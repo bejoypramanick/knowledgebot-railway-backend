@@ -66,8 +66,30 @@ class WidgetConfigRequest(BaseModel):
 @asynccontextmanager
 async def get_db_connection():
     """Get database connection from shared pool"""
+    # Try to initialize if not already initialized
     if not railway_db or not railway_db._pool:
-        raise HTTPException(status_code=503, detail="Database not initialized")
+        from shared.db import init_railway_db
+        import os
+        database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+        if database_url:
+            try:
+                await init_railway_db(database_url)
+                logger.info("✅ Database initialized on-demand for configuration endpoint")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize database: {e}")
+                raise HTTPException(
+                    status_code=503, 
+                    detail=f"Database not initialized. Please set DATABASE_URL environment variable. Error: {str(e)}"
+                )
+        else:
+            raise HTTPException(
+                status_code=503, 
+                detail="Database not initialized. DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL environment variable not set."
+            )
+    
+    if not railway_db._pool:
+        raise HTTPException(status_code=503, detail="Database connection pool not available")
+    
     async with railway_db.acquire() as conn:
         yield conn
 
