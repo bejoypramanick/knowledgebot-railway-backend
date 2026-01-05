@@ -76,6 +76,19 @@ setup_global_exception_logging("api_gateway")
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     try:
+        # Initialize database for configuration endpoints
+        from shared.db import init_railway_db, close_databases
+        database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL")
+        if database_url:
+            try:
+                await init_railway_db(database_url)
+                logger.info("✅ Database initialized for configuration endpoints")
+            except Exception as e:
+                logger.warning(f"⚠️  Could not initialize database: {e}")
+                logger.warning("Configuration endpoints may not work without database connection")
+        else:
+            logger.warning("⚠️  DATABASE_URL or RAILWAY_POSTGRES_URL not set - configuration endpoints may not work")
+        
         # Startup
         startup_time = time.time() - getattr(app, 'start_time', time.time())
         logger.info(f"Startup time: {startup_time:.2f} seconds")
@@ -97,6 +110,7 @@ async def lifespan(app: FastAPI):
 
         # Shutdown
         logger.info("🛑 FastAPI application shutting down")
+        await close_databases()
     except Exception as e:
         logger.error(f"❌ Error in lifespan handler: {e}")
         logger.error(f"Error type: {type(e).__name__}")
@@ -897,3 +911,11 @@ async def scrape_endpoint(scrape_request: ScrapeRequest, request: Request):
     except Exception as e:
         logger.error(f"Error routing scrape request: {e}")
         raise HTTPException(status_code=500, detail=f"Scraping service error: {str(e)}")
+
+
+# Configuration API endpoints
+from api_gateway.routers.configuration import config_router
+
+# Include configuration router
+app.include_router(config_router)
+logger.info("✅ Configuration API router included")
