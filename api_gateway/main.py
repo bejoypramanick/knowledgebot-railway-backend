@@ -78,16 +78,21 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize database for configuration endpoints
         from shared.db import init_railway_db, close_databases
-        database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL")
+        database_url = (
+            os.getenv("DATABASE_URL") or 
+            os.getenv("RAILWAY_POSTGRES_URL") or 
+            os.getenv("POSTGRES_URL")
+        )
         if database_url:
             try:
                 await init_railway_db(database_url)
                 logger.info("✅ Database initialized for configuration endpoints")
             except Exception as e:
-                logger.warning(f"⚠️  Could not initialize database: {e}")
-                logger.warning("Configuration endpoints may not work without database connection")
+                logger.error(f"❌ Could not initialize database: {e}")
+                logger.error("Configuration endpoints will not work without database connection")
+                # Don't raise - let the app start, but endpoints will fail gracefully
         else:
-            logger.warning("⚠️  DATABASE_URL or RAILWAY_POSTGRES_URL not set - configuration endpoints may not work")
+            logger.error("❌ DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
         
         # Startup
         startup_time = time.time() - getattr(app, 'start_time', time.time())
