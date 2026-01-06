@@ -84,16 +84,31 @@ async def get_db_connection():
         )
     
     try:
-        await init_railway_db(database_url)
+        # Initialize the database and get the instance
+        initialized_db = await init_railway_db(database_url)
         logger.info("✅ Database initialized on-demand for configuration endpoint")
-        # Re-import railway_db after initialization
-        from shared.db import railway_db as updated_railway_db
-        if updated_railway_db is None or not hasattr(updated_railway_db, '_pool') or updated_railway_db._pool is None:
+        
+        # Verify the pool was created successfully
+        if initialized_db is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Database initialization returned None"
+            )
+        
+        if not hasattr(initialized_db, '_pool') or initialized_db._pool is None:
             raise HTTPException(
                 status_code=503,
                 detail="Database connection pool not available after initialization"
             )
-        async with updated_railway_db.acquire() as conn:
+        
+        # Update the global reference for future use
+        import shared.db
+        shared.db.railway_db = initialized_db
+        global railway_db
+        railway_db = initialized_db
+        
+        # Use the initialized database instance directly
+        async with initialized_db.acquire() as conn:
             yield conn
     except HTTPException:
         raise
