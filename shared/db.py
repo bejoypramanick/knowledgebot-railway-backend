@@ -22,7 +22,7 @@ class Database:
         self.connection_url = connection_url
         self._pool: Optional[asyncpg.Pool] = None
     
-    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=10))
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=3))
     async def connect(self, min_size: int = 5, max_size: int = 20):
         """Create connection pool with retry logic."""
         try:
@@ -30,7 +30,7 @@ class Database:
                 self.connection_url,
                 min_size=min_size,
                 max_size=max_size,
-                command_timeout=60
+                command_timeout=30
             )
             # Log pool creation and redact connection URL for diagnostics
             try:

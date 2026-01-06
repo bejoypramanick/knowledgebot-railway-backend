@@ -148,8 +148,6 @@ async def get_chatbot_config():
                     updated_at
                 FROM chatbot_configuration
                 WHERE admin_user = 'GLOBISTAAN'
-                ORDER BY updated_at DESC
-                LIMIT 1
                 """
             )
             
@@ -357,8 +355,7 @@ async def get_widget_config():
                     chat_icon_url,
                     updated_at
                 FROM widget_configuration
-                ORDER BY updated_at DESC
-                LIMIT 1
+                WHERE id = 1
                 """
             )
             
