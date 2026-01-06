@@ -46,6 +46,7 @@ logger.info("SERVICE CONFIGURATION:")
 logger.info(f"KNOWLEDGEBASE_INGESTION_URL: {os.getenv('KNOWLEDGEBASE_INGESTION_URL', 'http://localhost:8001')}")
 logger.info(f"WEBSITE_SCRAPING_URL: {os.getenv('WEBSITE_SCRAPING_URL', 'http://localhost:8002')}")
 logger.info(f"CHATBOT_ORCHESTRATION_URL: {os.getenv('CHATBOT_ORCHESTRATION_URL', 'http://localhost:8003')}")
+logger.info(f"CONFIGURATION_SERVICE_URL: {os.getenv('CONFIGURATION_SERVICE_URL', 'http://localhost:8004')}")
 # Get port configuration
 PORT = int(os.getenv('API_GATEWAY_PORT', os.getenv('PORT', '8080')))
 logger.info(f"PORT being used: {PORT}")
@@ -76,23 +77,8 @@ setup_global_exception_logging("api_gateway")
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     try:
-        # Initialize database for configuration endpoints
-        from shared.db import init_railway_db, close_databases
-        database_url = (
-            os.getenv("DATABASE_URL") or 
-            os.getenv("RAILWAY_POSTGRES_URL") or 
-            os.getenv("POSTGRES_URL")
-        )
-        if database_url:
-            try:
-                await init_railway_db(database_url)
-                logger.info("✅ Database initialized for configuration endpoints")
-            except Exception as e:
-                logger.error(f"❌ Could not initialize database: {e}")
-                logger.error("Configuration endpoints will not work without database connection")
-                # Don't raise - let the app start, but endpoints will fail gracefully
-        else:
-            logger.error("❌ DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
+        # Configuration endpoints are now handled by a separate service
+        # No database initialization needed in API gateway
         
         # Startup
         startup_time = time.time() - getattr(app, 'start_time', time.time())
@@ -200,6 +186,9 @@ WEBSITE_SCRAPING_URL = os.getenv(
 )
 CHATBOT_ORCHESTRATION_URL = os.getenv(
     "CHATBOT_ORCHESTRATION_URL", "http://localhost:8003"
+)
+CONFIGURATION_SERVICE_URL = os.getenv(
+    "CONFIGURATION_SERVICE_URL", "http://localhost:8004"
 )
 
 class HealthResponse(BaseModel):
@@ -918,9 +907,75 @@ async def scrape_endpoint(scrape_request: ScrapeRequest, request: Request):
         raise HTTPException(status_code=500, detail=f"Scraping service error: {str(e)}")
 
 
-# Configuration API endpoints
-from api_gateway.routers.configuration import config_router
+# Configuration API endpoints - proxy to configuration service
+@app.get("/api/v1/configuration/chatbot")
+@app.post("/api/v1/configuration/chatbot")
+async def proxy_chatbot_config(request: Request):
+    """Proxy chatbot configuration requests to configuration service"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            method = request.method
+            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/configuration/chatbot"
+            
+            # Get request body if it's a POST
+            body = None
+            if method == "POST":
+                body = await request.body()
+            
+            # Forward headers (excluding host)
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.request(
+                method=method,
+                url=url,
+                content=body,
+                headers=headers
+            )
+            
+            return response.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Configuration service timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Error proxying to configuration service: {e}")
+        raise HTTPException(status_code=503, detail=f"Configuration service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in configuration proxy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-# Include configuration router
-app.include_router(config_router)
-logger.info("✅ Configuration API router included")
+@app.get("/api/v1/configuration/widget")
+@app.post("/api/v1/configuration/widget")
+async def proxy_widget_config(request: Request):
+    """Proxy widget configuration requests to configuration service"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            method = request.method
+            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/configuration/widget"
+            
+            # Get request body if it's a POST
+            body = None
+            if method == "POST":
+                body = await request.body()
+            
+            # Forward headers (excluding host)
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.request(
+                method=method,
+                url=url,
+                content=body,
+                headers=headers
+            )
+            
+            return response.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Configuration service timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Error proxying to configuration service: {e}")
+        raise HTTPException(status_code=503, detail=f"Configuration service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in configuration proxy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+logger.info("✅ Configuration API proxy endpoints configured")

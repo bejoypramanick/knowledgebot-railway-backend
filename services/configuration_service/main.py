@@ -1,25 +1,90 @@
 """
-Configuration API Endpoints for Railway Backend
-Handles chatbot and widget configuration management
+Configuration Service - Handles chatbot and widget configuration management
 """
-
-from fastapi import APIRouter, HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 import os
 import logging
-from contextlib import asynccontextmanager
-
-# Import shared database utilities
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from shared.db import railway_db
+from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 
+# Add shared directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from shared.db import init_railway_db, close_databases, railway_db
+
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)],
+    force=True
+)
 logger = logging.getLogger(__name__)
 
-# Configuration Router
-config_router = APIRouter(prefix="/api/v1/configuration", tags=["configuration"])
+# Log startup diagnostics
+logger.info("="*60)
+logger.info("CONFIGURATION SERVICE STARTING UP")
+logger.info("="*60)
+logger.info(f"Python version: {sys.version}")
+logger.info(f"Working directory: {os.getcwd()}")
+logger.info(f"Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'development')}")
+
+# Get port configuration
+PORT = int(os.getenv('CONFIGURATION_SERVICE_PORT', os.getenv('PORT', '8004')))
+logger.info(f"PORT being used: {PORT}")
+
+# Lifespan context manager
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle application startup and shutdown events."""
+    try:
+        # Initialize database
+        database_url = (
+            os.getenv("DATABASE_URL") or 
+            os.getenv("RAILWAY_POSTGRES_URL") or 
+            os.getenv("POSTGRES_URL")
+        )
+        if database_url:
+            try:
+                await init_railway_db(database_url)
+                logger.info("✅ Database initialized for configuration service")
+            except Exception as e:
+                logger.error(f"❌ Could not initialize database: {e}")
+                logger.error("Configuration endpoints will not work without database connection")
+        else:
+            logger.error("❌ DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
+        
+        logger.info(f"🚀 Configuration service started successfully on port {PORT}")
+        yield
+        
+        # Shutdown
+        await close_databases()
+        logger.info("✅ Configuration service shutdown complete")
+    except Exception as e:
+        logger.error(f"❌ Error in lifespan handler: {e}")
+        raise
+
+# Create FastAPI app
+app = FastAPI(
+    title="Configuration Service",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Pydantic Models
 class NotificationsUpdate(BaseModel):
@@ -74,7 +139,6 @@ async def get_db_connection():
     
     # Fallback: Try to initialize if not already initialized (should rarely happen)
     from shared.db import init_railway_db
-    import os
     
     database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
     if not database_url:
@@ -101,12 +165,6 @@ async def get_db_connection():
                 detail="Database connection pool not available after initialization"
             )
         
-        # Update the global reference for future use
-        import shared.db
-        shared.db.railway_db = initialized_db
-        global railway_db
-        railway_db = initialized_db
-        
         # Use the initialized database instance directly
         async with initialized_db.acquire() as conn:
             yield conn
@@ -120,8 +178,19 @@ async def get_db_connection():
         )
 
 
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "service": "configuration_service",
+        "database": "connected" if (railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None) else "disconnected"
+    }
+
+
 # Chatbot Configuration Endpoints
-@config_router.get("/chatbot")
+@app.get("/api/v1/configuration/chatbot")
 async def get_chatbot_config():
     """Get chatbot configuration"""
     try:
@@ -229,7 +298,7 @@ async def get_chatbot_config():
         raise HTTPException(status_code=500, detail=f"Error fetching configuration: {str(e)}")
 
 
-@config_router.post("/chatbot")
+@app.post("/api/v1/configuration/chatbot")
 async def save_chatbot_config(config: ChatbotConfigRequest):
     """Save chatbot configuration"""
     try:
@@ -333,7 +402,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
 
 
 # Widget Configuration Endpoints
-@config_router.get("/widget")
+@app.get("/api/v1/configuration/widget")
 async def get_widget_config():
     """Get widget configuration"""
     try:
@@ -395,7 +464,7 @@ async def get_widget_config():
         raise HTTPException(status_code=500, detail=f"Error fetching widget configuration: {str(e)}")
 
 
-@config_router.post("/widget")
+@app.post("/api/v1/configuration/widget")
 async def save_widget_config(config: WidgetConfigRequest):
     """Save widget configuration"""
     try:
@@ -454,4 +523,9 @@ async def save_widget_config(config: WidgetConfigRequest):
     except Exception as e:
         logger.error(f"Error saving widget configuration: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error saving widget configuration: {str(e)}")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
 

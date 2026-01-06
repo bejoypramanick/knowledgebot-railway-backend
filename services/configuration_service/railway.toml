@@ -1,0 +1,10 @@
+[build]
+dockerfilePath = "services/configuration_service/Dockerfile"
+rootDirectory = "."
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+
