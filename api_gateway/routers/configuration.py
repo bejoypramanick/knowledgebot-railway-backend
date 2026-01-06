@@ -418,13 +418,23 @@ async def save_widget_config(config: WidgetConfigRequest):
             if not updates:
                 raise HTTPException(status_code=400, detail="No fields to update")
             
-            # Use INSERT ... ON CONFLICT to handle upsert (assuming single row)
-            query = f"""
-                INSERT INTO widget_configuration (id, {', '.join([u.split(' = ')[0] for u in updates])})
-                VALUES (1, {', '.join([f'${i+1}' for i in range(len(updates))])})
-                ON CONFLICT (id) 
-                DO UPDATE SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
-            """
+            # Use INSERT ... ON CONFLICT to handle upsert (assuming single row with id=1)
+            # First, check if a row exists
+            existing = await conn.fetchrow("SELECT id FROM widget_configuration LIMIT 1")
+            
+            if existing:
+                # Update existing row
+                query = f"""
+                    UPDATE widget_configuration 
+                    SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = {existing['id']}
+                """
+            else:
+                # Insert new row with id=1
+                query = f"""
+                    INSERT INTO widget_configuration (id, {', '.join([u.split(' = ')[0] for u in updates])})
+                    VALUES (1, {', '.join([f'${i+1}' for i in range(len(updates))])})
+                """
             
             await conn.execute(query, *values)
             
