@@ -29,8 +29,7 @@ class Database:
             self._pool = await asyncpg.create_pool(
                 self.connection_url,
                 min_size=min_size,
-                max_size=max_size,
-                command_timeout=30
+                max_size=max_size
             )
             # Log pool creation and redact connection URL for diagnostics
             try:
