@@ -65,52 +65,44 @@ class WidgetConfigRequest(BaseModel):
 
 @asynccontextmanager
 async def get_db_connection():
-    """Get database connection from shared pool"""
+    """Get database connection from shared pool - optimized for performance"""
+    # Quick check - if railway_db exists and has a pool, use it directly
+    if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
+        async with railway_db.acquire() as conn:
+            yield conn
+        return
+    
+    # Fallback: Try to initialize if not already initialized (should rarely happen)
     from shared.db import init_railway_db
     import os
     
-    # Check if database is initialized - use hasattr to safely check
-    is_initialized = railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None
+    database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+    if not database_url:
+        raise HTTPException(
+            status_code=503, 
+            detail="Database not initialized. DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL environment variable not set."
+        )
     
-    if not is_initialized:
-        # Try to initialize if not already initialized
-        database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
-        if database_url:
-            try:
-                await init_railway_db(database_url)
-                logger.info("✅ Database initialized on-demand for configuration endpoint")
-                # Re-import railway_db after initialization to get the updated instance
-                from shared.db import railway_db as updated_railway_db
-                if updated_railway_db is None or not hasattr(updated_railway_db, '_pool') or updated_railway_db._pool is None:
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Database connection pool not available after initialization"
-                    )
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"❌ Failed to initialize database: {e}", exc_info=True)
-                raise HTTPException(
-                    status_code=503, 
-                    detail=f"Database not initialized. Please set DATABASE_URL environment variable. Error: {str(e)}"
-                )
-        else:
+    try:
+        await init_railway_db(database_url)
+        logger.info("✅ Database initialized on-demand for configuration endpoint")
+        # Re-import railway_db after initialization
+        from shared.db import railway_db as updated_railway_db
+        if updated_railway_db is None or not hasattr(updated_railway_db, '_pool') or updated_railway_db._pool is None:
             raise HTTPException(
-                status_code=503, 
-                detail="Database not initialized. DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL environment variable not set."
+                status_code=503,
+                detail="Database connection pool not available after initialization"
             )
-    
-    # Final check - ensure railway_db is available and has a pool
-    # Re-import to get the latest instance
-    from shared.db import railway_db as final_railway_db
-    if final_railway_db is None:
-        raise HTTPException(status_code=503, detail="Database connection not initialized")
-    
-    if not hasattr(final_railway_db, '_pool') or final_railway_db._pool is None:
-        raise HTTPException(status_code=503, detail="Database connection pool not available")
-    
-    async with final_railway_db.acquire() as conn:
-        yield conn
+        async with updated_railway_db.acquire() as conn:
+            yield conn
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize database: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=503, 
+            detail=f"Database not initialized. Error: {str(e)}"
+        )
 
 
 # Chatbot Configuration Endpoints
