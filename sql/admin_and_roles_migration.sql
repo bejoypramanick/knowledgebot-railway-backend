@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS admins (
     email VARCHAR(255) NOT NULL UNIQUE,
     status VARCHAR(50) NOT NULL DEFAULT 'pending', -- 'pending', 'confirmed', 'removed'
     confirmation_token VARCHAR(255) UNIQUE,
+    auto_generated_password VARCHAR(255), -- Auto-generated password sent to admin via email
     created_at TIMESTAMP DEFAULT NOW(),
     confirmed_at TIMESTAMP,
     removed_at TIMESTAMP,
@@ -110,8 +111,13 @@ SELECT
 FROM human_agents
 WHERE status = 'confirmed';
 
--- 9. Add comments for documentation
+-- 9. Ensure auto_generated_password column exists (for existing installations)
+ALTER TABLE admins
+ADD COLUMN IF NOT EXISTS auto_generated_password VARCHAR(255);
+
+-- 10. Add comments for documentation
 COMMENT ON TABLE admins IS 'Stores admin users with email-based authentication and verification';
+COMMENT ON COLUMN admins.auto_generated_password IS 'Auto-generated password sent to admin via email. Admin can reset this or login with Google.';
 COMMENT ON TABLE human_agents IS 'Stores human agent users with email-based authentication';
 COMMENT ON FUNCTION get_user_role IS 'Returns the role (admin, human_agent, or user) for a given email';
 COMMENT ON VIEW user_roles IS 'Unified view of all user roles (admins and human agents)';

@@ -432,15 +432,49 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                                 
                                 # Add to admins table and send verification email with password
                                 token = generate_confirmation_token()
-                                await conn.execute(
-                                    """
-                                    INSERT INTO admins (email, status, confirmation_token, auto_generated_password)
-                                    VALUES ($1, 'pending', $2, $3)
-                                    ON CONFLICT (email) 
-                                    DO UPDATE SET confirmation_token = $2, status = 'pending', auto_generated_password = $3
-                                    """,
-                                    email, token, generated_password
-                                )
+                                try:
+                                    # Try to insert with auto_generated_password column
+                                    await conn.execute(
+                                        """
+                                        INSERT INTO admins (email, status, confirmation_token, auto_generated_password)
+                                        VALUES ($1, 'pending', $2, $3)
+                                        ON CONFLICT (email) 
+                                        DO UPDATE SET confirmation_token = $2, status = 'pending', auto_generated_password = $3
+                                        """,
+                                        email, token, generated_password
+                                    )
+                                except Exception as db_error:
+                                    # If column doesn't exist, add it first and retry
+                                    if 'auto_generated_password' in str(db_error).lower() or 'column' in str(db_error).lower():
+                                        logger.warning(f"auto_generated_password column not found, adding it...")
+                                        try:
+                                            await conn.execute(
+                                                "ALTER TABLE admins ADD COLUMN IF NOT EXISTS auto_generated_password VARCHAR(255)"
+                                            )
+                                            # Retry the insert
+                                            await conn.execute(
+                                                """
+                                                INSERT INTO admins (email, status, confirmation_token, auto_generated_password)
+                                                VALUES ($1, 'pending', $2, $3)
+                                                ON CONFLICT (email) 
+                                                DO UPDATE SET confirmation_token = $2, status = 'pending', auto_generated_password = $3
+                                                """,
+                                                email, token, generated_password
+                                            )
+                                        except Exception as alter_error:
+                                            logger.error(f"Failed to add auto_generated_password column: {alter_error}")
+                                            # Fallback: insert without password column
+                                            await conn.execute(
+                                                """
+                                                INSERT INTO admins (email, status, confirmation_token)
+                                                VALUES ($1, 'pending', $2)
+                                                ON CONFLICT (email) 
+                                                DO UPDATE SET confirmation_token = $2, status = 'pending'
+                                                """,
+                                                email, token
+                                            )
+                                    else:
+                                        raise
                                 
                                 # Send verification email with generated password
                                 await email_service.send_admin_confirmation_email(email, token, "system", generated_password)
