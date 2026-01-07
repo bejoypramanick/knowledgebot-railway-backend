@@ -1,205 +1,162 @@
-# Implementation Summary
+# Backend Implementation Summary
 
-This document summarizes the changes made to implement Cloudflare R2 storage, PostgreSQL metadata tracking, intelligent chatbot routing, and database integration.
+## ✅ Completed Backend Changes
 
-## Overview
+All backend code has been implemented in the `knowledgebot-railway-backend` repository.
 
-The system now supports:
-1. **Cloudflare R2 Storage**: Files are uploaded to R2 before being sent to Gemini
-2. **PostgreSQL Metadata Tracking**: All file uploads, user data, and metrics are stored in Railway PostgreSQL
-3. **Intelligent Chatbot Routing**: The chatbot intelligently routes queries to appropriate data sources (RAG, PostgreSQL, Neon DB, Internet)
-4. **Business Database Integration**: Neon DB integration for business data queries
+### 📁 Files Created/Modified
 
-## Files Created
+#### 1. Database Migrations
+- **`sql/chatbot_configuration_features.sql`**
+  - Creates `human_agents` table
+  - Creates `human_agent_sessions` table
+  - Creates `chat_feedback` table
+  - Creates `token_usage_cache` table
+  - Updates `chatbot_configuration` table with new columns
 
-### SQL Schema Files
+#### 2. Email Service
+- **`shared/email_service.py`**
+  - EmailService class for sending emails
+  - Methods for confirmation, success, and removal emails
+  - HTML and plain text email templates
 
-1. **`sql/railway_postgres_schema.sql`**
-   - Creates tables for users, file_uploads, chat_sessions, chat_messages, metrics, and api_usage
-   - Includes indexes for performance
-   - Includes triggers for automatic timestamp updates
-   - Creates a default system user
+#### 3. Configuration Service Endpoints
+- **`services/configuration_service/human_agents.py`**
+  - `POST /api/v1/admin/human-agents` - Add human agents
+  - `POST /api/v1/admin/human-agents/confirm` - Confirm agent account
+  - `DELETE /api/v1/admin/human-agents/{email}` - Remove agent
 
-2. **`sql/neon_db_business_schema.sql`**
-   - Creates business database tables: customers, products, orders, order_items, sales_analytics, inventory
-   - Includes dummy data inserts for testing
-   - Includes indexes and triggers
+- **`services/configuration_service/feedback.py`**
+  - `POST /api/v1/feedback` - Submit feedback
 
-### Shared Utilities
+- **`services/configuration_service/token_usage.py`**
+  - `GET /api/v1/admin/token-usage` - Get token usage
 
-3. **`shared/db.py`**
-   - Database connection manager for PostgreSQL
-   - Supports both Railway PostgreSQL and Neon DB
-   - Provides async connection pooling
-   - Helper functions for initialization and cleanup
+- **`services/configuration_service/main.py`** (Updated)
+  - Updated to include new routers
+  - Updated LLM tokens response to use "openai" instead of "deepseek"
 
-4. **`shared/r2_storage.py`**
-   - Cloudflare R2 storage client (S3-compatible)
-   - Handles file uploads, deletions, and URL generation
-   - Supports metadata storage
+#### 4. Chatbot Orchestration Service
+- **`services/chatbot_orchestration/main.py`** (Updated)
+  - Updated `ChatRequest` model to accept `system_prompt` and `response_policy`
+  - Updated `get_system_prompt()` to accept custom prompt and response policy
+  - Updated `create_agent()` to use custom system prompt and response policy
+  - Response policy affects system prompt instructions (flexible/balanced/strict)
 
-## Files Modified
+## 🔧 What You Need to Do
 
-### Configuration
-
-1. **`shared/config.py`**
-   - Added Cloudflare R2 configuration variables
-   - Added Railway PostgreSQL configuration variables
-   - Added Neon DB configuration variables
-   - Added Tavily API configuration for internet search
-   - Added default user email configuration
-
-2. **`requirements.txt`**
-   - Added `boto3==1.35.0` for R2/S3 compatibility
-   - Added `asyncpg==0.29.0` for async PostgreSQL
-   - Added `psycopg2-binary==2.9.9` for PostgreSQL support
-   - Added `tavily-python==0.3.0` for internet search
-
-3. **`.env.example`**
-   - Added all new configuration variables with documentation
-   - Organized into logical sections
-   - Includes examples and comments
-
-### Services
-
-4. **`services/knowledgebase_ingestion/main.py`**
-   - **Major Changes**:
-     - Integrated Cloudflare R2 upload before Gemini upload
-     - Added PostgreSQL metadata storage after successful uploads
-     - Added SHA256 hash calculation for files
-     - Added user tracking via email header
-     - Saves file metadata, R2 URLs, Gemini file info to database
-     - Records metrics for file uploads
-     - Returns R2 URL and database record ID in response
-
-5. **`services/chatbot_orchestration/main.py`**
-   - **Major Changes**:
-     - Added intelligent data source routing with 4 tools:
-       - `search_knowledge_base`: RAG via Gemini FileSearch
-       - `query_railway_postgres`: File metadata, user data, metrics (no PII)
-       - `query_neon_db`: Business data - products, orders, sales, inventory (no PII)
-       - `search_internet`: Tavily API for current information
-     - Updated system prompt with routing instructions
-     - Agent intelligently selects appropriate data source(s) based on query
-     - Tracks which data sources were used in responses
-     - Saves chat messages to PostgreSQL with data source tracking
-     - Database initialization on startup/shutdown
-
-## Database Schema Details
-
-### Railway PostgreSQL Tables
-
-- **users**: Tracks users who upload files (email, name, created_at)
-- **file_uploads**: Complete file metadata including R2 URLs, Gemini file info, states
-- **chat_sessions**: Chat session tracking with message counts
-- **chat_messages**: Individual messages with data source flags (used_rag, used_postgres, used_neon_db, used_internet_search)
-- **metrics**: System metrics and analytics
-- **api_usage**: API call tracking for cost monitoring
-
-### Neon DB Tables (Business Database)
-
-- **customers**: Customer segments (anonymized, no PII)
-- **products**: Product catalog with pricing and ratings
-- **orders**: Order transactions
-- **order_items**: Order line items
-- **sales_analytics**: Aggregated sales data by category/date
-- **inventory**: Warehouse inventory levels
-
-## Intelligent Routing Logic
-
-The chatbot uses GPT-4o to intelligently route queries:
-
-1. **RAG (search_knowledge_base)**: Document content questions
-2. **PostgreSQL (query_railway_postgres)**: File metadata, system metrics
-3. **Neon DB (query_neon_db)**: Business data - products, orders, sales
-4. **Internet (search_internet)**: Current events, real-time info (last resort)
-
-The agent analyzes the question and selects the appropriate tool(s), ensuring:
-- No PII is exposed
-- Multiple sources can be combined for complete answers
-- Transparent about data sources used
-
-## File Upload Flow
-
-1. User uploads file via API
-2. File is temporarily saved to disk
-3. **File is uploaded to Cloudflare R2** (if configured)
-4. SHA256 hash is calculated
-5. File is uploaded to Gemini FileSearch
-6. System polls for ACTIVE state
-7. **Metadata is saved to PostgreSQL**:
-   - R2 URL and key
-   - Gemini file name and URI
-   - File metadata (size, hash, MIME type)
-   - User information
-   - Upload timestamps and states
-8. Metrics are recorded
-9. Response includes R2 URL and database record ID
-
-## Setup Instructions
-
-### 1. Run Railway PostgreSQL Schema
+### Step 1: Run Database Migrations
 
 ```bash
-# Connect to your Railway PostgreSQL database
-psql $RAILWAY_POSTGRES_URL < sql/railway_postgres_schema.sql
+cd /Users/bejoypramanick/iCloud\ Drive\ \(Archive\)\ -\ 1/Desktop/globistaan/projects/knowledgebot-railway-backend
+psql $DATABASE_URL -f sql/chatbot_configuration_features.sql
 ```
 
-### 2. Run Neon DB Schema
+Or connect to your database and run the SQL file manually.
 
+### Step 2: Set Environment Variables
+
+Add these to your Railway project or `.env`:
+
+```env
+# Email Configuration
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+EMAIL_FROM=noreply@knowledgebot.com
+WIDGET_BASE_URL=https://widget.yourdomain.com
+
+# API Keys (if not already set)
+GEMINI_API_KEY=your-gemini-key
+OPENAI_API_KEY=your-openai-key
+```
+
+**Important for Gmail:**
+- Enable 2-factor authentication
+- Generate an "App Password" (not your regular password)
+- Use the app password in `SMTP_PASSWORD`
+
+### Step 3: Deploy to Railway
+
+1. Commit all changes:
 ```bash
-# Connect to your Neon DB instance
-psql $NEON_DB_URL < sql/neon_db_business_schema.sql
+cd /Users/bejoypramanick/iCloud\ Drive\ \(Archive\)\ -\ 1/Desktop/globistaan/projects/knowledgebot-railway-backend
+git add .
+git commit -m "Add chatbot configuration features: human agents, feedback, token usage, system prompt, response policy"
+git push
 ```
 
-### 3. Configure Environment Variables
+2. Railway will automatically deploy the changes
 
-Copy `.env.example` to `.env` and fill in:
-- Cloudflare R2 credentials (optional)
-- Railway PostgreSQL connection string (optional)
-- Neon DB connection string (optional)
-- Tavily API key (optional, for internet search)
+3. Verify services are running:
+   - Configuration Service should show new endpoints in logs
+   - Chatbot Orchestration Service should accept new parameters
 
-### 4. Install Dependencies
+### Step 4: Test Endpoints
 
-```bash
-pip install -r requirements.txt
-```
+Use the test commands in `INTEGRATION_GUIDE.md` to verify everything works.
 
-## Security Notes
+## 📋 API Endpoints Summary
 
-- **PII Protection**: All database queries explicitly avoid exposing PII
-- **User Tracking**: Uses email header (optional) for tracking uploads
-- **Anonymized Data**: Business database queries return only aggregated/anonymized data
-- **No Direct PII Access**: Customer IDs and user emails are not exposed in responses
+### New Endpoints
 
-## Testing
+1. **Human Agents**
+   - `POST /api/v1/admin/human-agents` - Add agents (sends confirmation emails)
+   - `POST /api/v1/admin/human-agents/confirm` - Confirm agent (sends widget link)
+   - `DELETE /api/v1/admin/human-agents/{email}` - Remove agent (sends removal email)
 
-1. **File Upload**: Upload a file and verify:
-   - R2 upload succeeds (if configured)
-   - Gemini upload succeeds
-   - PostgreSQL record is created
-   - Response includes R2 URL and DB record ID
+2. **Feedback**
+   - `POST /api/v1/feedback` - Submit feedback for messages
 
-2. **Chatbot Routing**: Test queries:
-   - "What files are uploaded?" → Should use PostgreSQL
-   - "What products are available?" → Should use Neon DB
-   - "What does document X say about Y?" → Should use RAG
-   - "What's the latest news about AI?" → Should use Internet search
+3. **Token Usage**
+   - `GET /api/v1/admin/token-usage` - Get Gemini and OpenAI token usage
 
-## Next Steps
+### Updated Endpoints
 
-1. Set up Cloudflare R2 bucket and configure public URL (optional)
-2. Create Railway PostgreSQL database and run schema
-3. Create Neon DB instance and run schema
-4. Configure environment variables
-5. Test file uploads and chatbot queries
-6. Monitor metrics and API usage in PostgreSQL
+1. **Chat**
+   - `POST /api/v1/chat` - Now accepts:
+     - `system_prompt` (optional) - Custom system prompt to append
+     - `response_policy` (optional) - 0-100 (flexible to strict)
 
-## Notes
+## 🎯 Features Implemented
 
-- All features are optional - the system works without R2, PostgreSQL, or Neon DB
-- If R2 is not configured, files go directly to Gemini
-- If databases are not configured, the system falls back to in-memory storage
-- Internet search requires Tavily API key and explicit enablement
+✅ Human agent email confirmation flow  
+✅ Feedback recording  
+✅ Token usage API (with caching support)  
+✅ System prompt appending in chat  
+✅ Response policy implementation (affects system prompt)  
+✅ Database migrations  
+✅ Email service with HTML templates  
 
+## ⚠️ Not Implemented (Future Work)
+
+- WebSocket server for human agent chat (requires separate WebSocket service)
+- Real-time token usage from Gemini/OpenAI APIs (currently returns cached/default values)
+- Token usage tracking and updating (needs periodic job)
+
+## 📚 Documentation
+
+- **`INTEGRATION_GUIDE.md`** - Step-by-step integration instructions
+- **`BACKEND_REQUIREMENTS.md`** - Detailed API specifications (in frontend repo)
+
+## 🐛 Troubleshooting
+
+If endpoints are not found:
+1. Check that routers are imported correctly in `main.py`
+2. Verify API Gateway routes to configuration service
+3. Check service logs for import errors
+
+If emails are not sending:
+1. Verify SMTP credentials
+2. Check firewall/network restrictions
+3. For Gmail, ensure you're using App Password
+
+If database errors occur:
+1. Verify migrations ran successfully
+2. Check database connection string
+3. Verify user has CREATE TABLE permissions
+
+---
+
+**All backend code is ready!** Just follow the steps above to deploy and integrate.

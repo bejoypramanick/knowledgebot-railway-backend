@@ -280,18 +280,18 @@ async def get_chatbot_config():
                     "system_prompt": row["system_prompt"] or "",
                     "selected_persona": row["selected_persona"]
                 },
-                "llm_tokens": {
-                    "gemini": {
-                        "used": row["llm_token_used_gemini"],
-                        "available": row["llm_token_limit_gemini"] - row["llm_token_used_gemini"],
-                        "limit": row["llm_token_limit_gemini"]
-                    },
-                    "deepseek": {
-                        "used": row["llm_token_used_deepseek"],
-                        "available": row["llm_token_limit_deepseek"] - row["llm_token_used_deepseek"],
-                        "limit": row["llm_token_limit_deepseek"]
+                    "llm_tokens": {
+                        "gemini": {
+                            "used": row["llm_token_used_gemini"],
+                            "available": row["llm_token_limit_gemini"] - row["llm_token_used_gemini"],
+                            "limit": row["llm_token_limit_gemini"]
+                        },
+                        "openai": {
+                            "used": row.get("llm_token_used_deepseek", 0),  # Migrate deepseek to openai
+                            "available": row.get("llm_token_limit_deepseek", 150000) - row.get("llm_token_used_deepseek", 0),
+                            "limit": row.get("llm_token_limit_deepseek", 150000)
+                        }
                     }
-                }
             }
     except Exception as e:
         logger.error(f"Error fetching chatbot configuration: {e}", exc_info=True)
@@ -524,6 +524,20 @@ async def save_widget_config(config: WidgetConfigRequest):
         logger.error(f"Error saving widget configuration: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error saving widget configuration: {str(e)}")
 
+
+# Import and include new routers
+try:
+    from services.configuration_service.human_agents import router as human_agents_router
+    from services.configuration_service.feedback import router as feedback_router
+    from services.configuration_service.token_usage import router as token_usage_router
+    
+    app.include_router(human_agents_router)
+    app.include_router(feedback_router)
+    app.include_router(token_usage_router)
+    logger.info("✅ New endpoints (human agents, feedback, token usage) loaded successfully")
+except ImportError as e:
+    logger.warning(f"⚠️ Could not import new endpoint modules: {e}")
+    logger.warning("New endpoints (human agents, feedback, token usage) will not be available")
 
 if __name__ == "__main__":
     import uvicorn

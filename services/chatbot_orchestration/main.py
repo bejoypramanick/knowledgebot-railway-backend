@@ -223,6 +223,8 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     use_rag: bool = True
     max_results: int = 5
+    system_prompt: Optional[str] = None  # Custom system prompt (will be appended to default)
+    response_policy: Optional[int] = None  # 0-100: 0=flexible, 100=strict
 
 
 class ChatSessionResponse(BaseModel):
@@ -738,7 +740,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 
 
 # System prompt with intelligent routing instructions
-def get_system_prompt(file_context: Optional[List[SearchResult]] = None) -> str:
+def get_system_prompt(file_context: Optional[List[SearchResult]] = None, custom_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> str:
     """Generate dynamic system prompt with intelligent data source routing."""
     base_prompt = """You are an intelligent knowledge assistant chatbot with access to multiple data sources.
 
@@ -787,11 +789,26 @@ When answering:
 5. Mention which data source provided the information.
 """
     
+    # Add response policy instructions
+    if response_policy is not None:
+        if response_policy <= 30:
+            policy_instruction = "\n\nRESPONSE POLICY: FLEXIBLE - You may provide creative responses and use general knowledge when appropriate. You can expand beyond the provided sources if helpful."
+        elif response_policy <= 70:
+            policy_instruction = "\n\nRESPONSE POLICY: BALANCED - Balance between using provided sources and your general knowledge. Prefer sources but supplement when needed."
+        else:
+            policy_instruction = "\n\nRESPONSE POLICY: STRICT - Strictly adhere to information from provided sources. Only use information from the knowledge base, databases, or search results. Do not use general knowledge unless explicitly stated in sources."
+        base_prompt += policy_instruction
+    
+    # Add file context if available
     if file_context:
         context_section = "\n\nAvailable knowledge base files (from RAG):\n"
         for idx, result in enumerate(file_context, 1):
             context_section += f"{idx}. {result.file_name}\n"
-        return base_prompt + context_section
+        base_prompt += context_section
+    
+    # Append custom system prompt if provided
+    if custom_prompt:
+        base_prompt += f"\n\n{custom_prompt}"
     
     return base_prompt
 
@@ -806,7 +823,7 @@ def create_session_dependency(session_id: str) -> ChatSessionDeps:
     return ChatSessionDeps(session_id=session_id)
 
 # Initialize base agent with all tools
-def create_agent(file_context: Optional[List[SearchResult]] = None) -> Optional[Agent]:
+def create_agent(file_context: Optional[List[SearchResult]] = None, custom_system_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> Optional[Agent]:
     """Create a Pydantic AI agent with intelligent data source routing."""
     
     # Check if model is available
@@ -829,10 +846,22 @@ def create_agent(file_context: Optional[List[SearchResult]] = None) -> Optional[
     if tavily_client:
         tools.append(search_internet)
 
+    # Calculate temperature based on response policy (lower for strict, higher for flexible)
+    temperature = 0.7  # Default
+    if response_policy is not None:
+        if response_policy <= 30:
+            temperature = 0.9  # More creative for flexible
+        elif response_policy <= 70:
+            temperature = 0.7  # Balanced
+        else:
+            temperature = 0.3  # More deterministic for strict
+
     # Create agent with system prompt, tools, and dependencies
+    # Note: Temperature adjustment would need to be done at model initialization
+    # For now, we'll use the default model and adjust via system prompt
     agent = Agent(
         openai_model,
-        system_prompt=get_system_prompt(file_context),
+        system_prompt=get_system_prompt(file_context, custom_system_prompt, response_policy),
         tools=tools,
         deps_type=ChatSessionDeps,
     )
@@ -883,7 +912,12 @@ async def chat(request: ChatRequest):
         session = sessions[session_id]
         
         # Create agent with context (dynamic prompt injection)
-        agent = create_agent(file_context)
+        # Pass system_prompt and response_policy if provided
+        agent = create_agent(
+            file_context, 
+            custom_system_prompt=request.system_prompt,
+            response_policy=request.response_policy
+        )
         
         # Create dependency instance for this run
         session_dep = create_session_dependency(session_id)
