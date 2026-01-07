@@ -18,14 +18,15 @@ This integration adds:
 
 **Architecture**:
 - **Firebase Authentication**: User login/authentication (email/password, Google OAuth, etc.)
-  - **NO Firestore** - Only Firebase Auth is used
   - Tokens verified on backend using Firebase Admin SDK
-- **PostgreSQL (Railway)**: Stores ALL application data
-  - `users` - User information linked to Firebase Auth UIDs
+- **Firestore**: Stores user data and application data
+  - `users` collection - User information linked to Firebase Auth UIDs
+  - All user profiles, roles, and preferences
+- **PostgreSQL (Railway)**: Stores business data
   - `email_oauth_credentials` - Gmail OAuth2 credentials
   - `human_agents` - Human agent information
   - `chat_feedback` - User feedback
-  - All other application tables
+  - Other business/transactional data
 
 ---
 
@@ -68,13 +69,16 @@ WHERE table_name IN ('human_agents', 'chat_feedback', 'token_usage_cache');
 
 ---
 
-## 🔧 STEP 2: Set Up Firebase Authentication (NO Firestore)
+## 🔧 STEP 2: Set Up Firebase Authentication and Firestore
 
 ### 2.1 Create Firebase Project
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)
 2. Click **Add project** → Enter name: `KnowledgeBot`
-3. **DO NOT enable Firestore** - We only need Authentication
+3. Enable **Firestore Database**:
+   - Go to **Firestore Database** → **Create database**
+   - Start in **Production mode** (or Test mode for development)
+   - Choose location (closest to your users)
 4. Go to **Authentication** → **Get started**
 5. Enable **Email/Password** sign-in method
 6. (Optional) Enable **Google** sign-in for OAuth
@@ -86,13 +90,40 @@ WHERE table_name IN ('human_agents', 'chat_feedback', 'token_usage_cache');
 3. Download JSON file (e.g., `knowledgebot-firebase-adminsdk.json`)
 4. **Keep this file secure** - it has admin access
 
-### 2.3 Configure Firebase Auth
+### 2.3 Configure Firestore Security Rules
+
+Go to **Firestore Database** → **Rules** and add:
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Users collection - users can read/write their own data
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId;
+      // Admins can read/write any user
+      allow read, write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // Deny all other access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+```
+
+**Note**: These rules ensure users can only access their own data, and admins can access all user data.
+
+### 2.4 Configure Firebase Auth
 
 **Authentication Methods to Enable**:
 - Email/Password (for admin and human agents)
 - Google (optional, for OAuth login)
 
-**Note**: We use Firebase Auth ONLY for authentication. All user data is stored in PostgreSQL.
+**Note**: User data is stored in Firestore `users` collection, linked to Firebase Auth UIDs.
 
 ---
 
@@ -280,8 +311,10 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - [ ] Tables created: `human_agents`, `chat_feedback`, `token_usage_cache`
 - [ ] `chatbot_configuration` table updated with new columns
 
-### Firebase Authentication
+### Firebase Authentication and Firestore
 - [ ] Firebase project created
+- [ ] Firestore Database enabled
+- [ ] Firestore security rules configured
 - [ ] Authentication enabled (Email/Password, Google optional)
 - [ ] Service account JSON downloaded
 - [ ] `FIREBASE_CREDENTIALS_JSON` or `FIREBASE_CREDENTIALS_PATH` set in Railway
@@ -380,22 +413,24 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 
 ## 🎯 Summary
 
-1. **Run SQL migrations** on PostgreSQL (creates `users` and `email_oauth_credentials` tables)
-2. **Set up Firebase Authentication** (NO Firestore)
+1. **Run SQL migrations** on PostgreSQL (creates `email_oauth_credentials` table)
+2. **Set up Firebase Authentication and Firestore**
    - Create Firebase project
+   - Enable Firestore Database
+   - Configure Firestore security rules
    - Enable Email/Password authentication
    - Get service account JSON
 3. **Get Gmail OAuth2 credentials** (Client ID, Secret, Refresh Token)
 4. **Store OAuth credentials in PostgreSQL** (`email_oauth_credentials` table)
 5. **Create Configuration Service** in Railway
-6. **Set environment variables** (Database, Firebase Auth, SMTP, API keys)
+6. **Set environment variables** (Database, Firebase Auth/Firestore, SMTP, API keys)
 7. **Update API Gateway** with `CONFIGURATION_SERVICE_URL`
 8. **Deploy and test** all endpoints
 
 **That's it!** Follow the checklist above to verify everything is working.
 
 **Important**:
-- **Firebase Auth**: Used ONLY for user authentication (login/signup)
-- **NO Firestore**: All data stored in PostgreSQL
-- **PostgreSQL**: Stores user data, OAuth credentials, and all application data
+- **Firebase Auth**: User authentication (login/signup)
+- **Firestore**: Stores user data (`users` collection)
+- **PostgreSQL**: Stores business data (OAuth credentials, human agents, feedback, etc.)
 

@@ -60,14 +60,14 @@ async def lifespan(app: FastAPI):
         else:
             logger.error("❌ DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
         
-        # Initialize Firebase Auth (NO Firestore)
+        # Initialize Firebase Auth and Firestore
         try:
             from shared.firebase_auth import init_firebase_auth
             init_firebase_auth()
-            logger.info("✅ Firebase Auth initialized (NO Firestore)")
+            logger.info("✅ Firebase Auth and Firestore initialized")
         except Exception as e:
-            logger.warning(f"⚠️ Firebase Auth not initialized: {e}")
-            logger.warning("Authentication endpoints will not work without Firebase Auth")
+            logger.warning(f"⚠️ Firebase Auth/Firestore not initialized: {e}")
+            logger.warning("Authentication endpoints will not work without Firebase")
         
         logger.info(f"🚀 Configuration service started successfully on port {PORT}")
         yield

@@ -1,27 +1,27 @@
 """
-Firebase Authentication Service (NO Firestore)
-Verifies Firebase Auth tokens and manages user authentication.
-All user data is stored in PostgreSQL, not Firestore.
+Firebase Authentication and Firestore Service
+Verifies Firebase Auth tokens and manages user data in Firestore.
 """
 import os
 import logging
 from typing import Optional, Dict, Any
 import firebase_admin
-from firebase_admin import credentials, auth
+from firebase_admin import credentials, auth, firestore
 
 logger = logging.getLogger(__name__)
 
-# Global Firebase app instance (for Auth only, no Firestore)
+# Global Firebase app instance (for Auth and Firestore)
 _firebase_app = None
+_firestore_db = None
 
 
 def init_firebase_auth():
-    """Initialize Firebase Admin SDK for Authentication only (NO Firestore)."""
-    global _firebase_app
+    """Initialize Firebase Admin SDK for Authentication and Firestore."""
+    global _firebase_app, _firestore_db
     
     if _firebase_app is not None:
-        logger.info("Firebase Auth already initialized")
-        return _firebase_app
+        logger.info("Firebase Auth and Firestore already initialized")
+        return _firebase_app, _firestore_db
     
     try:
         # Option 1: Service account JSON file
@@ -29,8 +29,9 @@ def init_firebase_auth():
         if credentials_path and os.path.exists(credentials_path):
             cred = credentials.Certificate(credentials_path)
             _firebase_app = firebase_admin.initialize_app(cred)
-            logger.info("Firebase Auth initialized from service account file")
-            return _firebase_app
+            _firestore_db = firestore.client()
+            logger.info("Firebase Auth and Firestore initialized from service account file")
+            return _firebase_app, _firestore_db
         
         # Option 2: JSON string from environment variable
         credentials_json = os.getenv('FIREBASE_CREDENTIALS_JSON')
@@ -39,17 +40,27 @@ def init_firebase_auth():
             cred_dict = json.loads(credentials_json)
             cred = credentials.Certificate(cred_dict)
             _firebase_app = firebase_admin.initialize_app(cred)
-            logger.info("Firebase Auth initialized from environment variable")
-            return _firebase_app
+            _firestore_db = firestore.client()
+            logger.info("Firebase Auth and Firestore initialized from environment variable")
+            return _firebase_app, _firestore_db
         
         # Option 3: Default credentials (for Google Cloud environments)
         _firebase_app = firebase_admin.initialize_app()
-        logger.info("Firebase Auth initialized with default credentials")
-        return _firebase_app
+        _firestore_db = firestore.client()
+        logger.info("Firebase Auth and Firestore initialized with default credentials")
+        return _firebase_app, _firestore_db
         
     except Exception as e:
-        logger.error(f"Failed to initialize Firebase Auth: {e}")
-        raise RuntimeError(f"Firebase Auth initialization failed: {e}")
+        logger.error(f"Failed to initialize Firebase Auth and Firestore: {e}")
+        raise RuntimeError(f"Firebase initialization failed: {e}")
+
+
+def get_firestore():
+    """Get Firestore database instance."""
+    global _firestore_db
+    if _firestore_db is None:
+        init_firebase_auth()
+    return _firestore_db
 
 
 def verify_firebase_token(id_token: str) -> Optional[Dict[str, Any]]:
