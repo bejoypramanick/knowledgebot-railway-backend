@@ -4,7 +4,7 @@ Configuration Service - Handles chatbot and widget configuration management
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Union
 import os
 import logging
 import sys
@@ -117,8 +117,12 @@ class PersonaUpdate(BaseModel):
     system_prompt: str
     selected_persona: str
 
+class AdminAccount(BaseModel):
+    email: str
+    password: str
+
 class ChatbotConfigRequest(BaseModel):
-    admin_emails: Optional[List[str]] = None
+    admin_emails: Optional[List[Union[str, AdminAccount]]] = None
     human_agents: Optional[List[str]] = None
     notifications: Optional[NotificationsUpdate] = None
     security: Optional[SecurityUpdate] = None
@@ -359,17 +363,97 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
             param_index = 1
             
             if config.admin_emails is not None:
+                # Process admin emails - extract emails and handle passwords
+                admin_email_list = []
+                admin_accounts_to_create = []
+                
+                for admin_item in config.admin_emails:
+                    # Handle both dict (AdminAccount) and str formats
+                    if isinstance(admin_item, dict):
+                        # New format: {email, password}
+                        email = admin_item.get('email', '')
+                        password = admin_item.get('password', '')
+                        if email:
+                            admin_email_list.append(email)
+                            if password:
+                                admin_accounts_to_create.append({'email': email, 'password': password})
+                    elif hasattr(admin_item, 'email') and hasattr(admin_item, 'password'):
+                        # Pydantic model format
+                        email = admin_item.email
+                        password = admin_item.password
+                        if email:
+                            admin_email_list.append(email)
+                            if password:
+                                admin_accounts_to_create.append({'email': email, 'password': password})
+                    elif isinstance(admin_item, str):
+                        # Old format: just email string
+                        admin_email_list.append(admin_item)
+                
                 updates.append(f"admin_emails = ${param_index}")
-                values.append(config.admin_emails)
+                values.append(admin_email_list)
                 param_index += 1
                 
                 # Also update admin_user for backward compatibility (use first admin email if available)
-                if len(config.admin_emails) > 0:
+                if len(admin_email_list) > 0:
                     # Check if admin_user is already in updates to avoid duplicate
                     if "admin_user" not in " ".join(updates):
                         updates.append(f"admin_user = ${param_index}")
-                        values.append(config.admin_emails[0])
+                        values.append(admin_email_list[0])
                         param_index += 1
+                
+                # Create Firebase accounts for admins with passwords
+                if admin_accounts_to_create:
+                    try:
+                        from firebase_admin import auth
+                        from shared.firebase_auth import init_firebase_auth
+                        from services.configuration_service.admin_management import generate_confirmation_token
+                        from shared.email_service import create_email_service
+                        
+                        init_firebase_auth()
+                        email_service = create_email_service(conn)
+                        
+                        for admin_account in admin_accounts_to_create:
+                            email = admin_account['email']
+                            password = admin_account['password']
+                            
+                            try:
+                                # Check if user already exists in Firebase
+                                try:
+                                    existing_user = auth.get_user_by_email(email)
+                                    # User exists, update password
+                                    auth.update_user(existing_user.uid, password=password)
+                                    logger.info(f"Updated password for existing Firebase user: {email}")
+                                except auth.UserNotFoundError:
+                                    # User doesn't exist, create new user
+                                    user = auth.create_user(
+                                        email=email,
+                                        password=password,
+                                        email_verified=False
+                                    )
+                                    logger.info(f"Created Firebase user: {email} (UID: {user.uid})")
+                                
+                                # Add to admins table and send verification email
+                                token = generate_confirmation_token()
+                                await conn.execute(
+                                    """
+                                    INSERT INTO admins (email, status, confirmation_token)
+                                    VALUES ($1, 'pending', $2)
+                                    ON CONFLICT (email) 
+                                    DO UPDATE SET confirmation_token = $2, status = 'pending'
+                                    """,
+                                    email, token
+                                )
+                                
+                                # Send verification email
+                                await email_service.send_admin_confirmation_email(email, token, "system")
+                                logger.info(f"Verification email sent to admin: {email}")
+                                
+                            except Exception as e:
+                                logger.error(f"Error creating Firebase account for {email}: {e}", exc_info=True)
+                                # Continue with other admins even if one fails
+                    except Exception as e:
+                        logger.error(f"Error processing admin accounts: {e}", exc_info=True)
+                        # Don't fail the whole request if admin creation fails
             
             if config.human_agents is not None:
                 updates.append(f"human_agents = ${param_index}")
