@@ -286,9 +286,8 @@ FIREBASE_CREDENTIALS_JSON={"type":"service_account","project_id":"your-project-i
 # OR use file path instead:
 # FIREBASE_CREDENTIALS_PATH=/path/to/service-account.json
 
-# SMTP Configuration (REQUIRED)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
+# Gmail Configuration (REQUIRED)
+# Note: We use Gmail API (not SMTP) to avoid Railway network restrictions
 SMTP_USER=your-email@gmail.com
 EMAIL_FROM=noreply@knowledgebot.com
 WIDGET_BASE_URL=https://widget.yourdomain.com
@@ -430,9 +429,8 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - [ ] `CONFIGURATION_SERVICE_PORT=8004`
 - [ ] `PORT=8004`
 - [ ] `FIREBASE_CREDENTIALS_JSON` (entire JSON as single-line string) OR `FIREBASE_CREDENTIALS_PATH`
-- [ ] `SMTP_HOST=smtp.gmail.com`
-- [ ] `SMTP_PORT=587`
-- [ ] `SMTP_USER=your-email@gmail.com`
+- [ ] `SMTP_USER=your-email@gmail.com` (Gmail address for sending emails)
+- [ ] Note: Gmail API is used (not SMTP) - no SMTP_HOST or SMTP_PORT needed
 - [ ] `EMAIL_FROM=noreply@knowledgebot.com`
 - [ ] `WIDGET_BASE_URL=https://widget.yourdomain.com`
 - [ ] `GEMINI_API_KEY`
