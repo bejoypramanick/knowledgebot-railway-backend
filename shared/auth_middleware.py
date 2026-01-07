@@ -11,8 +11,11 @@ from shared.firebase_auth import verify_firebase_token
 
 logger = logging.getLogger(__name__)
 
-# HTTP Bearer token security scheme
+# HTTP Bearer token security scheme (required auth)
 security = HTTPBearer()
+
+# HTTP Bearer token security scheme (optional auth)
+security_optional = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -39,7 +42,7 @@ async def get_current_user(
 
 
 async def get_optional_user(
-    credentials: Optional[HTTPAuthorizationCredentials] = Security(security, auto_error=False)
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(security_optional)
 ) -> Optional[Dict[str, Any]]:
     """
     Dependency to optionally get current user (doesn't require auth).
