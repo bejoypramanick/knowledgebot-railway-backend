@@ -152,3 +152,96 @@ def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
         logger.error(f"Error getting user by email {email}: {e}")
         return None
 
+
+def get_user_from_firestore(uid: str) -> Optional[Dict[str, Any]]:
+    """
+    Get user data from Firestore by Firebase UID.
+    
+    Args:
+        uid: Firebase user UID
+        
+    Returns:
+        User document from Firestore or None
+    """
+    try:
+        db = get_firestore()
+        if not db:
+            logger.error("Firestore not initialized")
+            return None
+        
+        doc_ref = db.collection('users').document(uid)
+        doc = doc_ref.get()
+        
+        if not doc.exists:
+            return None
+        
+        data = doc.to_dict()
+        data['uid'] = uid  # Ensure UID is included
+        return data
+    except Exception as e:
+        logger.error(f"Error getting user from Firestore {uid}: {e}")
+        return None
+
+
+def save_user_to_firestore(uid: str, user_data: Dict[str, Any]) -> bool:
+    """
+    Save or update user data in Firestore.
+    
+    Args:
+        uid: Firebase user UID
+        user_data: User data dictionary
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        db = get_firestore()
+        if not db:
+            logger.error("Firestore not initialized")
+            return False
+        
+        doc_ref = db.collection('users').document(uid)
+        
+        # Add metadata
+        user_data['updated_at'] = firestore.SERVER_TIMESTAMP
+        
+        # If document doesn't exist, add created_at
+        if not doc_ref.get().exists:
+            user_data['created_at'] = firestore.SERVER_TIMESTAMP
+        
+        doc_ref.set(user_data, merge=True)
+        logger.info(f"User {uid} saved to Firestore")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving user to Firestore {uid}: {e}")
+        return False
+
+
+def update_user_role_in_firestore(uid: str, role: str) -> bool:
+    """
+    Update user role in Firestore.
+    
+    Args:
+        uid: Firebase user UID
+        role: New role ('admin', 'human_agent', 'user')
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        db = get_firestore()
+        if not db:
+            logger.error("Firestore not initialized")
+            return False
+        
+        doc_ref = db.collection('users').document(uid)
+        doc_ref.update({
+            'role': role,
+            'updated_at': firestore.SERVER_TIMESTAMP
+        })
+        logger.info(f"User {uid} role updated to {role}")
+        return True
+    except Exception as e:
+        logger.error(f"Error updating user role in Firestore {uid}: {e}")
+        return False
+
