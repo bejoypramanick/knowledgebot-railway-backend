@@ -56,6 +56,21 @@ CREATE TABLE IF NOT EXISTS token_usage_cache (
     last_updated TIMESTAMP DEFAULT NOW()
 );
 
+-- 5. Email OAuth Credentials Table (for Gmail OAuth2)
+CREATE TABLE IF NOT EXISTS email_oauth_credentials (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    client_id VARCHAR(500) NOT NULL,
+    client_secret VARCHAR(500) NOT NULL,
+    refresh_token TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    CONSTRAINT single_row CHECK (id = 1)
+);
+
+-- Insert default row (will be updated with actual credentials)
+INSERT INTO email_oauth_credentials (id, client_id, client_secret, refresh_token)
+VALUES (1, '', '', '')
+ON CONFLICT (id) DO NOTHING;
+
 -- 5. Update chatbot_configurations table (if it exists)
 -- Add new columns for response policy, system prompt, and persona
 DO $$ 

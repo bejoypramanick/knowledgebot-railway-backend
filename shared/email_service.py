@@ -1,13 +1,11 @@
 """
-Email Service for sending confirmation and notification emails using Firebase OAuth2.
-Firebase is used ONLY for storing OAuth credentials securely.
-All application data (human agents, feedback, etc.) is stored in PostgreSQL.
+Email Service for sending confirmation and notification emails using OAuth2.
+OAuth credentials are stored in PostgreSQL database.
 """
 import smtplib
 import os
 import logging
 import base64
-import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
@@ -15,100 +13,64 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Import Firebase Admin SDK (required for OAuth credentials only)
-try:
-    import firebase_admin
-    from firebase_admin import credentials, firestore
-except ImportError:
-    logger.error("Firebase Admin SDK not installed. Install with: pip install firebase-admin")
-    raise ImportError("firebase-admin is required for OAuth credential management. Install with: pip install firebase-admin")
-
 
 class EmailService:
-    """Service for sending emails via SMTP with Firebase OAuth2 authentication."""
+    """Service for sending emails via SMTP with OAuth2 authentication.
+    OAuth credentials are stored in PostgreSQL database.
+    """
     
-    def __init__(self):
+    def __init__(self, db_connection=None):
         self.smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
         self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
         self.smtp_user = os.getenv('SMTP_USER')
         self.email_from = os.getenv('EMAIL_FROM', 'noreply@knowledgebot.com')
         self.widget_base_url = os.getenv('WIDGET_BASE_URL', 'https://widget.example.com')
         self._access_token = None
-        
-        # Firebase configuration (required)
-        self.firebase_credentials_path = os.getenv('FIREBASE_CREDENTIALS_PATH')
-        self.firebase_project_id = os.getenv('FIREBASE_PROJECT_ID')
-        
-        # Initialize Firebase (required)
-        self.firebase_app = None
-        self.firestore_db = None
-        self._init_firebase()
+        self.db_connection = db_connection  # PostgreSQL connection for OAuth credentials
     
-    def _init_firebase(self):
-        """Initialize Firebase Admin SDK (required)."""
-        try:
-            if self.firebase_credentials_path:
-                # Use service account JSON file
-                cred = credentials.Certificate(self.firebase_credentials_path)
-                self.firebase_app = firebase_admin.initialize_app(cred)
-            elif os.getenv('FIREBASE_CREDENTIALS_JSON'):
-                # Use JSON string from environment variable
-                cred_json = json.loads(os.getenv('FIREBASE_CREDENTIALS_JSON'))
-                cred = credentials.Certificate(cred_json)
-                self.firebase_app = firebase_admin.initialize_app(cred)
-            else:
-                # Use default credentials (for Google Cloud environments)
-                self.firebase_app = firebase_admin.initialize_app()
-            
-            self.firestore_db = firestore.client()
-            logger.info("Firebase initialized successfully")
-        except Exception as e:
-            logger.error(f"Failed to initialize Firebase: {e}")
-            raise RuntimeError(f"Firebase initialization failed. Email service requires Firebase. Error: {e}")
-    
-    def _get_oauth_credentials_from_firebase(self) -> Optional[dict]:
-        """Get OAuth2 credentials from Firebase Firestore."""
-        if not self.firestore_db:
-            logger.error("Firestore database not initialized")
+    async def _get_oauth_credentials_from_db(self) -> Optional[dict]:
+        """Get OAuth2 credentials from PostgreSQL database."""
+        if not self.db_connection:
+            logger.error("Database connection not provided to email service")
             return None
         
         try:
-            # Get credentials from Firestore
-            doc_ref = self.firestore_db.collection('email_config').document('gmail_oauth')
-            doc = doc_ref.get()
+            # Get credentials from PostgreSQL
+            row = await self.db_connection.fetchrow(
+                """
+                SELECT client_id, client_secret, refresh_token 
+                FROM email_oauth_credentials 
+                WHERE id = 1
+                """
+            )
             
-            if not doc.exists:
-                logger.error("OAuth credentials document not found in Firestore. Create email_config/gmail_oauth document.")
-                return None
-            
-            data = doc.to_dict()
-            if not data:
-                logger.error("OAuth credentials document is empty in Firestore")
+            if not row:
+                logger.error("OAuth credentials not found in database. Insert credentials into email_oauth_credentials table.")
                 return None
             
             return {
-                'client_id': data.get('client_id'),
-                'client_secret': data.get('client_secret'),
-                'refresh_token': data.get('refresh_token')
+                'client_id': row.get('client_id'),
+                'client_secret': row.get('client_secret'),
+                'refresh_token': row.get('refresh_token')
             }
         except Exception as e:
-            logger.error(f"Error reading OAuth credentials from Firebase: {e}")
+            logger.error(f"Error reading OAuth credentials from database: {e}")
             return None
         
-    def _get_access_token(self) -> Optional[str]:
-        """Get OAuth2 access token using refresh token from Firebase."""
-        # Get credentials from Firebase
-        if not self.firestore_db:
-            logger.error("Firestore database not initialized. Cannot get OAuth credentials.")
+    async def _get_access_token(self) -> Optional[str]:
+        """Get OAuth2 access token using refresh token from PostgreSQL."""
+        # Get credentials from PostgreSQL
+        if not self.db_connection:
+            logger.error("Database connection not available. Cannot get OAuth credentials.")
             return None
         
-        oauth_creds = self._get_oauth_credentials_from_firebase()
+        oauth_creds = await self._get_oauth_credentials_from_db()
         if not oauth_creds:
-            logger.error("OAuth credentials not found in Firebase Firestore. Check email_config/gmail_oauth document.")
+            logger.error("OAuth credentials not found in PostgreSQL. Insert credentials into email_oauth_credentials table.")
             return None
         
         if not all([oauth_creds.get('client_id'), oauth_creds.get('client_secret'), oauth_creds.get('refresh_token')]):
-            logger.error("OAuth2 credentials incomplete in Firebase. Missing client_id, client_secret, or refresh_token.")
+            logger.error("OAuth2 credentials incomplete in database. Missing client_id, client_secret, or refresh_token.")
             return None
         
         try:
@@ -138,14 +100,14 @@ class EmailService:
         auth_string = f"user={user}\x01auth=Bearer {access_token}\x01\x01"
         return base64.b64encode(auth_string.encode()).decode()
         
-    def _send_email(self, to_email: str, subject: str, body_html: str, body_text: str = None) -> bool:
+    async def _send_email(self, to_email: str, subject: str, body_html: str, body_text: str = None) -> bool:
         """Send an email via SMTP with OAuth2 authentication."""
         if not self.smtp_user:
             logger.warning("SMTP user not configured. Email not sent.")
             return False
         
         # Get access token
-        access_token = self._get_access_token()
+        access_token = await self._get_access_token()
         if not access_token:
             logger.error("Failed to obtain OAuth2 access token. Email not sent.")
             return False
@@ -187,7 +149,7 @@ class EmailService:
             logger.error(f"Failed to send email to {to_email}: {e}")
             return False
     
-    def send_confirmation_email(self, email: str, confirmation_token: str) -> bool:
+    async def send_confirmation_email(self, email: str, confirmation_token: str) -> bool:
         """Send confirmation email to human agent."""
         confirmation_link = f"{self.widget_base_url}/confirm?token={confirmation_token}"
         
@@ -238,9 +200,9 @@ class EmailService:
         KnowledgeBot Team
         """
         
-        return self._send_email(email, subject, body_html, body_text)
+        return await self._send_email(email, subject, body_html, body_text)
     
-    def send_confirmation_success_email(self, email: str, widget_link: str, password: str) -> bool:
+    async def send_confirmation_success_email(self, email: str, widget_link: str, password: str) -> bool:
         """Send confirmation success email with widget link and password."""
         subject = "Your Human Agent Account is Ready"
         
@@ -292,9 +254,9 @@ class EmailService:
         KnowledgeBot Team
         """
         
-        return self._send_email(email, subject, body_html, body_text)
+        return await self._send_email(email, subject, body_html, body_text)
     
-    def send_removal_email(self, email: str) -> bool:
+    async def send_removal_email(self, email: str) -> bool:
         """Send removal notification email to human agent."""
         subject = "Human Agent Access Removed"
         
@@ -335,9 +297,5 @@ class EmailService:
         KnowledgeBot Team
         """
         
-        return self._send_email(email, subject, body_html, body_text)
-
-
-# Global email service instance
-email_service = EmailService()
+        return await self._send_email(email, subject, body_html, body_text)
 

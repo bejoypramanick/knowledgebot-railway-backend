@@ -60,55 +60,43 @@ WHERE table_name IN ('human_agents', 'chat_feedback', 'token_usage_cache');
 
 ---
 
-## 🔧 STEP 2: Set Up Firebase for OAuth (OAuth Credentials Only)
+## 🔧 STEP 2: Get Gmail OAuth2 Credentials
 
-### 2.1 Create Firebase Project
+**Note**: OAuth credentials will be stored in PostgreSQL, not Firebase. Firebase is not needed.
 
-1. Go to [Firebase Console](https://console.firebase.google.com/)
-2. Click **Add project** → Enter name: `KnowledgeBot Email Service`
-3. Enable **Firestore Database**:
-   - Go to **Firestore Database** → **Create database**
-   - Start in **Production mode**
-   - Choose location
+### 2.1 Quick Method (OAuth2 Playground)
 
-### 2.2 Get Firebase Service Account
-
-1. Go to **Project Settings** (gear icon) → **Service accounts**
-2. Click **Generate new private key**
-3. Download JSON file (e.g., `knowledgebot-firebase-adminsdk.json`)
-4. **Keep this file secure** - it has admin access
-
-### 2.3 Set Up Firestore Collection (OAuth Only)
-
-1. Go to **Firestore Database**
-2. Create collection: `email_config`
-3. Create document: `gmail_oauth`
-4. Add these fields:
-   ```
-   client_id: "your-client-id.apps.googleusercontent.com"
-   client_secret: "GOCSPX-your-client-secret"
-   refresh_token: "your-refresh-token-here"
-   ```
-
-**⚠️ This is the ONLY data in Firestore. All application data goes to PostgreSQL.**
-
-### 2.4 Get Gmail OAuth2 Credentials
-
-**Quick Method (OAuth2 Playground)**:
 1. Go to [OAuth2 Playground](https://developers.google.com/oauthplayground/)
 2. Click gear icon (⚙️) → Check **Use your own OAuth credentials**
-3. Enter Client ID and Secret (from Google Cloud Console)
+3. Enter Client ID and Secret (from Google Cloud Console - see below if you don't have them)
 4. In left panel: **Gmail API v1** → Select `https://www.googleapis.com/auth/gmail.send`
 5. Click **Authorize APIs** → Sign in → Grant permissions
 6. Click **Exchange authorization code for tokens**
 7. Copy the **Refresh token**
 
-**If you need to create OAuth credentials**:
+### 2.2 Create OAuth Credentials (if needed)
+
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create project → Enable Gmail API
 3. **APIs & Services** → **Credentials** → **Create OAuth client ID**
 4. Application type: **Web application**
-5. Copy Client ID and Secret
+5. Copy **Client ID** and **Client Secret**
+
+### 2.3 Store Credentials in PostgreSQL
+
+After getting Client ID, Secret, and Refresh Token, insert them into PostgreSQL:
+
+```sql
+UPDATE email_oauth_credentials 
+SET 
+    client_id = 'your-client-id.apps.googleusercontent.com',
+    client_secret = 'GOCSPX-your-client-secret',
+    refresh_token = 'your-refresh-token-here',
+    updated_at = NOW()
+WHERE id = 1;
+```
+
+**⚠️ These credentials are stored in PostgreSQL, not Firebase.**
 
 ---
 
@@ -144,9 +132,8 @@ DATABASE_URL=${{PostgreSQL.DATABASE_URL}}
 CONFIGURATION_SERVICE_PORT=8004
 PORT=8004
 
-# Firebase Configuration (REQUIRED - for OAuth credentials only)
-FIREBASE_CREDENTIALS_JSON={"type":"service_account","project_id":"your-project-id","private_key_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n","client_email":"firebase-adminsdk-xxxxx@your-project.iam.gserviceaccount.com","client_id":"...","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_x509_cert_url":"https://www.googleapis.com/robot/v1/metadata/x509/..."}
-FIREBASE_PROJECT_ID=your-firebase-project-id
+# Note: OAuth credentials are stored in PostgreSQL, not environment variables
+# Insert credentials into email_oauth_credentials table after deployment
 
 # SMTP Configuration (REQUIRED)
 SMTP_HOST=smtp.gmail.com
@@ -161,11 +148,10 @@ OPENAI_API_KEY=your-openai-api-key
 ```
 
 **⚠️ Important**:
-- Replace `FIREBASE_CREDENTIALS_JSON` with entire JSON from service account file (as single-line string)
-- Replace `your-firebase-project-id` with your Firebase project ID
 - Replace `your-email@gmail.com` with Gmail address used for OAuth
 - Replace API keys with actual keys
 - Replace `https://widget.yourdomain.com` with your widget URL
+- **OAuth credentials** (Client ID, Secret, Refresh Token) are stored in PostgreSQL `email_oauth_credentials` table, not environment variables
 
 ---
 
@@ -258,12 +244,9 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - [ ] Tables created: `human_agents`, `chat_feedback`, `token_usage_cache`
 - [ ] `chatbot_configuration` table updated with new columns
 
-### Firebase
-- [ ] Firebase project created
-- [ ] Firestore database enabled
-- [ ] Service account JSON downloaded
-- [ ] Firestore collection `email_config/gmail_oauth` created
-- [ ] OAuth credentials added to Firestore (client_id, client_secret, refresh_token)
+### OAuth Credentials
+- [ ] Gmail OAuth2 credentials obtained (Client ID, Secret, Refresh Token)
+- [ ] Credentials stored in PostgreSQL `email_oauth_credentials` table
 
 ### Railway Services
 - [ ] Configuration Service created
@@ -277,8 +260,6 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - [ ] `DATABASE_URL` or `RAILWAY_POSTGRES_URL`
 - [ ] `CONFIGURATION_SERVICE_PORT=8004`
 - [ ] `PORT=8004`
-- [ ] `FIREBASE_CREDENTIALS_JSON` (entire JSON as single-line string)
-- [ ] `FIREBASE_PROJECT_ID`
 - [ ] `SMTP_HOST=smtp.gmail.com`
 - [ ] `SMTP_PORT=587`
 - [ ] `SMTP_USER=your-email@gmail.com`
@@ -286,6 +267,10 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - [ ] `WIDGET_BASE_URL=https://widget.yourdomain.com`
 - [ ] `GEMINI_API_KEY`
 - [ ] `OPENAI_API_KEY`
+
+### OAuth Credentials in PostgreSQL
+- [ ] `email_oauth_credentials` table created (via migration)
+- [ ] OAuth credentials inserted: `client_id`, `client_secret`, `refresh_token`
 
 ### Testing
 - [ ] Configuration endpoint returns 200
@@ -298,23 +283,19 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 
 ## 🐛 Troubleshooting
 
-### Firebase Not Initializing
-- Check `FIREBASE_CREDENTIALS_JSON` is valid JSON (no extra quotes)
-- Verify JSON is complete (all fields present)
-- Check `FIREBASE_PROJECT_ID` matches Firebase project
-
 ### OAuth Credentials Not Found
-- Verify Firestore collection: `email_config`
-- Verify document: `gmail_oauth`
-- Check field names: `client_id`, `client_secret`, `refresh_token`
-- Verify Firestore security rules allow Admin SDK access
+- Verify PostgreSQL table: `email_oauth_credentials`
+- Check row exists: `SELECT * FROM email_oauth_credentials WHERE id = 1;`
+- Verify field names: `client_id`, `client_secret`, `refresh_token`
+- Check credentials are not empty strings
 
 ### Email Not Sending
-- Check Firebase OAuth credentials in Firestore
+- Check OAuth credentials in PostgreSQL: `SELECT * FROM email_oauth_credentials WHERE id = 1;`
 - Verify refresh token is valid (not expired)
 - Check `SMTP_USER` matches Gmail account used for OAuth
 - Check Railway logs for OAuth errors
 - Verify Gmail API is enabled in Google Cloud Console
+- Verify credentials are properly inserted (not empty strings)
 
 ### Database Errors
 - Verify migrations ran successfully
@@ -348,20 +329,23 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 
 **Database Variable**: `${{PostgreSQL.DATABASE_URL}}` in Railway
 
-**Firebase**: OAuth credentials ONLY in `email_config/gmail_oauth`
+**OAuth Credentials**: Stored in PostgreSQL `email_oauth_credentials` table
 
-**PostgreSQL**: ALL application data (human_agents, chat_feedback, etc.)
+**PostgreSQL**: ALL data including OAuth credentials (human_agents, chat_feedback, email_oauth_credentials, etc.)
 
 ---
 
 ## 🎯 Summary
 
-1. **Run SQL migrations** on PostgreSQL
-2. **Set up Firebase** for OAuth credentials (Firestore: `email_config/gmail_oauth`)
-3. **Create Configuration Service** in Railway
-4. **Set environment variables** (Firebase, Database, SMTP, API keys)
-5. **Update API Gateway** with `CONFIGURATION_SERVICE_URL`
-6. **Deploy and test** all endpoints
+1. **Run SQL migrations** on PostgreSQL (creates `email_oauth_credentials` table)
+2. **Get Gmail OAuth2 credentials** (Client ID, Secret, Refresh Token)
+3. **Store OAuth credentials in PostgreSQL** (`email_oauth_credentials` table)
+4. **Create Configuration Service** in Railway
+5. **Set environment variables** (Database, SMTP, API keys - NO Firebase needed)
+6. **Update API Gateway** with `CONFIGURATION_SERVICE_URL`
+7. **Deploy and test** all endpoints
 
 **That's it!** Follow the checklist above to verify everything is working.
+
+**Note**: Firebase is NOT needed. All data including OAuth credentials are stored in PostgreSQL.
 
