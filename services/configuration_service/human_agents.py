@@ -44,10 +44,16 @@ def generate_password() -> str:
     return secrets.token_urlsafe(16)
 
 
-def generate_widget_link(agent_id: str) -> str:
+def generate_widget_link(agent_id: str, email_service) -> str:
     """Generate a unique widget link for the agent."""
     widget_base_url = email_service.widget_base_url
     return f"{widget_base_url}/agent/{agent_id}"
+
+def generate_confirmation_link(token: str) -> str:
+    """Generate confirmation link for human agent."""
+    import os
+    frontend_url = os.getenv('FRONTEND_URL', os.getenv('WIDGET_BASE_URL', 'https://knowledgebot.vercel.app'))
+    return f"{frontend_url}/agent/confirm?token={token}"
 
 
 @router.post("/human-agents", response_model=dict)
@@ -75,9 +81,23 @@ async def add_human_agents(request: HumanAgentsRequest):
                         logger.info(f"Agent {email} already confirmed, skipping")
                         continue
                     elif existing['status'] == 'pending':
-                        # Resend confirmation email
+                        # Resend confirmation email with existing password
                         token = existing['confirmation_token']
-                        if await email_service.send_confirmation_email(email, token):
+                        # Get existing password
+                        existing_with_password = await conn.fetchrow(
+                            "SELECT confirmation_token, auto_generated_password FROM human_agents WHERE email = $1",
+                            email
+                        )
+                        password = existing_with_password.get('auto_generated_password') if existing_with_password else None
+                        # If no password exists, generate one and store it
+                        if not password:
+                            password = generate_password()
+                            await conn.execute(
+                                "UPDATE human_agents SET auto_generated_password = $1 WHERE email = $2",
+                                password, email
+                            )
+                        confirmation_link = generate_confirmation_link(token)
+                        if await email_service.send_confirmation_email(email, confirmation_link, password):
                             agents_created.append({
                                 "email": email,
                                 "status": "pending",
@@ -85,19 +105,23 @@ async def add_human_agents(request: HumanAgentsRequest):
                             })
                         continue
                 
-                # Create new agent
+                # Create new agent with auto-generated password
                 token = generate_confirmation_token()
+                password = generate_password()
                 agent_id = await conn.fetchval(
                     """
-                    INSERT INTO human_agents (email, status, confirmation_token)
-                    VALUES ($1, 'pending', $2)
+                    INSERT INTO human_agents (email, status, confirmation_token, auto_generated_password)
+                    VALUES ($1, 'pending', $2, $3)
                     RETURNING id::text
                     """,
-                    email, token
+                    email, token, password
                 )
                 
-                # Send confirmation email
-                if await email_service.send_confirmation_email(email, token):
+                # Generate confirmation link
+                confirmation_link = generate_confirmation_link(token)
+                
+                # Send confirmation email with password
+                if await email_service.send_confirmation_email(email, confirmation_link, password):
                     agents_created.append({
                         "email": email,
                         "status": "pending",
@@ -137,10 +161,25 @@ async def confirm_human_agent(request: ConfirmAgentRequest):
             if not agent:
                 raise HTTPException(status_code=404, detail="Invalid or expired confirmation token")
             
-            # Generate widget link and password
+            # Create email service and generate widget link
+            email_service = create_email_service(conn)
             agent_id = str(agent['id'])
-            widget_link = generate_widget_link(agent_id)
-            password = generate_password()
+            widget_link = generate_widget_link(agent_id, email_service)
+            
+            # Get existing password (already generated when agent was added)
+            agent_with_password = await conn.fetchrow(
+                "SELECT auto_generated_password FROM human_agents WHERE id = $1",
+                agent['id']
+            )
+            password = agent_with_password.get('auto_generated_password') if agent_with_password else None
+            
+            # If no password exists (legacy case), generate one
+            if not password:
+                password = generate_password()
+                await conn.execute(
+                    "UPDATE human_agents SET auto_generated_password = $1 WHERE id = $2",
+                    password, agent['id']
+                )
             
             # Update agent status
             await conn.execute(
@@ -148,15 +187,13 @@ async def confirm_human_agent(request: ConfirmAgentRequest):
                 UPDATE human_agents 
                 SET status = 'confirmed',
                     widget_link = $1,
-                    auto_generated_password = $2,
                     confirmed_at = NOW()
-                WHERE id = $3
+                WHERE id = $2
                 """,
-                widget_link, password, agent['id']
+                widget_link, agent['id']
             )
             
             # Send confirmation success email
-            email_service = create_email_service(conn)
             if await email_service.send_confirmation_success_email(agent['email'], widget_link, password):
                 logger.info(f"Confirmation success email sent to {agent['email']}")
             else:

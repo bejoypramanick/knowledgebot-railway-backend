@@ -167,16 +167,22 @@ class EmailService:
             logger.error(f"❌ Failed to send email to {to_email}: {e}", exc_info=True)
             return False
     
-    async def send_confirmation_email(self, email: str, confirmation_token: str) -> bool:
-        """Send confirmation email to human agent."""
+    async def send_confirmation_email(self, email: str, confirmation_link: str, password: Optional[str] = None) -> bool:
+        """Send confirmation email to human agent with optional password."""
         logger.info(f"📧 Preparing to send confirmation email to {email}")
-        logger.info(f"Widget base URL: {self.widget_base_url}")
         logger.info(f"Gmail sender: {self.smtp_user}")
-        
-        confirmation_link = f"{self.widget_base_url}/confirm?token={confirmation_token}"
         logger.info(f"Confirmation link: {confirmation_link}")
         
         subject = "Confirm Your Human Agent Account"
+        
+        password_section = ""
+        if password:
+            password_section = f"""
+                <div class="info-box">
+                    <p><strong>Your temporary password:</strong> <span class="password">{password}</span></p>
+                    <p>Please use this password to log in after confirmation. You can reset it or login with Google.</p>
+                </div>
+            """
         
         body_html = f"""
         <!DOCTYPE html>
@@ -185,8 +191,10 @@ class EmailService:
             <style>
                 body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
                 .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                .info-box {{ background-color: #f3f4f6; padding: 15px; border-radius: 5px; margin: 20px 0; }}
                 .button {{ display: inline-block; padding: 12px 24px; background-color: #4F46E5; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
                 .footer {{ margin-top: 30px; font-size: 12px; color: #666; }}
+                .password {{ font-family: monospace; background-color: #fff; padding: 5px 10px; border: 1px solid #ddd; border-radius: 3px; }}
             </style>
         </head>
         <body>
@@ -194,6 +202,7 @@ class EmailService:
                 <h2>Confirm Your Human Agent Account</h2>
                 <p>Hello,</p>
                 <p>You have been added as a human agent for the KnowledgeBot chatbot system.</p>
+                {password_section}
                 <p>Please confirm your account by clicking the button below:</p>
                 <a href="{confirmation_link}" class="button">Confirm Account</a>
                 <p>Or copy and paste this link into your browser:</p>
@@ -207,12 +216,14 @@ class EmailService:
         </html>
         """
         
+        password_text = f"\n\nYour temporary password: {password}\nPlease use this password to log in after confirmation. You can reset it or login with Google.\n" if password else ""
+        
         body_text = f"""
         Confirm Your Human Agent Account
         
         Hello,
         
-        You have been added as a human agent for the KnowledgeBot chatbot system.
+        You have been added as a human agent for the KnowledgeBot chatbot system.{password_text}
         
         Please confirm your account by clicking the link below:
         {confirmation_link}
@@ -326,7 +337,72 @@ class EmailService:
         """
         
         return await self._send_email(email, subject, body_html, body_text)
-
+    
+    async def send_admin_confirmation_email(self, email: str, token: str, created_by: str, password: Optional[str] = None) -> bool:
+        """Send admin confirmation email with optional password."""
+        confirmation_link = f"{self.widget_base_url}/admin/confirm?token={token}"
+        subject = "Confirm Your Admin Account"
+        
+        password_section = ""
+        if password:
+            password_section = f"""
+                <div class="info-box">
+                    <p><strong>Your temporary password:</strong> <span class="password">{password}</span></p>
+                    <p>Please use this password to log in. You can reset it or login with Google after confirmation.</p>
+                </div>
+            """
+        
+        body_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
+                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+                .info-box {{ background-color: #f3f4f6; padding: 15px; border-radius: 5px; margin: 20px 0; }}
+                .button {{ display: inline-block; padding: 12px 24px; background-color: #4F46E5; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }}
+                .footer {{ margin-top: 30px; font-size: 12px; color: #666; }}
+                .password {{ font-family: monospace; background-color: #fff; padding: 5px 10px; border: 1px solid #ddd; border-radius: 3px; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h2>Confirm Your Admin Account</h2>
+                <p>Hello,</p>
+                <p>You have been added as an administrator for the KnowledgeBot system by {created_by}.</p>
+                {password_section}
+                <p>Please confirm your account by clicking the link below:</p>
+                <a href="{confirmation_link}" class="button">Confirm Account</a>
+                <p>Or copy and paste this link into your browser:</p>
+                <p>{confirmation_link}</p>
+                <p>If you did not request this, please ignore this email.</p>
+                <div class="footer">
+                    <p>Best regards,<br>KnowledgeBot Team</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        password_text = f"\n\nYour temporary password: {password}\nPlease use this password to log in. You can reset it or login with Google after confirmation.\n" if password else ""
+        
+        body_text = f"""
+        Confirm Your Admin Account
+        
+        Hello,
+        
+        You have been added as an administrator for the KnowledgeBot system by {created_by}.{password_text}
+        
+        Please confirm your account by clicking the link below:
+        {confirmation_link}
+        
+        If you did not request this, please ignore this email.
+        
+        Best regards,
+        KnowledgeBot Team
+        """
+        
+        return await self._send_email(email, subject, body_html, body_text)
 
 
 # Factory function to create email service with database connection

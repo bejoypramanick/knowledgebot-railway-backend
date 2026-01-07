@@ -363,31 +363,28 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
             param_index = 1
             
             if config.admin_emails is not None:
-                # Process admin emails - extract emails and handle passwords
+                # Process admin emails - extract emails (passwords will be auto-generated)
                 admin_email_list = []
-                admin_accounts_to_create = []
+                admin_emails_to_create = []
                 
                 for admin_item in config.admin_emails:
                     # Handle both dict (AdminAccount) and str formats
                     if isinstance(admin_item, dict):
-                        # New format: {email, password}
+                        # New format: {email, password} - extract just email
                         email = admin_item.get('email', '')
-                        password = admin_item.get('password', '')
                         if email:
                             admin_email_list.append(email)
-                            if password:
-                                admin_accounts_to_create.append({'email': email, 'password': password})
-                    elif hasattr(admin_item, 'email') and hasattr(admin_item, 'password'):
-                        # Pydantic model format
+                            admin_emails_to_create.append(email)
+                    elif hasattr(admin_item, 'email'):
+                        # Pydantic model format - extract just email
                         email = admin_item.email
-                        password = admin_item.password
                         if email:
                             admin_email_list.append(email)
-                            if password:
-                                admin_accounts_to_create.append({'email': email, 'password': password})
+                            admin_emails_to_create.append(email)
                     elif isinstance(admin_item, str):
                         # Old format: just email string
                         admin_email_list.append(admin_item)
+                        admin_emails_to_create.append(admin_item)
                 
                 updates.append(f"admin_emails = ${param_index}")
                 values.append(admin_email_list)
@@ -401,52 +398,53 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                         values.append(admin_email_list[0])
                         param_index += 1
                 
-                # Create Firebase accounts for admins with passwords
-                if admin_accounts_to_create:
+                # Create Firebase accounts for admins with auto-generated passwords
+                if admin_emails_to_create:
                     try:
                         from firebase_admin import auth
                         from shared.firebase_auth import init_firebase_auth
                         from services.configuration_service.admin_management import generate_confirmation_token
                         from shared.email_service import create_email_service
+                        import secrets
                         
                         init_firebase_auth()
                         email_service = create_email_service(conn)
                         
-                        for admin_account in admin_accounts_to_create:
-                            email = admin_account['email']
-                            password = admin_account['password']
-                            
+                        for email in admin_emails_to_create:
                             try:
+                                # Generate a secure random password
+                                generated_password = secrets.token_urlsafe(16)
+                                
                                 # Check if user already exists in Firebase
                                 try:
                                     existing_user = auth.get_user_by_email(email)
-                                    # User exists, update password
-                                    auth.update_user(existing_user.uid, password=password)
+                                    # User exists, update password with generated one
+                                    auth.update_user(existing_user.uid, password=generated_password)
                                     logger.info(f"Updated password for existing Firebase user: {email}")
                                 except auth.UserNotFoundError:
-                                    # User doesn't exist, create new user
+                                    # User doesn't exist, create new user with generated password
                                     user = auth.create_user(
                                         email=email,
-                                        password=password,
+                                        password=generated_password,
                                         email_verified=False
                                     )
                                     logger.info(f"Created Firebase user: {email} (UID: {user.uid})")
                                 
-                                # Add to admins table and send verification email
+                                # Add to admins table and send verification email with password
                                 token = generate_confirmation_token()
                                 await conn.execute(
                                     """
-                                    INSERT INTO admins (email, status, confirmation_token)
-                                    VALUES ($1, 'pending', $2)
+                                    INSERT INTO admins (email, status, confirmation_token, auto_generated_password)
+                                    VALUES ($1, 'pending', $2, $3)
                                     ON CONFLICT (email) 
-                                    DO UPDATE SET confirmation_token = $2, status = 'pending'
+                                    DO UPDATE SET confirmation_token = $2, status = 'pending', auto_generated_password = $3
                                     """,
-                                    email, token
+                                    email, token, generated_password
                                 )
                                 
-                                # Send verification email
-                                await email_service.send_admin_confirmation_email(email, token, "system")
-                                logger.info(f"Verification email sent to admin: {email}")
+                                # Send verification email with generated password
+                                await email_service.send_admin_confirmation_email(email, token, "system", generated_password)
+                                logger.info(f"Verification email with password sent to admin: {email}")
                                 
                             except Exception as e:
                                 logger.error(f"Error creating Firebase account for {email}: {e}", exc_info=True)
@@ -562,7 +560,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                     from shared.email_service import create_email_service
                     from services.configuration_service.human_agents import (
                         generate_confirmation_token,
-                        generate_widget_link
+                        generate_confirmation_link
                     )
                     
                     logger.info("Email service imports successful, creating email service instance")
@@ -590,10 +588,25 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                                 logger.info(f"Agent {email} already confirmed, skipping email")
                                 continue
                             elif existing['status'] == 'pending':
-                                # Resend confirmation email
+                                # Resend confirmation email with existing password
                                 token = existing['confirmation_token']
+                                # Get existing password
+                                existing_with_password = await conn.fetchrow(
+                                    "SELECT confirmation_token, auto_generated_password FROM human_agents WHERE email = $1",
+                                    email
+                                )
+                                password = existing_with_password.get('auto_generated_password') if existing_with_password else None
+                                # If no password exists, generate one and store it
+                                if not password:
+                                    from services.configuration_service.human_agents import generate_password
+                                    password = generate_password()
+                                    await conn.execute(
+                                        "UPDATE human_agents SET auto_generated_password = $1 WHERE email = $2",
+                                        password, email
+                                    )
+                                confirmation_link = generate_confirmation_link(token)
                                 logger.info(f"Resending confirmation email to pending agent {email}")
-                                email_result = await email_service.send_confirmation_email(email, token)
+                                email_result = await email_service.send_confirmation_email(email, confirmation_link, password)
                                 logger.info(f"Email send result for {email}: {email_result}")
                                 if email_result:
                                     agents_emailed.append(email)
@@ -602,21 +615,24 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                                     logger.error(f"❌ Failed to resend confirmation email to {email}")
                                 continue
                         
-                        # Create new agent
+                        # Create new agent with auto-generated password
                         logger.info(f"Creating new agent record for {email}")
                         token = generate_confirmation_token()
+                        from services.configuration_service.human_agents import generate_password
+                        password = generate_password()
                         agent_id = await conn.fetchval(
                             """
-                            INSERT INTO human_agents (email, status, confirmation_token)
-                            VALUES ($1, 'pending', $2)
+                            INSERT INTO human_agents (email, status, confirmation_token, auto_generated_password)
+                            VALUES ($1, 'pending', $2, $3)
                             RETURNING id::text
                             """,
-                            email, token
+                            email, token, password
                         )
                         logger.info(f"New agent created with ID: {agent_id}, sending confirmation email to {email}")
                         
-                        # Send confirmation email
-                        email_result = await email_service.send_confirmation_email(email, token)
+                        # Generate confirmation link and send confirmation email with password
+                        confirmation_link = generate_confirmation_link(token)
+                        email_result = await email_service.send_confirmation_email(email, confirmation_link, password)
                         logger.info(f"Email send result for {email}: {email_result}")
                         if email_result:
                             agents_emailed.append(email)
