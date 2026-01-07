@@ -102,17 +102,11 @@ CONFIGURATION_SERVICE_PORT=8004
 PORT=8004
 
 # Email Configuration (REQUIRED for human agent emails)
-# Option 1: Use Firebase for OAuth (Recommended - more secure)
-USE_FIREBASE_OAUTH=true
+# Firebase OAuth Configuration (REQUIRED)
 FIREBASE_CREDENTIALS_JSON={"type":"service_account","project_id":"...","private_key_id":"...","private_key":"...","client_email":"...","client_id":"...","auth_uri":"...","token_uri":"...","auth_provider_x509_cert_url":"...","client_x509_cert_url":"..."}
 FIREBASE_PROJECT_ID=your-firebase-project-id
 
-# Option 2: Direct OAuth2 (Alternative - if not using Firebase)
-# GMAIL_OAUTH2_CLIENT_ID=your-client-id.apps.googleusercontent.com
-# GMAIL_OAUTH2_CLIENT_SECRET=GOCSPX-your-client-secret
-# GMAIL_OAUTH2_REFRESH_TOKEN=your-refresh-token-here
-
-# SMTP Configuration (Required for both options)
+# SMTP Configuration (REQUIRED)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
@@ -131,31 +125,23 @@ OPENAI_API_KEY=your-openai-api-key
 - Replace `https://widget.yourdomain.com` with your actual widget URL
 - `${{PostgreSQL.DATABASE_URL}}` is Railway's variable reference syntax
 
-### 2.4 Gmail OAuth2 Setup (Firebase Recommended)
+### 2.4 Firebase OAuth Setup (REQUIRED)
 
-**⚠️ IMPORTANT**: We use Firebase to manage OAuth2 credentials securely.
+**⚠️ IMPORTANT**: Email service uses Firebase exclusively for OAuth2 credential management.
 
-**Two Options**:
-
-#### Option A: Firebase OAuth (Recommended)
+**Setup Steps**:
 1. Set up Firebase project (see `FIREBASE_OAUTH_SETUP.md`)
 2. Get Firebase service account JSON
-3. Store OAuth credentials in Firestore
-4. Set `USE_FIREBASE_OAUTH=true` in Railway
-5. Add `FIREBASE_CREDENTIALS_JSON` and `FIREBASE_PROJECT_ID`
+3. Store Gmail OAuth credentials in Firestore (`email_config/gmail_oauth`)
+4. Add `FIREBASE_CREDENTIALS_JSON` and `FIREBASE_PROJECT_ID` to Railway
 
 **Benefits**:
 - Credentials stored securely in Firestore
 - Update credentials without redeploying
 - Centralized management
+- No credentials in environment variables
 
-#### Option B: Direct OAuth2
-1. Follow `GMAIL_OAUTH2_SETUP.md`
-2. Get Client ID, Secret, Refresh Token
-3. Set `USE_FIREBASE_OAUTH=false` (or omit)
-4. Add `GMAIL_OAUTH2_CLIENT_ID`, `GMAIL_OAUTH2_CLIENT_SECRET`, `GMAIL_OAUTH2_REFRESH_TOKEN`
-
-**See `FIREBASE_OAUTH_SETUP.md` for Firebase setup or `GMAIL_OAUTH2_SETUP.md` for direct OAuth2.**
+**See `FIREBASE_OAUTH_SETUP.md` for complete step-by-step instructions.**
 
 ---
 
@@ -263,14 +249,9 @@ curl https://your-api-gateway-url.up.railway.app/api/v1/admin/token-usage
 - [ ] `DATABASE_URL` or `RAILWAY_POSTGRES_URL` or `POSTGRES_URL`
 - [ ] `CONFIGURATION_SERVICE_PORT=8004`
 - [ ] `PORT=8004`
-- [ ] **Firebase OAuth (Recommended)**:
-  - [ ] `USE_FIREBASE_OAUTH=true`
+- [ ] **Firebase OAuth (REQUIRED)**:
   - [ ] `FIREBASE_CREDENTIALS_JSON={...}` (entire service account JSON)
   - [ ] `FIREBASE_PROJECT_ID=your-firebase-project-id`
-- [ ] **OR Direct OAuth2 (Alternative)**:
-  - [ ] `GMAIL_OAUTH2_CLIENT_ID=your-client-id.apps.googleusercontent.com`
-  - [ ] `GMAIL_OAUTH2_CLIENT_SECRET=GOCSPX-your-client-secret`
-  - [ ] `GMAIL_OAUTH2_REFRESH_TOKEN=your-refresh-token`
 - [ ] `SMTP_HOST=smtp.gmail.com`
 - [ ] `SMTP_PORT=587`
 - [ ] `SMTP_USER=your-email@gmail.com`

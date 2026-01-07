@@ -2,12 +2,15 @@
 
 This guide shows you how to use Firebase to manage Gmail OAuth2 credentials securely.
 
-## 📋 Why Use Firebase?
+**⚠️ IMPORTANT**: Firebase is used **ONLY** for storing OAuth credentials. All application data (human agents, feedback, sessions) is stored in PostgreSQL (Railway).
+
+## 📋 Why Use Firebase for OAuth?
 
 - **Secure Storage**: OAuth credentials stored in Firebase Firestore (encrypted)
 - **Easy Management**: Update credentials without redeploying
 - **Centralized**: Manage credentials from Firebase Console
 - **Audit Trail**: Track credential changes in Firebase
+- **Separation of Concerns**: OAuth credentials separate from application data
 
 ## 🔧 Step 1: Set Up Firebase Project
 
@@ -26,7 +29,9 @@ This guide shows you how to use Firebase to manage Gmail OAuth2 credentials secu
 3. Download the JSON file (e.g., `knowledgebot-firebase-adminsdk.json`)
 4. **IMPORTANT**: Keep this file secure - it has admin access
 
-## 🔧 Step 3: Set Up Firestore Collection
+## 🔧 Step 3: Set Up Firestore Collection (OAuth Credentials Only)
+
+**⚠️ NOTE**: This Firestore collection is ONLY for OAuth credentials. All application data (human agents, feedback, etc.) is stored in PostgreSQL.
 
 1. Go to **Firestore Database** in Firebase Console
 2. Create a collection: `email_config`
@@ -37,6 +42,8 @@ This guide shows you how to use Firebase to manage Gmail OAuth2 credentials secu
    client_secret: "GOCSPX-your-client-secret"
    refresh_token: "your-refresh-token-here"
    ```
+
+**This is the ONLY data stored in Firestore.** All other data uses PostgreSQL.
 
 ### Security Rules (Important!)
 
@@ -193,6 +200,8 @@ You can update OAuth credentials anytime without redeploying:
 
 ## 📊 Firestore Document Structure
 
+**This is the ONLY data in Firestore** - OAuth credentials only:
+
 ```
 email_config (collection)
   └── gmail_oauth (document)
@@ -201,17 +210,18 @@ email_config (collection)
       └── refresh_token: "1//xxxxx"
 ```
 
-## 🔄 Fallback to Direct OAuth2
+## 📊 PostgreSQL Tables (Application Data)
 
-If Firebase is not configured or fails, the service automatically falls back to direct OAuth2 using environment variables:
+All application data is stored in PostgreSQL (Railway):
 
-```env
-GMAIL_OAUTH2_CLIENT_ID=...
-GMAIL_OAUTH2_CLIENT_SECRET=...
-GMAIL_OAUTH2_REFRESH_TOKEN=...
-```
+- `human_agents` - Human agent information
+- `human_agent_sessions` - Agent-customer chat sessions
+- `chat_feedback` - User feedback on messages
+- `token_usage_cache` - Token usage statistics
+- `chatbot_configuration` - Chatbot settings
+- `widget_configuration` - Widget settings
 
-Set `USE_FIREBASE_OAUTH=false` to force direct OAuth2 mode.
+**Firebase is NOT used for application data storage.**
 
 ---
 

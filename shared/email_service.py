@@ -1,5 +1,7 @@
 """
 Email Service for sending confirmation and notification emails using Firebase OAuth2.
+Firebase is used ONLY for storing OAuth credentials securely.
+All application data (human agents, feedback, etc.) is stored in PostgreSQL.
 """
 import smtplib
 import os
@@ -13,14 +15,13 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Try to import Firebase Admin SDK (optional)
+# Import Firebase Admin SDK (required for OAuth credentials only)
 try:
     import firebase_admin
     from firebase_admin import credentials, firestore
-    FIREBASE_AVAILABLE = True
 except ImportError:
-    FIREBASE_AVAILABLE = False
-    logger.warning("Firebase Admin SDK not installed. Using direct OAuth2. Install with: pip install firebase-admin")
+    logger.error("Firebase Admin SDK not installed. Install with: pip install firebase-admin")
+    raise ImportError("firebase-admin is required for OAuth credential management. Install with: pip install firebase-admin")
 
 
 class EmailService:
@@ -34,24 +35,17 @@ class EmailService:
         self.widget_base_url = os.getenv('WIDGET_BASE_URL', 'https://widget.example.com')
         self._access_token = None
         
-        # Firebase OAuth2 configuration
-        self.use_firebase = os.getenv('USE_FIREBASE_OAUTH', 'false').lower() == 'true'
+        # Firebase configuration (required)
         self.firebase_credentials_path = os.getenv('FIREBASE_CREDENTIALS_PATH')
         self.firebase_project_id = os.getenv('FIREBASE_PROJECT_ID')
         
-        # Direct OAuth2 configuration (fallback or if not using Firebase)
-        self.oauth2_client_id = os.getenv('GMAIL_OAUTH2_CLIENT_ID')
-        self.oauth2_client_secret = os.getenv('GMAIL_OAUTH2_CLIENT_SECRET')
-        self.oauth2_refresh_token = os.getenv('GMAIL_OAUTH2_REFRESH_TOKEN')
-        
-        # Initialize Firebase if configured
+        # Initialize Firebase (required)
         self.firebase_app = None
         self.firestore_db = None
-        if self.use_firebase and FIREBASE_AVAILABLE:
-            self._init_firebase()
+        self._init_firebase()
     
     def _init_firebase(self):
-        """Initialize Firebase Admin SDK."""
+        """Initialize Firebase Admin SDK (required)."""
         try:
             if self.firebase_credentials_path:
                 # Use service account JSON file
@@ -70,12 +64,12 @@ class EmailService:
             logger.info("Firebase initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize Firebase: {e}")
-            logger.warning("Falling back to direct OAuth2")
-            self.use_firebase = False
+            raise RuntimeError(f"Firebase initialization failed. Email service requires Firebase. Error: {e}")
     
     def _get_oauth_credentials_from_firebase(self) -> Optional[dict]:
         """Get OAuth2 credentials from Firebase Firestore."""
         if not self.firestore_db:
+            logger.error("Firestore database not initialized")
             return None
         
         try:
@@ -83,41 +77,38 @@ class EmailService:
             doc_ref = self.firestore_db.collection('email_config').document('gmail_oauth')
             doc = doc_ref.get()
             
-            if doc.exists:
-                data = doc.to_dict()
-                return {
-                    'client_id': data.get('client_id'),
-                    'client_secret': data.get('client_secret'),
-                    'refresh_token': data.get('refresh_token')
-                }
-            else:
-                logger.warning("OAuth credentials not found in Firestore")
+            if not doc.exists:
+                logger.error("OAuth credentials document not found in Firestore. Create email_config/gmail_oauth document.")
                 return None
+            
+            data = doc.to_dict()
+            if not data:
+                logger.error("OAuth credentials document is empty in Firestore")
+                return None
+            
+            return {
+                'client_id': data.get('client_id'),
+                'client_secret': data.get('client_secret'),
+                'refresh_token': data.get('refresh_token')
+            }
         except Exception as e:
             logger.error(f"Error reading OAuth credentials from Firebase: {e}")
             return None
         
     def _get_access_token(self) -> Optional[str]:
-        """Get OAuth2 access token using refresh token (from Firebase or direct config)."""
-        # Get credentials from Firebase or use direct config
-        if self.use_firebase and self.firestore_db:
-            oauth_creds = self._get_oauth_credentials_from_firebase()
-            if not oauth_creds:
-                logger.warning("Firebase OAuth credentials not found, falling back to direct config")
-                oauth_creds = {
-                    'client_id': self.oauth2_client_id,
-                    'client_secret': self.oauth2_client_secret,
-                    'refresh_token': self.oauth2_refresh_token
-                }
-        else:
-            oauth_creds = {
-                'client_id': self.oauth2_client_id,
-                'client_secret': self.oauth2_client_secret,
-                'refresh_token': self.oauth2_refresh_token
-            }
+        """Get OAuth2 access token using refresh token from Firebase."""
+        # Get credentials from Firebase
+        if not self.firestore_db:
+            logger.error("Firestore database not initialized. Cannot get OAuth credentials.")
+            return None
+        
+        oauth_creds = self._get_oauth_credentials_from_firebase()
+        if not oauth_creds:
+            logger.error("OAuth credentials not found in Firebase Firestore. Check email_config/gmail_oauth document.")
+            return None
         
         if not all([oauth_creds.get('client_id'), oauth_creds.get('client_secret'), oauth_creds.get('refresh_token')]):
-            logger.warning("OAuth2 credentials not configured. Email not sent.")
+            logger.error("OAuth2 credentials incomplete in Firebase. Missing client_id, client_secret, or refresh_token.")
             return None
         
         try:
