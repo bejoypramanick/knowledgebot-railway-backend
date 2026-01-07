@@ -71,6 +71,25 @@ INSERT INTO email_oauth_credentials (id, client_id, client_secret, refresh_token
 VALUES (1, '', '', '')
 ON CONFLICT (id) DO NOTHING;
 
+-- 6. Users Table (for Firebase Auth integration)
+-- Stores user information linked to Firebase Auth UIDs
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    firebase_uid VARCHAR(255) NOT NULL UNIQUE, -- Firebase Auth UID
+    email VARCHAR(255) NOT NULL UNIQUE,
+    display_name VARCHAR(255),
+    role VARCHAR(50) NOT NULL DEFAULT 'user', -- 'admin', 'human_agent', 'user'
+    email_verified BOOLEAN DEFAULT FALSE,
+    photo_url TEXT,
+    disabled BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_firebase_uid ON users(firebase_uid);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
 -- 5. Update chatbot_configurations table (if it exists)
 -- Add new columns for response policy, system prompt, and persona
 DO $$ 

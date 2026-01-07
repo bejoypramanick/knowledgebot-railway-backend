@@ -42,3 +42,6 @@ tavily-python>=0.3.0
 
 # Retry logic for HTTP requests
 tenacity>=8.2.2
+
+# Firebase Admin SDK (for Authentication only, NOT Firestore)
+firebase-admin>=6.0.0

@@ -60,6 +60,15 @@ async def lifespan(app: FastAPI):
         else:
             logger.error("❌ DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
         
+        # Initialize Firebase Auth (NO Firestore)
+        try:
+            from shared.firebase_auth import init_firebase_auth
+            init_firebase_auth()
+            logger.info("✅ Firebase Auth initialized (NO Firestore)")
+        except Exception as e:
+            logger.warning(f"⚠️ Firebase Auth not initialized: {e}")
+            logger.warning("Authentication endpoints will not work without Firebase Auth")
+        
         logger.info(f"🚀 Configuration service started successfully on port {PORT}")
         yield
         
@@ -530,14 +539,16 @@ try:
     from services.configuration_service.human_agents import router as human_agents_router
     from services.configuration_service.feedback import router as feedback_router
     from services.configuration_service.token_usage import router as token_usage_router
+    from services.configuration_service.auth import router as auth_router
     
     app.include_router(human_agents_router)
     app.include_router(feedback_router)
     app.include_router(token_usage_router)
-    logger.info("✅ New endpoints (human agents, feedback, token usage) loaded successfully")
+    app.include_router(auth_router)
+    logger.info("✅ New endpoints (human agents, feedback, token usage, auth) loaded successfully")
 except ImportError as e:
     logger.warning(f"⚠️ Could not import new endpoint modules: {e}")
-    logger.warning("New endpoints (human agents, feedback, token usage) will not be available")
+    logger.warning("New endpoints (human agents, feedback, token usage, auth) will not be available")
 
 if __name__ == "__main__":
     import uvicorn
