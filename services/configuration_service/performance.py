@@ -257,14 +257,18 @@ async def get_performance_metrics():
                 elif recent_engagement > 0:
                     engagement_growth = 100.0
                 
-                # Deflection growth
+                # Deflection growth - calculate deflection rate for recent period
                 recent_deflection = await conn.fetchval(
                     """
-                    SELECT COUNT(DISTINCT session_id)::float / NULLIF(COUNT(DISTINCT s.id), 0) * 100
+                    SELECT 
+                        CASE 
+                            WHEN COUNT(DISTINCT s.id) > 0 
+                            THEN (COUNT(DISTINCT m.session_id)::float / COUNT(DISTINCT s.id)::float) * 100
+                            ELSE 0
+                        END
                     FROM chat_sessions s
                     LEFT JOIN chat_messages m ON s.id = m.session_id AND m.role = 'assistant'
                     WHERE s.created_at >= NOW() - INTERVAL '30 days'
-                    GROUP BY s.id
                     """
                 ) or 0
                 
