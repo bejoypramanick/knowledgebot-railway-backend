@@ -44,6 +44,7 @@ except ImportError as e:
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.config import settings
 from shared.db import init_railway_db, init_neon_db, railway_db, neon_db
+from shared.token_tracker import track_openai_usage_from_response, track_gemini_usage_from_response
 
 # Lazy database initialization for serverless optimization
 async def get_railway_db():
@@ -670,6 +671,10 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 contents=contents
             )
 
+            # Track Gemini token usage from response
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                await track_gemini_usage_from_response(response.usage_metadata)
+
             # Parse the response to extract actual file names
             response_text = response.text
             
@@ -1000,6 +1005,8 @@ async def chat(request: ChatRequest):
                     "input_tokens": getattr(result.usage, 'input_tokens', 0),
                     "output_tokens": getattr(result.usage, 'output_tokens', 0),
                 }
+                # Track token usage in database
+                await track_openai_usage_from_response(result.usage)
             logger.debug("Usage info extracted: %s", usage_info)
         except Exception as e:
             logger.debug("Failed to extract usage info: %s", e)
@@ -1128,6 +1135,8 @@ async def chat(request: ChatRequest):
                 "input_tokens": getattr(result.usage, 'input_tokens', 0),
                 "output_tokens": getattr(result.usage, 'output_tokens', 0),
             }
+            # Track token usage in database
+            await track_openai_usage_from_response(result.usage)
         
         return ChatSessionResponse(
             session_id=session_id,
