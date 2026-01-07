@@ -914,7 +914,8 @@ async def scrape_endpoint(scrape_request: ScrapeRequest, request: Request):
 async def proxy_chatbot_config(request: Request):
     """Proxy chatbot configuration requests to configuration service"""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # Increased timeout to 60s to allow for email sending operations
+        async with httpx.AsyncClient(timeout=60.0) as client:
             method = request.method
             url = f"{CONFIGURATION_SERVICE_URL}/api/v1/configuration/chatbot"
             

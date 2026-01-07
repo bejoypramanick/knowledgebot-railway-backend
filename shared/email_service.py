@@ -10,6 +10,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
 import httpx
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,9 @@ class EmailService:
     """Service for sending emails via SMTP with OAuth2 authentication.
     OAuth credentials are stored in PostgreSQL database.
     """
+    
+    # Thread pool executor for running blocking SMTP operations
+    _executor = ThreadPoolExecutor(max_workers=3)
     
     def __init__(self, db_connection=None):
         self.smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
@@ -114,7 +119,8 @@ class EmailService:
             logger.error("❌ Failed to obtain OAuth2 access token. Email not sent.")
             return False
         logger.info("✅ OAuth2 access token obtained successfully")
-            
+        
+        # Prepare email message
         try:
             msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
@@ -129,27 +135,51 @@ class EmailService:
             part2 = MIMEText(body_html, 'html')
             msg.attach(part2)
             
+            # Run SMTP operations in thread pool to avoid blocking
+            logger.info(f"📤 Sending email to {to_email} via SMTP (non-blocking)...")
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                self._executor,
+                self._send_email_sync,
+                to_email,
+                access_token,
+                msg
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Failed to prepare or send email to {to_email}: {e}", exc_info=True)
+            return False
+    
+    def _send_email_sync(self, to_email: str, access_token: str, msg: MIMEMultipart) -> bool:
+        """Synchronous SMTP email sending (runs in thread pool)."""
+        try:
             # Send email with OAuth2
-            server = smtplib.SMTP(self.smtp_host, self.smtp_port)
+            logger.info(f"🔌 Connecting to SMTP server {self.smtp_host}:{self.smtp_port}")
+            server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10)
             try:
                 server.ehlo()
                 server.starttls()
                 server.ehlo()
                 
                 # Authenticate using OAuth2
+                logger.info("🔐 Authenticating with OAuth2...")
                 auth_string = self._create_oauth2_string(self.smtp_user, access_token)
                 server.docmd('AUTH', 'XOAUTH2 ' + auth_string)
                 
+                logger.info(f"📨 Sending email message to {to_email}...")
                 server.send_message(msg)
-                logger.info(f"Email sent successfully to {to_email}")
+                logger.info(f"✅ Email sent successfully to {to_email}")
                 return True
             finally:
                 server.quit()
         except smtplib.SMTPAuthenticationError as e:
-            logger.error(f"SMTP authentication failed for {to_email}: {e}")
+            logger.error(f"❌ SMTP authentication failed for {to_email}: {e}")
+            return False
+        except smtplib.SMTPException as e:
+            logger.error(f"❌ SMTP error sending email to {to_email}: {e}")
             return False
         except Exception as e:
-            logger.error(f"Failed to send email to {to_email}: {e}")
+            logger.error(f"❌ Failed to send email to {to_email}: {e}", exc_info=True)
             return False
     
     async def send_confirmation_email(self, email: str, confirmation_token: str) -> bool:
