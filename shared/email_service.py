@@ -1,8 +1,8 @@
 """
-Email Service for sending confirmation and notification emails using OAuth2.
+Email Service for sending confirmation and notification emails using Gmail API.
 OAuth credentials are stored in PostgreSQL database.
+Uses Gmail API instead of SMTP to avoid network restrictions on Railway.
 """
-import smtplib
 import os
 import logging
 import base64
@@ -10,25 +10,19 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
 import httpx
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
 
 class EmailService:
-    """Service for sending emails via SMTP with OAuth2 authentication.
+    """Service for sending emails via Gmail API with OAuth2 authentication.
     OAuth credentials are stored in PostgreSQL database.
+    Uses Gmail API (HTTP) instead of SMTP to work around Railway network restrictions.
     """
     
-    # Thread pool executor for running blocking SMTP operations
-    _executor = ThreadPoolExecutor(max_workers=3)
-    
     def __init__(self, db_connection=None):
-        self.smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
-        self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
-        self.smtp_user = os.getenv('SMTP_USER')
-        self.email_from = os.getenv('EMAIL_FROM', 'noreply@knowledgebot.com')
+        self.smtp_user = os.getenv('SMTP_USER')  # Gmail address for sending
+        self.email_from = os.getenv('EMAIL_FROM', self.smtp_user or 'noreply@knowledgebot.com')
         self.widget_base_url = os.getenv('WIDGET_BASE_URL', 'https://widget.example.com')
         self._access_token = None
         self.db_connection = db_connection  # PostgreSQL connection for OAuth credentials
@@ -99,14 +93,17 @@ class EmailService:
             logger.error(f"Failed to obtain OAuth2 access token: {e}")
             return None
     
-    def _create_oauth2_string(self, user: str, access_token: str) -> str:
-        """Create OAuth2 authentication string for SMTP XOAUTH2."""
-        # Format: base64("user=user@example.com\x01auth=Bearer access_token\x01\x01")
-        auth_string = f"user={user}\x01auth=Bearer {access_token}\x01\x01"
-        return base64.b64encode(auth_string.encode()).decode()
+    def _encode_message_for_gmail(self, msg: MIMEMultipart) -> str:
+        """Encode email message as base64url for Gmail API."""
+        # Convert message to string
+        message_string = msg.as_string()
+        # Encode as base64url (Gmail API requirement)
+        message_bytes = message_string.encode('utf-8')
+        message_b64 = base64.urlsafe_b64encode(message_bytes).decode('utf-8')
+        return message_b64
         
     async def _send_email(self, to_email: str, subject: str, body_html: str, body_text: str = None) -> bool:
-        """Send an email via SMTP with OAuth2 authentication."""
+        """Send an email via Gmail API with OAuth2 authentication."""
         logger.info(f"📧 _send_email called for {to_email}")
         if not self.smtp_user:
             logger.error("❌ SMTP user not configured. Email not sent. Set SMTP_USER environment variable.")
@@ -135,48 +132,36 @@ class EmailService:
             part2 = MIMEText(body_html, 'html')
             msg.attach(part2)
             
-            # Run SMTP operations in thread pool to avoid blocking
-            logger.info(f"📤 Sending email to {to_email} via SMTP (non-blocking)...")
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(
-                self._executor,
-                self._send_email_sync,
-                to_email,
-                access_token,
-                msg
-            )
-            return result
-        except Exception as e:
-            logger.error(f"Failed to prepare or send email to {to_email}: {e}", exc_info=True)
-            return False
-    
-    def _send_email_sync(self, to_email: str, access_token: str, msg: MIMEMultipart) -> bool:
-        """Synchronous SMTP email sending (runs in thread pool)."""
-        try:
-            # Send email with OAuth2
-            logger.info(f"🔌 Connecting to SMTP server {self.smtp_host}:{self.smtp_port}")
-            server = smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=10)
-            try:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
+            # Encode message for Gmail API
+            logger.info(f"📤 Sending email to {to_email} via Gmail API...")
+            message_b64 = self._encode_message_for_gmail(msg)
+            
+            # Send via Gmail API
+            gmail_api_url = f"https://gmail.googleapis.com/gmail/v1/users/{self.smtp_user}/messages/send"
+            headers = {
+                'Authorization': f'Bearer {access_token}',
+                'Content-Type': 'application/json'
+            }
+            payload = {
+                'raw': message_b64
+            }
+            
+            logger.info(f"🔌 Sending request to Gmail API...")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(gmail_api_url, json=payload, headers=headers)
                 
-                # Authenticate using OAuth2
-                logger.info("🔐 Authenticating with OAuth2...")
-                auth_string = self._create_oauth2_string(self.smtp_user, access_token)
-                server.docmd('AUTH', 'XOAUTH2 ' + auth_string)
-                
-                logger.info(f"📨 Sending email message to {to_email}...")
-                server.send_message(msg)
-                logger.info(f"✅ Email sent successfully to {to_email}")
-                return True
-            finally:
-                server.quit()
-        except smtplib.SMTPAuthenticationError as e:
-            logger.error(f"❌ SMTP authentication failed for {to_email}: {e}")
+                if response.status_code == 200:
+                    logger.info(f"✅ Email sent successfully to {to_email}")
+                    return True
+                else:
+                    logger.error(f"❌ Gmail API error: {response.status_code} - {response.text}")
+                    return False
+                    
+        except httpx.TimeoutException:
+            logger.error(f"❌ Gmail API request timed out for {to_email}")
             return False
-        except smtplib.SMTPException as e:
-            logger.error(f"❌ SMTP error sending email to {to_email}: {e}")
+        except httpx.RequestError as e:
+            logger.error(f"❌ Gmail API request failed for {to_email}: {e}")
             return False
         except Exception as e:
             logger.error(f"❌ Failed to send email to {to_email}: {e}", exc_info=True)
@@ -186,8 +171,7 @@ class EmailService:
         """Send confirmation email to human agent."""
         logger.info(f"📧 Preparing to send confirmation email to {email}")
         logger.info(f"Widget base URL: {self.widget_base_url}")
-        logger.info(f"SMTP user: {self.smtp_user}")
-        logger.info(f"SMTP host: {self.smtp_host}:{self.smtp_port}")
+        logger.info(f"Gmail sender: {self.smtp_user}")
         
         confirmation_link = f"{self.widget_base_url}/confirm?token={confirmation_token}"
         logger.info(f"Confirmation link: {confirmation_link}")
