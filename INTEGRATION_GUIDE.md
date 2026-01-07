@@ -1,6 +1,6 @@
-# Complete Integration Guide - KnowledgeBot Backend
+# Complete Integration Guide - KnowledgeBot
 
-**Step-by-step guide to set up and integrate all backend services.**
+**Complete step-by-step guide to integrate all features and deploy the application.**
 
 ---
 
@@ -8,16 +8,18 @@
 
 This guide covers the complete setup for:
 - **Firebase Authentication + Firestore** - User authentication and user data
-- **PostgreSQL (Railway)** - Business data (OAuth credentials, human agents, feedback, etc.)
+- **PostgreSQL (Railway)** - Business data (OAuth credentials, human agents, feedback, configuration)
 - **Gmail OAuth2** - Email sending for human agent notifications
 - **Configuration Service** - Chatbot and widget configuration management
 - **Chatbot Orchestration** - AI chat processing with system prompts and response policies
+- **Frontend Deployment** - React application deployment
 
 **Architecture**:
 - **Firebase Auth**: User login/authentication (email/password, Google OAuth)
-- **Firestore**: User data (`users` collection)
+- **Firestore**: User data (`users` collection) only
 - **PostgreSQL**: Business data (human agents, feedback, configuration) + Email OAuth credentials
 - **Railway**: Hosting for all backend services
+- **Frontend**: React app (deployed separately)
 
 ---
 
@@ -536,3 +538,13 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - **Firebase Auth**: User authentication (login/signup)
 - **Firestore**: Stores user data (`users` collection) only
 - **PostgreSQL**: Stores business data (human agents, feedback, configuration) + Email OAuth credentials
+
+---
+
+## 📝 Notes
+
+- All backend code is in: `knowledgebot-railway-backend`
+- All frontend code is in: `knowledgebot` (chatbot folder)
+- Frontend deployment is separate and not covered in this guide
+- This guide focuses on backend integration only
+
