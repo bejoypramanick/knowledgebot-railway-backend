@@ -127,19 +127,21 @@ OPENAI_API_KEY=your-openai-api-key
 
 ### 2.4 Firebase OAuth Setup (REQUIRED)
 
-**⚠️ IMPORTANT**: Email service uses Firebase exclusively for OAuth2 credential management.
+**⚠️ IMPORTANT**: 
+- Firebase is used **ONLY** for storing Gmail OAuth2 credentials
+- All application data (human agents, feedback, etc.) is stored in **PostgreSQL (Railway)**
+- See `ARCHITECTURE.md` for complete architecture overview
 
 **Setup Steps**:
 1. Set up Firebase project (see `FIREBASE_OAUTH_SETUP.md`)
 2. Get Firebase service account JSON
 3. Store Gmail OAuth credentials in Firestore (`email_config/gmail_oauth`)
+   - This is the **ONLY** data in Firestore
 4. Add `FIREBASE_CREDENTIALS_JSON` and `FIREBASE_PROJECT_ID` to Railway
 
-**Benefits**:
-- Credentials stored securely in Firestore
-- Update credentials without redeploying
-- Centralized management
-- No credentials in environment variables
+**What Goes Where**:
+- **Firebase Firestore**: OAuth credentials only (`email_config/gmail_oauth`)
+- **PostgreSQL**: All application data (human_agents, chat_feedback, etc.)
 
 **See `FIREBASE_OAUTH_SETUP.md` for complete step-by-step instructions.**
 

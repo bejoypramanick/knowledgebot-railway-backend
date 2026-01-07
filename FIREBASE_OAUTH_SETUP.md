@@ -2,7 +2,20 @@
 
 This guide shows you how to use Firebase to manage Gmail OAuth2 credentials securely.
 
-**⚠️ IMPORTANT**: Firebase is used **ONLY** for storing OAuth credentials. All application data (human agents, feedback, sessions) is stored in PostgreSQL (Railway).
+## ⚠️ IMPORTANT: Firebase Usage
+
+**Firebase is used ONLY for OAuth credentials storage.**
+
+- ✅ **Firebase Firestore**: Stores Gmail OAuth2 credentials (Client ID, Secret, Refresh Token)
+- ❌ **NOT used for**: Human agents, feedback, sessions, or any application data
+
+**All application data is stored in PostgreSQL (Railway):**
+- `human_agents` table
+- `human_agent_sessions` table
+- `chat_feedback` table
+- `token_usage_cache` table
+- `chatbot_configuration` table
+- `widget_configuration` table
 
 ## 📋 Why Use Firebase for OAuth?
 
