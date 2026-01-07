@@ -405,7 +405,9 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
             await conn.execute(query, *values)
             
             # If human agents are provided, trigger email sending
+            logger.info(f"Checking human agents: config.human_agents = {config.human_agents}")
             if config.human_agents is not None and len(config.human_agents) > 0:
+                logger.info(f"Processing {len(config.human_agents)} human agent(s) for email sending")
                 try:
                     # Import email service and helper functions
                     from shared.email_service import create_email_service
@@ -414,10 +416,12 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                         generate_widget_link
                     )
                     
+                    logger.info("Email service imports successful, creating email service instance")
                     # Create email service with database connection
                     email_service = create_email_service(conn)
                     agents_emailed = []
                     
+                    logger.info(f"Starting email sending loop for {len(config.human_agents)} agent(s)")
                     for email in config.human_agents:
                         if not email or not email.strip():
                             continue
@@ -431,6 +435,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                         )
                         
                         if existing:
+                            logger.info(f"Agent {email} exists with status: {existing['status']}")
                             if existing['status'] == 'confirmed':
                                 # Already confirmed, skip
                                 logger.info(f"Agent {email} already confirmed, skipping email")
@@ -438,12 +443,18 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                             elif existing['status'] == 'pending':
                                 # Resend confirmation email
                                 token = existing['confirmation_token']
-                                if await email_service.send_confirmation_email(email, token):
+                                logger.info(f"Resending confirmation email to pending agent {email}")
+                                email_result = await email_service.send_confirmation_email(email, token)
+                                logger.info(f"Email send result for {email}: {email_result}")
+                                if email_result:
                                     agents_emailed.append(email)
-                                    logger.info(f"Confirmation email resent to {email}")
+                                    logger.info(f"✅ Confirmation email resent to {email}")
+                                else:
+                                    logger.error(f"❌ Failed to resend confirmation email to {email}")
                                 continue
                         
                         # Create new agent
+                        logger.info(f"Creating new agent record for {email}")
                         token = generate_confirmation_token()
                         agent_id = await conn.fetchval(
                             """
@@ -453,19 +464,27 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                             """,
                             email, token
                         )
+                        logger.info(f"New agent created with ID: {agent_id}, sending confirmation email to {email}")
                         
                         # Send confirmation email
-                        if await email_service.send_confirmation_email(email, token):
+                        email_result = await email_service.send_confirmation_email(email, token)
+                        logger.info(f"Email send result for {email}: {email_result}")
+                        if email_result:
                             agents_emailed.append(email)
-                            logger.info(f"Confirmation email sent to {email}")
+                            logger.info(f"✅ Confirmation email sent to {email}")
                         else:
-                            logger.warning(f"Failed to send confirmation email to {email}")
+                            logger.error(f"❌ Failed to send confirmation email to {email}")
                     
                     if agents_emailed:
-                        logger.info(f"Human agent emails sent to: {', '.join(agents_emailed)}")
+                        logger.info(f"✅ Successfully sent emails to {len(agents_emailed)} agent(s): {', '.join(agents_emailed)}")
+                    else:
+                        logger.warning(f"⚠️ No emails were sent. Processed {len(config.human_agents)} agent(s) but none received emails.")
                 except Exception as e:
                     # Don't fail the entire save if email sending fails
-                    logger.error(f"Error sending human agent emails: {e}", exc_info=True)
+                    logger.error(f"❌ Error sending human agent emails: {e}", exc_info=True)
+                    logger.error(f"Error type: {type(e).__name__}")
+            else:
+                logger.info("No human agents provided or list is empty, skipping email sending")
             
             return {"success": True, "message": "Configuration saved successfully"}
     except Exception as e:

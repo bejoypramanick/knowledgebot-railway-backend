@@ -102,15 +102,18 @@ class EmailService:
         
     async def _send_email(self, to_email: str, subject: str, body_html: str, body_text: str = None) -> bool:
         """Send an email via SMTP with OAuth2 authentication."""
+        logger.info(f"📧 _send_email called for {to_email}")
         if not self.smtp_user:
-            logger.warning("SMTP user not configured. Email not sent.")
+            logger.error("❌ SMTP user not configured. Email not sent. Set SMTP_USER environment variable.")
             return False
         
         # Get access token
+        logger.info("🔑 Attempting to get OAuth2 access token...")
         access_token = await self._get_access_token()
         if not access_token:
-            logger.error("Failed to obtain OAuth2 access token. Email not sent.")
+            logger.error("❌ Failed to obtain OAuth2 access token. Email not sent.")
             return False
+        logger.info("✅ OAuth2 access token obtained successfully")
             
         try:
             msg = MIMEMultipart('alternative')
@@ -151,7 +154,13 @@ class EmailService:
     
     async def send_confirmation_email(self, email: str, confirmation_token: str) -> bool:
         """Send confirmation email to human agent."""
+        logger.info(f"📧 Preparing to send confirmation email to {email}")
+        logger.info(f"Widget base URL: {self.widget_base_url}")
+        logger.info(f"SMTP user: {self.smtp_user}")
+        logger.info(f"SMTP host: {self.smtp_host}:{self.smtp_port}")
+        
         confirmation_link = f"{self.widget_base_url}/confirm?token={confirmation_token}"
+        logger.info(f"Confirmation link: {confirmation_link}")
         
         subject = "Confirm Your Human Agent Account"
         
@@ -200,7 +209,12 @@ class EmailService:
         KnowledgeBot Team
         """
         
-        return await self._send_email(email, subject, body_html, body_text)
+        result = await self._send_email(email, subject, body_html, body_text)
+        if result:
+            logger.info(f"✅ Confirmation email successfully sent to {email}")
+        else:
+            logger.error(f"❌ Failed to send confirmation email to {email}")
+        return result
     
     async def send_confirmation_success_email(self, email: str, widget_link: str, password: str) -> bool:
         """Send confirmation success email with widget link and password."""

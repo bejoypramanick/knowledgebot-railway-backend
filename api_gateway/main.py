@@ -101,7 +101,8 @@ async def lifespan(app: FastAPI):
 
         # Shutdown
         logger.info("🛑 FastAPI application shutting down")
-        await close_databases()
+        # API Gateway doesn't manage database connections directly
+        # No cleanup needed here
     except Exception as e:
         logger.error(f"❌ Error in lifespan handler: {e}")
         logger.error(f"Error type: {type(e).__name__}")
