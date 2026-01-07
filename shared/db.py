@@ -108,6 +108,19 @@ neon_db: Optional[Database] = None
 async def init_railway_db(connection_url: str):
     """Initialize Railway PostgreSQL database connection."""
     global railway_db
+    
+    # If railway_db already exists and has a pool, reuse it
+    if railway_db is not None:
+        if hasattr(railway_db, '_pool') and railway_db._pool is not None:
+            logger.debug("Reusing existing Railway database connection pool")
+            return railway_db
+        # If it exists but has no pool, try to connect it
+        if railway_db.connection_url == connection_url:
+            logger.info("Railway database instance exists but pool is missing, attempting to connect...")
+            await railway_db.connect()
+            return railway_db
+    
+    # Create new database instance only if one doesn't exist
     railway_db = Database(connection_url=connection_url)
     await railway_db.connect()
     return railway_db

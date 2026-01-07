@@ -170,6 +170,7 @@ async def get_db_connection():
         
         try:
             # Initialize the database and get the instance
+            # init_railway_db will reuse existing instance if available
             initialized_db = await init_railway_db(database_url)
             logger.info("✅ Database initialized on-demand for configuration endpoint")
             
@@ -192,10 +193,15 @@ async def get_db_connection():
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"❌ Failed to initialize database: {e}", exc_info=True)
+            error_msg = str(e)
+            # If we get "too many clients already", don't log the full traceback as it's expected
+            if "too many clients already" in error_msg.lower():
+                logger.error(f"❌ Database connection limit exceeded. Please wait and retry.")
+            else:
+                logger.error(f"❌ Failed to initialize database: {e}", exc_info=True)
             raise HTTPException(
                 status_code=503, 
-                detail=f"Database not initialized. Error: {str(e)}"
+                detail=f"Database not initialized. Error: {error_msg}"
             )
 
 
