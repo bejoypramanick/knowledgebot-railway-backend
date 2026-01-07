@@ -299,3 +299,9 @@ class EmailService:
         
         return await self._send_email(email, subject, body_html, body_text)
 
+
+
+# Factory function to create email service with database connection
+def create_email_service(db_connection):
+    """Create email service instance with database connection."""
+    return EmailService(db_connection=db_connection)
