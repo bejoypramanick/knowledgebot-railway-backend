@@ -203,45 +203,67 @@ async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str
 
 @router.get("/chat-sessions", response_model=ChatSessionsResponse)
 async def get_assigned_chat_sessions(
-    agent_id: str = Query(..., description="Agent email or ID"),
+    agent_id: Optional[str] = Query(None, description="Agent email or ID (optional for admins/users)"),
     role: str = Query(..., description="User role"),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get all chat sessions assigned to a specific human agent.
-    Only returns sessions assigned to the requesting agent.
+    Get chat sessions:
+    - For human agents: only their assigned sessions
+    - For admins/users: all sessions
     """
     if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
         raise HTTPException(status_code=503, detail="Database not available")
     
     try:
-        # Verify user is a human agent
         user_email = current_user.get('email')
         if not user_email:
             raise HTTPException(status_code=403, detail="User email not found in token")
         
         # For human agents, only return their own sessions
-        if role == 'human_agent' and agent_id != user_email:
-            raise HTTPException(status_code=403, detail="You can only view your own assigned chats")
+        if role == 'human_agent':
+            if not agent_id or agent_id != user_email:
+                raise HTTPException(status_code=403, detail="You can only view your own assigned chats")
+        # For admins and regular users, show all sessions
+        elif role in ['admin', 'user']:
+            agent_id = None  # Don't filter by agent for admins/users
         
         async with railway_db.acquire() as conn:
-            # Get all sessions assigned to this agent
-            sessions_data = await conn.fetch(
-                """
-                SELECT DISTINCT
-                    cs.id,
-                    cs.session_id,
-                    cs.last_activity_at,
-                    cs.metadata,
-                    cs.is_active
-                FROM chat_sessions cs
-                LEFT JOIN human_agent_sessions has ON cs.session_id = has.customer_session_id
-                WHERE has.agent_email = $1 
-                AND has.status IN ('waiting', 'connected')
-                ORDER BY cs.last_activity_at DESC
-                """,
-                agent_id
-            )
+            # Build query based on role
+            if role == 'human_agent' and agent_id:
+                # Human agents: only their assigned sessions
+                sessions_data = await conn.fetch(
+                    """
+                    SELECT DISTINCT
+                        cs.id,
+                        cs.session_id,
+                        cs.last_activity_at,
+                        cs.metadata,
+                        cs.is_active
+                    FROM chat_sessions cs
+                    LEFT JOIN human_agent_sessions has ON cs.session_id = has.customer_session_id
+                    WHERE has.agent_email = $1 
+                    AND has.status IN ('waiting', 'connected')
+                    ORDER BY cs.last_activity_at DESC
+                    """,
+                    agent_id
+                )
+            else:
+                # Admins and users: all sessions
+                sessions_data = await conn.fetch(
+                    """
+                    SELECT DISTINCT
+                        cs.id,
+                        cs.session_id,
+                        cs.last_activity_at,
+                        cs.metadata,
+                        cs.is_active,
+                        has.agent_email
+                    FROM chat_sessions cs
+                    LEFT JOIN human_agent_sessions has ON cs.session_id = has.customer_session_id
+                    ORDER BY cs.last_activity_at DESC
+                    """
+                )
             
             sessions = []
             for session_row in sessions_data:
@@ -281,13 +303,20 @@ async def get_assigned_chat_sessions(
                 if metadata.get('status'):
                     status = metadata['status']
                 
+                # Get assigned agent from session_row if available (for admin/user queries)
+                assigned_agent = metadata.get('assigned_agent')
+                if not assigned_agent and 'agent_email' in session_row and session_row['agent_email']:
+                    assigned_agent = session_row['agent_email']
+                if not assigned_agent and agent_id:
+                    assigned_agent = agent_id
+                
                 sessions.append(ChatSessionResponse(
                     id=session_id,
                     customer_name=metadata.get('customer_name'),
                     customer_email=metadata.get('customer_email'),
                     status=status,
                     last_message_at=session_row['last_activity_at'].isoformat() if session_row['last_activity_at'] else datetime.now().isoformat(),
-                    assigned_agent=metadata.get('assigned_agent') or agent_id,
+                    assigned_agent=assigned_agent,
                     messages=messages
                 ))
             
@@ -307,7 +336,7 @@ async def get_session_messages(
 ):
     """
     Get all messages for a specific chat session.
-    Only accessible by the assigned agent or admins.
+    Accessible by all authenticated users.
     """
     if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
         raise HTTPException(status_code=503, detail="Database not available")
@@ -318,25 +347,7 @@ async def get_session_messages(
             raise HTTPException(status_code=403, detail="User email not found in token")
         
         async with railway_db.acquire() as conn:
-            # Check if user has access to this session
-            # Get session assignment
-            assignment = await conn.fetchrow(
-                """
-                SELECT agent_email FROM human_agent_sessions
-                WHERE customer_session_id = $1
-                """,
-                session_id
-            )
-            
-            # Check if user is admin
-            is_admin = await conn.fetchval(
-                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
-                user_email
-            )
-            
-            # Verify access
-            if not is_admin and (not assignment or assignment['agent_email'] != user_email):
-                raise HTTPException(status_code=403, detail="You don't have access to this chat session")
+            # All authenticated users can view messages
             
             # Get session database ID
             session_row = await conn.fetchrow(
@@ -391,8 +402,8 @@ async def send_agent_message(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Send a message from a human agent to a customer.
-    Only the assigned agent can send messages.
+    Send a message from a user/agent to a customer.
+    All authenticated users can send messages.
     """
     if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
         raise HTTPException(status_code=503, detail="Database not available")
@@ -407,17 +418,7 @@ async def send_agent_message(
             raise HTTPException(status_code=403, detail="Agent ID must match authenticated user")
         
         async with railway_db.acquire() as conn:
-            # Verify agent has access to this session
-            assignment = await conn.fetchrow(
-                """
-                SELECT agent_email FROM human_agent_sessions
-                WHERE customer_session_id = $1
-                """,
-                session_id
-            )
-            
-            if not assignment or assignment['agent_email'] != user_email:
-                raise HTTPException(status_code=403, detail="You don't have access to this chat session")
+            # All authenticated users can send messages to any session
             
             # Get session database ID
             session_row = await conn.fetchrow(
