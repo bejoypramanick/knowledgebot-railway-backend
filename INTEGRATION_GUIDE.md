@@ -1,32 +1,23 @@
-# Integration Steps - Chatbot Configuration Features
+# Complete Integration Guide - KnowledgeBot Backend
 
-**Complete step-by-step guide to integrate all new features.**
+**Step-by-step guide to set up and integrate all backend services.**
 
 ---
 
 ## 📋 Overview
 
-This integration adds:
-- Human agent email confirmation flow
-- Feedback recording system
-- Token usage API
-- System prompt appending
-- Response policy implementation
-- Gmail OAuth2 for email sending
-- **Firebase Authentication** (NO Firestore) for user login
-- PostgreSQL for ALL data (including OAuth credentials and user data)
+This guide covers the complete setup for:
+- **Firebase Authentication + Firestore** - User authentication and user data
+- **PostgreSQL (Railway)** - Business data (OAuth credentials, human agents, feedback, etc.)
+- **Gmail OAuth2** - Email sending for human agent notifications
+- **Configuration Service** - Chatbot and widget configuration management
+- **Chatbot Orchestration** - AI chat processing with system prompts and response policies
 
 **Architecture**:
-- **Firebase Authentication**: User login/authentication (email/password, Google OAuth, etc.)
-  - Tokens verified on backend using Firebase Admin SDK
-- **Firestore**: Stores user data and application data
-  - `users` collection - User information linked to Firebase Auth UIDs
-  - All user profiles, roles, and preferences
-- **PostgreSQL (Railway)**: Stores business data
-  - `email_oauth_credentials` - Gmail OAuth2 credentials
-  - `human_agents` - Human agent information
-  - `chat_feedback` - User feedback
-  - Other business/transactional data
+- **Firebase Auth**: User login/authentication (email/password, Google OAuth)
+- **Firestore**: User data (`users` collection)
+- **PostgreSQL**: Business data (OAuth credentials, human agents, feedback, configuration)
+- **Railway**: Hosting for all backend services
 
 ---
 
@@ -55,16 +46,17 @@ railway connect  # Connect to PostgreSQL service
 Execute the SQL file: `sql/chatbot_configuration_features.sql`
 
 This creates:
-- `human_agents` table
-- `human_agent_sessions` table
-- `chat_feedback` table
-- `token_usage_cache` table
-- Updates `chatbot_configuration` table with new columns
+- `human_agents` table - Human agent management
+- `human_agent_sessions` table - Agent-customer chat sessions
+- `chat_feedback` table - User feedback on chat responses
+- `token_usage_cache` table - LLM token usage tracking
+- `email_oauth_credentials` table - Gmail OAuth2 credentials
+- Updates `chatbot_configuration` table with new columns (response_policy, system_prompt, selected_persona)
 
 **Verification**:
 ```sql
 SELECT table_name FROM information_schema.tables 
-WHERE table_name IN ('human_agents', 'chat_feedback', 'token_usage_cache');
+WHERE table_name IN ('human_agents', 'chat_feedback', 'token_usage_cache', 'email_oauth_credentials');
 ```
 
 ---
@@ -167,15 +159,15 @@ WHERE id = 1;
 
 ---
 
-## 🔧 STEP 3: Create Configuration Service in Railway
+## 🔧 STEP 4: Create Configuration Service in Railway
 
-### 3.1 Create Service
+### 4.1 Create Service
 
 1. Railway Dashboard → Your Project
 2. Click **+ New** → **GitHub Repo** (select `knowledgebot-railway-backend`)
 3. Service name: `configuration-service` (exact, with hyphen)
 
-### 3.2 Configure Service Settings
+### 4.2 Configure Service Settings
 
 1. **Settings** → **Build**:
    - **Root Directory**: `.` (dot - repository root) ⚠️ **CRITICAL**
@@ -187,7 +179,7 @@ WHERE id = 1;
    - **CPU**: `0.5 vCPU` (default)
    - **Memory**: `512 MB` (default)
 
-### 3.3 Set Environment Variables
+### 4.3 Set Environment Variables
 
 Go to **Variables** tab → **RAW Editor** → Paste:
 
@@ -199,8 +191,10 @@ DATABASE_URL=${{PostgreSQL.DATABASE_URL}}
 CONFIGURATION_SERVICE_PORT=8004
 PORT=8004
 
-# Note: OAuth credentials are stored in PostgreSQL, not environment variables
-# Insert credentials into email_oauth_credentials table after deployment
+# Firebase Authentication and Firestore (REQUIRED)
+FIREBASE_CREDENTIALS_JSON={"type":"service_account","project_id":"your-project-id","private_key_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n","client_email":"firebase-adminsdk-xxxxx@your-project.iam.gserviceaccount.com","client_id":"...","auth_uri":"https://accounts.google.com/o/oauth2/auth","token_uri":"https://oauth2.googleapis.com/token","auth_provider_x509_cert_url":"https://www.googleapis.com/oauth2/v1/certs","client_x509_cert_url":"https://www.googleapis.com/robot/v1/metadata/x509/..."}
+# OR use file path instead:
+# FIREBASE_CREDENTIALS_PATH=/path/to/service-account.json
 
 # SMTP Configuration (REQUIRED)
 SMTP_HOST=smtp.gmail.com
@@ -215,6 +209,7 @@ OPENAI_API_KEY=your-openai-api-key
 ```
 
 **⚠️ Important**:
+- Replace `FIREBASE_CREDENTIALS_JSON` with entire JSON from service account file (as single-line string, escape newlines with `\n`)
 - Replace `your-email@gmail.com` with Gmail address used for OAuth
 - Replace API keys with actual keys
 - Replace `https://widget.yourdomain.com` with your widget URL
@@ -222,9 +217,9 @@ OPENAI_API_KEY=your-openai-api-key
 
 ---
 
-## 🔧 STEP 4: Update API Gateway
+## 🔧 STEP 5: Update API Gateway
 
-### 4.1 Add Environment Variable
+### 5.1 Add Environment Variable
 
 1. Go to **API Gateway** service → **Variables** tab
 2. Add:
@@ -232,7 +227,7 @@ OPENAI_API_KEY=your-openai-api-key
 CONFIGURATION_SERVICE_URL=http://configuration-service:8004
 ```
 
-### 4.2 Verify All Service URLs
+### 5.2 Verify All Service URLs
 
 Ensure these exist in API Gateway variables:
 ```env
@@ -246,9 +241,9 @@ API_GATEWAY_HOST=0.0.0.0
 
 ---
 
-## 🔧 STEP 5: Verify Chatbot Orchestration Service
+## 🔧 STEP 6: Verify Chatbot Orchestration Service
 
-### 5.1 Check Environment Variables
+### 6.1 Check Environment Variables
 
 Go to **Chatbot Orchestration** service → **Variables** → Verify:
 ```env
@@ -261,26 +256,33 @@ DATABASE_URL=${{PostgreSQL.DATABASE_URL}}
 
 ---
 
-## 🔧 STEP 6: Deploy and Test
+## 🔧 STEP 7: Deploy and Test
 
-### 6.1 Deploy Services
+### 7.1 Deploy Services
 
 1. **Configuration Service**: Should auto-deploy after creation
 2. **API Gateway**: May need manual redeploy after adding variable
 3. **Chatbot Orchestration**: Should auto-deploy (code changes in repo)
 
-### 6.2 Check Service Health
+### 7.2 Check Service Health
 
 1. Each service → **Deployments** tab → Verify **Active** and **Healthy**
 2. Check **Logs** tab for errors
 
-### 6.3 Test Endpoints
+### 7.3 Test Endpoints
 
 Get your API Gateway URL from Railway (e.g., `api-gateway-production-c4c3.up.railway.app`)
 
 **Test Configuration**:
 ```bash
 curl https://your-api-gateway.up.railway.app/api/v1/configuration/chatbot
+```
+
+**Test Authentication**:
+```bash
+curl -X POST https://your-api-gateway.up.railway.app/api/v1/auth/verify-token \
+  -H "Content-Type: application/json" \
+  -d '{"id_token": "your-firebase-token"}'
 ```
 
 **Test Feedback**:
@@ -295,7 +297,7 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/feedback \
 curl https://your-api-gateway.up.railway.app/api/v1/admin/token-usage
 ```
 
-**Test Human Agent (requires Firebase OAuth setup)**:
+**Test Human Agent**:
 ```bash
 curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
   -H "Content-Type: application/json" \
@@ -304,12 +306,13 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 
 ---
 
-## ✅ Checklist
+## ✅ Complete Checklist
 
 ### Database
 - [ ] Database migrations executed successfully
-- [ ] Tables created: `human_agents`, `chat_feedback`, `token_usage_cache`
+- [ ] Tables created: `human_agents`, `chat_feedback`, `token_usage_cache`, `email_oauth_credentials`
 - [ ] `chatbot_configuration` table updated with new columns
+- [ ] OAuth credentials inserted into `email_oauth_credentials` table
 
 ### Firebase Authentication and Firestore
 - [ ] Firebase project created
@@ -319,9 +322,10 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - [ ] Service account JSON downloaded
 - [ ] `FIREBASE_CREDENTIALS_JSON` or `FIREBASE_CREDENTIALS_PATH` set in Railway
 
-### OAuth Credentials (for Email)
+### Gmail OAuth2
 - [ ] Gmail OAuth2 credentials obtained (Client ID, Secret, Refresh Token)
 - [ ] Credentials stored in PostgreSQL `email_oauth_credentials` table
+- [ ] Gmail API enabled in Google Cloud Console
 
 ### Railway Services
 - [ ] Configuration Service created
@@ -335,7 +339,7 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - [ ] `DATABASE_URL` or `RAILWAY_POSTGRES_URL`
 - [ ] `CONFIGURATION_SERVICE_PORT=8004`
 - [ ] `PORT=8004`
-- [ ] `FIREBASE_CREDENTIALS_JSON` (entire JSON as single-line string) OR `FIREBASE_CREDENTIALS_PATH` (path to JSON file)
+- [ ] `FIREBASE_CREDENTIALS_JSON` (entire JSON as single-line string) OR `FIREBASE_CREDENTIALS_PATH`
 - [ ] `SMTP_HOST=smtp.gmail.com`
 - [ ] `SMTP_PORT=587`
 - [ ] `SMTP_USER=your-email@gmail.com`
@@ -344,12 +348,9 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - [ ] `GEMINI_API_KEY`
 - [ ] `OPENAI_API_KEY`
 
-### OAuth Credentials in PostgreSQL
-- [ ] `email_oauth_credentials` table created (via migration)
-- [ ] OAuth credentials inserted: `client_id`, `client_secret`, `refresh_token`
-
 ### Testing
 - [ ] Configuration endpoint returns 200
+- [ ] Authentication endpoint works
 - [ ] Feedback endpoint works
 - [ ] Token usage endpoint works
 - [ ] Human agent email sent successfully
@@ -358,6 +359,12 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 ---
 
 ## 🐛 Troubleshooting
+
+### Firebase Not Initializing
+- Check `FIREBASE_CREDENTIALS_JSON` is valid JSON (no extra quotes)
+- Verify JSON is complete (all fields present)
+- Check JSON is properly escaped (newlines as `\n`)
+- Verify service account has Firestore permissions
 
 ### OAuth Credentials Not Found
 - Verify PostgreSQL table: `email_oauth_credentials`
@@ -385,13 +392,19 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - Verify service is running (check deployments)
 - Check API Gateway routing configuration
 
+### Authentication Errors
+- Verify Firebase credentials are set correctly
+- Check Firestore security rules are configured
+- Verify user exists in Firebase Auth
+- Check Railway logs for Firebase initialization errors
+
 ---
 
 ## 📚 Quick Reference
 
 **Service Names** (exact, case-sensitive):
 - `api-gateway`
-- `configuration-service` ← **NEW**
+- `configuration-service`
 - `chatbot-orchestration`
 - `knowledgebase-ingestion`
 - `website-scraping`
@@ -400,20 +413,22 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - API Gateway: `8000` (public)
 - Configuration Service: `8004` (internal)
 - Chatbot Orchestration: `8003` (internal)
+- Knowledgebase Ingestion: `8001` (internal)
+- Website Scraping: `8002` (internal)
 
 **Root Directory**: `.` (dot) for ALL services
 
 **Database Variable**: `${{PostgreSQL.DATABASE_URL}}` in Railway
 
-**OAuth Credentials**: Stored in PostgreSQL `email_oauth_credentials` table
+**Firebase**: Authentication + Firestore for user data
 
-**PostgreSQL**: ALL data including OAuth credentials (human_agents, chat_feedback, email_oauth_credentials, etc.)
+**PostgreSQL**: Business data (OAuth credentials, human agents, feedback, configuration)
 
 ---
 
 ## 🎯 Summary
 
-1. **Run SQL migrations** on PostgreSQL (creates `email_oauth_credentials` table)
+1. **Run SQL migrations** on PostgreSQL
 2. **Set up Firebase Authentication and Firestore**
    - Create Firebase project
    - Enable Firestore Database
@@ -433,4 +448,3 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - **Firebase Auth**: User authentication (login/signup)
 - **Firestore**: Stores user data (`users` collection)
 - **PostgreSQL**: Stores business data (OAuth credentials, human agents, feedback, etc.)
-
