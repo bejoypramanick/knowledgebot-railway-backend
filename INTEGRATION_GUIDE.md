@@ -84,7 +84,44 @@ WHERE table_name IN ('human_agents', 'chat_feedback', 'token_usage_cache', 'emai
 3. Download JSON file (e.g., `knowledgebot-firebase-adminsdk.json`)
 4. **Keep this file secure** - it has admin access
 
-### 2.3 Configure Firestore Security Rules
+### 2.3 Get Firebase Web App Configuration
+
+1. Go to **Project Settings** (gear icon) → **General** tab
+2. Scroll down to **Your apps** section
+3. Click **Web** icon (`</>`) to add a web app
+4. Register app with a nickname (e.g., "KnowledgeBot Web")
+5. Copy the Firebase configuration object - you'll need these values:
+   - `apiKey`
+   - `authDomain`
+   - `projectId`
+   - `storageBucket`
+   - `messagingSenderId`
+   - `appId`
+
+**Save these values** - you'll need them for the frontend `.env` file.
+
+### 2.4 Configure Frontend Firebase Environment Variables
+
+1. In your frontend project, create a `.env` file (or update existing one)
+2. Add the following variables (use values from step 2.3):
+
+```env
+VITE_FIREBASE_API_KEY=your-api-key-here
+VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your-project-id
+VITE_FIREBASE_STORAGE_BUCKET=your-project.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=your-messaging-sender-id
+VITE_FIREBASE_APP_ID=your-app-id
+```
+
+3. Also ensure your API Gateway URL is set:
+```env
+VITE_API_GATEWAY_URL=https://api-gateway-production-c4c3.up.railway.app
+```
+
+4. Restart your development server after adding environment variables
+
+### 2.5 Configure Firestore Security Rules
 
 Go to **Firestore Database** → **Rules** and add:
 
@@ -410,6 +447,8 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - [ ] Authentication enabled (Email/Password, Google optional)
 - [ ] Service account JSON downloaded
 - [ ] `FIREBASE_CREDENTIALS_JSON` or `FIREBASE_CREDENTIALS_PATH` set in Railway
+- [ ] Firebase Web App created and configuration copied
+- [ ] Frontend `.env` file created with Firebase configuration variables
 
 ### Gmail OAuth2
 - [ ] Gmail OAuth2 credentials obtained (Client ID, Secret, Refresh Token)
