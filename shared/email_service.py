@@ -1,32 +1,75 @@
 """
-Email Service for sending confirmation and notification emails.
+Email Service for sending confirmation and notification emails using OAuth2.
 """
 import smtplib
 import os
 import logging
+import base64
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
-from jinja2 import Template
+import httpx
 
 logger = logging.getLogger(__name__)
 
 
 class EmailService:
-    """Service for sending emails via SMTP."""
+    """Service for sending emails via SMTP with OAuth2 authentication."""
     
     def __init__(self):
         self.smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
         self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
         self.smtp_user = os.getenv('SMTP_USER')
-        self.smtp_password = os.getenv('SMTP_PASSWORD')
+        self.oauth2_client_id = os.getenv('GMAIL_OAUTH2_CLIENT_ID')
+        self.oauth2_client_secret = os.getenv('GMAIL_OAUTH2_CLIENT_SECRET')
+        self.oauth2_refresh_token = os.getenv('GMAIL_OAUTH2_REFRESH_TOKEN')
         self.email_from = os.getenv('EMAIL_FROM', 'noreply@knowledgebot.com')
         self.widget_base_url = os.getenv('WIDGET_BASE_URL', 'https://widget.example.com')
+        self._access_token = None
+        
+    def _get_access_token(self) -> Optional[str]:
+        """Get OAuth2 access token using refresh token."""
+        if not all([self.oauth2_client_id, self.oauth2_client_secret, self.oauth2_refresh_token]):
+            logger.warning("OAuth2 credentials not configured. Email not sent.")
+            return None
+        
+        try:
+            # Request new access token using refresh token
+            token_url = "https://oauth2.googleapis.com/token"
+            data = {
+                "client_id": self.oauth2_client_id,
+                "client_secret": self.oauth2_client_secret,
+                "refresh_token": self.oauth2_refresh_token,
+                "grant_type": "refresh_token"
+            }
+            
+            response = httpx.post(token_url, data=data, timeout=10)
+            response.raise_for_status()
+            token_data = response.json()
+            
+            self._access_token = token_data.get("access_token")
+            logger.debug("OAuth2 access token obtained successfully")
+            return self._access_token
+        except Exception as e:
+            logger.error(f"Failed to obtain OAuth2 access token: {e}")
+            return None
+    
+    def _create_oauth2_string(self, user: str, access_token: str) -> str:
+        """Create OAuth2 authentication string for SMTP XOAUTH2."""
+        # Format: base64("user=user@example.com\x01auth=Bearer access_token\x01\x01")
+        auth_string = f"user={user}\x01auth=Bearer {access_token}\x01\x01"
+        return base64.b64encode(auth_string.encode()).decode()
         
     def _send_email(self, to_email: str, subject: str, body_html: str, body_text: str = None) -> bool:
-        """Send an email via SMTP."""
-        if not self.smtp_user or not self.smtp_password:
-            logger.warning("SMTP credentials not configured. Email not sent.")
+        """Send an email via SMTP with OAuth2 authentication."""
+        if not self.smtp_user:
+            logger.warning("SMTP user not configured. Email not sent.")
+            return False
+        
+        # Get access token
+        access_token = self._get_access_token()
+        if not access_token:
+            logger.error("Failed to obtain OAuth2 access token. Email not sent.")
             return False
             
         try:
@@ -43,14 +86,25 @@ class EmailService:
             part2 = MIMEText(body_html, 'html')
             msg.attach(part2)
             
-            # Send email
-            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
+            # Send email with OAuth2
+            server = smtplib.SMTP(self.smtp_host, self.smtp_port)
+            try:
+                server.ehlo()
                 server.starttls()
-                server.login(self.smtp_user, self.smtp_password)
+                server.ehlo()
+                
+                # Authenticate using OAuth2
+                auth_string = self._create_oauth2_string(self.smtp_user, access_token)
+                server.docmd('AUTH', 'XOAUTH2 ' + auth_string)
+                
                 server.send_message(msg)
-            
-            logger.info(f"Email sent successfully to {to_email}")
-            return True
+                logger.info(f"Email sent successfully to {to_email}")
+                return True
+            finally:
+                server.quit()
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(f"SMTP authentication failed for {to_email}: {e}")
+            return False
         except Exception as e:
             logger.error(f"Failed to send email to {to_email}: {e}")
             return False

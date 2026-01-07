@@ -49,20 +49,31 @@ The email service uses Python's built-in `smtplib` and `email` modules, so no ad
 
 Add these environment variables to your Railway project or `.env` file:
 
-### Email Configuration
+### Email Configuration (OAuth2 - More Secure)
 ```env
+# Gmail OAuth2 Credentials (REQUIRED)
+GMAIL_OAUTH2_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GMAIL_OAUTH2_CLIENT_SECRET=GOCSPX-your-client-secret
+GMAIL_OAUTH2_REFRESH_TOKEN=your-refresh-token-here
+
+# SMTP Configuration
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
-SMTP_PASSWORD=your-app-password  # Use app-specific password for Gmail
 EMAIL_FROM=noreply@knowledgebot.com
 WIDGET_BASE_URL=https://widget.yourdomain.com
 ```
 
-**Note for Gmail**: You'll need to:
-1. Enable 2-factor authentication
-2. Generate an "App Password" (not your regular password)
-3. Use the app password in `SMTP_PASSWORD`
+**⚠️ IMPORTANT**: We use OAuth2 (Client ID, Client Secret, Refresh Token) instead of App Password for better security.
+
+**Setup Instructions**: See `GMAIL_OAUTH2_SETUP.md` for complete step-by-step guide.
+
+**Quick Setup**:
+1. Create Google Cloud Project
+2. Enable Gmail API
+3. Create OAuth 2.0 Credentials
+4. Generate Refresh Token (use OAuth2 Playground: https://developers.google.com/oauthplayground/)
+5. Add all three values to environment variables
 
 ### LLM API Keys (if not already set)
 ```env
@@ -187,10 +198,13 @@ The `token_usage_cache` table is optional. You can populate it by:
 
 ### Email Not Sending
 
-1. Check SMTP credentials are correct
-2. Verify SMTP port (587 for TLS, 465 for SSL)
-3. For Gmail, ensure you're using an App Password, not your regular password
-4. Check firewall/network restrictions
+1. Check OAuth2 credentials are correct (Client ID, Secret, Refresh Token)
+2. Verify Refresh Token is valid and not expired
+3. Check SMTP_USER matches the Gmail account used for OAuth2
+4. Verify Gmail API is enabled in Google Cloud Console
+5. Check OAuth consent screen is configured
+6. Check firewall/network restrictions
+7. See `GMAIL_OAUTH2_SETUP.md` for detailed troubleshooting
 
 ### Database Connection Issues
 

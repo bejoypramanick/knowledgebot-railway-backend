@@ -102,10 +102,13 @@ CONFIGURATION_SERVICE_PORT=8004
 PORT=8004
 
 # Email Configuration (REQUIRED for human agent emails)
+# Gmail OAuth2 Credentials (REQUIRED - more secure than App Password)
+GMAIL_OAUTH2_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GMAIL_OAUTH2_CLIENT_SECRET=GOCSPX-your-client-secret
+GMAIL_OAUTH2_REFRESH_TOKEN=your-refresh-token-here
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
-SMTP_PASSWORD=your-gmail-app-password
 EMAIL_FROM=noreply@knowledgebot.com
 WIDGET_BASE_URL=https://widget.yourdomain.com
 
@@ -121,17 +124,26 @@ OPENAI_API_KEY=your-openai-api-key
 - Replace `https://widget.yourdomain.com` with your actual widget URL
 - `${{PostgreSQL.DATABASE_URL}}` is Railway's variable reference syntax
 
-### 2.4 Gmail App Password Setup
+### 2.4 Gmail OAuth2 Setup
 
-1. Go to **Google Account** → **Security**
-2. Enable **2-Step Verification** (if not already enabled)
-3. Go to **App Passwords**:
-   - Click **Select app** → **Mail**
-   - Click **Select device** → **Other (Custom name)**
-   - Enter: "KnowledgeBot Railway"
-   - Click **Generate**
-4. Copy the 16-character password (no spaces)
-5. Use this in `SMTP_PASSWORD` (NOT your regular Gmail password)
+**⚠️ IMPORTANT**: We use OAuth2 (Client ID, Client Secret, Refresh Token) instead of App Password for better security.
+
+**Quick Setup**:
+1. Follow the detailed guide in `GMAIL_OAUTH2_SETUP.md`
+2. Or use OAuth2 Playground: https://developers.google.com/oauthplayground/
+3. You need:
+   - **Client ID**: From Google Cloud Console
+   - **Client Secret**: From Google Cloud Console  
+   - **Refresh Token**: Generated via OAuth2 flow
+
+**Steps Summary**:
+1. Create Google Cloud Project
+2. Enable Gmail API
+3. Create OAuth 2.0 Credentials (Web application)
+4. Generate Refresh Token (use OAuth2 Playground or Python script)
+5. Add all three values to Railway environment variables
+
+See `GMAIL_OAUTH2_SETUP.md` for complete step-by-step instructions.
 
 ---
 
@@ -239,10 +251,12 @@ curl https://your-api-gateway-url.up.railway.app/api/v1/admin/token-usage
 - [ ] `DATABASE_URL` or `RAILWAY_POSTGRES_URL` or `POSTGRES_URL`
 - [ ] `CONFIGURATION_SERVICE_PORT=8004`
 - [ ] `PORT=8004`
+- [ ] `GMAIL_OAUTH2_CLIENT_ID=your-client-id.apps.googleusercontent.com`
+- [ ] `GMAIL_OAUTH2_CLIENT_SECRET=GOCSPX-your-client-secret`
+- [ ] `GMAIL_OAUTH2_REFRESH_TOKEN=your-refresh-token`
 - [ ] `SMTP_HOST=smtp.gmail.com`
 - [ ] `SMTP_PORT=587`
 - [ ] `SMTP_USER=your-email@gmail.com`
-- [ ] `SMTP_PASSWORD=your-app-password`
 - [ ] `EMAIL_FROM=noreply@knowledgebot.com`
 - [ ] `WIDGET_BASE_URL=https://widget.yourdomain.com`
 - [ ] `GEMINI_API_KEY=your-key`
@@ -287,10 +301,12 @@ curl https://your-api-gateway-url.up.railway.app/api/v1/admin/token-usage
 
 ### Email Not Sending
 
-1. **Check SMTP variables**: All 5 email variables must be set
-2. **Verify Gmail App Password**: Must be 16 characters, no spaces
-3. **Check logs**: Look for SMTP errors in Configuration Service logs
-4. **Test SMTP connection**: Check if port 587 is accessible from Railway
+1. **Check OAuth2 variables**: All 3 OAuth2 variables must be set (Client ID, Secret, Refresh Token)
+2. **Verify Refresh Token**: Must be valid and not expired
+3. **Check SMTP_USER**: Must match the Gmail account used for OAuth2
+4. **Check logs**: Look for OAuth2 or SMTP errors in Configuration Service logs
+5. **Verify Gmail API**: Ensure Gmail API is enabled in Google Cloud Console
+6. **Check OAuth consent**: Ensure OAuth consent screen is configured and you're a test user
 
 ### Database Errors
 
