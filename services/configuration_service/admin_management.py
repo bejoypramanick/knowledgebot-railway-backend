@@ -120,11 +120,10 @@ async def add_admins(request: AdminRequest, current_user: dict = Depends(get_cur
 @router.post("/admins/confirm", response_model=dict)
 async def confirm_admin(request: ConfirmAdminRequest):
     """Confirm admin account via token."""
-    if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
-        raise HTTPException(status_code=503, detail="Database not initialized")
-    
     try:
-        async with railway_db.acquire() as conn:
+        # Use the same database connection pattern as other endpoints
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             # Find admin by token
             admin = await conn.fetchrow(
                 """

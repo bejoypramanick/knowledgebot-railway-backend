@@ -340,7 +340,9 @@ class EmailService:
     
     async def send_admin_confirmation_email(self, email: str, token: str, created_by: str, password: Optional[str] = None) -> bool:
         """Send admin confirmation email with optional password."""
-        confirmation_link = f"{self.widget_base_url}/admin/confirm?token={token}"
+        import os
+        frontend_url = os.getenv('FRONTEND_URL', os.getenv('WIDGET_BASE_URL', self.widget_base_url))
+        confirmation_link = f"{frontend_url}/admin/confirm?token={token}"
         subject = "Confirm Your Admin Account"
         
         password_section = ""

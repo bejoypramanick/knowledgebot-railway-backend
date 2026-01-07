@@ -144,11 +144,10 @@ async def add_human_agents(request: HumanAgentsRequest):
 @router.post("/human-agents/confirm", response_model=dict)
 async def confirm_human_agent(request: ConfirmAgentRequest):
     """Confirm human agent account and send widget link with password."""
-    if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
-        raise HTTPException(status_code=503, detail="Database not initialized")
-    
     try:
-        async with railway_db.acquire() as conn:
+        # Use the same database connection pattern as other endpoints
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             # Find agent by token
             agent = await conn.fetchrow(
                 """
