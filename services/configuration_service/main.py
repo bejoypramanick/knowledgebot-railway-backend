@@ -220,6 +220,8 @@ async def health_check():
 @app.get("/api/v1/configuration/chatbot")
 async def get_chatbot_config():
     """Get chatbot configuration"""
+    from fastapi.responses import JSONResponse
+    
     try:
         async with get_db_connection() as conn:
             row = await conn.fetchrow(
@@ -248,8 +250,8 @@ async def get_chatbot_config():
             )
             
             if not row:
-                # Return default configuration
-                return {
+                # Return default configuration with cache headers
+                data = {
                     "admin_user": "GLOBISTAAN",
                     "admin_password": "**********",
                     "human_agents": [],
@@ -284,8 +286,12 @@ async def get_chatbot_config():
                         }
                     }
                 }
+                response = JSONResponse(content=data)
+                # Add cache headers for faster loading (5 seconds cache, but allow revalidation)
+                response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
+                return response
             
-            return {
+            data = {
                 "admin_user": row["admin_user"],
                 "admin_password": "**********",
                 "human_agents": row["human_agents"] or [],
@@ -307,19 +313,23 @@ async def get_chatbot_config():
                     "system_prompt": row["system_prompt"] or "",
                     "selected_persona": row["selected_persona"]
                 },
-                    "llm_tokens": {
-                        "gemini": {
-                            "used": row["llm_token_used_gemini"],
-                            "available": row["llm_token_limit_gemini"] - row["llm_token_used_gemini"],
-                            "limit": row["llm_token_limit_gemini"]
-                        },
-                        "openai": {
-                            "used": row.get("llm_token_used_deepseek", 0),  # Migrate deepseek to openai
-                            "available": row.get("llm_token_limit_deepseek", 150000) - row.get("llm_token_used_deepseek", 0),
-                            "limit": row.get("llm_token_limit_deepseek", 150000)
-                        }
+                "llm_tokens": {
+                    "gemini": {
+                        "used": row["llm_token_used_gemini"],
+                        "available": row["llm_token_limit_gemini"] - row["llm_token_used_gemini"],
+                        "limit": row["llm_token_limit_gemini"]
+                    },
+                    "openai": {
+                        "used": row.get("llm_token_used_deepseek", 0),  # Migrate deepseek to openai
+                        "available": row.get("llm_token_limit_deepseek", 150000) - row.get("llm_token_used_deepseek", 0),
+                        "limit": row.get("llm_token_limit_deepseek", 150000)
                     }
+                }
             }
+            response = JSONResponse(content=data)
+            # Add cache headers for faster loading (5 seconds cache, but allow revalidation)
+            response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
+            return response
     except Exception as e:
         logger.error(f"Error fetching chatbot configuration: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching configuration: {str(e)}")
@@ -514,6 +524,8 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
 @app.get("/api/v1/configuration/widget")
 async def get_widget_config():
     """Get widget configuration"""
+    from fastapi.responses import JSONResponse
+    
     try:
         async with get_db_connection() as conn:
             row = await conn.fetchrow(
@@ -538,8 +550,8 @@ async def get_widget_config():
             )
             
             if not row:
-                # Return default configuration
-                return {
+                # Return default configuration with cache headers
+                data = {
                     "display_name": "GLOBISTAAN",
                     "initial_message": "Hi! What can I help you with?",
                     "auto_show_duration": 4,
@@ -553,8 +565,11 @@ async def get_widget_config():
                     "profile_picture_url": None,
                     "chat_icon_url": None
                 }
+                response = JSONResponse(content=data)
+                response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
+                return response
             
-            return {
+            data = {
                 "display_name": row["display_name"],
                 "initial_message": row["initial_message"],
                 "auto_show_duration": row["auto_show_duration"],
@@ -568,6 +583,9 @@ async def get_widget_config():
                 "profile_picture_url": row["profile_picture_url"],
                 "chat_icon_url": row["chat_icon_url"]
             }
+            response = JSONResponse(content=data)
+            response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
+            return response
     except Exception as e:
         logger.error(f"Error fetching widget configuration: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching widget configuration: {str(e)}")
