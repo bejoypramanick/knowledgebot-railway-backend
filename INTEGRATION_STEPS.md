@@ -12,12 +12,16 @@ This integration adds:
 - Token usage API
 - System prompt appending
 - Response policy implementation
-- Firebase OAuth for email (OAuth credentials only)
-- PostgreSQL for all application data
+- Gmail OAuth2 for email sending
+- PostgreSQL for ALL data (including OAuth credentials)
 
 **Architecture**:
-- **Firebase**: Stores Gmail OAuth2 credentials ONLY (`email_config/gmail_oauth`)
-- **PostgreSQL (Railway)**: Stores ALL application data (human agents, feedback, sessions, configuration)
+- **PostgreSQL (Railway)**: Stores ALL data including OAuth credentials
+  - `email_oauth_credentials` - Gmail OAuth2 credentials
+  - `human_agents` - Human agent information
+  - `chat_feedback` - User feedback
+  - All other application tables
+- **No Firebase needed** - Everything in PostgreSQL
 
 ---
 
