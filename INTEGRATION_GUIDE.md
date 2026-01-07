@@ -139,13 +139,86 @@ service cloud.firestore {
 6. Click **Exchange authorization code for tokens**
 7. Copy the **Refresh token**
 
-### 3.2 Create OAuth Credentials (if needed)
+### 3.2 Create OAuth Credentials (Detailed Steps)
+
+**You need to create OAuth credentials as a "Web application" in Google Cloud Console.**
+
+#### Step 1: Create or Select Google Cloud Project
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create project → Enable Gmail API
-3. **APIs & Services** → **Credentials** → **Create OAuth client ID**
-4. Application type: **Web application**
-5. Copy **Client ID** and **Client Secret**
+2. If you don't have a project:
+   - Click the project dropdown at the top
+   - Click **New Project**
+   - Enter project name: `KnowledgeBot Email Service` (or any name)
+   - Click **Create**
+3. If you have a project, select it from the dropdown
+
+#### Step 2: Enable Gmail API
+
+1. In the left sidebar, go to **APIs & Services** → **Library**
+2. Search for "Gmail API"
+3. Click on **Gmail API** from the results
+4. Click **Enable** button
+5. Wait for it to enable (may take a few seconds)
+
+#### Step 3: Configure OAuth Consent Screen
+
+**This is required before creating OAuth credentials.**
+
+1. Go to **APIs & Services** → **OAuth consent screen**
+2. Choose **User Type**:
+   - **Internal** (if using Google Workspace) - Only users in your organization
+   - **External** (recommended) - Any Google user
+3. Click **Create**
+4. Fill in the required information:
+   - **App name**: `KnowledgeBot Email Service`
+   - **User support email**: Your email address
+   - **Developer contact information**: Your email address
+5. Click **Save and Continue**
+6. **Scopes** (Step 2):
+   - Click **Add or Remove Scopes**
+   - Search for `gmail.send`
+   - Check **`https://www.googleapis.com/auth/gmail.send`**
+   - Click **Update**
+   - Click **Save and Continue**
+7. **Test users** (Step 3 - if External):
+   - Add your email address as a test user
+   - Click **Save and Continue**
+8. **Summary** (Step 4):
+   - Review and click **Back to Dashboard**
+
+#### Step 4: Create OAuth Client ID
+
+1. Go to **APIs & Services** → **Credentials**
+2. Click **+ Create Credentials** → **OAuth client ID**
+3. **Application type**: Select **Web application** ⚠️ **IMPORTANT: Choose "Web application", NOT "User"**
+4. **Name**: Enter a name like `KnowledgeBot Gmail OAuth`
+5. **Authorized JavaScript origins**: 
+   - Click **+ Add URI**
+   - Add: `https://developers.google.com` (for OAuth Playground)
+   - You can also add your domain if needed
+6. **Authorized redirect URIs**:
+   - Click **+ Add URI**
+   - Add: `https://developers.google.com/oauthplayground` (for OAuth Playground)
+   - You can also add your callback URL if needed
+7. Click **Create**
+8. **IMPORTANT**: A popup will appear with your credentials:
+   - **Client ID**: Copy this (looks like: `123456789-abc.apps.googleusercontent.com`)
+   - **Client Secret**: Copy this (looks like: `GOCSPX-xxxxxxxxxxxxx`)
+   - ⚠️ **Save these immediately** - you won't be able to see the secret again!
+   - Click **OK**
+
+#### Step 5: Download Credentials (Optional)
+
+1. You can download the credentials as JSON:
+   - Go to **Credentials** page
+   - Click the download icon (⬇️) next to your OAuth client
+   - Save the JSON file securely
+
+**You now have:**
+- ✅ **Client ID**: `your-client-id.apps.googleusercontent.com`
+- ✅ **Client Secret**: `GOCSPX-your-secret`
+- ⏳ **Refresh Token**: You'll get this in the next step (3.1)
 
 ### 3.3 Store Credentials in Firestore
 
