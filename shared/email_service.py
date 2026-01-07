@@ -1,10 +1,11 @@
 """
-Email Service for sending confirmation and notification emails using OAuth2.
+Email Service for sending confirmation and notification emails using Firebase OAuth2.
 """
 import smtplib
 import os
 import logging
 import base64
+import json
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
@@ -12,24 +13,63 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Try to import Firebase Admin SDK (optional)
+try:
+    import firebase_admin
+    from firebase_admin import credentials, firestore
+    FIREBASE_AVAILABLE = True
+except ImportError:
+    FIREBASE_AVAILABLE = False
+    logger.warning("Firebase Admin SDK not installed. Using direct OAuth2. Install with: pip install firebase-admin")
+
 
 class EmailService:
-    """Service for sending emails via SMTP with OAuth2 authentication."""
+    """Service for sending emails via SMTP with Firebase OAuth2 authentication."""
     
     def __init__(self):
         self.smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
         self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
         self.smtp_user = os.getenv('SMTP_USER')
-        self.oauth2_client_id = os.getenv('GMAIL_OAUTH2_CLIENT_ID')
-        self.oauth2_client_secret = os.getenv('GMAIL_OAUTH2_CLIENT_SECRET')
-        self.oauth2_refresh_token = os.getenv('GMAIL_OAUTH2_REFRESH_TOKEN')
         self.email_from = os.getenv('EMAIL_FROM', 'noreply@knowledgebot.com')
         self.widget_base_url = os.getenv('WIDGET_BASE_URL', 'https://widget.example.com')
         self._access_token = None
         
+        # Firebase OAuth2 configuration
+        self.use_firebase = os.getenv('USE_FIREBASE_OAUTH', 'false').lower() == 'true'
+        self.firebase_credentials_path = os.getenv('FIREBASE_CREDENTIALS_PATH')
+        self.firebase_project_id = os.getenv('FIREBASE_PROJECT_ID')
+        
+        # Direct OAuth2 configuration (fallback or if not using Firebase)
+        self.oauth2_client_id = os.getenv('GMAIL_OAUTH2_CLIENT_ID')
+        self.oauth2_client_secret = os.getenv('GMAIL_OAUTH2_CLIENT_SECRET')
+        self.oauth2_refresh_token = os.getenv('GMAIL_OAUTH2_REFRESH_TOKEN')
+        
+        # Initialize Firebase if configured
+        self.firebase_app = None
+        self.firestore_db = None
+        if self.use_firebase and FIREBASE_AVAILABLE:
+            self._init_firebase()
+        
     def _get_access_token(self) -> Optional[str]:
-        """Get OAuth2 access token using refresh token."""
-        if not all([self.oauth2_client_id, self.oauth2_client_secret, self.oauth2_refresh_token]):
+        """Get OAuth2 access token using refresh token (from Firebase or direct config)."""
+        # Get credentials from Firebase or use direct config
+        if self.use_firebase and self.firestore_db:
+            oauth_creds = self._get_oauth_credentials_from_firebase()
+            if not oauth_creds:
+                logger.warning("Firebase OAuth credentials not found, falling back to direct config")
+                oauth_creds = {
+                    'client_id': self.oauth2_client_id,
+                    'client_secret': self.oauth2_client_secret,
+                    'refresh_token': self.oauth2_refresh_token
+                }
+        else:
+            oauth_creds = {
+                'client_id': self.oauth2_client_id,
+                'client_secret': self.oauth2_client_secret,
+                'refresh_token': self.oauth2_refresh_token
+            }
+        
+        if not all([oauth_creds.get('client_id'), oauth_creds.get('client_secret'), oauth_creds.get('refresh_token')]):
             logger.warning("OAuth2 credentials not configured. Email not sent.")
             return None
         
@@ -37,9 +77,9 @@ class EmailService:
             # Request new access token using refresh token
             token_url = "https://oauth2.googleapis.com/token"
             data = {
-                "client_id": self.oauth2_client_id,
-                "client_secret": self.oauth2_client_secret,
-                "refresh_token": self.oauth2_refresh_token,
+                "client_id": oauth_creds['client_id'],
+                "client_secret": oauth_creds['client_secret'],
+                "refresh_token": oauth_creds['refresh_token'],
                 "grant_type": "refresh_token"
             }
             
