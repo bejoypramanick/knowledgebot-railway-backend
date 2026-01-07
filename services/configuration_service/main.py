@@ -407,17 +407,62 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
             # If human agents are provided, trigger email sending
             if config.human_agents is not None and len(config.human_agents) > 0:
                 try:
-                    from services.configuration_service.human_agents import add_human_agents
-                    from services.configuration_service.human_agents import HumanAgentsRequest
+                    # Import email service and helper functions
+                    from shared.email_service import create_email_service
+                    from services.configuration_service.human_agents import (
+                        generate_confirmation_token,
+                        generate_widget_link
+                    )
                     
-                    # Call the human agents endpoint to send emails
-                    human_agents_request = HumanAgentsRequest(emails=config.human_agents)
-                    email_result = await add_human_agents(human_agents_request)
+                    # Create email service with database connection
+                    email_service = create_email_service(conn)
+                    agents_emailed = []
                     
-                    if email_result.get("success"):
-                        logger.info(f"Human agent emails sent: {email_result.get('agents', [])}")
-                    else:
-                        logger.warning(f"Human agent emails may not have been sent: {email_result}")
+                    for email in config.human_agents:
+                        if not email or not email.strip():
+                            continue
+                        
+                        email = email.strip()
+                        
+                        # Check if agent already exists
+                        existing = await conn.fetchrow(
+                            "SELECT id, status, confirmation_token FROM human_agents WHERE email = $1",
+                            email
+                        )
+                        
+                        if existing:
+                            if existing['status'] == 'confirmed':
+                                # Already confirmed, skip
+                                logger.info(f"Agent {email} already confirmed, skipping email")
+                                continue
+                            elif existing['status'] == 'pending':
+                                # Resend confirmation email
+                                token = existing['confirmation_token']
+                                if await email_service.send_confirmation_email(email, token):
+                                    agents_emailed.append(email)
+                                    logger.info(f"Confirmation email resent to {email}")
+                                continue
+                        
+                        # Create new agent
+                        token = generate_confirmation_token()
+                        agent_id = await conn.fetchval(
+                            """
+                            INSERT INTO human_agents (email, status, confirmation_token)
+                            VALUES ($1, 'pending', $2)
+                            RETURNING id::text
+                            """,
+                            email, token
+                        )
+                        
+                        # Send confirmation email
+                        if await email_service.send_confirmation_email(email, token):
+                            agents_emailed.append(email)
+                            logger.info(f"Confirmation email sent to {email}")
+                        else:
+                            logger.warning(f"Failed to send confirmation email to {email}")
+                    
+                    if agents_emailed:
+                        logger.info(f"Human agent emails sent to: {', '.join(agents_emailed)}")
                 except Exception as e:
                     # Don't fail the entire save if email sending fails
                     logger.error(f"Error sending human agent emails: {e}", exc_info=True)
