@@ -404,6 +404,24 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
             
             await conn.execute(query, *values)
             
+            # If human agents are provided, trigger email sending
+            if config.human_agents is not None and len(config.human_agents) > 0:
+                try:
+                    from services.configuration_service.human_agents import add_human_agents
+                    from services.configuration_service.human_agents import HumanAgentsRequest
+                    
+                    # Call the human agents endpoint to send emails
+                    human_agents_request = HumanAgentsRequest(emails=config.human_agents)
+                    email_result = await add_human_agents(human_agents_request)
+                    
+                    if email_result.get("success"):
+                        logger.info(f"Human agent emails sent: {email_result.get('agents', [])}")
+                    else:
+                        logger.warning(f"Human agent emails may not have been sent: {email_result}")
+                except Exception as e:
+                    # Don't fail the entire save if email sending fails
+                    logger.error(f"Error sending human agent emails: {e}", exc_info=True)
+            
             return {"success": True, "message": "Configuration saved successfully"}
     except Exception as e:
         logger.error(f"Error saving chatbot configuration: {e}", exc_info=True)
