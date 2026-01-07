@@ -129,6 +129,15 @@ service cloud.firestore {
 
 **Note**: OAuth credentials for email sending are stored in Firestore.
 
+**Why can't Firebase do this automatically?**
+- Firebase Authentication handles **user login** (users authenticating to your app)
+- Gmail API OAuth2 handles **server-side email sending** (your backend sending emails)
+- These are different OAuth flows with different purposes
+- Google requires manual OAuth consent screen setup for security and compliance
+- However, you can use the **same Google Cloud project** for both Firebase and Gmail API (simplifies setup)
+
+**Simplification**: If you created your Firebase project in Google Cloud Console, you can use that **same project** for Gmail API - no need to create a new project!
+
 ### 3.1 Quick Method (OAuth2 Playground)
 
 1. Go to [OAuth2 Playground](https://developers.google.com/oauthplayground/)
@@ -143,15 +152,21 @@ service cloud.firestore {
 
 **You need to create OAuth credentials as a "Web application" in Google Cloud Console.**
 
-#### Step 1: Create or Select Google Cloud Project
+#### Step 1: Use Your Existing Firebase Project (Recommended)
+
+**✅ SIMPLIFICATION**: Use the **same Google Cloud project** where your Firebase is located!
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. If you don't have a project:
-   - Click the project dropdown at the top
-   - Click **New Project**
-   - Enter project name: `KnowledgeBot Email Service` (or any name)
-   - Click **Create**
-3. If you have a project, select it from the dropdown
+2. **Select your Firebase project** from the project dropdown (the same one you used in Step 2)
+   - This way, Firebase and Gmail API are in the same project
+   - No need to create a new project!
+   - Easier to manage all credentials in one place
+
+**OR** if you want a separate project:
+1. Click the project dropdown at the top
+2. Click **New Project**
+3. Enter project name: `KnowledgeBot Email Service` (or any name)
+4. Click **Create**
 
 #### Step 2: Enable Gmail API
 
