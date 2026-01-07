@@ -11,12 +11,16 @@ import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
+import asyncio
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.db import init_railway_db, close_databases, railway_db
 
 load_dotenv()
+
+# Lock for database initialization to prevent race conditions
+_db_init_lock = asyncio.Lock()
 
 # Configure logging
 logging.basicConfig(
@@ -147,44 +151,52 @@ async def get_db_connection():
         return
     
     # Fallback: Try to initialize if not already initialized (should rarely happen)
-    from shared.db import init_railway_db
-    
-    database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
-    if not database_url:
-        raise HTTPException(
-            status_code=503, 
-            detail="Database not initialized. DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL environment variable not set."
-        )
-    
-    try:
-        # Initialize the database and get the instance
-        initialized_db = await init_railway_db(database_url)
-        logger.info("✅ Database initialized on-demand for configuration endpoint")
+    # Use lock to prevent concurrent initialization
+    async with _db_init_lock:
+        # Check again after acquiring lock - another request might have initialized it
+        if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
+            async with railway_db.acquire() as conn:
+                yield conn
+            return
         
-        # Verify the pool was created successfully
-        if initialized_db is None:
+        from shared.db import init_railway_db
+        
+        database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+        if not database_url:
             raise HTTPException(
-                status_code=503,
-                detail="Database initialization returned None"
+                status_code=503, 
+                detail="Database not initialized. DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL environment variable not set."
             )
         
-        if not hasattr(initialized_db, '_pool') or initialized_db._pool is None:
+        try:
+            # Initialize the database and get the instance
+            initialized_db = await init_railway_db(database_url)
+            logger.info("✅ Database initialized on-demand for configuration endpoint")
+            
+            # Verify the pool was created successfully
+            if initialized_db is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Database initialization returned None"
+                )
+            
+            if not hasattr(initialized_db, '_pool') or initialized_db._pool is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Database connection pool not available after initialization"
+                )
+            
+            # Use the initialized database instance directly
+            async with initialized_db.acquire() as conn:
+                yield conn
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize database: {e}", exc_info=True)
             raise HTTPException(
-                status_code=503,
-                detail="Database connection pool not available after initialization"
+                status_code=503, 
+                detail=f"Database not initialized. Error: {str(e)}"
             )
-        
-        # Use the initialized database instance directly
-        async with initialized_db.acquire() as conn:
-            yield conn
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize database: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=503, 
-            detail=f"Database not initialized. Error: {str(e)}"
-        )
 
 
 # Health check endpoint
