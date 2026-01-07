@@ -49,6 +49,53 @@ class EmailService:
         self.firestore_db = None
         if self.use_firebase and FIREBASE_AVAILABLE:
             self._init_firebase()
+    
+    def _init_firebase(self):
+        """Initialize Firebase Admin SDK."""
+        try:
+            if self.firebase_credentials_path:
+                # Use service account JSON file
+                cred = credentials.Certificate(self.firebase_credentials_path)
+                self.firebase_app = firebase_admin.initialize_app(cred)
+            elif os.getenv('FIREBASE_CREDENTIALS_JSON'):
+                # Use JSON string from environment variable
+                cred_json = json.loads(os.getenv('FIREBASE_CREDENTIALS_JSON'))
+                cred = credentials.Certificate(cred_json)
+                self.firebase_app = firebase_admin.initialize_app(cred)
+            else:
+                # Use default credentials (for Google Cloud environments)
+                self.firebase_app = firebase_admin.initialize_app()
+            
+            self.firestore_db = firestore.client()
+            logger.info("Firebase initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize Firebase: {e}")
+            logger.warning("Falling back to direct OAuth2")
+            self.use_firebase = False
+    
+    def _get_oauth_credentials_from_firebase(self) -> Optional[dict]:
+        """Get OAuth2 credentials from Firebase Firestore."""
+        if not self.firestore_db:
+            return None
+        
+        try:
+            # Get credentials from Firestore
+            doc_ref = self.firestore_db.collection('email_config').document('gmail_oauth')
+            doc = doc_ref.get()
+            
+            if doc.exists:
+                data = doc.to_dict()
+                return {
+                    'client_id': data.get('client_id'),
+                    'client_secret': data.get('client_secret'),
+                    'refresh_token': data.get('refresh_token')
+                }
+            else:
+                logger.warning("OAuth credentials not found in Firestore")
+                return None
+        except Exception as e:
+            logger.error(f"Error reading OAuth credentials from Firebase: {e}")
+            return None
         
     def _get_access_token(self) -> Optional[str]:
         """Get OAuth2 access token using refresh token (from Firebase or direct config)."""
