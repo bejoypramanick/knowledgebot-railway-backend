@@ -20,16 +20,39 @@ router = APIRouter(prefix="/api/v1/admin", tags=["performance"])
 
 async def get_db_connection():
     """Get database connection, initializing if needed."""
+    # Check if database is already initialized with a valid pool
     if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
-        return railway_db
+        # Verify pool is still valid (not closed)
+        try:
+            # Try to check pool size to verify it's still active
+            if hasattr(railway_db._pool, '_size'):
+                return railway_db
+        except Exception:
+            # Pool might be closed, will reinitialize below
+            logger.warning("Database pool appears to be closed, reinitializing...")
     
     # Initialize database if not already initialized
     database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
-    if database_url:
-        await init_railway_db(database_url)
-        return railway_db
+    if not database_url:
+        logger.error("No database URL found in environment variables")
+        return None
     
-    return None
+    try:
+        await init_railway_db(database_url)
+        # Verify the pool was created successfully
+        if railway_db is None:
+            logger.error("Database initialization returned None")
+            return None
+        
+        if not hasattr(railway_db, '_pool') or railway_db._pool is None:
+            logger.error("Database connection pool not available after initialization")
+            return None
+        
+        logger.info("✅ Database connection initialized successfully for performance metrics")
+        return railway_db
+    except Exception as e:
+        logger.error(f"Failed to initialize database connection: {e}", exc_info=True)
+        return None
 
 
 @router.get("/performance/metrics")
@@ -37,8 +60,19 @@ async def get_performance_metrics():
     """Get chatbot performance metrics from database."""
     try:
         db = await get_db_connection()
-        if not db or not hasattr(db, '_pool') or db._pool is None:
-            raise HTTPException(status_code=503, detail="Database not available")
+        if not db:
+            logger.warning("Database connection not available for performance metrics")
+            raise HTTPException(
+                status_code=503, 
+                detail="Database not available. Please check database connection configuration."
+            )
+        
+        if not hasattr(db, '_pool') or db._pool is None:
+            logger.warning("Database pool not available for performance metrics")
+            raise HTTPException(
+                status_code=503, 
+                detail="Database connection pool not available. Please check database connection."
+            )
         
         async with db.acquire() as conn:
             # Total Interactions (total messages)
@@ -254,6 +288,9 @@ async def get_performance_metrics():
                 "active_sessions": active_sessions
             }
             
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 503) as-is
+        raise
     except Exception as e:
         logger.error(f"Error fetching performance metrics: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching performance metrics: {str(e)}")

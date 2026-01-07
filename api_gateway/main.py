@@ -978,7 +978,12 @@ async def proxy_chatbot_config(request: Request):
                 headers=headers
             )
             
-            return response.json()
+            # Preserve status code from upstream service
+            return JSONResponse(
+                content=response.json(),
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="Configuration service timeout")
     except httpx.RequestError as e:
@@ -1013,7 +1018,12 @@ async def proxy_widget_config(request: Request):
                 headers=headers
             )
             
-            return response.json()
+            # Preserve status code from upstream service
+            return JSONResponse(
+                content=response.json(),
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="Configuration service timeout")
     except httpx.RequestError as e:
@@ -1049,8 +1059,13 @@ async def proxy_admin_routes(request: Request, path: str):
             )
             
             # Return JSON if content-type is JSON, otherwise return raw response
+            # Always preserve the status code from the upstream service
             if "application/json" in response.headers.get("content-type", ""):
-                return response.json()
+                return JSONResponse(
+                    content=response.json(),
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
+                )
             else:
                 return JSONResponse(
                     content=response.text,
