@@ -118,6 +118,7 @@ class PersonaUpdate(BaseModel):
     selected_persona: str
 
 class ChatbotConfigRequest(BaseModel):
+    admin_emails: Optional[List[str]] = None
     human_agents: Optional[List[str]] = None
     notifications: Optional[NotificationsUpdate] = None
     security: Optional[SecurityUpdate] = None
@@ -228,6 +229,7 @@ async def get_chatbot_config():
                 """
                 SELECT 
                     admin_user,
+                    admin_emails,
                     human_agents,
                     user_interactions_enabled,
                     error_alerts_enabled,
@@ -253,6 +255,7 @@ async def get_chatbot_config():
                 # Return default configuration with cache headers
                 data = {
                     "admin_user": "GLOBISTAAN",
+                    "admin_emails": [],
                     "admin_password": "**********",
                     "human_agents": [],
                     "notifications": {
@@ -291,8 +294,18 @@ async def get_chatbot_config():
                 response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
                 return response
             
+            # Handle admin_emails - use array if available, otherwise convert admin_user to array
+            admin_emails = row.get("admin_emails")
+            if admin_emails is None or (isinstance(admin_emails, list) and len(admin_emails) == 0):
+                # Fallback to admin_user if admin_emails is empty
+                if row["admin_user"] and row["admin_user"] != 'GLOBISTAAN':
+                    admin_emails = [row["admin_user"]]
+                else:
+                    admin_emails = []
+            
             data = {
                 "admin_user": row["admin_user"],
+                "admin_emails": admin_emails if isinstance(admin_emails, list) else (admin_emails if admin_emails else []),
                 "admin_password": "**********",
                 "human_agents": row["human_agents"] or [],
                 "notifications": {
@@ -344,6 +357,19 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
             updates = []
             values = []
             param_index = 1
+            
+            if config.admin_emails is not None:
+                updates.append(f"admin_emails = ${param_index}")
+                values.append(config.admin_emails)
+                param_index += 1
+                
+                # Also update admin_user for backward compatibility (use first admin email if available)
+                if len(config.admin_emails) > 0:
+                    # Check if admin_user is already in updates to avoid duplicate
+                    if "admin_user" not in " ".join(updates):
+                        updates.append(f"admin_user = ${param_index}")
+                        values.append(config.admin_emails[0])
+                        param_index += 1
             
             if config.human_agents is not None:
                 updates.append(f"human_agents = ${param_index}")
@@ -423,9 +449,20 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                 raise HTTPException(status_code=400, detail="No fields to update")
             
             # Use INSERT ... ON CONFLICT to handle upsert
+            # Determine admin_user value for INSERT
+            admin_user_value = 'GLOBISTAAN'
+            if config.admin_emails is not None and len(config.admin_emails) > 0:
+                admin_user_value = config.admin_emails[0]
+            
+            # Build field names for INSERT (exclude admin_user if it's in updates)
+            field_names = [u.split(' = ')[0] for u in updates]
+            if 'admin_user' not in field_names:
+                field_names.insert(0, 'admin_user')
+                values.insert(0, admin_user_value)
+            
             query = f"""
-                INSERT INTO chatbot_configuration (admin_user, {', '.join([u.split(' = ')[0] for u in updates])})
-                VALUES ('GLOBISTAAN', {', '.join([f'${i+1}' for i in range(len(updates))])})
+                INSERT INTO chatbot_configuration ({', '.join(field_names)})
+                VALUES ({', '.join([f'${i+1}' for i in range(len(field_names))])})
                 ON CONFLICT (admin_user) 
                 DO UPDATE SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
             """
