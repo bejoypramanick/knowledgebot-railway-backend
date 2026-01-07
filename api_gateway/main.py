@@ -281,6 +281,14 @@ class ReviewResponse(BaseModel):
     message: str
     review_status: str
 
+class SuggestedMessagesRequest(BaseModel):
+    session_id: str
+    conversation_history: Optional[List[Dict[str, str]]] = None
+
+class SuggestedMessagesResponse(BaseModel):
+    suggested_messages: List[str]
+    usage: Optional[Dict[str, Any]] = None
+
 
 @app.get("/health")
 async def health_check(request: Request):
@@ -565,6 +573,41 @@ async def chat_endpoint(chat_request: ChatRequest, request: Request):
     except Exception as e:
         logger.error(f"Error routing chat request: {e}")
         raise HTTPException(status_code=500, detail=f"Chat service error: {str(e)}")
+
+
+@app.post("/api/v1/suggested-messages", response_model=SuggestedMessagesResponse)
+async def suggested_messages_endpoint(suggested_request: SuggestedMessagesRequest, request: Request):
+    """Route suggested messages requests to chatbot orchestration service."""
+    try:
+        headers = dict(request.headers)
+        # Remove hop-by-hop headers and problematic headers
+        hop_by_hop_headers = [
+            'connection', 'keep-alive', 'proxy-authenticate',
+            'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade'
+        ]
+        headers = {k: v for k, v in headers.items() if k.lower() not in hop_by_hop_headers}
+        headers.pop('host', None)
+        headers.pop('Host', None)
+        headers.pop('content-length', None)
+        headers.pop('Content-Length', None)
+
+        target_url = f"{CHATBOT_ORCHESTRATION_URL}/suggested-messages"
+        logger.info(f"🧪 Forwarding suggested messages request to: {target_url}")
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                target_url,
+                json=suggested_request.model_dump(),
+                headers=headers,
+                timeout=30.0
+            )
+            return JSONResponse(
+                status_code=resp.status_code,
+                content=resp.json() if resp.headers.get('content-type', '').startswith('application/json') else resp.text
+            )
+    except Exception as e:
+        logger.error(f"Error routing suggested messages request: {e}")
+        raise HTTPException(status_code=500, detail=f"Suggested messages service error: {str(e)}")
 
 
 @app.get("/api/v1/sessions", response_model=ListSessionsResponse)

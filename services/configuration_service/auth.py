@@ -1,7 +1,7 @@
 """
 Authentication Endpoints
 Handles Firebase Auth token verification and user management.
-All user data stored in PostgreSQL (not Firestore).
+User data stored in Firestore, roles determined from PostgreSQL.
 """
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
@@ -21,6 +21,7 @@ from shared.firebase_auth import (
     update_user_role_in_firestore
 )
 from shared.auth_middleware import get_current_user
+from shared.db import railway_db
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
     """
     Sync Firebase Auth user to Firestore.
     Called after user signs up or logs in.
+    Determines user role from database (admin, human_agent, or user).
     """
     try:
         firebase_uid = user.get('uid')
@@ -96,19 +98,49 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
         # Get existing user from Firestore
         existing_user = get_user_from_firestore(firebase_uid)
         
+        # Determine user role from database
+        user_role = 'user'  # Default
+        
+        try:
+            # Import here to avoid circular dependency
+            from shared.db import railway_db
+            
+            if railway_db and hasattr(railway_db, '_pool') and railway_db._pool is not None:
+                async with railway_db.acquire() as conn:
+                    # Check if user is an admin
+                    admin = await conn.fetchrow(
+                        "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
+                        email
+                    )
+                    if admin:
+                        user_role = 'admin'
+                    else:
+                        # Check if user is a human agent
+                        agent = await conn.fetchrow(
+                            "SELECT email FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                            email
+                        )
+                        if agent:
+                            user_role = 'human_agent'
+        except Exception as role_error:
+            logger.warning(f"Error determining user role from database: {role_error}, defaulting to 'user'")
+        
+        # Preserve role if user already exists in Firestore (unless database says otherwise)
+        if existing_user and 'role' in existing_user:
+            # Only update if database has a different role (database is source of truth)
+            if user_role != existing_user.get('role'):
+                logger.info(f"Updating user role from {existing_user.get('role')} to {user_role} based on database")
+            else:
+                user_role = existing_user.get('role')
+        
         # Prepare user data
         user_data = {
             'email': email,
             'display_name': user.get('name'),
             'email_verified': user.get('email_verified', False),
             'photo_url': user.get('picture'),
+            'role': user_role,
         }
-        
-        # Preserve role if user already exists
-        if existing_user and 'role' in existing_user:
-            user_data['role'] = existing_user['role']
-        else:
-            user_data['role'] = 'user'  # Default role for new users
         
         # Save to Firestore
         success = save_user_to_firestore(firebase_uid, user_data)
@@ -116,8 +148,8 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
         if not success:
             raise HTTPException(status_code=500, detail="Failed to save user to Firestore")
         
-        logger.info(f"User {firebase_uid} synced to Firestore")
-        return {"success": True, "message": "User synced successfully"}
+        logger.info(f"User {firebase_uid} synced to Firestore with role: {user_role}")
+        return {"success": True, "message": "User synced successfully", "role": user_role}
         
     except HTTPException:
         raise
@@ -130,30 +162,77 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
 async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)):
     """
     Get current authenticated user information from Firestore.
+    Returns all roles for the user (admin, human_agent, user) so they can toggle between them.
     """
     try:
         firebase_uid = user.get('uid')
+        email = user.get('email')
         
         # Get user from Firestore
         user_data = get_user_from_firestore(firebase_uid)
         
+        # Get all roles from database (source of truth)
+        user_roles = []  # List of all roles user has
+        primary_role = 'user'  # Default primary role
+        
+        try:
+            if railway_db and hasattr(railway_db, '_pool') and railway_db._pool is not None and email:
+                async with railway_db.acquire() as conn:
+                    # Check if user is an admin
+                    admin = await conn.fetchrow(
+                        "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
+                        email
+                    )
+                    if admin:
+                        user_roles.append('admin')
+                        primary_role = 'admin'  # Admin takes precedence
+                    
+                    # Check if user is a human agent
+                    agent = await conn.fetchrow(
+                        "SELECT email FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                        email
+                    )
+                    if agent:
+                        user_roles.append('human_agent')
+                        if primary_role == 'user':
+                            primary_role = 'human_agent'
+        except Exception as role_error:
+            logger.warning(f"Error determining user roles from database: {role_error}")
+            # Fallback to Firestore role if database check fails
+            if user_data and 'role' in user_data:
+                primary_role = user_data.get('role')
+                user_roles = [primary_role]
+        
+        # Always include 'user' role as fallback
+        if 'user' not in user_roles:
+            user_roles.append('user')
+        
+        # If no roles found, default to user
+        if not user_roles:
+            user_roles = ['user']
+            primary_role = 'user'
+        
         if not user_data:
-            # Return Firebase Auth data if not in Firestore yet
+            # Return basic Firebase Auth data if not in Firestore yet
             return {
                 "uid": firebase_uid,
-                "email": user.get('email'),
+                "email": email,
                 "email_verified": user.get('email_verified', False),
                 "display_name": user.get('name'),
                 "photo_url": user.get('picture'),
-                "role": "user"  # Default
+                "role": primary_role,
+                "roles": user_roles,  # All available roles
+                "primary_role": primary_role
             }
         
         # Convert Firestore timestamps to ISO format
         result = {
             "uid": user_data.get('uid', firebase_uid),
-            "email": user_data.get('email'),
+            "email": user_data.get('email') or email,
             "display_name": user_data.get('display_name'),
-            "role": user_data.get('role', 'user'),
+            "role": primary_role,  # Primary role (for backward compatibility)
+            "roles": user_roles,  # All available roles
+            "primary_role": primary_role,
             "email_verified": user_data.get('email_verified', False),
             "photo_url": user_data.get('photo_url'),
         }

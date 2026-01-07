@@ -237,6 +237,18 @@ class ChatSessionResponse(BaseModel):
     timestamp: str
 
 
+class SuggestedMessagesRequest(BaseModel):
+    """Request for AI-generated suggested messages."""
+    session_id: str
+    conversation_history: Optional[List[Dict[str, str]]] = None  # List of {role: "user"|"assistant", content: "..."}
+
+
+class SuggestedMessagesResponse(BaseModel):
+    """Response with AI-generated suggested messages."""
+    suggested_messages: List[str]
+    usage: Optional[Dict[str, Any]] = None
+
+
 
 # Pydantic AI Agent Setup
 # OpenAI model reads API key from OPENAI_API_KEY environment variable automatically
@@ -1226,6 +1238,132 @@ async def review_response(session_id: str, review: HumanReviewRequest):
         "message": "Review recorded",
         "session_id": session_id
     }
+
+
+@app.post("/suggested-messages", response_model=SuggestedMessagesResponse)
+async def generate_suggested_messages(request: SuggestedMessagesRequest):
+    """
+    Generate AI-suggested follow-up messages based on conversation history.
+    
+    Args:
+        request: SuggestedMessagesRequest with session_id and optional conversation_history
+    
+    Returns:
+        SuggestedMessagesResponse with list of suggested messages
+    """
+    try:
+        # Get conversation history from session if not provided
+        conversation_history = request.conversation_history
+        if not conversation_history:
+            if request.session_id in sessions:
+                session = sessions[request.session_id]
+                conversation_history = [
+                    {"role": msg["role"], "content": msg["content"]}
+                    for msg in session.get("messages", [])[-10:]  # Last 10 messages
+                ]
+            else:
+                conversation_history = []
+        
+        # Build context from conversation history
+        context = ""
+        if conversation_history:
+            for msg in conversation_history:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role == "user":
+                    context += f"User: {content}\n"
+                elif role == "assistant":
+                    context += f"Assistant: {content}\n"
+        
+        # Create a prompt for generating suggested messages
+        prompt = f"""Based on the following conversation, generate 3-5 short, relevant follow-up questions or messages that a user might want to ask next. 
+Keep each suggestion concise (under 40 characters) and make them helpful and contextually relevant.
+
+Conversation:
+{context if context else "This is the start of a new conversation."}
+
+Generate suggested messages as a JSON array of strings. Example format: ["Question 1", "Question 2", "Question 3"]
+
+Only return the JSON array, nothing else."""
+
+        # Use OpenAI to generate suggestions
+        if not openai_model:
+            raise HTTPException(
+                status_code=503,
+                detail="OpenAI model not available - cannot generate suggested messages"
+            )
+        
+        # Create a simple agent for generating suggestions
+        suggestion_agent = Agent(
+            model=openai_model,
+            system_prompt="You are a helpful assistant that generates relevant follow-up questions based on conversation context. Always return a JSON array of 3-5 short suggested messages."
+        )
+        
+        # Run the agent to generate suggestions
+        result = await suggestion_agent.run(prompt)
+        
+        # Extract response
+        response_text = ""
+        if hasattr(result, 'output'):
+            response_text = result.output if isinstance(result.output, str) else str(result.output)
+        elif hasattr(result, 'data'):
+            response_text = str(result.data)
+        
+        # Parse JSON array from response
+        import json
+        import re
+        
+        # Try to extract JSON array from response
+        json_match = re.search(r'\[.*?\]', response_text, re.DOTALL)
+        if json_match:
+            try:
+                suggested_messages = json.loads(json_match.group(0))
+                # Ensure it's a list of strings
+                if isinstance(suggested_messages, list):
+                    suggested_messages = [str(msg).strip() for msg in suggested_messages if msg]
+                    # Limit to 5 messages and filter empty ones
+                    suggested_messages = [msg for msg in suggested_messages if msg and len(msg) <= 40][:5]
+                else:
+                    suggested_messages = []
+            except json.JSONDecodeError:
+                # Fallback: split by lines or commas
+                suggested_messages = [msg.strip().strip('"\'') for msg in response_text.split('\n') if msg.strip() and len(msg.strip()) <= 40][:5]
+        else:
+            # Fallback: try to extract suggestions from text
+            lines = [line.strip().strip('"\'') for line in response_text.split('\n') if line.strip() and len(line.strip()) <= 40]
+            suggested_messages = lines[:5]
+        
+        # If no suggestions generated, provide defaults
+        if not suggested_messages:
+            suggested_messages = [
+                "Tell me more",
+                "What else can you help with?",
+                "I have another question"
+            ]
+        
+        # Extract usage information
+        usage_info = None
+        if hasattr(result, 'usage') and result.usage:
+            usage_info = {
+                "input_tokens": getattr(result.usage, 'input_tokens', 0),
+                "output_tokens": getattr(result.usage, 'output_tokens', 0),
+            }
+            # Track token usage
+            await track_openai_usage_from_response(result.usage)
+        
+        return SuggestedMessagesResponse(
+            suggested_messages=suggested_messages,
+            usage=usage_info
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating suggested messages: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate suggested messages: {str(e)}"
+        )
 
 
 if __name__ == "__main__":
