@@ -15,8 +15,8 @@ This guide covers the complete setup for:
 
 **Architecture**:
 - **Firebase Auth**: User login/authentication (email/password, Google OAuth)
-- **Firestore**: User data (`users` collection) + Email OAuth credentials (`email_config/gmail_oauth`)
-- **PostgreSQL**: Business data (human agents, feedback, configuration)
+- **Firestore**: User data (`users` collection)
+- **PostgreSQL**: Business data (human agents, feedback, configuration) + Email OAuth credentials
 - **Railway**: Hosting for all backend services
 
 ---
@@ -50,14 +50,13 @@ This creates:
 - `human_agent_sessions` table - Agent-customer chat sessions
 - `chat_feedback` table - User feedback on chat responses
 - `token_usage_cache` table - LLM token usage tracking
+- `email_oauth_credentials` table - Gmail OAuth2 credentials
 - Updates `chatbot_configuration` table with new columns (response_policy, system_prompt, selected_persona)
-
-**Note**: Email OAuth credentials are stored in Firestore, not PostgreSQL.
 
 **Verification**:
 ```sql
 SELECT table_name FROM information_schema.tables 
-WHERE table_name IN ('human_agents', 'chat_feedback', 'token_usage_cache');
+WHERE table_name IN ('human_agents', 'chat_feedback', 'token_usage_cache', 'email_oauth_credentials');
 ```
 
 ---
@@ -100,11 +99,6 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
     
-    // Email config - only Admin SDK can access (server-side only)
-    match /email_config/{document} {
-      allow read, write: if false; // Only Admin SDK can access
-    }
-    
     // Deny all other access by default
     match /{document=**} {
       allow read, write: if false;
@@ -125,9 +119,9 @@ service cloud.firestore {
 
 ---
 
-## 🔧 STEP 3: Get Gmail OAuth2 Credentials and Store in Firestore
+## 🔧 STEP 3: Get Gmail OAuth2 Credentials and Store in PostgreSQL
 
-**Note**: OAuth credentials for email sending are stored in Firestore.
+**Note**: OAuth credentials for email sending are stored in PostgreSQL database.
 
 **Why can't Firebase do this automatically?**
 - Firebase Authentication handles **user login** (users authenticating to your app)
@@ -235,19 +229,21 @@ service cloud.firestore {
 - ✅ **Client Secret**: `GOCSPX-your-secret`
 - ⏳ **Refresh Token**: You'll get this in the next step (3.1)
 
-### 3.3 Store Credentials in Firestore
+### 3.3 Store Credentials in PostgreSQL
 
-After getting Client ID, Secret, and Refresh Token, store them in Firestore:
+After getting Client ID, Secret, and Refresh Token, insert them into PostgreSQL:
 
-1. Go to **Firestore Database** in Firebase Console
-2. Create collection: `email_config`
-3. Create document: `gmail_oauth`
-4. Add these fields:
-   - `client_id`: `your-client-id.apps.googleusercontent.com`
-   - `client_secret`: `GOCSPX-your-client-secret`
-   - `refresh_token`: `your-refresh-token-here`
+```sql
+UPDATE email_oauth_credentials 
+SET 
+    client_id = 'your-client-id.apps.googleusercontent.com',
+    client_secret = 'GOCSPX-your-client-secret',
+    refresh_token = 'your-refresh-token-here',
+    updated_at = NOW()
+WHERE id = 1;
+```
 
-**⚠️ These credentials are stored in Firestore, not PostgreSQL.**
+**⚠️ These credentials are stored in PostgreSQL, not Firestore.**
 
 ---
 
@@ -402,8 +398,9 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 
 ### Database
 - [ ] Database migrations executed successfully
-- [ ] Tables created: `human_agents`, `chat_feedback`, `token_usage_cache`
+- [ ] Tables created: `human_agents`, `chat_feedback`, `token_usage_cache`, `email_oauth_credentials`
 - [ ] `chatbot_configuration` table updated with new columns
+- [ ] OAuth credentials inserted into `email_oauth_credentials` table
 
 ### Firebase Authentication and Firestore
 - [ ] Firebase project created
@@ -415,8 +412,7 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 
 ### Gmail OAuth2
 - [ ] Gmail OAuth2 credentials obtained (Client ID, Secret, Refresh Token)
-- [ ] Firestore collection `email_config` created
-- [ ] Firestore document `gmail_oauth` created with credentials
+- [ ] Credentials stored in PostgreSQL `email_oauth_credentials` table
 - [ ] Gmail API enabled in Google Cloud Console
 
 ### Railway Services
@@ -459,20 +455,18 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 - Verify service account has Firestore permissions
 
 ### OAuth Credentials Not Found
-- Verify Firestore collection: `email_config`
-- Verify document: `gmail_oauth`
-- Check field names: `client_id`, `client_secret`, `refresh_token`
+- Verify PostgreSQL table: `email_oauth_credentials`
+- Check row exists: `SELECT * FROM email_oauth_credentials WHERE id = 1;`
+- Verify field names: `client_id`, `client_secret`, `refresh_token`
 - Check credentials are not empty strings
-- Verify Firestore security rules allow Admin SDK access
 
 ### Email Not Sending
-- Check OAuth credentials in Firestore: `email_config/gmail_oauth` document
+- Check OAuth credentials in PostgreSQL: `SELECT * FROM email_oauth_credentials WHERE id = 1;`
 - Verify refresh token is valid (not expired)
 - Check `SMTP_USER` matches Gmail account used for OAuth
 - Check Railway logs for OAuth errors
 - Verify Gmail API is enabled in Google Cloud Console
-- Verify credentials are properly set in Firestore (not empty strings)
-- Check Firestore security rules allow Admin SDK access
+- Verify credentials are properly inserted (not empty strings)
 
 ### Database Errors
 - Verify migrations ran successfully
@@ -514,9 +508,9 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 
 **Database Variable**: `${{PostgreSQL.DATABASE_URL}}` in Railway
 
-**Firebase**: Authentication + Firestore for user data and OAuth credentials
+**Firebase**: Authentication + Firestore for user data only
 
-**PostgreSQL**: Business data (human agents, feedback, configuration)
+**PostgreSQL**: Business data (human agents, feedback, configuration) + Email OAuth credentials
 
 ---
 
@@ -530,7 +524,7 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
    - Enable Email/Password authentication
    - Get service account JSON
 3. **Get Gmail OAuth2 credentials** (Client ID, Secret, Refresh Token)
-4. **Store OAuth credentials in Firestore** (`email_config/gmail_oauth` document)
+4. **Store OAuth credentials in PostgreSQL** (`email_oauth_credentials` table)
 5. **Create Configuration Service** in Railway
 6. **Set environment variables** (Database, Firebase Auth/Firestore, SMTP, API keys)
 7. **Update API Gateway** with `CONFIGURATION_SERVICE_URL`
@@ -540,5 +534,5 @@ curl -X POST https://your-api-gateway.up.railway.app/api/v1/admin/human-agents \
 
 **Important**:
 - **Firebase Auth**: User authentication (login/signup)
-- **Firestore**: Stores user data (`users` collection) and OAuth credentials (`email_config/gmail_oauth`)
-- **PostgreSQL**: Stores business data (human agents, feedback, configuration)
+- **Firestore**: Stores user data (`users` collection) only
+- **PostgreSQL**: Stores business data (human agents, feedback, configuration) + Email OAuth credentials
