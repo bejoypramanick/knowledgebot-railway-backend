@@ -213,16 +213,25 @@ async def get_assigned_chat_sessions(
     - For human agents: only their assigned sessions
     - For admins/users: all sessions
     """
+    # Debug: Log all query parameters
+    logger.info(f"Request URL: {request.url}")
+    logger.info(f"Query params: {dict(request.query_params)}")
+    logger.info(f"Role from Query: {role}")
+    
     # If role is not provided in Query, try to get it from request query params
     if not role:
         role = request.query_params.get("role")
+        logger.info(f"Role from request.query_params: {role}")
     
     if not role:
+        logger.error(f"Role parameter missing. All query params: {dict(request.query_params)}")
         raise HTTPException(status_code=422, detail="Role query parameter is required")
     
     # Validate role value
     if role not in ['admin', 'human_agent', 'user']:
         raise HTTPException(status_code=422, detail=f"Invalid role: {role}. Must be one of: admin, human_agent, user")
+    
+    logger.info(f"Using role: {role}, agent_id: {agent_id}")
     
     if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
         raise HTTPException(status_code=503, detail="Database not available")
