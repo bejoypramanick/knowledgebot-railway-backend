@@ -580,30 +580,65 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
             # Determine admin_user value for INSERT
             admin_user_value = 'GLOBISTAAN'
             if config.admin_emails is not None and len(config.admin_emails) > 0:
-                admin_user_value = config.admin_emails[0]
-            
-            # Build field names for INSERT (exclude admin_user if it's in updates)
-            field_names = [u.split(' = ')[0] for u in updates]
-            if 'admin_user' not in field_names:
-                field_names.insert(0, 'admin_user')
-                values.insert(0, admin_user_value)
-            
-            # Build VALUES clause with proper casting for array types
-            values_placeholders = []
-            for i, field_name in enumerate(field_names):
-                if field_name in ['admin_emails', 'human_agents']:
-                    values_placeholders.append(f'${i+1}::text[]')
+                # Extract first email if it's a string, or get email from dict/object
+                first_admin = config.admin_emails[0]
+                if isinstance(first_admin, str):
+                    admin_user_value = first_admin
+                elif isinstance(first_admin, dict):
+                    admin_user_value = first_admin.get('email', 'GLOBISTAAN')
+                elif hasattr(first_admin, 'email'):
+                    admin_user_value = first_admin.email
                 else:
-                    values_placeholders.append(f'${i+1}')
+                    admin_user_value = 'GLOBISTAAN'
+            
+            # Extract field names from updates
+            update_field_names = [u.split(' = ')[0] for u in updates]
+            
+            # Build INSERT values and placeholders
+            insert_field_names = []
+            insert_values = []
+            insert_placeholders = []
+            param_num = 1
+            
+            # Add admin_user first if not in updates
+            if 'admin_user' not in update_field_names:
+                insert_field_names.append('admin_user')
+                insert_values.append(admin_user_value)
+                insert_placeholders.append(f'${param_num}')
+                param_num += 1
+            
+            # Add all update fields to INSERT
+            for i, update_clause in enumerate(updates):
+                field_name = update_clause.split(' = ')[0]
+                insert_field_names.append(field_name)
+                insert_values.append(values[i])
+                if field_name in ['admin_emails', 'human_agents']:
+                    insert_placeholders.append(f'${param_num}::text[]')
+                else:
+                    insert_placeholders.append(f'${param_num}')
+                param_num += 1
+            
+            # Rebuild UPDATE clause to reference the same parameters as INSERT
+            # If admin_user was added to INSERT, UPDATE parameters start from $2
+            update_clauses = []
+            update_param_start = 2 if 'admin_user' not in update_field_names else 1
+            
+            for i, update_clause in enumerate(updates):
+                field_name = update_clause.split(' = ')[0]
+                param_num = update_param_start + i
+                if field_name in ['admin_emails', 'human_agents']:
+                    update_clauses.append(f"{field_name} = ${param_num}::text[]")
+                else:
+                    update_clauses.append(f"{field_name} = ${param_num}")
             
             query = f"""
-                INSERT INTO chatbot_configuration ({', '.join(field_names)})
-                VALUES ({', '.join(values_placeholders)})
+                INSERT INTO chatbot_configuration ({', '.join(insert_field_names)})
+                VALUES ({', '.join(insert_placeholders)})
                 ON CONFLICT (admin_user) 
-                DO UPDATE SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+                DO UPDATE SET {', '.join(update_clauses)}, updated_at = CURRENT_TIMESTAMP
             """
             
-            await conn.execute(query, *values)
+            await conn.execute(query, *insert_values)
             
             # If human agents are provided, trigger email sending
             logger.info(f"Checking human agents: config.human_agents = {config.human_agents}")
