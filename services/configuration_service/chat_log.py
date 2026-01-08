@@ -718,12 +718,32 @@ async def request_human_agent(
         
         async with get_db_connection() as conn:
             # Check if HIL is enabled (default to true if not set)
-            config = await conn.fetchrow(
-                "SELECT hil_enabled FROM chatbot_configuration WHERE admin_user = 'GLOBISTAAN' LIMIT 1"
-            )
-            
-            # Default to enabled if not set (hil_enabled can be NULL, which means enabled by default)
-            hil_enabled = config.get('hil_enabled') if config and config.get('hil_enabled') is not None else True
+            # First, check if hil_enabled column exists
+            try:
+                config = await conn.fetchrow(
+                    "SELECT hil_enabled FROM chatbot_configuration WHERE admin_user = 'GLOBISTAAN' LIMIT 1"
+                )
+                
+                # Default to enabled if not set (hil_enabled can be NULL, which means enabled by default)
+                hil_enabled = config.get('hil_enabled') if config and config.get('hil_enabled') is not None else True
+            except Exception as e:
+                # If column doesn't exist, add it and default to True
+                if 'hil_enabled' in str(e) or 'column' in str(e).lower():
+                    logger.warning(f"hil_enabled column not found, adding it with default value True...")
+                    try:
+                        await conn.execute(
+                            "ALTER TABLE chatbot_configuration ADD COLUMN IF NOT EXISTS hil_enabled BOOLEAN DEFAULT TRUE"
+                        )
+                        hil_enabled = True
+                        logger.info("Added hil_enabled column with default value True")
+                    except Exception as alter_error:
+                        logger.error(f"Failed to add hil_enabled column: {alter_error}")
+                        # Default to True if we can't add the column
+                        hil_enabled = True
+                else:
+                    # For other errors, default to True
+                    logger.error(f"Error checking hil_enabled: {e}")
+                    hil_enabled = True
             
             if not hil_enabled:
                 raise HTTPException(

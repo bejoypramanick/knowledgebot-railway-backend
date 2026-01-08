@@ -229,12 +229,22 @@ async def get_chatbot_config():
     
     try:
         async with get_db_connection() as conn:
+            # First, ensure hil_enabled column exists
+            try:
+                await conn.execute(
+                    "ALTER TABLE chatbot_configuration ADD COLUMN IF NOT EXISTS hil_enabled BOOLEAN DEFAULT TRUE"
+                )
+            except Exception as e:
+                # Column might already exist, ignore error
+                logger.debug(f"hil_enabled column check: {e}")
+            
             row = await conn.fetchrow(
                 """
                 SELECT 
                     admin_user,
                     admin_emails,
                     human_agents,
+                    hil_enabled,
                     user_interactions_enabled,
                     error_alerts_enabled,
                     feedback_requests_enabled,
@@ -274,6 +284,7 @@ async def get_chatbot_config():
                     "admin_emails": [],
                     "admin_password": "**********",
                     "human_agents": human_agents_list,
+                    "hil_enabled": True,  # Default to enabled
                     "notifications": {
                         "user_interactions_enabled": False,
                         "error_alerts_enabled": False,
@@ -324,6 +335,7 @@ async def get_chatbot_config():
                 "admin_emails": admin_emails if isinstance(admin_emails, list) else (admin_emails if admin_emails else []),
                 "admin_password": "**********",
                 "human_agents": human_agents_list,
+                "hil_enabled": row.get("hil_enabled", True),  # Default to True if column doesn't exist
                 "notifications": {
                     "user_interactions_enabled": row["user_interactions_enabled"],
                     "error_alerts_enabled": row["error_alerts_enabled"],
@@ -502,6 +514,11 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
             if config.human_agents is not None:
                 updates.append(f"human_agents = ${param_index}::text[]")
                 values.append(config.human_agents)
+                param_index += 1
+            
+            if config.hil_enabled is not None:
+                updates.append(f"hil_enabled = ${param_index}")
+                values.append(config.hil_enabled)
                 param_index += 1
             
             if config.notifications:
