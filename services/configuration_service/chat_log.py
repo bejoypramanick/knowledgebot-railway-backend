@@ -366,6 +366,28 @@ async def get_assigned_chat_sessions(
         if not user_email:
             raise HTTPException(status_code=403, detail="User email not found in token")
         
+        # Record heartbeat for human agents when they access chat log
+        # This helps track which agents are online and available
+        if role == 'human_agent':
+            try:
+                from services.configuration_service.main import get_db_connection
+                async with get_db_connection() as heartbeat_conn:
+                    # Update last activity by touching a recent session
+                    # This helps track that the agent is online
+                    await heartbeat_conn.execute(
+                        """
+                        UPDATE human_agent_sessions 
+                        SET connected_at = CURRENT_TIMESTAMP
+                        WHERE agent_email = $1 
+                        AND connected_at > NOW() - INTERVAL '1 hour'
+                        LIMIT 1
+                        """,
+                        user_email
+                    )
+                    logger.debug(f"Recorded activity for agent {user_email} via chat-sessions endpoint")
+            except Exception as e:
+                logger.warning(f"Could not record heartbeat for {user_email}: {e}")
+        
         # For human agents, only return their own sessions
         # Use the authenticated user's email to ensure they can only see their own chats
         if role == 'human_agent':
