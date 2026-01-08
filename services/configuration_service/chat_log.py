@@ -2,7 +2,7 @@
 Chat Log Endpoints for Human Agents
 Handles chat session management, assignment, and messaging for human agents.
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from pydantic import BaseModel
 from typing import List, Optional
 import logging
@@ -203,8 +203,9 @@ async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str
 
 @router.get("/chat-sessions", response_model=ChatSessionsResponse)
 async def get_assigned_chat_sessions(
-    role: str = Query(..., alias="role", description="User role: admin, human_agent, or user"),
-    agent_id: Optional[str] = Query(None, alias="agent_id", description="Agent email or ID (optional for admins/users)"),
+    request: Request,
+    role: Optional[str] = Query(None, description="User role: admin, human_agent, or user"),
+    agent_id: Optional[str] = Query(None, description="Agent email or ID (optional for admins/users)"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -212,6 +213,17 @@ async def get_assigned_chat_sessions(
     - For human agents: only their assigned sessions
     - For admins/users: all sessions
     """
+    # If role is not provided in Query, try to get it from request query params
+    if not role:
+        role = request.query_params.get("role")
+    
+    if not role:
+        raise HTTPException(status_code=422, detail="Role query parameter is required")
+    
+    # Validate role value
+    if role not in ['admin', 'human_agent', 'user']:
+        raise HTTPException(status_code=422, detail=f"Invalid role: {role}. Must be one of: admin, human_agent, user")
+    
     if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
         raise HTTPException(status_code=503, detail="Database not available")
     
