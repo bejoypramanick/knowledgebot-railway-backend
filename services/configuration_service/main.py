@@ -229,22 +229,15 @@ async def get_chatbot_config():
     
     try:
         async with get_db_connection() as conn:
-            # First, ensure hil_enabled column exists
-            try:
-                await conn.execute(
-                    "ALTER TABLE chatbot_configuration ADD COLUMN IF NOT EXISTS hil_enabled BOOLEAN DEFAULT TRUE"
-                )
-            except Exception as e:
-                # Column might already exist, ignore error
-                logger.debug(f"hil_enabled column check: {e}")
-            
+            # Try to select hil_enabled, but handle gracefully if column doesn't exist
+            # Column must be added manually via migration script
             row = await conn.fetchrow(
                 """
                 SELECT 
                     admin_user,
                     admin_emails,
                     human_agents,
-                    hil_enabled,
+                    COALESCE(hil_enabled, TRUE) as hil_enabled,
                     user_interactions_enabled,
                     error_alerts_enabled,
                     feedback_requests_enabled,
@@ -458,6 +451,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                                 token = generate_confirmation_token()
                                 try:
                                     # Try to insert with auto_generated_password column
+                                    # Column must exist in database (added via migration script)
                                     await conn.execute(
                                         """
                                         INSERT INTO admins (email, status, confirmation_token, auto_generated_password)
@@ -468,35 +462,19 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                                         email, token, generated_password
                                     )
                                 except Exception as db_error:
-                                    # If column doesn't exist, add it first and retry
+                                    # If column doesn't exist, fallback to insert without password column
+                                    # Column must be added manually via migration script
                                     if 'auto_generated_password' in str(db_error).lower() or 'column' in str(db_error).lower():
-                                        logger.warning(f"auto_generated_password column not found, adding it...")
-                                        try:
-                                            await conn.execute(
-                                                "ALTER TABLE admins ADD COLUMN IF NOT EXISTS auto_generated_password VARCHAR(255)"
-                                            )
-                                            # Retry the insert
-                                            await conn.execute(
-                                                """
-                                                INSERT INTO admins (email, status, confirmation_token, auto_generated_password)
-                                                VALUES ($1, 'pending', $2, $3)
-                                                ON CONFLICT (email) 
-                                                DO UPDATE SET confirmation_token = $2, status = 'pending', auto_generated_password = $3
-                                                """,
-                                                email, token, generated_password
-                                            )
-                                        except Exception as alter_error:
-                                            logger.error(f"Failed to add auto_generated_password column: {alter_error}")
-                                            # Fallback: insert without password column
-                                            await conn.execute(
-                                                """
-                                                INSERT INTO admins (email, status, confirmation_token)
-                                                VALUES ($1, 'pending', $2)
-                                                ON CONFLICT (email) 
-                                                DO UPDATE SET confirmation_token = $2, status = 'pending'
-                                                """,
-                                                email, token
-                                            )
+                                        logger.warning(f"auto_generated_password column not found. Please run migration script to add it. Inserting without password column.")
+                                        await conn.execute(
+                                            """
+                                            INSERT INTO admins (email, status, confirmation_token)
+                                            VALUES ($1, 'pending', $2)
+                                            ON CONFLICT (email) 
+                                            DO UPDATE SET confirmation_token = $2, status = 'pending'
+                                            """,
+                                            email, token
+                                        )
                                     else:
                                         raise
                                 
