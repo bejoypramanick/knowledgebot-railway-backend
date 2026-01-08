@@ -255,13 +255,25 @@ async def get_chatbot_config():
                 """
             )
             
+            # Fetch human agents from the human_agents table (not from chatbot_configuration.human_agents)
+            # Get all confirmed and pending agents
+            human_agents_rows = await conn.fetch(
+                """
+                SELECT email FROM human_agents 
+                WHERE status IN ('confirmed', 'pending')
+                ORDER BY email
+                """
+            )
+            human_agents_list = [agent["email"] for agent in human_agents_rows] if human_agents_rows else []
+            logger.info(f"Fetched {len(human_agents_list)} human agent(s) from human_agents table: {human_agents_list}")
+            
             if not row:
                 # Return default configuration with cache headers
                 data = {
                     "admin_user": "GLOBISTAAN",
                     "admin_emails": [],
                     "admin_password": "**********",
-                    "human_agents": [],
+                    "human_agents": human_agents_list,
                     "notifications": {
                         "user_interactions_enabled": False,
                         "error_alerts_enabled": False,
@@ -311,7 +323,7 @@ async def get_chatbot_config():
                 "admin_user": row["admin_user"],
                 "admin_emails": admin_emails if isinstance(admin_emails, list) else (admin_emails if admin_emails else []),
                 "admin_password": "**********",
-                "human_agents": row["human_agents"] or [],
+                "human_agents": human_agents_list,
                 "notifications": {
                     "user_interactions_enabled": row["user_interactions_enabled"],
                     "error_alerts_enabled": row["error_alerts_enabled"],
