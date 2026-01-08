@@ -2,9 +2,9 @@
 Chat Log Endpoints for Human Agents
 Handles chat session management, assignment, and messaging for human agents.
 """
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Set
 import logging
 import sys
 from pathlib import Path
@@ -12,6 +12,7 @@ from datetime import datetime
 import uuid
 import json
 import os
+import asyncio
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -24,6 +25,83 @@ router = APIRouter(prefix="/api/v1/admin", tags=["chat-log"])
 
 # Public router for chat endpoints (no authentication required)
 public_chat_router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
+
+
+# WebSocket Connection Manager
+class ConnectionManager:
+    """Manages WebSocket connections for real-time chat between agents and customers."""
+    
+    def __init__(self):
+        # Map session_id -> Set of WebSocket connections
+        # Each session can have multiple connections (agent + customer)
+        self.active_connections: Dict[str, Set[WebSocket]] = {}
+        # Map WebSocket -> session_id for quick lookup
+        self.connection_sessions: Dict[WebSocket, str] = {}
+        # Map WebSocket -> user_type ('agent' or 'customer')
+        self.connection_types: Dict[WebSocket, str] = {}
+        self.lock = asyncio.Lock()
+    
+    async def connect(self, websocket: WebSocket, session_id: str, user_type: str = 'customer'):
+        """Connect a WebSocket to a session."""
+        await websocket.accept()
+        async with self.lock:
+            if session_id not in self.active_connections:
+                self.active_connections[session_id] = set()
+            self.active_connections[session_id].add(websocket)
+            self.connection_sessions[websocket] = session_id
+            self.connection_types[websocket] = user_type
+        logger.info(f"WebSocket connected: {user_type} for session {session_id}")
+    
+    async def disconnect(self, websocket: WebSocket):
+        """Disconnect a WebSocket from a session."""
+        async with self.lock:
+            session_id = self.connection_sessions.pop(websocket, None)
+            user_type = self.connection_types.pop(websocket, None)
+            if session_id and session_id in self.active_connections:
+                self.active_connections[session_id].discard(websocket)
+                if not self.active_connections[session_id]:
+                    del self.active_connections[session_id]
+        logger.info(f"WebSocket disconnected: {user_type} from session {session_id}")
+    
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
+        """Send a message to a specific WebSocket connection."""
+        try:
+            await websocket.send_json(message)
+        except Exception as e:
+            logger.error(f"Error sending message to WebSocket: {e}")
+    
+    async def broadcast_to_session(self, message: dict, session_id: str, exclude_websocket: WebSocket = None):
+        """Broadcast a message to all connections in a session."""
+        async with self.lock:
+            connections = self.active_connections.get(session_id, set()).copy()
+        
+        if not connections:
+            logger.warning(f"No active connections for session {session_id}")
+            return
+        
+        disconnected = []
+        for connection in connections:
+            if connection == exclude_websocket:
+                continue
+            try:
+                await connection.send_json(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting to WebSocket: {e}")
+                disconnected.append(connection)
+        
+        # Clean up disconnected connections
+        if disconnected:
+            async with self.lock:
+                for conn in disconnected:
+                    await self.disconnect(conn)
+    
+    def get_session_connections(self, session_id: str) -> Set[WebSocket]:
+        """Get all active connections for a session."""
+        return self.active_connections.get(session_id, set()).copy()
+
+
+# Global connection manager instance
+connection_manager = ConnectionManager()
 
 
 class ChatMessageResponse(BaseModel):
@@ -727,6 +805,18 @@ async def send_agent_message(
             
             logger.info(f"Agent {user_email} sent message to session {session_id}")
             
+            # Broadcast message via WebSocket to customer
+            message_data = {
+                "type": "agent_message",
+                "message_id": message_id,
+                "text": request.text,
+                "sender": "agent",
+                "session_id": session_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "agent_email": user_email
+            }
+            await connection_manager.broadcast_to_session(message_data, session_id)
+            
             return SendMessageResponse(
                 message_id=message_id,
                 success=True
@@ -848,4 +938,183 @@ async def request_human_agent(
     except Exception as e:
         logger.error(f"Error requesting human agent: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error requesting human agent: {str(e)}")
+
+
+# WebSocket endpoints for real-time chat
+@router.websocket("/chat-sessions/{session_id}/ws")
+async def websocket_agent_chat(websocket: WebSocket, session_id: str):
+    """
+    WebSocket endpoint for agents to connect to a chat session.
+    Requires authentication via query parameter token.
+    """
+    try:
+        # Get token from query parameters
+        token = websocket.query_params.get("token")
+        if not token:
+            await websocket.close(code=1008, reason="Authentication required")
+            return
+        
+        # Verify token and get user
+        try:
+            from shared.firebase_auth import verify_firebase_token
+            user = await verify_firebase_token(token)
+            user_email = user.get('email')
+            if not user_email:
+                await websocket.close(code=1008, reason="Invalid token")
+                return
+        except Exception as e:
+            logger.error(f"Token verification failed: {e}")
+            await websocket.close(code=1008, reason="Invalid token")
+            return
+        
+        # Verify agent has access to this session
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
+            # Check if agent is assigned to this session
+            assigned = await conn.fetchrow(
+                """
+                SELECT agent_email FROM human_agent_sessions 
+                WHERE customer_session_id = $1 AND agent_email = $2
+                """,
+                session_id, user_email
+            )
+            if not assigned:
+                # Check if user is admin
+                is_admin = await conn.fetchval(
+                    "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                    user_email
+                )
+                if not is_admin:
+                    await websocket.close(code=1008, reason="Access denied")
+                    return
+        
+        # Connect to session
+        await connection_manager.connect(websocket, session_id, 'agent')
+        
+        try:
+            while True:
+                # Receive messages from agent
+                data = await websocket.receive_json()
+                
+                if data.get("type") == "ping":
+                    # Respond to ping
+                    await websocket.send_json({"type": "pong"})
+                elif data.get("type") == "message":
+                    # Handle agent sending message via WebSocket
+                    text = data.get("text", "")
+                    if text:
+                        # Save to database and broadcast
+                        from services.configuration_service.main import get_db_connection
+                        async with get_db_connection() as conn:
+                            session_row = await conn.fetchrow(
+                                "SELECT id FROM chat_sessions WHERE session_id = $1",
+                                session_id
+                            )
+                            if session_row:
+                                session_db_id = session_row['id']
+                                message_id = await conn.fetchval(
+                                    """
+                                    INSERT INTO chat_messages (session_id, role, content)
+                                    VALUES ($1, 'agent', $2)
+                                    RETURNING id::text
+                                    """,
+                                    session_db_id, text
+                                )
+                                
+                                # Broadcast to customer
+                                message_data = {
+                                    "type": "agent_message",
+                                    "message_id": message_id,
+                                    "text": text,
+                                    "sender": "agent",
+                                    "session_id": session_id,
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                    "agent_email": user_email
+                                }
+                                await connection_manager.broadcast_to_session(message_data, session_id, exclude_websocket=websocket)
+        except WebSocketDisconnect:
+            await connection_manager.disconnect(websocket)
+        except Exception as e:
+            logger.error(f"WebSocket error: {e}", exc_info=True)
+            await connection_manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket connection error: {e}", exc_info=True)
+        try:
+            await websocket.close(code=1011, reason="Internal error")
+        except:
+            pass
+
+
+@public_chat_router.websocket("/{session_id}/ws")
+async def websocket_customer_chat(websocket: WebSocket, session_id: str):
+    """
+    WebSocket endpoint for customers to connect to a chat session.
+    No authentication required for customers.
+    """
+    try:
+        # Connect customer to session
+        await connection_manager.connect(websocket, session_id, 'customer')
+        
+        try:
+            while True:
+                # Receive messages from customer
+                data = await websocket.receive_json()
+                
+                if data.get("type") == "ping":
+                    # Respond to ping
+                    await websocket.send_json({"type": "pong"})
+                elif data.get("type") == "message":
+                    # Handle customer sending message via WebSocket
+                    text = data.get("text", "")
+                    if text:
+                        # Save to database and broadcast to agent
+                        from services.configuration_service.main import get_db_connection
+                        async with get_db_connection() as conn:
+                            session_row = await conn.fetchrow(
+                                "SELECT id FROM chat_sessions WHERE session_id = $1",
+                                session_id
+                            )
+                            if not session_row:
+                                # Create session if it doesn't exist
+                                session_db_id = await conn.fetchval(
+                                    """
+                                    INSERT INTO chat_sessions (session_id, is_active, metadata)
+                                    VALUES ($1, TRUE, '{}'::jsonb)
+                                    RETURNING id
+                                    """,
+                                    session_id
+                                )
+                            else:
+                                session_db_id = session_row['id']
+                            
+                            message_id = await conn.fetchval(
+                                """
+                                INSERT INTO chat_messages (session_id, role, content)
+                                VALUES ($1, 'user', $2)
+                                RETURNING id::text
+                                """,
+                                session_db_id, text
+                            )
+                            
+                            # Broadcast to agent
+                            message_data = {
+                                "type": "customer_message",
+                                "message_id": message_id,
+                                "text": text,
+                                "sender": "user",
+                                "session_id": session_id,
+                                "timestamp": datetime.utcnow().isoformat()
+                            }
+                            await connection_manager.broadcast_to_session(message_data, session_id, exclude_websocket=websocket)
+        except WebSocketDisconnect:
+            await connection_manager.disconnect(websocket)
+        except Exception as e:
+            logger.error(f"WebSocket error: {e}", exc_info=True)
+            await connection_manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"WebSocket connection error: {e}", exc_info=True)
+        try:
+            await websocket.close(code=1011, reason="Internal error")
+        except:
+            pass
 
