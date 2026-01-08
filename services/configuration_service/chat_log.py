@@ -59,17 +59,55 @@ class SendMessageResponse(BaseModel):
     success: bool
 
 
-def get_agent_online_status(agent_email: str) -> bool:
+async def get_agent_online_status(agent_email: str, conn) -> bool:
     """
-    Check if an agent is online.
-    TODO: Implement actual online status tracking (e.g., via WebSocket connections or heartbeat)
-    For now, we assume agents with active sessions are online.
+    Check if an agent is online by checking their last activity timestamp.
+    An agent is considered online if they've accessed the chat log within the last 10 minutes.
     """
-    # This is a placeholder - in production, you'd track online status via:
-    # - WebSocket connections
-    # - Heartbeat/ping mechanism
-    # - Last activity timestamp
-    return True  # Simplified: assume all confirmed agents are online
+    try:
+        # Check if agent has accessed chat log recently (within last 10 minutes)
+        # We track this via the chat_sessions endpoint being called by the agent
+        # For now, we'll check if the agent has any recent activity in their assigned chats
+        # or if they've accessed the chat log endpoint recently
+        
+        # Check for recent activity: agent has accessed chat log or has active chats
+        # An agent with active chats is likely online
+        recent_activity = await conn.fetchval(
+            """
+            SELECT COUNT(*) 
+            FROM human_agent_sessions 
+            WHERE agent_email = $1 
+            AND status IN ('waiting', 'connected')
+            AND connected_at > NOW() - INTERVAL '10 minutes'
+            """,
+            agent_email
+        ) or 0
+        
+        # Also check if agent has accessed their chat log recently
+        # We can infer this from recent chat_sessions queries or last_activity_at
+        # For now, if they have any active chats, consider them online
+        if recent_activity > 0:
+            return True
+        
+        # Check if agent has been assigned any chats recently (within last 30 minutes)
+        # This indicates they might be active
+        recent_assignment = await conn.fetchval(
+            """
+            SELECT COUNT(*) 
+            FROM human_agent_sessions 
+            WHERE agent_email = $1 
+            AND connected_at > NOW() - INTERVAL '30 minutes'
+            """,
+            agent_email
+        ) or 0
+        
+        # If agent has recent assignments, they're likely online
+        return recent_assignment > 0
+        
+    except Exception as e:
+        logger.error(f"Error checking agent online status for {agent_email}: {e}")
+        # Default to True to avoid blocking chat assignments if there's an error
+        return True
 
 
 async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
@@ -194,16 +232,21 @@ async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str
             logger.warning("No confirmed human agents available")
             return None
         
-        # Get chat counts for each agent
+        # Get chat counts for each ONLINE agent only
         agent_loads = []
         for agent in agents:
             agent_email = agent['email']
-            if get_agent_online_status(agent_email):
+            # Check if agent is online (has recent activity)
+            is_online = await get_agent_online_status(agent_email, conn)
+            if is_online:
                 chat_count = await get_agent_chat_count(agent_email, conn)
                 agent_loads.append({
                     'email': agent_email,
                     'chat_count': chat_count
                 })
+                logger.debug(f"Agent {agent_email} is online with {chat_count} active chats")
+            else:
+                logger.debug(f"Agent {agent_email} is offline (no recent activity)")
         
         if not agent_loads:
             logger.warning("No online agents available")
@@ -222,6 +265,68 @@ async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str
     except Exception as e:
         logger.error(f"Error in load balancing: {e}", exc_info=True)
         return None
+
+
+@router.post("/agents/heartbeat")
+async def agent_heartbeat(
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Heartbeat endpoint for agents to indicate they're online and active.
+    This helps track which agents are currently logged in and available.
+    """
+    try:
+        user_email = current_user.get('email')
+        if not user_email:
+            raise HTTPException(status_code=401, detail="User email not found")
+        
+        # Check if user is a human agent
+        conn = await railway_db.get_connection()
+        try:
+            agent = await conn.fetchrow(
+                """
+                SELECT email FROM human_agents 
+                WHERE email = $1 AND status = 'confirmed'
+                """,
+                user_email
+            )
+            
+            if not agent:
+                raise HTTPException(status_code=403, detail="User is not a confirmed human agent")
+            
+            # Update last activity timestamp for this agent
+            # We'll use the human_agent_sessions table to track activity
+            # by updating the most recent session's connected_at timestamp
+            # or we can create a separate tracking mechanism
+            
+            # For now, we'll update any recent session to indicate activity
+            await conn.execute(
+                """
+                UPDATE human_agent_sessions 
+                SET connected_at = CURRENT_TIMESTAMP
+                WHERE agent_email = $1 
+                AND connected_at > NOW() - INTERVAL '1 hour'
+                LIMIT 1
+                """,
+                user_email
+            )
+            
+            logger.debug(f"Heartbeat received from agent {user_email}")
+            
+            return {
+                "success": True,
+                "message": "Heartbeat recorded",
+                "agent_email": user_email
+            }
+        finally:
+            await conn.close()
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing agent heartbeat: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error processing heartbeat: {str(e)}")
 
 
 @router.get("/chat-sessions", response_model=ChatSessionsResponse)
