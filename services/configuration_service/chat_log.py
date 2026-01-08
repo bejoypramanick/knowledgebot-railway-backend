@@ -62,52 +62,53 @@ class SendMessageResponse(BaseModel):
 async def get_agent_online_status(agent_email: str, conn) -> bool:
     """
     Check if an agent is online by checking their last activity timestamp.
-    An agent is considered online if they've accessed the chat log within the last 10 minutes.
+    An agent is considered online if they've accessed the chat log within the last 30 minutes.
+    We check for heartbeat entries (created when agent accesses chat log) and real chat sessions.
     """
     try:
-        # Check if agent has accessed chat log recently (within last 10 minutes)
-        # We track this via the chat_sessions endpoint being called by the agent
-        # For now, we'll check if the agent has any recent activity in their assigned chats
-        # or if they've accessed the chat log endpoint recently
+        # Primary check: Look for heartbeat entry (created when agent accesses chat log)
+        # This is the most reliable indicator that an agent is actively logged in
+        heartbeat_session_id = f"heartbeat_{agent_email}"
+        heartbeat_activity = await conn.fetchval(
+            """
+            SELECT COUNT(*) 
+            FROM human_agent_sessions 
+            WHERE customer_session_id = $1
+            AND connected_at > NOW() - INTERVAL '30 minutes'
+            """,
+            heartbeat_session_id
+        ) or 0
         
-        # Check for recent activity: agent has accessed chat log or has active chats
-        # An agent with active chats is likely online
+        if heartbeat_activity > 0:
+            logger.debug(f"Agent {agent_email} is online (heartbeat found)")
+            return True
+        
+        # Secondary check: Look for any recent activity in assigned chats
+        # This catches agents who have active chats but haven't accessed chat log recently
         recent_activity = await conn.fetchval(
             """
             SELECT COUNT(*) 
             FROM human_agent_sessions 
             WHERE agent_email = $1 
+            AND customer_session_id != $2
             AND status IN ('waiting', 'connected')
-            AND connected_at > NOW() - INTERVAL '10 minutes'
-            """,
-            agent_email
-        ) or 0
-        
-        # Also check if agent has accessed their chat log recently
-        # We can infer this from recent chat_sessions queries or last_activity_at
-        # For now, if they have any active chats, consider them online
-        if recent_activity > 0:
-            return True
-        
-        # Check if agent has been assigned any chats recently (within last 30 minutes)
-        # This indicates they might be active
-        recent_assignment = await conn.fetchval(
-            """
-            SELECT COUNT(*) 
-            FROM human_agent_sessions 
-            WHERE agent_email = $1 
             AND connected_at > NOW() - INTERVAL '30 minutes'
             """,
-            agent_email
+            agent_email, heartbeat_session_id
         ) or 0
         
-        # If agent has recent assignments, they're likely online
-        return recent_assignment > 0
+        if recent_activity > 0:
+            logger.debug(f"Agent {agent_email} is online (recent chat activity found)")
+            return True
+        
+        logger.debug(f"Agent {agent_email} is offline (no recent activity)")
+        return False
         
     except Exception as e:
         logger.error(f"Error checking agent online status for {agent_email}: {e}")
-        # Default to True to avoid blocking chat assignments if there's an error
-        return True
+        # Default to False to avoid assigning chats to offline agents
+        # But log the error so we can debug
+        return False
 
 
 async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
@@ -417,9 +418,39 @@ async def get_assigned_chat_sessions(
             try:
                 from services.configuration_service.main import get_db_connection
                 async with get_db_connection() as heartbeat_conn:
-                    # Update last activity by touching a recent session
-                    # This helps track that the agent is online
-                    # PostgreSQL doesn't support LIMIT in UPDATE, so we use a subquery
+                    # Always ensure heartbeat entry exists and is up-to-date
+                    # This is the primary way we track that an agent is online
+                    dummy_session_id = f"heartbeat_{user_email}"
+                    
+                    # Check if heartbeat entry already exists
+                    existing = await heartbeat_conn.fetchval(
+                        "SELECT id FROM human_agent_sessions WHERE customer_session_id = $1",
+                        dummy_session_id
+                    )
+                    
+                    if existing:
+                        # Update existing heartbeat entry to current timestamp
+                        await heartbeat_conn.execute(
+                            """
+                            UPDATE human_agent_sessions 
+                            SET connected_at = CURRENT_TIMESTAMP, status = 'connected'
+                            WHERE customer_session_id = $1
+                            """,
+                            dummy_session_id
+                        )
+                        logger.debug(f"Updated heartbeat for agent {user_email}")
+                    else:
+                        # Insert new heartbeat entry
+                        await heartbeat_conn.execute(
+                            """
+                            INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
+                            VALUES ($1, $2, 'connected', CURRENT_TIMESTAMP)
+                            """,
+                            dummy_session_id, user_email
+                        )
+                        logger.debug(f"Created heartbeat entry for agent {user_email}")
+                    
+                    # Also update any recent real sessions to show activity
                     await heartbeat_conn.execute(
                         """
                         UPDATE human_agent_sessions 
@@ -427,51 +458,13 @@ async def get_assigned_chat_sessions(
                         WHERE id = (
                             SELECT id FROM human_agent_sessions
                             WHERE agent_email = $1 
+                            AND customer_session_id != $2
                             AND connected_at > NOW() - INTERVAL '1 hour'
                             LIMIT 1
                         )
                         """,
-                        user_email
+                        user_email, dummy_session_id
                     )
-                    
-                    # If no existing session was updated, create a dummy session entry to track activity
-                    # This ensures agents without assigned chats are still marked as online
-                    rows_updated = await heartbeat_conn.fetchval(
-                        "SELECT COUNT(*) FROM human_agent_sessions WHERE agent_email = $1 AND connected_at > NOW() - INTERVAL '1 hour'",
-                        user_email
-                    ) or 0
-                    
-                    if rows_updated == 0:
-                        # Create a dummy session entry to track that agent is online
-                        # Use a special session_id format to indicate this is a heartbeat entry
-                        # Use a consistent session_id per agent (not timestamp-based) so we can update it
-                        dummy_session_id = f"heartbeat_{user_email}"
-                        
-                        # Check if heartbeat entry already exists
-                        existing = await heartbeat_conn.fetchval(
-                            "SELECT id FROM human_agent_sessions WHERE customer_session_id = $1",
-                            dummy_session_id
-                        )
-                        
-                        if existing:
-                            # Update existing heartbeat entry
-                            await heartbeat_conn.execute(
-                                """
-                                UPDATE human_agent_sessions 
-                                SET connected_at = CURRENT_TIMESTAMP, status = 'connected'
-                                WHERE customer_session_id = $1
-                                """,
-                                dummy_session_id
-                            )
-                        else:
-                            # Insert new heartbeat entry
-                            await heartbeat_conn.execute(
-                                """
-                                INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
-                                VALUES ($1, $2, 'connected', CURRENT_TIMESTAMP)
-                                """,
-                                dummy_session_id, user_email
-                            )
                     logger.debug(f"Recorded activity for agent {user_email} via chat-sessions endpoint")
             except Exception as e:
                 logger.warning(f"Could not record heartbeat for {user_email}: {e}")
