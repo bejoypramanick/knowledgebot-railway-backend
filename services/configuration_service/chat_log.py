@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from datetime import datetime
 import uuid
+import json
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -289,7 +290,19 @@ async def get_assigned_chat_sessions(
             sessions = []
             for session_row in sessions_data:
                 session_id = session_row['session_id']
-                metadata = session_row['metadata'] or {}
+                # Parse metadata - it might be a JSON string or already a dict
+                raw_metadata = session_row['metadata']
+                if raw_metadata is None:
+                    metadata = {}
+                elif isinstance(raw_metadata, str):
+                    try:
+                        metadata = json.loads(raw_metadata)
+                    except (json.JSONDecodeError, TypeError):
+                        metadata = {}
+                elif isinstance(raw_metadata, dict):
+                    metadata = raw_metadata
+                else:
+                    metadata = {}
                 
                 # Get messages for this session
                 session_db_id = session_row['id']
