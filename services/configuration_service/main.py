@@ -728,15 +728,10 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                         logger.info(f"Deleting {len(agents_to_delete)} agent(s) that are no longer in the list: {', '.join(agents_to_delete)}")
                         for email in agents_to_delete:
                             await conn.execute(
-                                """
-                                UPDATE human_agents 
-                                SET status = 'removed',
-                                    removed_at = NOW()
-                                WHERE email = $1
-                                """,
+                                "DELETE FROM human_agents WHERE email = $1",
                                 email
                             )
-                            logger.info(f"✅ Marked agent {email} as removed")
+                            logger.info(f"✅ Deleted agent {email} from database")
                     else:
                         logger.info("No agents to delete - all current agents are in the new list")
                 except Exception as e:
