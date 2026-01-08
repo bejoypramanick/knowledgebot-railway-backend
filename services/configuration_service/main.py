@@ -702,8 +702,48 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                     # Don't fail the entire save if email sending fails
                     logger.error(f"❌ Error sending human agent emails: {e}", exc_info=True)
                     logger.error(f"Error type: {type(e).__name__}")
+            
+            # Handle deletion of agents that are no longer in the list
+            if config.human_agents is not None:
+                try:
+                    # Get all current agents from the database
+                    current_agents = await conn.fetch(
+                        "SELECT email FROM human_agents WHERE status IN ('confirmed', 'pending')"
+                    )
+                    
+                    # Create a mapping of lowercase email to original email for comparison
+                    current_emails_map = {agent['email'].lower(): agent['email'] for agent in current_agents}
+                    
+                    # Get the new list of emails (normalize to lowercase for comparison)
+                    new_emails_lower = {email.strip().lower() for email in config.human_agents if email and email.strip()}
+                    
+                    # Find agents to delete (in database but not in new list)
+                    agents_to_delete = []
+                    for lower_email, original_email in current_emails_map.items():
+                        if lower_email not in new_emails_lower:
+                            agents_to_delete.append(original_email)
+                    
+                    # Delete agents that are no longer in the list
+                    if agents_to_delete:
+                        logger.info(f"Deleting {len(agents_to_delete)} agent(s) that are no longer in the list: {', '.join(agents_to_delete)}")
+                        for email in agents_to_delete:
+                            await conn.execute(
+                                """
+                                UPDATE human_agents 
+                                SET status = 'removed',
+                                    removed_at = NOW()
+                                WHERE email = $1
+                                """,
+                                email
+                            )
+                            logger.info(f"✅ Marked agent {email} as removed")
+                    else:
+                        logger.info("No agents to delete - all current agents are in the new list")
+                except Exception as e:
+                    # Don't fail the entire save if deletion fails
+                    logger.error(f"❌ Error deleting removed human agents: {e}", exc_info=True)
             else:
-                logger.info("No human agents provided or list is empty, skipping email sending")
+                logger.info("No human agents provided or list is empty, skipping email sending and deletion")
             
             return {"success": True, "message": "Configuration saved successfully"}
     except Exception as e:
