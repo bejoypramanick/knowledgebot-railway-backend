@@ -233,9 +233,6 @@ async def get_assigned_chat_sessions(
     
     logger.info(f"Using role: {role}, agent_id: {agent_id}")
     
-    if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
     try:
         user_email = current_user.get('email')
         if not user_email:
@@ -249,7 +246,10 @@ async def get_assigned_chat_sessions(
         elif role in ['admin', 'user']:
             agent_id = None  # Don't filter by agent for admins/users
         
-        async with railway_db.acquire() as conn:
+        # Use get_db_connection context manager to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        
+        async with get_db_connection() as conn:
             # Build query based on role
             if role == 'human_agent' and agent_id:
                 # Human agents: only their assigned sessions
@@ -359,15 +359,15 @@ async def get_session_messages(
     Get all messages for a specific chat session.
     Accessible by all authenticated users.
     """
-    if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
     try:
         user_email = current_user.get('email')
         if not user_email:
             raise HTTPException(status_code=403, detail="User email not found in token")
         
-        async with railway_db.acquire() as conn:
+        # Use get_db_connection context manager to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        
+        async with get_db_connection() as conn:
             # All authenticated users can view messages
             
             # Get session database ID
@@ -426,9 +426,6 @@ async def send_agent_message(
     Send a message from a user/agent to a customer.
     All authenticated users can send messages.
     """
-    if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
     try:
         user_email = current_user.get('email')
         if not user_email:
@@ -438,7 +435,10 @@ async def send_agent_message(
         if request.agent_id != user_email:
             raise HTTPException(status_code=403, detail="Agent ID must match authenticated user")
         
-        async with railway_db.acquire() as conn:
+        # Use get_db_connection context manager to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        
+        async with get_db_connection() as conn:
             # All authenticated users can send messages to any session
             
             # Get session database ID
@@ -499,15 +499,15 @@ async def assign_chat_session(
     This endpoint is called when a customer requests to connect to a human agent.
     Only admins can manually assign, otherwise it's automatic.
     """
-    if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
     try:
         user_email = current_user.get('email')
         if not user_email:
             raise HTTPException(status_code=403, detail="User email not found in token")
         
-        async with railway_db.acquire() as conn:
+        # Use get_db_connection context manager to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        
+        async with get_db_connection() as conn:
             # Check if user is admin (for manual assignment)
             is_admin = await conn.fetchval(
                 "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
