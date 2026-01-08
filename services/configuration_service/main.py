@@ -229,34 +229,70 @@ async def get_chatbot_config():
     
     try:
         async with get_db_connection() as conn:
-            # Try to select hil_enabled, but handle gracefully if column doesn't exist
+            # Try to select with hil_enabled, but handle gracefully if column doesn't exist
             # Column must be added manually via migration script
-            row = await conn.fetchrow(
-                """
-                SELECT 
-                    admin_user,
-                    admin_emails,
-                    human_agents,
-                    COALESCE(hil_enabled, TRUE) as hil_enabled,
-                    user_interactions_enabled,
-                    error_alerts_enabled,
-                    feedback_requests_enabled,
-                    response_timeout,
-                    remove_pii,
-                    restrict_config,
-                    response_policy,
-                    backup_logs,
-                    system_prompt,
-                    selected_persona,
-                    llm_token_limit_gemini,
-                    llm_token_used_gemini,
-                    llm_token_limit_deepseek,
-                    llm_token_used_deepseek,
-                    updated_at
-                FROM chatbot_configuration
-                WHERE admin_user = 'GLOBISTAAN'
-                """
-            )
+            try:
+                row = await conn.fetchrow(
+                    """
+                    SELECT 
+                        admin_user,
+                        admin_emails,
+                        human_agents,
+                        hil_enabled,
+                        user_interactions_enabled,
+                        error_alerts_enabled,
+                        feedback_requests_enabled,
+                        response_timeout,
+                        remove_pii,
+                        restrict_config,
+                        response_policy,
+                        backup_logs,
+                        system_prompt,
+                        selected_persona,
+                        llm_token_limit_gemini,
+                        llm_token_used_gemini,
+                        llm_token_limit_deepseek,
+                        llm_token_used_deepseek,
+                        updated_at
+                    FROM chatbot_configuration
+                    WHERE admin_user = 'GLOBISTAAN'
+                    """
+                )
+            except Exception as e:
+                # If hil_enabled column doesn't exist, select without it and default to True
+                if 'hil_enabled' in str(e) or 'column' in str(e).lower():
+                    logger.warning("hil_enabled column not found. Please run migration script to add it. Defaulting to True.")
+                    row = await conn.fetchrow(
+                        """
+                        SELECT 
+                            admin_user,
+                            admin_emails,
+                            human_agents,
+                            user_interactions_enabled,
+                            error_alerts_enabled,
+                            feedback_requests_enabled,
+                            response_timeout,
+                            remove_pii,
+                            restrict_config,
+                            response_policy,
+                            backup_logs,
+                            system_prompt,
+                            selected_persona,
+                            llm_token_limit_gemini,
+                            llm_token_used_gemini,
+                            llm_token_limit_deepseek,
+                            llm_token_used_deepseek,
+                            updated_at
+                        FROM chatbot_configuration
+                        WHERE admin_user = 'GLOBISTAAN'
+                        """
+                    )
+                    # Add hil_enabled with default value
+                    if row:
+                        row = dict(row)
+                        row['hil_enabled'] = True
+                else:
+                    raise
             
             # Fetch human agents from the human_agents table (not from chatbot_configuration.human_agents)
             # Get all confirmed and pending agents
