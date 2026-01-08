@@ -374,13 +374,17 @@ async def get_assigned_chat_sessions(
                 async with get_db_connection() as heartbeat_conn:
                     # Update last activity by touching a recent session
                     # This helps track that the agent is online
+                    # PostgreSQL doesn't support LIMIT in UPDATE, so we use a subquery
                     await heartbeat_conn.execute(
                         """
                         UPDATE human_agent_sessions 
                         SET connected_at = CURRENT_TIMESTAMP
-                        WHERE agent_email = $1 
-                        AND connected_at > NOW() - INTERVAL '1 hour'
-                        LIMIT 1
+                        WHERE id = (
+                            SELECT id FROM human_agent_sessions
+                            WHERE agent_email = $1 
+                            AND connected_at > NOW() - INTERVAL '1 hour'
+                            LIMIT 1
+                        )
                         """,
                         user_email
                     )
