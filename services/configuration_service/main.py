@@ -386,7 +386,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                         admin_email_list.append(admin_item)
                         admin_emails_to_create.append(admin_item)
                 
-                updates.append(f"admin_emails = ${param_index}")
+                updates.append(f"admin_emails = ${param_index}::text[]")
                 values.append(admin_email_list)
                 param_index += 1
                 
@@ -576,9 +576,17 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                 field_names.insert(0, 'admin_user')
                 values.insert(0, admin_user_value)
             
+            # Build VALUES clause with proper casting for array types
+            values_placeholders = []
+            for i, field_name in enumerate(field_names):
+                if field_name in ['admin_emails', 'human_agents']:
+                    values_placeholders.append(f'${i+1}::text[]')
+                else:
+                    values_placeholders.append(f'${i+1}')
+            
             query = f"""
                 INSERT INTO chatbot_configuration ({', '.join(field_names)})
-                VALUES ({', '.join([f'${i+1}' for i in range(len(field_names))])})
+                VALUES ({', '.join(values_placeholders)})
                 ON CONFLICT (admin_user) 
                 DO UPDATE SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
             """
