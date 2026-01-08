@@ -1042,6 +1042,11 @@ async def proxy_admin_routes(request: Request, path: str):
             method = request.method
             url = f"{CONFIGURATION_SERVICE_URL}/api/v1/admin/{path}"
             
+            # Preserve query parameters from the original request
+            query_string = str(request.url.query)
+            if query_string:
+                url += f"?{query_string}"
+            
             # Get request body if it's a POST/PUT/PATCH
             body = None
             if method in ["POST", "PUT", "PATCH"]:
