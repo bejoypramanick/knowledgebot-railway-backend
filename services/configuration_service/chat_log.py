@@ -399,12 +399,17 @@ async def get_assigned_chat_sessions(
     if role not in ['admin', 'human_agent', 'user']:
         raise HTTPException(status_code=422, detail=f"Invalid role: {role}. Must be one of: admin, human_agent, user")
     
-    logger.info(f"Using role: {role}, agent_id: {agent_id}")
-    
     try:
         user_email = current_user.get('email')
         if not user_email:
             raise HTTPException(status_code=403, detail="User email not found in token")
+        
+        # For human agents, we determine the agent from the authenticated user's email (from token)
+        # The agent_id query parameter is ignored for security - we use user_email instead
+        if role == 'human_agent':
+            logger.info(f"Human agent {user_email} requesting their assigned chats (ignoring agent_id query parameter for security)")
+        elif role in ['admin', 'user']:
+            logger.info(f"{role.capitalize()} {user_email} requesting chat sessions (agent_id query param: {agent_id})")
         
         # Record heartbeat for human agents when they access chat log
         # This helps track which agents are online and available
@@ -473,11 +478,11 @@ async def get_assigned_chat_sessions(
         
         # For human agents, only return their own sessions
         # Use the authenticated user's email to ensure they can only see their own chats
+        # SECURITY: Always use user_email from token, never trust agent_id query parameter
         if role == 'human_agent':
             # Always use the authenticated user's email for filtering (security)
             # Ignore agent_id parameter to prevent viewing other agents' chats
             agent_id = user_email
-            logger.info(f"Human agent {user_email} requesting their assigned chats")
         # For admins and regular users, show all sessions
         elif role in ['admin', 'user']:
             agent_id = None  # Don't filter by agent for admins/users
