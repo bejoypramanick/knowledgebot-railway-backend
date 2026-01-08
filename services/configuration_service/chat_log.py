@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["chat-log"])
 
+# Public router for chat endpoints (no authentication required)
+public_chat_router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
+
 
 class ChatMessageResponse(BaseModel):
     id: str
@@ -139,15 +142,32 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
 async def get_agent_chat_count(agent_email: str, conn) -> int:
     """Get the number of active chats assigned to an agent."""
     try:
-        count = await conn.fetchval(
+        # Count from both human_agent_sessions and chat_sessions metadata
+        # This ensures we count all active chats regardless of where they're stored
+        count1 = await conn.fetchval(
             """
             SELECT COUNT(*) 
             FROM human_agent_sessions 
             WHERE agent_email = $1 AND status IN ('waiting', 'connected')
             """,
             agent_email
-        )
-        return count or 0
+        ) or 0
+        
+        # Also count from chat_sessions where agent is assigned in metadata
+        count2 = await conn.fetchval(
+            """
+            SELECT COUNT(*) 
+            FROM chat_sessions 
+            WHERE is_active = TRUE 
+            AND (metadata->>'assigned_agent') = $1
+            AND (metadata->>'status') IN ('active', 'waiting', 'connected')
+            """,
+            agent_email
+        ) or 0
+        
+        # Return the maximum count (to avoid double counting if both exist)
+        # In practice, both should be in sync, but we take max to be safe
+        return max(count1, count2)
     except Exception as e:
         logger.error(f"Error getting agent chat count: {e}")
         return 0
@@ -545,4 +565,56 @@ async def assign_chat_session(
     except Exception as e:
         logger.error(f"Error assigning chat session: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error assigning chat: {str(e)}")
+
+
+@public_chat_router.post("/{session_id}/request-human-agent", response_model=dict)
+async def request_human_agent(
+    session_id: str,
+    request: Request
+):
+    """
+    Request human agent connection for a chat session.
+    This endpoint is called from the chatbot widget when a customer requests to connect to a human agent.
+    It performs load balancing to assign the chat to the agent with the least number of active chats.
+    No authentication required - called from public chatbot widget.
+    """
+    try:
+        # Use get_db_connection context manager to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        
+        async with get_db_connection() as conn:
+            # Check if HIL is enabled
+            config = await conn.fetchrow(
+                "SELECT hil_enabled FROM chatbot_config ORDER BY updated_at DESC LIMIT 1"
+            )
+            
+            if not config or not config.get('hil_enabled'):
+                raise HTTPException(
+                    status_code=503, 
+                    detail="Human agent support is currently disabled"
+                )
+            
+            # Use load balancing to assign chat to agent with least active chats
+            assigned_agent = await assign_chat_with_load_balancing(session_id, conn)
+            
+            if not assigned_agent:
+                raise HTTPException(
+                    status_code=503, 
+                    detail="No available agents to assign chat. Please try again later."
+                )
+            
+            logger.info(f"Chat session {session_id} assigned to agent {assigned_agent} via request-human-agent endpoint")
+            
+            return {
+                "success": True,
+                "message": f"Chat assigned to agent {assigned_agent}",
+                "assigned_agent": assigned_agent,
+                "session_id": session_id
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error requesting human agent: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error requesting human agent: {str(e)}")
 
