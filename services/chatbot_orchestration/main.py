@@ -565,6 +565,12 @@ async def search_internet(
         return f"Error performing internet search: {str(e)}"
 
 
+# Define ChatSessionDeps before it's used in tools
+@dataclass
+class ChatSessionDeps:
+    """Dependencies for chat session."""
+    session_id: str
+
 # Tool for requesting human agent connection
 async def request_human_agent_connection(
     deps: ChatSessionDeps,
@@ -894,11 +900,6 @@ When answering:
     
     return base_prompt
 
-
-@dataclass
-class ChatSessionDeps:
-    """Dependencies for chat session."""
-    session_id: str
 
 def create_session_dependency(session_id: str) -> ChatSessionDeps:
     """Create session dependency instance."""
