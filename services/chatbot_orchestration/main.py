@@ -565,6 +565,63 @@ async def search_internet(
         return f"Error performing internet search: {str(e)}"
 
 
+# Tool for requesting human agent connection
+async def request_human_agent_connection(
+    deps: ChatSessionDeps,
+    reason: Annotated[str, "Brief reason why the user wants to connect to a human agent (optional)"]
+) -> str:
+    """
+    Request to connect the user to a human agent for personalized assistance.
+    
+    Use this tool when:
+    - The user explicitly asks to speak with a human, real person, or agent
+    - The user requests human support or assistance
+    - The user is frustrated and needs human help
+    - The query cannot be answered by the knowledge base or requires human judgment
+    
+    This will assign the chat to an available human agent and the chat will appear in their chat log.
+    """
+    session_id = deps.session_id
+    
+    try:
+        import httpx
+        import os
+        
+        # Get configuration service URL from environment
+        config_service_url = os.getenv(
+            'CONFIGURATION_SERVICE_URL',
+            'https://configuration-service-production.up.railway.app'
+        )
+        
+        # Call the request-human-agent endpoint
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{config_service_url}/api/v1/chat/{session_id}/request-human-agent",
+                json={}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                assigned_agent = result.get('assigned_agent', 'an agent')
+                logger.info(f"Chat {session_id} assigned to human agent {assigned_agent}")
+                return f"Successfully connected you to a human agent ({assigned_agent}). They will join the conversation shortly. The chat has been opened in their chat log."
+            elif response.status_code == 503:
+                error_detail = response.json().get('detail', 'No agents available')
+                logger.warning(f"Human agent request failed: {error_detail}")
+                return f"I'm sorry, but {error_detail.lower()}. Please try again later or continue chatting with me."
+            else:
+                error_detail = response.json().get('detail', 'Failed to connect to human agent')
+                logger.error(f"Human agent request failed with status {response.status_code}: {error_detail}")
+                return f"I encountered an error while trying to connect you to a human agent: {error_detail}. Please try again later."
+                
+    except httpx.TimeoutException:
+        logger.error("Timeout while requesting human agent connection")
+        return "The request to connect to a human agent timed out. Please try again."
+    except Exception as e:
+        logger.error(f"Error requesting human agent connection: {e}", exc_info=True)
+        return f"I encountered an error while trying to connect you to a human agent. Please try again later."
+
+
 # Tool for querying Gemini FileSearch (RAG)
 async def search_knowledge_base(query: Annotated[str, "The search query to find relevant information in uploaded documents"]) -> List[SearchResult]:
     """
@@ -790,6 +847,13 @@ AVAILABLE DATA SOURCES AND WHEN TO USE THEM:
    - Use for general knowledge questions not in the knowledge base
    - Use as a last resort after checking other sources
 
+5. **request_human_agent_connection** (Human Agent Support):
+   - Use when the user explicitly asks to speak with a human, real person, or agent
+   - Use when the user requests human support or assistance
+   - Use when the user is frustrated and needs human help
+   - Use when the query requires human judgment or cannot be answered by automated systems
+   - This will connect the user to an available human agent and open the chat in their chat log
+
 ROUTING STRATEGY & PRIORITY:
 You MUST follow this strictly to find the best answer:
 1. **Gemini RAG (search_knowledge_base)**: ALWAYS try this first for any question about documents, files, or specific content.
@@ -800,10 +864,11 @@ You MUST follow this strictly to find the best answer:
 
 When answering:
 1. Intelligently select the appropriate tool(s) based on this priority.
-2. Combine information from multiple sources if needed.
-3. Provide accurate, helpful answers.
-4. Clearly indicate when information is not available.
-5. Mention which data source provided the information.
+2. If the user wants to connect to a human agent, use request_human_agent_connection tool.
+3. Combine information from multiple sources if needed.
+4. Provide accurate, helpful answers.
+5. Clearly indicate when information is not available.
+6. Mention which data source provided the information.
 """
     
     # Add response policy instructions
@@ -850,6 +915,9 @@ def create_agent(file_context: Optional[List[SearchResult]] = None, custom_syste
 
     # Build list of available tools
     tools = [search_knowledge_base]
+    
+    # Add human agent connection tool (requires session_id from deps)
+    tools.append(request_human_agent_connection)
     
     # Add PostgreSQL tool if available
     if railway_db:
