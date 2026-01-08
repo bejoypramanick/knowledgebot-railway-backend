@@ -583,12 +583,15 @@ async def request_human_agent(
         from services.configuration_service.main import get_db_connection
         
         async with get_db_connection() as conn:
-            # Check if HIL is enabled
+            # Check if HIL is enabled (default to true if not set)
             config = await conn.fetchrow(
-                "SELECT hil_enabled FROM chatbot_config ORDER BY updated_at DESC LIMIT 1"
+                "SELECT hil_enabled FROM chatbot_configuration WHERE admin_user = 'GLOBISTAAN' LIMIT 1"
             )
             
-            if not config or not config.get('hil_enabled'):
+            # Default to enabled if not set (hil_enabled can be NULL, which means enabled by default)
+            hil_enabled = config.get('hil_enabled') if config and config.get('hil_enabled') is not None else True
+            
+            if not hil_enabled:
                 raise HTTPException(
                     status_code=503, 
                     detail="Human agent support is currently disabled"
