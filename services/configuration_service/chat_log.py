@@ -298,19 +298,40 @@ async def agent_heartbeat(
             # Update last activity timestamp for this agent
             # We'll use the human_agent_sessions table to track activity
             # by updating the most recent session's connected_at timestamp
-            # or we can create a separate tracking mechanism
-            
-            # For now, we'll update any recent session to indicate activity
+            # PostgreSQL doesn't support LIMIT in UPDATE, so we use a subquery
             await conn.execute(
                 """
                 UPDATE human_agent_sessions 
                 SET connected_at = CURRENT_TIMESTAMP
-                WHERE agent_email = $1 
-                AND connected_at > NOW() - INTERVAL '1 hour'
-                LIMIT 1
+                WHERE id = (
+                    SELECT id FROM human_agent_sessions
+                    WHERE agent_email = $1 
+                    AND connected_at > NOW() - INTERVAL '1 hour'
+                    LIMIT 1
+                )
                 """,
                 user_email
             )
+            
+            # If no existing session was updated, create a dummy session entry to track activity
+            # This ensures agents without assigned chats are still marked as online
+            rows_updated = await conn.fetchval(
+                "SELECT COUNT(*) FROM human_agent_sessions WHERE agent_email = $1 AND connected_at > NOW() - INTERVAL '1 hour'",
+                user_email
+            ) or 0
+            
+            if rows_updated == 0:
+                # Create a dummy session entry to track that agent is online
+                # Use a special session_id format to indicate this is a heartbeat entry
+                dummy_session_id = f"heartbeat_{user_email}_{int(datetime.now().timestamp())}"
+                await conn.execute(
+                    """
+                    INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
+                    VALUES ($1, $2, 'connected', CURRENT_TIMESTAMP)
+                    ON CONFLICT (customer_session_id) DO UPDATE SET connected_at = CURRENT_TIMESTAMP
+                    """,
+                    dummy_session_id, user_email
+                )
             
             logger.debug(f"Heartbeat received from agent {user_email}")
             
@@ -388,6 +409,26 @@ async def get_assigned_chat_sessions(
                         """,
                         user_email
                     )
+                    
+                    # If no existing session was updated, create a dummy session entry to track activity
+                    # This ensures agents without assigned chats are still marked as online
+                    rows_updated = await heartbeat_conn.fetchval(
+                        "SELECT COUNT(*) FROM human_agent_sessions WHERE agent_email = $1 AND connected_at > NOW() - INTERVAL '1 hour'",
+                        user_email
+                    ) or 0
+                    
+                    if rows_updated == 0:
+                        # Create a dummy session entry to track that agent is online
+                        # Use a special session_id format to indicate this is a heartbeat entry
+                        dummy_session_id = f"heartbeat_{user_email}_{int(datetime.now().timestamp())}"
+                        await heartbeat_conn.execute(
+                            """
+                            INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
+                            VALUES ($1, $2, 'connected', CURRENT_TIMESTAMP)
+                            ON CONFLICT (customer_session_id) DO UPDATE SET connected_at = CURRENT_TIMESTAMP
+                            """,
+                            dummy_session_id, user_email
+                        )
                     logger.debug(f"Recorded activity for agent {user_email} via chat-sessions endpoint")
             except Exception as e:
                 logger.warning(f"Could not record heartbeat for {user_email}: {e}")
