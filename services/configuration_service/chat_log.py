@@ -204,8 +204,8 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
             metadata_dict = {"assigned_agent": agent_email, "status": "active"}
             session_db_id = await conn.fetchval(
                 """
-                INSERT INTO chat_sessions (session_id, is_active, metadata)
-                VALUES ($1, TRUE, $2::jsonb)
+                INSERT INTO chat_sessions (session_id, is_active, metadata, last_activity_at, created_at)
+                VALUES ($1, TRUE, $2::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 RETURNING id
                 """,
                 session_id,
@@ -213,12 +213,13 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
             )
         else:
             session_db_id = session_row['id']
-            # Update existing session
+            # Update existing session - ensure last_activity_at is set
             metadata_dict = {"assigned_agent": agent_email, "status": "active"}
             await conn.execute(
                 """
                 UPDATE chat_sessions 
                 SET metadata = COALESCE(metadata, '{}'::jsonb) || $1::jsonb,
+                    last_activity_at = COALESCE(last_activity_at, CURRENT_TIMESTAMP),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = $2
                 """,
@@ -252,6 +253,16 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
                 """,
                 session_id, agent_email
             )
+        
+        # Ensure last_activity_at is updated so the session appears at the top of the list
+        await conn.execute(
+            """
+            UPDATE chat_sessions 
+            SET last_activity_at = CURRENT_TIMESTAMP
+            WHERE id = $1 AND (last_activity_at IS NULL OR last_activity_at < CURRENT_TIMESTAMP - INTERVAL '1 minute')
+            """,
+            session_db_id
+        )
         
         logger.info(f"Chat session {session_id} assigned to agent {agent_email} - will appear in chat log")
         
@@ -573,14 +584,14 @@ async def get_assigned_chat_sessions(
                     SELECT DISTINCT
                         cs.id,
                         cs.session_id,
-                        cs.last_activity_at,
+                        COALESCE(cs.last_activity_at, cs.created_at, cs.updated_at, CURRENT_TIMESTAMP) as last_activity_at,
                         cs.metadata,
                         cs.is_active
                     FROM chat_sessions cs
                     INNER JOIN human_agent_sessions has ON cs.session_id = has.customer_session_id
                     WHERE LOWER(has.agent_email) = LOWER($1)
                     AND has.status IN ('waiting', 'connected')
-                    ORDER BY cs.last_activity_at DESC
+                    ORDER BY COALESCE(cs.last_activity_at, cs.created_at, cs.updated_at, CURRENT_TIMESTAMP) DESC
                     """,
                     agent_id
                 )
