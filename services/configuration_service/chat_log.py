@@ -11,6 +11,7 @@ from pathlib import Path
 from datetime import datetime
 import uuid
 import json
+import os
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -72,7 +73,7 @@ def get_agent_online_status(agent_email: str) -> bool:
 
 
 async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
-    """Assign a chat session to a human agent."""
+    """Assign a chat session to a human agent and send notification."""
     try:
         # Update chat_sessions table to assign agent
         # First, get the chat_sessions id from session_id
@@ -119,7 +120,7 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
             await conn.execute(
                 """
                 UPDATE human_agent_sessions
-                SET agent_email = $1, status = 'connected', connected_at = CURRENT_TIMESTAMP
+                SET agent_email = $1, status = 'waiting', connected_at = CURRENT_TIMESTAMP
                 WHERE customer_session_id = $2
                 """,
                 agent_email, session_id
@@ -128,12 +129,13 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
             await conn.execute(
                 """
                 INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
-                VALUES ($1, $2, 'connected', CURRENT_TIMESTAMP)
+                VALUES ($1, $2, 'waiting', CURRENT_TIMESTAMP)
                 """,
                 session_id, agent_email
             )
         
-        logger.info(f"Chat session {session_id} assigned to agent {agent_email}")
+        logger.info(f"Chat session {session_id} assigned to agent {agent_email} - will appear in chat log")
+        
     except Exception as e:
         logger.error(f"Error assigning chat to agent: {e}", exc_info=True)
         raise
@@ -260,9 +262,12 @@ async def get_assigned_chat_sessions(
             raise HTTPException(status_code=403, detail="User email not found in token")
         
         # For human agents, only return their own sessions
+        # Use the authenticated user's email to ensure they can only see their own chats
         if role == 'human_agent':
-            if not agent_id or agent_id != user_email:
-                raise HTTPException(status_code=403, detail="You can only view your own assigned chats")
+            # Always use the authenticated user's email for filtering (security)
+            # Ignore agent_id parameter to prevent viewing other agents' chats
+            agent_id = user_email
+            logger.info(f"Human agent {user_email} requesting their assigned chats")
         # For admins and regular users, show all sessions
         elif role in ['admin', 'user']:
             agent_id = None  # Don't filter by agent for admins/users
@@ -274,6 +279,7 @@ async def get_assigned_chat_sessions(
             # Build query based on role
             if role == 'human_agent' and agent_id:
                 # Human agents: only their assigned sessions
+                # Filter by agent_email in human_agent_sessions table to ensure they only see their chats
                 sessions_data = await conn.fetch(
                     """
                     SELECT DISTINCT
@@ -283,13 +289,14 @@ async def get_assigned_chat_sessions(
                         cs.metadata,
                         cs.is_active
                     FROM chat_sessions cs
-                    LEFT JOIN human_agent_sessions has ON cs.session_id = has.customer_session_id
-                    WHERE has.agent_email = $1 
+                    INNER JOIN human_agent_sessions has ON cs.session_id = has.customer_session_id
+                    WHERE LOWER(has.agent_email) = LOWER($1)
                     AND has.status IN ('waiting', 'connected')
                     ORDER BY cs.last_activity_at DESC
                     """,
                     agent_id
                 )
+                logger.info(f"Found {len(sessions_data)} sessions for human agent {agent_id}")
             else:
                 # Admins and users: all sessions
                 sessions_data = await conn.fetch(
