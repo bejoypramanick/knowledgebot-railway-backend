@@ -323,15 +323,34 @@ async def agent_heartbeat(
             if rows_updated == 0:
                 # Create a dummy session entry to track that agent is online
                 # Use a special session_id format to indicate this is a heartbeat entry
-                dummy_session_id = f"heartbeat_{user_email}_{int(datetime.now().timestamp())}"
-                await conn.execute(
-                    """
-                    INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
-                    VALUES ($1, $2, 'connected', CURRENT_TIMESTAMP)
-                    ON CONFLICT (customer_session_id) DO UPDATE SET connected_at = CURRENT_TIMESTAMP
-                    """,
-                    dummy_session_id, user_email
+                # Use a consistent session_id per agent (not timestamp-based) so we can update it
+                dummy_session_id = f"heartbeat_{user_email}"
+                
+                # Check if heartbeat entry already exists
+                existing = await conn.fetchval(
+                    "SELECT id FROM human_agent_sessions WHERE customer_session_id = $1",
+                    dummy_session_id
                 )
+                
+                if existing:
+                    # Update existing heartbeat entry
+                    await conn.execute(
+                        """
+                        UPDATE human_agent_sessions 
+                        SET connected_at = CURRENT_TIMESTAMP, status = 'connected'
+                        WHERE customer_session_id = $1
+                        """,
+                        dummy_session_id
+                    )
+                else:
+                    # Insert new heartbeat entry
+                    await conn.execute(
+                        """
+                        INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
+                        VALUES ($1, $2, 'connected', CURRENT_TIMESTAMP)
+                        """,
+                        dummy_session_id, user_email
+                    )
             
             logger.debug(f"Heartbeat received from agent {user_email}")
             
