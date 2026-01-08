@@ -488,7 +488,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                         # Don't fail the whole request if admin creation fails
             
             if config.human_agents is not None:
-                updates.append(f"human_agents = ${param_index}")
+                updates.append(f"human_agents = ${param_index}::text[]")
                 values.append(config.human_agents)
                 param_index += 1
             
