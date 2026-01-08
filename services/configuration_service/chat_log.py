@@ -420,15 +420,34 @@ async def get_assigned_chat_sessions(
                     if rows_updated == 0:
                         # Create a dummy session entry to track that agent is online
                         # Use a special session_id format to indicate this is a heartbeat entry
-                        dummy_session_id = f"heartbeat_{user_email}_{int(datetime.now().timestamp())}"
-                        await heartbeat_conn.execute(
-                            """
-                            INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
-                            VALUES ($1, $2, 'connected', CURRENT_TIMESTAMP)
-                            ON CONFLICT (customer_session_id) DO UPDATE SET connected_at = CURRENT_TIMESTAMP
-                            """,
-                            dummy_session_id, user_email
+                        # Use a consistent session_id per agent (not timestamp-based) so we can update it
+                        dummy_session_id = f"heartbeat_{user_email}"
+                        
+                        # Check if heartbeat entry already exists
+                        existing = await heartbeat_conn.fetchval(
+                            "SELECT id FROM human_agent_sessions WHERE customer_session_id = $1",
+                            dummy_session_id
                         )
+                        
+                        if existing:
+                            # Update existing heartbeat entry
+                            await heartbeat_conn.execute(
+                                """
+                                UPDATE human_agent_sessions 
+                                SET connected_at = CURRENT_TIMESTAMP, status = 'connected'
+                                WHERE customer_session_id = $1
+                                """,
+                                dummy_session_id
+                            )
+                        else:
+                            # Insert new heartbeat entry
+                            await heartbeat_conn.execute(
+                                """
+                                INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
+                                VALUES ($1, $2, 'connected', CURRENT_TIMESTAMP)
+                                """,
+                                dummy_session_id, user_email
+                            )
                     logger.debug(f"Recorded activity for agent {user_email} via chat-sessions endpoint")
             except Exception as e:
                 logger.warning(f"Could not record heartbeat for {user_email}: {e}")
