@@ -123,6 +123,7 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
         
         if not session_row:
             # Create a new session if it doesn't exist
+            metadata_dict = {"assigned_agent": agent_email, "status": "active"}
             session_db_id = await conn.fetchval(
                 """
                 INSERT INTO chat_sessions (session_id, is_active, metadata)
@@ -130,11 +131,12 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
                 RETURNING id
                 """,
                 session_id,
-                {"assigned_agent": agent_email, "status": "active"}
+                json.dumps(metadata_dict)
             )
         else:
             session_db_id = session_row['id']
             # Update existing session
+            metadata_dict = {"assigned_agent": agent_email, "status": "active"}
             await conn.execute(
                 """
                 UPDATE chat_sessions 
@@ -142,7 +144,7 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = $2
                 """,
-                {"assigned_agent": agent_email, "status": "active"},
+                json.dumps(metadata_dict),
                 session_db_id
             )
         
