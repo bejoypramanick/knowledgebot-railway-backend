@@ -203,8 +203,8 @@ async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str
 
 @router.get("/chat-sessions", response_model=ChatSessionsResponse)
 async def get_assigned_chat_sessions(
-    agent_id: Optional[str] = Query(None, description="Agent email or ID (optional for admins/users)"),
-    role: str = Query(..., description="User role"),
+    role: str = Query(..., alias="role", description="User role: admin, human_agent, or user"),
+    agent_id: Optional[str] = Query(None, alias="agent_id", description="Agent email or ID (optional for admins/users)"),
     current_user: dict = Depends(get_current_user)
 ):
     """
