@@ -1363,24 +1363,41 @@ async def proxy_customer_websocket(websocket: WebSocket, session_id: str):
             async def forward_to_upstream():
                 try:
                     while True:
-                        data = await websocket.receive_text()
-                        await upstream_ws.send(data)
+                        # Handle both text and JSON messages
+                        try:
+                            data = await websocket.receive_text()
+                            await upstream_ws.send(data)
+                        except:
+                            # Try binary if text fails
+                            try:
+                                data = await websocket.receive_bytes()
+                                await upstream_ws.send(data)
+                            except:
+                                break
                 except (WebSocketDisconnect, websockets.exceptions.ConnectionClosed):
                     try:
                         await upstream_ws.close()
                     except:
                         pass
+                except Exception as e:
+                    logger.error(f"Error forwarding to upstream: {e}")
             
             async def forward_from_upstream():
                 try:
                     while True:
                         data = await upstream_ws.recv()
-                        await websocket.send_text(data)
+                        # Send as text if string, otherwise as bytes
+                        if isinstance(data, str):
+                            await websocket.send_text(data)
+                        else:
+                            await websocket.send_bytes(data)
                 except (websockets.exceptions.ConnectionClosed, WebSocketDisconnect):
                     try:
                         await websocket.close()
                     except:
                         pass
+                except Exception as e:
+                    logger.error(f"Error forwarding from upstream: {e}")
             
             # Run both forwarding tasks concurrently
             await asyncio.gather(
@@ -1420,24 +1437,41 @@ async def proxy_agent_websocket(websocket: WebSocket, session_id: str):
             async def forward_to_upstream():
                 try:
                     while True:
-                        data = await websocket.receive_text()
-                        await upstream_ws.send(data)
+                        # Handle both text and JSON messages
+                        try:
+                            data = await websocket.receive_text()
+                            await upstream_ws.send(data)
+                        except:
+                            # Try binary if text fails
+                            try:
+                                data = await websocket.receive_bytes()
+                                await upstream_ws.send(data)
+                            except:
+                                break
                 except (WebSocketDisconnect, websockets.exceptions.ConnectionClosed):
                     try:
                         await upstream_ws.close()
                     except:
                         pass
+                except Exception as e:
+                    logger.error(f"Error forwarding to upstream: {e}")
             
             async def forward_from_upstream():
                 try:
                     while True:
                         data = await upstream_ws.recv()
-                        await websocket.send_text(data)
+                        # Send as text if string, otherwise as bytes
+                        if isinstance(data, str):
+                            await websocket.send_text(data)
+                        else:
+                            await websocket.send_bytes(data)
                 except (websockets.exceptions.ConnectionClosed, WebSocketDisconnect):
                     try:
                         await websocket.close()
                     except:
                         pass
+                except Exception as e:
+                    logger.error(f"Error forwarding from upstream: {e}")
             
             # Run both forwarding tasks concurrently
             await asyncio.gather(
