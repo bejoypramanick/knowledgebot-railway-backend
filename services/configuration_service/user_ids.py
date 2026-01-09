@@ -54,7 +54,9 @@ async def get_or_create_unique_id(
     If email is None (anonymous user), creates a temporary ID.
     """
     try:
-        async with railway_db.acquire() as conn:
+        # Use get_db_connection to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             role = request.role.lower()
             if role not in ['customer', 'agent', 'admin']:
                 raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")
@@ -140,7 +142,9 @@ async def get_unique_id(
     Returns 404 if not found.
     """
     try:
-        async with railway_db.acquire() as conn:
+        # Use get_db_connection to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             role = role.lower()
             if role not in ['customer', 'agent', 'admin']:
                 raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")

@@ -59,7 +59,8 @@ async def create_notification(
     If user_email is not provided, uses the current authenticated user's email.
     """
     try:
-        async with railway_db.acquire() as conn:
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             # Use provided email or current user's email
             target_email = user_email or current_user.get('email')
             if not target_email:
@@ -125,7 +126,8 @@ async def get_notifications(
     Get notifications for a user.
     """
     try:
-        async with railway_db.acquire() as conn:
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             target_email = user_email or current_user.get('email')
             if not target_email:
                 raise HTTPException(status_code=400, detail="User email is required")
@@ -197,7 +199,8 @@ async def mark_notifications_read(
     Mark one or more notifications as read.
     """
     try:
-        async with railway_db.acquire() as conn:
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             target_email = user_email or current_user.get('email')
             if not target_email:
                 raise HTTPException(status_code=400, detail="User email is required")
@@ -236,7 +239,8 @@ async def mark_all_notifications_read(
     Mark all notifications as read for a user.
     """
     try:
-        async with railway_db.acquire() as conn:
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             target_email = user_email or current_user.get('email')
             if not target_email:
                 raise HTTPException(status_code=400, detail="User email is required")
@@ -275,7 +279,8 @@ async def delete_notification(
     Delete a notification.
     """
     try:
-        async with railway_db.acquire() as conn:
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             target_email = user_email or current_user.get('email')
             if not target_email:
                 raise HTTPException(status_code=400, detail="User email is required")

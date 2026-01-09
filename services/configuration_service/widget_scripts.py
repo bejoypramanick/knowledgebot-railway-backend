@@ -283,7 +283,8 @@ async def generate_embed_script(
     Generate widget embed script and store it for version control and analytics.
     """
     try:
-        async with railway_db.acquire() as conn:
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             # Generate script based on embed type
             if request.config.embedType == 'iframe':
                 script_content = generate_iframe_script(request.config)
@@ -369,7 +370,8 @@ async def get_embed_script(
 ):
     """Get widget script by ID."""
     try:
-        async with railway_db.acquire() as conn:
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             script = await conn.fetchrow(
                 """
                 SELECT script_content, version, config_id, install_count, last_used_at
@@ -409,7 +411,8 @@ async def track_script_install(
 ):
     """Track widget script installation (public endpoint, no auth required)."""
     try:
-        async with railway_db.acquire() as conn:
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
             await conn.execute(
                 """
                 UPDATE widget_scripts 
