@@ -1186,7 +1186,166 @@ async def proxy_auth_routes(request: Request, path: str):
         logger.error(f"Unexpected error in auth proxy: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
+# Users API endpoints - proxy to configuration service
+@app.api_route("/api/v1/users/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_users_routes(request: Request, path: str):
+    """Proxy users API requests to configuration service (unique-id, etc.)"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            method = request.method
+            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/users/{path}"
+            
+            # Preserve query parameters from the original request
+            query_string = str(request.url.query)
+            if query_string:
+                url += f"?{query_string}"
+            
+            # Get request body if it's a POST/PUT/PATCH
+            body = None
+            if method in ["POST", "PUT", "PATCH"]:
+                body = await request.body()
+            
+            # Forward headers (excluding host)
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.request(
+                method=method,
+                url=url,
+                content=body,
+                headers=headers
+            )
+            
+            # Return JSON if content-type is JSON, otherwise return raw response
+            if "application/json" in response.headers.get("content-type", ""):
+                return JSONResponse(
+                    content=response.json(),
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
+                )
+            else:
+                return JSONResponse(
+                    content=response.text,
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
+                )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Configuration service timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Error proxying users route to configuration service: {e}")
+        raise HTTPException(status_code=503, detail=f"Configuration service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in users proxy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+# Widget API endpoints - proxy to configuration service
+@app.api_route("/api/v1/widget/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_widget_routes(request: Request, path: str):
+    """Proxy widget API requests to configuration service (embed-script, etc.)"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            method = request.method
+            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/widget/{path}"
+            
+            # Preserve query parameters from the original request
+            query_string = str(request.url.query)
+            if query_string:
+                url += f"?{query_string}"
+            
+            # Get request body if it's a POST/PUT/PATCH
+            body = None
+            if method in ["POST", "PUT", "PATCH"]:
+                body = await request.body()
+            
+            # Forward headers (excluding host)
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.request(
+                method=method,
+                url=url,
+                content=body,
+                headers=headers
+            )
+            
+            # Return JSON if content-type is JSON, otherwise return raw response
+            if "application/json" in response.headers.get("content-type", ""):
+                return JSONResponse(
+                    content=response.json(),
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
+                )
+            else:
+                return JSONResponse(
+                    content=response.text,
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
+                )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Configuration service timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Error proxying widget route to configuration service: {e}")
+        raise HTTPException(status_code=503, detail=f"Configuration service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in widget proxy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+# Notifications API endpoints - proxy to configuration service
+@app.api_route("/api/v1/notifications/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_notifications_routes(request: Request, path: str):
+    """Proxy notifications API requests to configuration service"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            method = request.method
+            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/notifications/{path}"
+            
+            # Preserve query parameters from the original request
+            query_string = str(request.url.query)
+            if query_string:
+                url += f"?{query_string}"
+            
+            # Get request body if it's a POST/PUT/PATCH
+            body = None
+            if method in ["POST", "PUT", "PATCH"]:
+                body = await request.body()
+            
+            # Forward headers (excluding host)
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.request(
+                method=method,
+                url=url,
+                content=body,
+                headers=headers
+            )
+            
+            # Return JSON if content-type is JSON, otherwise return raw response
+            if "application/json" in response.headers.get("content-type", ""):
+                return JSONResponse(
+                    content=response.json(),
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
+                )
+            else:
+                return JSONResponse(
+                    content=response.text,
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
+                )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Configuration service timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Error proxying notifications route to configuration service: {e}")
+        raise HTTPException(status_code=503, detail=f"Configuration service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in notifications proxy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
 logger.info("✅ Configuration API proxy endpoints configured")
 logger.info("✅ Admin API proxy endpoints configured")
 logger.info("✅ Auth API proxy endpoints configured")
 logger.info("✅ Chat API proxy endpoints configured")
+logger.info("✅ Users API proxy endpoints configured")
+logger.info("✅ Widget API proxy endpoints configured")
+logger.info("✅ Notifications API proxy endpoints configured")
