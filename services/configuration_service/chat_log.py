@@ -957,7 +957,20 @@ async def update_chat_session(
                 raise HTTPException(status_code=404, detail="Chat session not found")
             
             session_db_id = session_row['id']
-            current_metadata = session_row['metadata'] or {}
+            
+            # Parse metadata - it might be a JSON string or already a dict
+            raw_metadata = session_row['metadata']
+            if raw_metadata is None:
+                current_metadata = {}
+            elif isinstance(raw_metadata, str):
+                try:
+                    current_metadata = json.loads(raw_metadata)
+                except (json.JSONDecodeError, TypeError):
+                    current_metadata = {}
+            elif isinstance(raw_metadata, dict):
+                current_metadata = raw_metadata
+            else:
+                current_metadata = {}
             
             # Build update query dynamically based on provided parameters
             updates = []
