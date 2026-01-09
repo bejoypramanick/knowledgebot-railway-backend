@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Set
 import logging
 import sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import json
 import os
@@ -658,17 +658,60 @@ async def get_assigned_chat_sessions(
                         session_id=session_id
                     ))
                 
-                # Determine status
-                status = 'active' if session_row['is_active'] else 'closed'
-                if metadata.get('status'):
-                    status = metadata['status']
-                
                 # Get assigned agent from session_row if available (for admin/user queries)
                 assigned_agent = metadata.get('assigned_agent')
                 if not assigned_agent and 'agent_email' in session_row and session_row['agent_email']:
                     assigned_agent = session_row['agent_email']
                 if not assigned_agent and agent_id:
                     assigned_agent = agent_id
+                
+                # Determine status
+                # Check if session has expired (5 minutes of inactivity)
+                last_activity = session_row['last_activity_at']
+                is_expired = False
+                if last_activity:
+                    # Handle timezone-aware and naive datetime objects
+                    if last_activity.tzinfo:
+                        # Timezone-aware: convert to UTC naive for comparison
+                        last_activity_naive = last_activity.replace(tzinfo=None) - (last_activity.utcoffset() or timedelta(0))
+                    else:
+                        # Already naive, assume UTC
+                        last_activity_naive = last_activity
+                    
+                    now_utc = datetime.utcnow()
+                    time_diff = now_utc - last_activity_naive
+                    # Expire if no activity for 5 minutes
+                    is_expired = time_diff.total_seconds() > 300  # 5 minutes = 300 seconds
+                
+                # Only mark as 'active' if:
+                # 1. Session is marked as active in DB
+                # 2. Has an assigned agent (human agent session)
+                # 3. Not expired (activity within last 5 minutes)
+                if session_row['is_active'] and assigned_agent and not is_expired:
+                    status = 'active'
+                elif metadata.get('status') and not is_expired:
+                    # Use metadata status if not expired
+                    status = metadata['status']
+                    # But override to 'closed' if expired
+                    if is_expired:
+                        status = 'closed'
+                else:
+                    status = 'closed'
+                
+                # If session expired, update it in the database
+                if is_expired and session_row['is_active']:
+                    try:
+                        await conn.execute(
+                            """
+                            UPDATE chat_sessions 
+                            SET is_active = FALSE, updated_at = CURRENT_TIMESTAMP
+                            WHERE id = $1
+                            """,
+                            session_db_id
+                        )
+                        logger.info(f"Marked expired session {session_id} as closed (no activity for 5+ minutes)")
+                    except Exception as e:
+                        logger.error(f"Error updating expired session: {e}")
                 
                 sessions.append(ChatSessionResponse(
                     id=session_id,
@@ -1153,6 +1196,18 @@ async def websocket_agent_chat(websocket: WebSocket, session_id: str):
                                     session_db_id, text
                                 )
                                 
+                                # Update session last activity
+                                await conn.execute(
+                                    """
+                                    UPDATE chat_sessions 
+                                    SET last_activity_at = CURRENT_TIMESTAMP,
+                                        message_count = message_count + 1,
+                                        updated_at = CURRENT_TIMESTAMP
+                                    WHERE id = $1
+                                    """,
+                                    session_db_id
+                                )
+                                
                                 # Broadcast to customer
                                 message_data = {
                                     "type": "agent_message",
@@ -1219,25 +1274,37 @@ async def websocket_customer_chat(websocket: WebSocket, session_id: str):
                             else:
                                 session_db_id = session_row['id']
                             
-                            message_id = await conn.fetchval(
-                                """
-                                INSERT INTO chat_messages (session_id, role, content)
-                                VALUES ($1, 'user', $2)
-                                RETURNING id::text
-                                """,
-                                session_db_id, text
-                            )
-                            
-                            # Broadcast to agent
-                            message_data = {
-                                "type": "customer_message",
-                                "message_id": message_id,
-                                "text": text,
-                                "sender": "user",
-                                "session_id": session_id,
-                                "timestamp": datetime.utcnow().isoformat()
-                            }
-                            await connection_manager.broadcast_to_session(message_data, session_id, exclude_websocket=websocket)
+                                message_id = await conn.fetchval(
+                                    """
+                                    INSERT INTO chat_messages (session_id, role, content)
+                                    VALUES ($1, 'user', $2)
+                                    RETURNING id::text
+                                    """,
+                                    session_db_id, text
+                                )
+                                
+                                # Update session last activity
+                                await conn.execute(
+                                    """
+                                    UPDATE chat_sessions 
+                                    SET last_activity_at = CURRENT_TIMESTAMP,
+                                        message_count = message_count + 1,
+                                        updated_at = CURRENT_TIMESTAMP
+                                    WHERE id = $1
+                                    """,
+                                    session_db_id
+                                )
+                                
+                                # Broadcast to agent
+                                message_data = {
+                                    "type": "customer_message",
+                                    "message_id": message_id,
+                                    "text": text,
+                                    "sender": "user",
+                                    "session_id": session_id,
+                                    "timestamp": datetime.utcnow().isoformat()
+                                }
+                                await connection_manager.broadcast_to_session(message_data, session_id, exclude_websocket=websocket)
         except WebSocketDisconnect:
             await connection_manager.disconnect(websocket)
         except Exception as e:
