@@ -961,6 +961,39 @@ async def update_chat_session(
             
             logger.info(f"Session {session_id} updated by {user_email}: status={status}, assigned_agent={assigned_agent}")
             
+            # If session is being closed, broadcast a message to all connected clients
+            if status == 'closed' and assigned_agent == '':
+                # Determine if the user ending the session is an agent or customer
+                # Check if user is a human agent
+                is_agent = await conn.fetchval(
+                    "SELECT COUNT(*) FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                    user_email
+                )
+                
+                # Check if user is an admin (admins can also end sessions)
+                is_admin = await conn.fetchval(
+                    "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                    user_email
+                )
+                
+                # Determine who ended the session
+                ended_by = 'human agent' if (is_agent or is_admin) else 'customer'
+                
+                # Broadcast session ended message to all connected clients
+                session_ended_message = {
+                    "type": "session_ended",
+                    "session_id": session_id,
+                    "text": f"Session has been ended by the {ended_by}.",
+                    "ended_by": ended_by,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
+                try:
+                    await connection_manager.broadcast_to_session(session_ended_message, session_id)
+                    logger.info(f"Broadcasted session ended message to session {session_id}: ended by {ended_by}")
+                except Exception as e:
+                    logger.error(f"Error broadcasting session ended message: {e}")
+            
             return {
                 'success': True,
                 'message': 'Session updated successfully'
