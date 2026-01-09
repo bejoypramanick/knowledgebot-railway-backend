@@ -7,10 +7,12 @@ from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import httpx
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Header
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Header, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+import websockets
+import asyncio
 
 # Load environment variables
 load_dotenv()
@@ -1342,6 +1344,116 @@ async def proxy_notifications_routes(request: Request, path: str):
         logger.error(f"Unexpected error in notifications proxy: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
+# WebSocket proxy endpoints - proxy WebSocket connections to configuration service
+@app.websocket("/api/v1/chat/{session_id}/ws")
+async def proxy_customer_websocket(websocket: WebSocket, session_id: str):
+    """Proxy customer WebSocket connections to configuration service"""
+    try:
+        await websocket.accept()
+        
+        # Build target WebSocket URL
+        base_url = CONFIGURATION_SERVICE_URL.replace('https://', 'wss://').replace('http://', 'ws://')
+        ws_url = f"{base_url}/api/v1/chat/{session_id}/ws"
+        
+        logger.info(f"Proxying customer WebSocket: {ws_url}")
+        
+        # Connect to upstream WebSocket
+        async with websockets.connect(ws_url) as upstream_ws:
+            # Create tasks for bidirectional message forwarding
+            async def forward_to_upstream():
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        await upstream_ws.send(data)
+                except (WebSocketDisconnect, websockets.exceptions.ConnectionClosed):
+                    try:
+                        await upstream_ws.close()
+                    except:
+                        pass
+            
+            async def forward_from_upstream():
+                try:
+                    while True:
+                        data = await upstream_ws.recv()
+                        await websocket.send_text(data)
+                except (websockets.exceptions.ConnectionClosed, WebSocketDisconnect):
+                    try:
+                        await websocket.close()
+                    except:
+                        pass
+            
+            # Run both forwarding tasks concurrently
+            await asyncio.gather(
+                forward_to_upstream(),
+                forward_from_upstream(),
+                return_exceptions=True
+            )
+    except WebSocketDisconnect:
+        logger.info("Customer WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"WebSocket proxy error: {e}", exc_info=True)
+        try:
+            await websocket.close(code=1011, reason="Proxy error")
+        except:
+            pass
+
+@app.websocket("/api/v1/admin/chat-sessions/{session_id}/ws")
+async def proxy_agent_websocket(websocket: WebSocket, session_id: str):
+    """Proxy agent WebSocket connections to configuration service"""
+    try:
+        await websocket.accept()
+        
+        # Get token from query parameters
+        token = websocket.query_params.get("token", "")
+        
+        # Build target WebSocket URL with token
+        base_url = CONFIGURATION_SERVICE_URL.replace('https://', 'wss://').replace('http://', 'ws://')
+        ws_url = f"{base_url}/api/v1/admin/chat-sessions/{session_id}/ws"
+        if token:
+            ws_url += f"?token={token}"
+        
+        logger.info(f"Proxying agent WebSocket: {ws_url[:100]}...")
+        
+        # Connect to upstream WebSocket
+        async with websockets.connect(ws_url) as upstream_ws:
+            # Create tasks for bidirectional message forwarding
+            async def forward_to_upstream():
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        await upstream_ws.send(data)
+                except (WebSocketDisconnect, websockets.exceptions.ConnectionClosed):
+                    try:
+                        await upstream_ws.close()
+                    except:
+                        pass
+            
+            async def forward_from_upstream():
+                try:
+                    while True:
+                        data = await upstream_ws.recv()
+                        await websocket.send_text(data)
+                except (websockets.exceptions.ConnectionClosed, WebSocketDisconnect):
+                    try:
+                        await websocket.close()
+                    except:
+                        pass
+            
+            # Run both forwarding tasks concurrently
+            await asyncio.gather(
+                forward_to_upstream(),
+                forward_from_upstream(),
+                return_exceptions=True
+            )
+    except WebSocketDisconnect:
+        logger.info("Agent WebSocket disconnected")
+    except Exception as e:
+        logger.error(f"WebSocket proxy error: {e}", exc_info=True)
+        try:
+            await websocket.close(code=1011, reason="Proxy error")
+        except:
+            pass
+
 logger.info("✅ Configuration API proxy endpoints configured")
 logger.info("✅ Admin API proxy endpoints configured")
 logger.info("✅ Auth API proxy endpoints configured")
@@ -1349,3 +1461,4 @@ logger.info("✅ Chat API proxy endpoints configured")
 logger.info("✅ Users API proxy endpoints configured")
 logger.info("✅ Widget API proxy endpoints configured")
 logger.info("✅ Notifications API proxy endpoints configured")
+logger.info("✅ WebSocket proxy endpoints configured")

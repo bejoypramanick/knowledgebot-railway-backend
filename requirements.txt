@@ -45,3 +45,6 @@ tenacity>=8.2.2
 
 # Firebase Admin SDK (for Authentication only, NOT Firestore)
 firebase-admin>=6.0.0
+
+# WebSocket support for API Gateway
+websockets>=12.0
