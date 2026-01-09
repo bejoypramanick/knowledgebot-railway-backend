@@ -885,6 +885,94 @@ async def assign_chat_session(
         raise HTTPException(status_code=500, detail=f"Error assigning chat: {str(e)}")
 
 
+@router.patch("/chat-sessions/{session_id}", response_model=dict)
+async def update_chat_session(
+    session_id: str,
+    status: Optional[str] = Query(None, description="Session status: 'active', 'waiting', or 'closed'"),
+    assigned_agent: Optional[str] = Query(None, description="Assigned agent email (set to empty string to remove)"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update a chat session (e.g., close session, remove assigned agent).
+    Allows both customers and agents/admins to end the session.
+    """
+    try:
+        user_email = current_user.get('email')
+        if not user_email:
+            raise HTTPException(status_code=403, detail="User email not found in token")
+        
+        from services.configuration_service.main import get_db_connection
+        
+        async with get_db_connection() as conn:
+            # Get session database ID
+            session_row = await conn.fetchrow(
+                "SELECT id, session_id, metadata FROM chat_sessions WHERE session_id = $1",
+                session_id
+            )
+            
+            if not session_row:
+                raise HTTPException(status_code=404, detail="Chat session not found")
+            
+            session_db_id = session_row['id']
+            current_metadata = session_row['metadata'] or {}
+            
+            # Build update query dynamically based on provided parameters
+            updates = []
+            params = []
+            param_index = 1
+            
+            if status is not None:
+                updates.append(f"is_active = ${param_index}")
+                params.append(status != 'closed')
+                param_index += 1
+            
+            if assigned_agent is not None:
+                # Update metadata to remove assigned agent
+                if assigned_agent == '' or assigned_agent is None:
+                    # Remove assigned agent from metadata
+                    if 'assigned_agent' in current_metadata:
+                        del current_metadata['assigned_agent']
+                    updates.append(f"metadata = ${param_index}::jsonb")
+                    params.append(json.dumps(current_metadata))
+                    param_index += 1
+                else:
+                    # Set assigned agent in metadata
+                    current_metadata['assigned_agent'] = assigned_agent
+                    updates.append(f"metadata = ${param_index}::jsonb")
+                    params.append(json.dumps(current_metadata))
+                    param_index += 1
+            
+            if not updates:
+                raise HTTPException(status_code=400, detail="No updates provided")
+            
+            # Always update updated_at
+            updates.append(f"updated_at = CURRENT_TIMESTAMP")
+            
+            # Add session_db_id as last parameter
+            params.append(session_db_id)
+            
+            query = f"""
+                UPDATE chat_sessions 
+                SET {', '.join(updates)}
+                WHERE id = ${param_index}
+            """
+            
+            await conn.execute(query, *params)
+            
+            logger.info(f"Session {session_id} updated by {user_email}: status={status}, assigned_agent={assigned_agent}")
+            
+            return {
+                'success': True,
+                'message': 'Session updated successfully'
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating chat session: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error updating session: {str(e)}")
+
+
 @public_chat_router.post("/{session_id}/request-human-agent", response_model=dict)
 async def request_human_agent(
     session_id: str,
