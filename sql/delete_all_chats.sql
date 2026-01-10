@@ -33,6 +33,11 @@ FROM information_schema.tables
 WHERE table_name = 'chat_feedback'
   AND EXISTS (SELECT 1 FROM chat_feedback LIMIT 1);
 
+-- Note: chat_sessions table now includes:
+--   - sentiment (VARCHAR) - LLM-analyzed sentiment
+--   - session_feedback (VARCHAR) - Aggregated feedback from chat_feedback table
+-- These will be deleted along with chat_sessions records
+
 -- ============================================================================
 -- DELETE STATEMENTS
 -- ============================================================================

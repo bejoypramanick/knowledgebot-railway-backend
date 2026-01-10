@@ -2,12 +2,17 @@
 
 ## ⚠️ WARNING
 This SQL script will **permanently delete ALL chat data** from your database. This includes:
-- All chat sessions
+- All chat sessions (including sentiment and session_feedback columns)
 - All chat messages  
 - All human agent session assignments
 - All chat feedback
 
 **This action CANNOT be undone!**
+
+**Note:** The `chat_sessions` table includes:
+- `sentiment` (VARCHAR) - LLM-analyzed sentiment (positive/negative/neutral)
+- `session_feedback` (VARCHAR) - Aggregated feedback from chat_feedback table
+These columns will be deleted along with the chat_sessions records.
 
 ## File Location
 `sql/delete_all_chats.sql`
