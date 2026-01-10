@@ -18,25 +18,10 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-# Lazy initialization of LLM clients
-genai_client = None
+# Lazy initialization of OpenAI client
 openai_client = None
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or settings.openai_api_key
-
-
-def get_gemini_client():
-    """Lazy initialization of Gemini client."""
-    global genai_client
-    if genai_client is None and GEMINI_API_KEY:
-        try:
-            from google import genai
-            genai_client = genai.Client(api_key=GEMINI_API_KEY)
-            logger.info("✅ Gemini client initialized for sentiment analysis")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize Gemini client: {e}")
-    return genai_client
 
 
 def get_openai_client():
