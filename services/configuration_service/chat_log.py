@@ -118,6 +118,7 @@ class ChatSessionResponse(BaseModel):
     customer_email: Optional[str] = None
     status: str  # 'active', 'waiting', 'closed'
     last_message_at: str
+    created_at: Optional[str] = None
     assigned_agent: Optional[str] = None
     feedback: Optional[str] = None  # 'positive', 'negative', None
     sentiment: Optional[str] = None  # 'positive', 'negative', 'neutral', None
@@ -595,6 +596,7 @@ async def get_assigned_chat_sessions(
                         cs.id,
                         cs.session_id,
                         COALESCE(cs.last_activity_at, cs.created_at, cs.updated_at, CURRENT_TIMESTAMP) as last_activity_at,
+                        cs.created_at,
                         cs.metadata,
                         cs.is_active,
                         cs.sentiment,
@@ -616,6 +618,7 @@ async def get_assigned_chat_sessions(
                         cs.id,
                         cs.session_id,
                         cs.last_activity_at,
+                        cs.created_at,
                         cs.metadata,
                         cs.is_active,
                         cs.sentiment,
@@ -747,12 +750,16 @@ async def get_assigned_chat_sessions(
                 # Determine chat type
                 chat_type = 'human-handoff' if assigned_agent else 'ai-chat'
                 
+                created_at = session_row.get('created_at')
+                created_at_str = created_at.isoformat() if created_at else None
+                
                 sessions.append(ChatSessionResponse(
                     id=session_id,
                     customer_name=metadata.get('customer_name'),
                     customer_email=metadata.get('customer_email'),
                     status=status,
                     last_message_at=session_row['last_activity_at'].isoformat() if session_row['last_activity_at'] else datetime.now().isoformat(),
+                    created_at=created_at_str,
                     assigned_agent=assigned_agent,
                     feedback=session_feedback,
                     sentiment=sentiment,
@@ -1086,8 +1093,11 @@ async def update_chat_session(
                                 }
                                 for msg in messages_data
                             ]
-                            await analyze_and_store_sentiment(session_id, messages_for_analysis, conn)
-                            logger.info(f"Analyzed sentiment for closed session {session_id}")
+                            sentiment_result = await analyze_and_store_sentiment(session_id, messages_for_analysis, conn)
+                            if sentiment_result:
+                                logger.info(f"Successfully analyzed and stored sentiment '{sentiment_result}' for closed session {session_id}")
+                            else:
+                                logger.warning(f"Sentiment analysis returned None for closed session {session_id}")
                 except Exception as e:
                     logger.warning(f"Could not analyze sentiment for closed session {session_id}: {e}")
             
