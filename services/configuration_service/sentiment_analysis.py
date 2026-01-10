@@ -90,72 +90,43 @@ Based on this conversation, determine the overall sentiment. Respond with ONLY o
 
 Your response should be just the single word, nothing else."""
 
-        # Try Gemini first, fallback to OpenAI
-        client = get_gemini_client()
-        if client:
-            try:
-                response = client.models.generate_content(
-                    model='gemini-2.0-flash-exp',
-                    contents=prompt
-                )
-                response_text = response.text.strip().lower()
-                logger.info(f"Gemini sentiment response: {response_text}")
-                
-                # Extract sentiment from response - be more strict
-                # Remove any punctuation and whitespace, then check
-                cleaned_response = response_text.replace('.', '').replace(',', '').replace('!', '').replace('?', '').strip()
-                
-                if cleaned_response == 'positive' or 'positive' in cleaned_response:
-                    logger.info(f"Detected positive sentiment from Gemini")
-                    return 'positive'
-                elif cleaned_response == 'negative' or 'negative' in cleaned_response:
-                    logger.info(f"Detected negative sentiment from Gemini")
-                    return 'negative'
-                elif cleaned_response == 'neutral' or 'neutral' in cleaned_response:
-                    logger.info(f"Detected neutral sentiment from Gemini")
-                    return 'neutral'
-                else:
-                    logger.warning(f"Unexpected sentiment analysis response from Gemini: {response_text}, defaulting to neutral")
-                    return 'neutral'
-            except Exception as e:
-                logger.warning(f"Gemini sentiment analysis failed: {e}, trying OpenAI")
-        
-        # Fallback to OpenAI
+        # Use OpenAI for sentiment analysis
         openai = get_openai_client()
-        if openai:
-            try:
-                response = openai.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": "You are a sentiment analysis assistant. Analyze customer support conversations and respond with ONLY one word: 'positive', 'negative', or 'neutral'. Do not include any explanation or additional text."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3,
-                    max_tokens=10
-                )
-                response_text = response.choices[0].message.content.strip().lower()
-                logger.info(f"OpenAI sentiment response: {response_text}")
-                
-                # Remove any punctuation and whitespace, then check
-                cleaned_response = response_text.replace('.', '').replace(',', '').replace('!', '').replace('?', '').strip()
-                
-                if cleaned_response == 'positive' or 'positive' in cleaned_response:
-                    logger.info(f"Detected positive sentiment from OpenAI")
-                    return 'positive'
-                elif cleaned_response == 'negative' or 'negative' in cleaned_response:
-                    logger.info(f"Detected negative sentiment from OpenAI")
-                    return 'negative'
-                elif cleaned_response == 'neutral' or 'neutral' in cleaned_response:
-                    logger.info(f"Detected neutral sentiment from OpenAI")
-                    return 'neutral'
-                else:
-                    logger.warning(f"Unexpected sentiment analysis response from OpenAI: {response_text}, defaulting to neutral")
-                    return 'neutral'
-            except Exception as e:
-                logger.error(f"OpenAI sentiment analysis failed: {e}")
+        if not openai:
+            logger.error("OpenAI client not available for sentiment analysis")
+            return None
         
-        logger.error("Both Gemini and OpenAI sentiment analysis failed")
-        return None
+        try:
+            response = openai.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a sentiment analysis assistant. Analyze customer support conversations and respond with ONLY one word: 'positive', 'negative', or 'neutral'. Do not include any explanation or additional text."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=10
+            )
+            response_text = response.choices[0].message.content.strip().lower()
+            logger.info(f"OpenAI sentiment response: {response_text}")
+            
+            # Remove any punctuation and whitespace, then check
+            cleaned_response = response_text.replace('.', '').replace(',', '').replace('!', '').replace('?', '').strip()
+            
+            if cleaned_response == 'positive' or 'positive' in cleaned_response:
+                logger.info(f"Detected positive sentiment from OpenAI")
+                return 'positive'
+            elif cleaned_response == 'negative' or 'negative' in cleaned_response:
+                logger.info(f"Detected negative sentiment from OpenAI")
+                return 'negative'
+            elif cleaned_response == 'neutral' or 'neutral' in cleaned_response:
+                logger.info(f"Detected neutral sentiment from OpenAI")
+                return 'neutral'
+            else:
+                logger.warning(f"Unexpected sentiment analysis response from OpenAI: {response_text}, defaulting to neutral")
+                return 'neutral'
+        except Exception as e:
+            logger.error(f"OpenAI sentiment analysis failed: {e}", exc_info=True)
+            return None
         
     except Exception as e:
         logger.error(f"Error in sentiment analysis: {e}", exc_info=True)
