@@ -324,11 +324,14 @@ async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str
         )
         
         if not agents:
-            logger.warning("No confirmed human agents available")
+            logger.warning("No confirmed human agents available in database")
             return None
+        
+        logger.info(f"Found {len(agents)} confirmed agent(s): {[a['email'] for a in agents]}")
         
         # Get chat counts for each ONLINE agent only
         agent_loads = []
+        offline_agents = []
         for agent in agents:
             agent_email = agent['email']
             # Check if agent is online (has recent activity)
@@ -339,12 +342,16 @@ async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str
                     'email': agent_email,
                     'chat_count': chat_count
                 })
-                logger.debug(f"Agent {agent_email} is online with {chat_count} active chats")
+                logger.info(f"Agent {agent_email} is online with {chat_count} active chats")
             else:
-                logger.debug(f"Agent {agent_email} is offline (no recent activity)")
+                offline_agents.append(agent_email)
+                logger.info(f"Agent {agent_email} is offline (no recent activity in last 30 minutes)")
         
         if not agent_loads:
-            logger.warning("No online agents available")
+            if offline_agents:
+                logger.warning(f"No online agents available. All {len(offline_agents)} agent(s) are offline: {offline_agents}")
+            else:
+                logger.warning("No online agents available")
             return None
         
         # Sort by chat count (load balancing - assign to agent with fewest chats)
@@ -1174,9 +1181,33 @@ async def request_human_agent(
             assigned_agent = await assign_chat_with_load_balancing(session_id, conn)
             
             if not assigned_agent:
+                # Check if there are any confirmed agents at all
+                total_agents = await conn.fetchval(
+                    "SELECT COUNT(*) FROM human_agents WHERE status = 'confirmed'"
+                ) or 0
+                
+                if total_agents == 0:
+                    error_detail = "No human agents are configured. Please contact your administrator to set up human agents."
+                else:
+                    # Check if any agents are online
+                    online_count = await conn.fetchval(
+                        """
+                        SELECT COUNT(DISTINCT has.agent_email)
+                        FROM human_agent_sessions has
+                        WHERE has.connected_at > NOW() - INTERVAL '30 minutes'
+                        AND has.agent_email IN (SELECT email FROM human_agents WHERE status = 'confirmed')
+                        """
+                    ) or 0
+                    
+                    if online_count == 0:
+                        error_detail = "No human agents are currently online. Agents need to access the chat log to be marked as online. Please try again later."
+                    else:
+                        error_detail = "No available agents to assign chat. Please try again later."
+                
+                logger.warning(f"Failed to assign chat {session_id}: {error_detail}")
                 raise HTTPException(
                     status_code=503, 
-                    detail="No available agents to assign chat. Please try again later."
+                    detail=error_detail
                 )
             
             logger.info(f"Chat session {session_id} assigned to agent {assigned_agent} via request-human-agent endpoint")
