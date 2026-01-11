@@ -55,18 +55,70 @@ async def verify_token(request: TokenVerificationRequest):
         
         # Get user from Firestore
         uid = decoded_token.get('uid')
+        email = decoded_token.get('email')
         user_data = get_user_from_firestore(uid)
         
         # If user doesn't exist in Firestore, return Firebase Auth data
         if not user_data:
             user_data = {
                 'uid': uid,
-                'email': decoded_token.get('email'),
+                'email': email,
                 'email_verified': decoded_token.get('email_verified', False),
                 'display_name': decoded_token.get('name'),
                 'photo_url': decoded_token.get('picture'),
-                'role': 'user'  # Default role
+                'role': 'user',
+                'roles': ['user'],
+                'primary_role': 'user',
+                'is_admin': False,
+                'is_human_agent': False
             }
+        
+        # Helper variables for role check
+        user_roles = user_data.get('roles', [])
+        primary_role = user_data.get('role', 'user')
+        is_admin = user_data.get('is_admin', False)
+        is_human_agent = user_data.get('is_human_agent', False)
+        
+        # Check database for exact roles (source of truth)
+        try:
+            if railway_db and hasattr(railway_db, '_pool') and railway_db._pool is not None and email:
+                async with railway_db.acquire() as conn:
+                    # Check if user is an admin
+                    admin = await conn.fetchrow(
+                        "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
+                        email
+                    )
+                    if admin:
+                        if 'admin' not in user_roles:
+                            user_roles.append('admin')
+                        is_admin = True
+                        primary_role = 'admin'  # Admin takes precedence
+                    
+                    # Check if user is a human agent
+                    agent = await conn.fetchrow(
+                        "SELECT email FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                        email
+                    )
+                    if agent:
+                        if 'human_agent' not in user_roles:
+                            user_roles.append('human_agent')
+                        is_human_agent = True
+                        if primary_role == 'user':
+                            primary_role = 'human_agent'
+                            
+            # Ensure 'user' is in roles
+            if 'user' not in user_roles:
+                user_roles.append('user')
+                
+            # Update user_data with latest roles from DB
+            user_data['role'] = primary_role
+            user_data['primary_role'] = primary_role
+            user_data['roles'] = user_roles
+            user_data['is_admin'] = is_admin
+            user_data['is_human_agent'] = is_human_agent
+            
+        except Exception as role_error:
+            logger.warning(f"Error determining user roles from database in verify-token: {role_error}")
         
         return TokenVerificationResponse(
             valid=True,
@@ -282,4 +334,3 @@ async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)
     except Exception as e:
         logger.error(f"Error getting user info: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting user info: {str(e)}")
-
