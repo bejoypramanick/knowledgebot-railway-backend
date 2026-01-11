@@ -98,10 +98,10 @@ CREATE OR REPLACE VIEW user_roles AS
 SELECT 
     email,
     'admin' as role,
-    'confirmed' as status,
+    status,
     confirmed_at as role_assigned_at
 FROM admins
-WHERE status = 'confirmed'
+WHERE status IN ('confirmed', 'pending')
 UNION ALL
 SELECT 
     email,
@@ -109,7 +109,7 @@ SELECT
     status,
     confirmed_at as role_assigned_at
 FROM human_agents
-WHERE status = 'confirmed';
+WHERE status IN ('confirmed', 'pending');
 
 -- 9. Ensure auto_generated_password column exists (for existing installations)
 ALTER TABLE admins
