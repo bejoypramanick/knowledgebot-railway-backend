@@ -82,13 +82,17 @@ class EmailService:
                 "grant_type": "refresh_token"
             }
             
-            response = httpx.post(token_url, data=data, timeout=10)
-            response.raise_for_status()
-            token_data = response.json()
-            
-            self._access_token = token_data.get("access_token")
-            logger.debug("OAuth2 access token obtained successfully")
-            return self._access_token
+            async with httpx.AsyncClient() as client:
+                response = await client.post(token_url, data=data, timeout=10)
+                
+                if response.status_code != 200:
+                    logger.error(f"❌ Google OAuth2 Error: {response.status_code} - {response.text}")
+                    return None
+                    
+                token_data = response.json()
+                self._access_token = token_data.get("access_token")
+                logger.debug("OAuth2 access token obtained successfully")
+                return self._access_token
         except Exception as e:
             logger.error(f"Failed to obtain OAuth2 access token: {e}")
             return None
