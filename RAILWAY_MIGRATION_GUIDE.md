@@ -28,7 +28,7 @@ railway login
 
 ### Step 3: Link to Source Project
 ```bash
-railway link 19719468-25dc-4b99-9715-5a0540bca7f4
+railway link --project 19719468-25dc-4b99-9715-5a0540bca7f4
 ```
 
 ### Step 4: Export Database Schema and Data
@@ -59,7 +59,7 @@ pg_dump "$SOURCE_DB_URL" --no-owner --no-privileges > full_backup.sql
 
 ### Step 5: Switch to Target Project
 ```bash
-railway link 0ed75b44-58cd-47b0-9520-6888f4592121
+railway link --project 0ed75b44-58cd-47b0-9520-6888f4592121
 ```
 
 ### Step 6: Deploy Application to Target Project

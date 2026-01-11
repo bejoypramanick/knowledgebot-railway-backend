@@ -36,7 +36,7 @@ railway login
 
 echo ""
 echo "🔗 Step 3: Linking to source project..."
-railway link "$SOURCE_PROJECT_ID"
+railway link --project "$SOURCE_PROJECT_ID"
 
 echo ""
 echo "💾 Step 4: Creating database backup..."
@@ -69,7 +69,7 @@ echo ""
 
 echo "🔄 To continue with target project setup, run:"
 echo "cd .."
-echo "railway link $TARGET_PROJECT_ID"
+echo "railway link --project $TARGET_PROJECT_ID"
 echo "railway run psql < $BACKUP_DIR/full_backup.sql"
 
 echo ""
