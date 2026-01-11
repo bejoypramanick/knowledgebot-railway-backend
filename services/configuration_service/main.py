@@ -307,11 +307,22 @@ async def get_chatbot_config():
             human_agents_list = [agent["email"] for agent in human_agents_rows] if human_agents_rows else []
             logger.info(f"Fetched {len(human_agents_list)} human agent(s) from human_agents table: {human_agents_list}")
             
+            # Fetch admins from the admins table (source of truth for admin list)
+            admin_rows = await conn.fetch(
+                """
+                SELECT email FROM admins 
+                WHERE status IN ('confirmed', 'pending')
+                ORDER BY email
+                """
+            )
+            admin_emails_list = [admin["email"] for admin in admin_rows] if admin_rows else []
+            logger.info(f"Fetched {len(admin_emails_list)} admin(s) from admins table: {admin_emails_list}")
+            
             if not row:
                 # Return default configuration with cache headers
                 data = {
                     "admin_user": "GLOBISTAAN",
-                    "admin_emails": [],
+                    "admin_emails": admin_emails_list,
                     "admin_password": "**********",
                     "human_agents": human_agents_list,
                     "hil_enabled": True,  # Default to enabled
@@ -351,18 +362,9 @@ async def get_chatbot_config():
                 response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
                 return response
             
-            # Handle admin_emails - use array if available, otherwise convert admin_user to array
-            admin_emails = row.get("admin_emails")
-            if admin_emails is None or (isinstance(admin_emails, list) and len(admin_emails) == 0):
-                # Fallback to admin_user if admin_emails is empty
-                if row["admin_user"] and row["admin_user"] != 'GLOBISTAAN':
-                    admin_emails = [row["admin_user"]]
-                else:
-                    admin_emails = []
-            
             data = {
                 "admin_user": row["admin_user"],
-                "admin_emails": admin_emails if isinstance(admin_emails, list) else (admin_emails if admin_emails else []),
+                "admin_emails": admin_emails_list,
                 "admin_password": "**********",
                 "human_agents": human_agents_list,
                 "hil_enabled": row.get("hil_enabled", True),  # Default to True if column doesn't exist
