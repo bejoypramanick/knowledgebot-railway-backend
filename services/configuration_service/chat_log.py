@@ -314,6 +314,7 @@ async def get_agent_chat_count(agent_email: str, conn) -> int:
 async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str]:
     """
     Assign a chat to an available agent using round-robin load balancing.
+    If no human agents are online, fallback to logged-in admins.
     Returns the assigned agent email or None if no agents available.
     """
     try:
@@ -326,36 +327,71 @@ async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str
             """
         )
         
-        if not agents:
-            logger.warning("No confirmed human agents available in database")
-            return None
-        
-        logger.info(f"Found {len(agents)} confirmed agent(s): {[a['email'] for a in agents]}")
-        
-        # Get chat counts for each ONLINE agent only
         agent_loads = []
         offline_agents = []
-        for agent in agents:
-            agent_email = agent['email']
-            # Check if agent is online (has recent activity)
-            is_online = await get_agent_online_status(agent_email, conn)
-            if is_online:
-                chat_count = await get_agent_chat_count(agent_email, conn)
-                agent_loads.append({
-                    'email': agent_email,
-                    'chat_count': chat_count
-                })
-                logger.info(f"Agent {agent_email} is online with {chat_count} active chats")
-            else:
-                offline_agents.append(agent_email)
-                logger.info(f"Agent {agent_email} is offline (no recent activity in last 30 minutes)")
+        
+        if agents:
+            logger.info(f"Found {len(agents)} confirmed human agent(s): {[a['email'] for a in agents]}")
+            
+            # Get chat counts for each ONLINE agent only
+            for agent in agents:
+                agent_email = agent['email']
+                # Check if agent is online (has recent activity)
+                is_online = await get_agent_online_status(agent_email, conn)
+                if is_online:
+                    chat_count = await get_agent_chat_count(agent_email, conn)
+                    agent_loads.append({
+                        'email': agent_email,
+                        'chat_count': chat_count
+                    })
+                    logger.info(f"Agent {agent_email} is online with {chat_count} active chats")
+                else:
+                    offline_agents.append(agent_email)
+                    logger.info(f"Agent {agent_email} is offline (no recent activity in last 30 minutes)")
         
         if not agent_loads:
             if offline_agents:
-                logger.warning(f"No online agents available. All {len(offline_agents)} agent(s) are offline: {offline_agents}")
+                logger.warning(f"No online human agents available. All {len(offline_agents)} human agent(s) are offline. Falling back to admins.")
             else:
-                logger.warning("No online agents available")
-            return None
+                logger.warning("No confirmed human agents available. Checking for admins.")
+            
+            # Fallback to admins
+            admins = await conn.fetch(
+                """
+                SELECT email FROM admins 
+                WHERE status = 'confirmed'
+                ORDER BY email
+                """
+            )
+            
+            if not admins:
+                logger.warning("No confirmed admins available in database")
+                return None
+                
+            admin_loads = []
+            offline_admins = []
+            for admin in admins:
+                admin_email = admin['email']
+                is_online = await get_agent_online_status(admin_email, conn)
+                if is_online:
+                    chat_count = await get_agent_chat_count(admin_email, conn)
+                    admin_loads.append({
+                        'email': admin_email,
+                        'chat_count': chat_count
+                    })
+                    logger.info(f"Admin {admin_email} is online with {chat_count} active chats")
+                else:
+                    offline_admins.append(admin_email)
+            
+            if not admin_loads:
+                if offline_admins:
+                    logger.warning(f"No online admins available. All {len(offline_admins)} admin(s) are offline.")
+                else:
+                    logger.warning("No confirmed admins available or online")
+                return None
+            
+            # Use admin loads for assignment
+            agent_loads = admin_loads
         
         # Sort by chat count (load balancing - assign to agent with fewest chats)
         agent_loads.sort(key=lambda x: x['chat_count'])
@@ -372,6 +408,74 @@ async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str
         return None
 
 
+@router.get("/agents/online", response_model=dict)
+async def get_online_agents(current_user: dict = Depends(get_current_user)):
+    """
+    Get all online human agents and admins with their active session counts.
+    Used for load balancing and transfer UI.
+    """
+    try:
+        user_email = current_user.get('email')
+        if not user_email:
+            raise HTTPException(status_code=403, detail="User email not found in token")
+            
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
+            # Check if current user is an admin or agent
+            is_agent = await conn.fetchval(
+                "SELECT COUNT(*) FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                user_email
+            )
+            is_admin = await conn.fetchval(
+                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                user_email
+            )
+            
+            if not is_agent and not is_admin:
+                raise HTTPException(status_code=403, detail="Access denied")
+                
+            # Fetch all confirmed agents
+            agents = await conn.fetch("SELECT email FROM human_agents WHERE status = 'confirmed'")
+            # Fetch all confirmed admins
+            admins = await conn.fetch("SELECT email FROM admins WHERE status = 'confirmed'")
+            
+            online_users = []
+            
+            # Check online status and load for each agent
+            for row in agents:
+                email = row['email']
+                is_online = await get_agent_online_status(email, conn)
+                if is_online:
+                    chat_count = await get_agent_chat_count(email, conn)
+                    online_users.append({
+                        "email": email,
+                        "role": "agent",
+                        "is_online": True,
+                        "active_sessions": chat_count
+                    })
+            
+            # Check online status and load for each admin
+            for row in admins:
+                email = row['email']
+                is_online = await get_agent_online_status(email, conn)
+                if is_online:
+                    chat_count = await get_agent_chat_count(email, conn)
+                    online_users.append({
+                        "email": email,
+                        "role": "admin",
+                        "is_online": True,
+                        "active_sessions": chat_count
+                    })
+            
+            return {
+                "success": True,
+                "agents": online_users
+            }
+    except Exception as e:
+        logger.error(f"Error getting online agents: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/agents/heartbeat")
 async def agent_heartbeat(
     request: Request,
@@ -386,9 +490,10 @@ async def agent_heartbeat(
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
         
-        # Check if user is a human agent
+        # Check if user is a human agent or admin
         conn = await railway_db.get_connection()
         try:
+            # Check if user is a confirmed human agent
             agent = await conn.fetchrow(
                 """
                 SELECT email FROM human_agents 
@@ -397,8 +502,17 @@ async def agent_heartbeat(
                 user_email
             )
             
+            # If not a human agent, check if user is an admin
             if not agent:
-                raise HTTPException(status_code=403, detail="User is not a confirmed human agent")
+                admin = await conn.fetchrow(
+                    """
+                    SELECT email FROM admins 
+                    WHERE email = $1 AND status = 'confirmed'
+                    """,
+                    user_email
+                )
+                if not admin:
+                    raise HTTPException(status_code=403, detail="User is not a confirmed human agent or admin")
             
             # Update last activity timestamp for this agent
             # We'll use the human_agent_sessions table to track activity
@@ -978,6 +1092,89 @@ async def assign_chat_session(
     except Exception as e:
         logger.error(f"Error assigning chat session: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error assigning chat: {str(e)}")
+
+
+@router.post("/chat-sessions/{session_id}/transfer", response_model=dict)
+async def transfer_chat_session(
+    session_id: str,
+    target_agent_email: str = Query(..., description="Email of the agent or admin to transfer to"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Transfer a chat session to another agent or admin.
+    Accessible by both human agents and admins.
+    """
+    try:
+        user_email = current_user.get('email')
+        if not user_email:
+            raise HTTPException(status_code=403, detail="User email not found in token")
+            
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
+            # Check if current user has permission (must be confirmed agent or admin)
+            is_agent = await conn.fetchval(
+                "SELECT COUNT(*) FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                user_email
+            )
+            is_admin = await conn.fetchval(
+                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                user_email
+            )
+            
+            if not is_agent and not is_admin:
+                raise HTTPException(status_code=403, detail="Only confirmed agents or admins can transfer chats")
+                
+            # Check if target agent exists and is confirmed
+            target_is_agent = await conn.fetchval(
+                "SELECT COUNT(*) FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                target_agent_email
+            )
+            target_is_admin = await conn.fetchval(
+                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                target_agent_email
+            )
+            
+            if not target_is_agent and not target_is_admin:
+                raise HTTPException(status_code=400, detail="Target user is not a confirmed agent or admin")
+                
+            # Perform the transfer
+            await assign_chat_to_agent(session_id, target_agent_email, conn)
+            
+            # Broadcast transfer message via WebSocket
+            transfer_message = {
+                "type": "chat_transferred",
+                "session_id": session_id,
+                "transferred_to": target_agent_email,
+                "transferred_by": user_email,
+                "timestamp": datetime.utcnow().isoformat(),
+                "text": "Chat has been transferred to another support agent"
+            }
+            await connection_manager.broadcast_to_session(transfer_message, session_id)
+            
+            # Also add a system message to the chat
+            session_row = await conn.fetchrow(
+                "SELECT id FROM chat_sessions WHERE session_id = $1",
+                session_id
+            )
+            if session_row:
+                await conn.execute(
+                    """
+                    INSERT INTO chat_messages (session_id, role, content)
+                    VALUES ($1, 'system', $2)
+                    """,
+                    session_row['id'], f"Chat transferred to another support agent"
+                )
+            
+            return {
+                "success": True,
+                "message": f"Chat transferred to {target_agent_email}",
+                "assigned_agent": target_agent_email
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error transferring chat: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.patch("/chat-sessions/{session_id}", response_model=dict)
