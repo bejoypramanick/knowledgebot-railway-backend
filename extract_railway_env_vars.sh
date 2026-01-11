@@ -6,22 +6,19 @@
 set -e  # Exit on any error
 
 # Configuration
-SOURCE_PROJECT_ID="19719468-25dc-4b99-9715-5a0540bca7f4"
-TARGET_PROJECT_ID="0ed75b44-58cd-47b0-9520-6888f4592121"
 BACKUP_DIR="./railway_env_backup_$(date +%Y%m%d_%H%M%S)"
-REPO_NAME="knowledgebot-railway-backend"
 
 echo "🚂 Railway Environment Variables Extractor"
 echo "==========================================="
 echo "This script will extract environment variables from ALL your Railway projects"
-echo "Source Project: $SOURCE_PROJECT_ID"
-echo "Target Project: $TARGET_PROJECT_ID"
 echo "Backup Directory: $BACKUP_DIR"
 echo ""
 
 # Create backup directory
 mkdir -p "$BACKUP_DIR"
 cd "$BACKUP_DIR"
+
+echo "📁 Backup directory created: $BACKUP_DIR"
 
 echo "📦 Step 1: Installing Railway CLI..."
 if ! command -v railway &> /dev/null; then
@@ -34,21 +31,6 @@ fi
 echo ""
 echo "🔐 Step 2: Authenticating with Railway..."
 railway login
-
-echo ""
-echo "🔗 Step 3: Linking to source project..."
-railway link --project "$SOURCE_PROJECT_ID"
-
-echo ""
-echo "💾 Step 4: Creating database backup..."
-echo "Creating full database backup..."
-railway run pg_dump --no-owner --no-privileges > full_backup.sql
-
-echo "Creating schema-only backup..."
-railway run pg_dump --schema-only --no-owner --no-privileges > schema_backup.sql
-
-echo "Creating data-only backup..."
-railway run pg_dump --data-only --no-owner --no-privileges > data_backup.sql
 
 echo ""
 echo "📋 Step 5: Exporting environment variables from ALL projects..."
@@ -100,9 +82,8 @@ for PROJECT_ID in $PROJECTS; do
     echo "✓ Exported variables for: $PROJECT_NAME ($PROJECT_ID)"
 done
 
-# Go back to source project for database operations
-echo "Returning to source project for database operations..."
-railway link --project "$SOURCE_PROJECT_ID"
+# Environment variable extraction completed
+echo "Environment variable extraction completed for all projects"
 
 # Create summary
 echo "Environment Variables Summary" > "$BACKUP_DIR/variables/README.md"
@@ -138,11 +119,16 @@ echo "3. Use the TXT files for manual review"
 echo "4. Import variables to new projects using: railway variables --set KEY=VALUE"
 echo ""
 
-echo "🔄 For project migration:"
-echo "1. Create new Railway project from GitHub repo: $REPO_NAME"
-echo "2. Link to target project: railway link --project $TARGET_PROJECT_ID"
-echo "3. Configure environment variables from the exported files"
-echo "4. Restore database if needed: railway run psql < database_backup.sql"
+echo "🔄 To restore variables to a new project:"
+echo "1. Create new Railway project"
+echo "2. Link to the project: railway link --project <PROJECT_ID>"
+echo "3. Set variables from the exported files"
+echo ""
+
+echo "📊 Summary:"
+echo "- All your Railway environment variables have been extracted"
+echo "- Variables are organized by project in: $BACKUP_DIR/variables/"
+echo "- Use the JSON files for automation or TXT files for manual review"
 
 echo ""
 echo "⚠️  IMPORTANT: Test thoroughly before deleting source project!"
