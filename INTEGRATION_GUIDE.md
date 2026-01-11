@@ -1,4 +1,4 @@
-# Complete Integration Guide - KnowledgeBot
+# Complete Integration Guide - Digibot
 
 **Complete step-by-step guide to integrate all features and deploy the application.**
 
@@ -68,7 +68,7 @@ WHERE table_name IN ('human_agents', 'chat_feedback', 'token_usage_cache', 'emai
 ### 2.1 Create Firebase Project
 
 1. Go to [Firebase Console](https://console.firebase.google.com/)
-2. Click **Add project** → Enter name: `KnowledgeBot`
+2. Click **Add project** → Enter name: `Digibot`
 3. Enable **Firestore Database**:
    - Go to **Firestore Database** → **Create database**
    - Start in **Production mode** (or Test mode for development)
@@ -89,7 +89,7 @@ WHERE table_name IN ('human_agents', 'chat_feedback', 'token_usage_cache', 'emai
 1. Go to **Project Settings** (gear icon) → **General** tab
 2. Scroll down to **Your apps** section
 3. Click **Web** icon (`</>`) to add a web app
-4. Register app with a nickname (e.g., "KnowledgeBot Web")
+4. Register app with a nickname (e.g., "Digibot Web")
 5. Copy the Firebase configuration object - you'll need these values:
    - `apiKey`
    - `authDomain`
@@ -198,7 +198,7 @@ service cloud.firestore {
 **OR** if you want a separate project:
 1. Click the project dropdown at the top
 2. Click **New Project**
-3. Enter project name: `KnowledgeBot Email Service` (or any name)
+3. Enter project name: `Digibot` (or any name)
 4. Click **Create**
 
 #### Step 2: Enable Gmail API
@@ -219,7 +219,7 @@ service cloud.firestore {
    - **External** (recommended) - Any Google user
 3. Click **Create**
 4. Fill in the required information:
-   - **App name**: `KnowledgeBot Email Service`
+   - **App name**: `Digibot`
    - **User support email**: Your email address
    - **Developer contact information**: Your email address
 5. Click **Save and Continue**
@@ -240,7 +240,7 @@ service cloud.firestore {
 1. Go to **APIs & Services** → **Credentials**
 2. Click **+ Create Credentials** → **OAuth client ID**
 3. **Application type**: Select **Web application** ⚠️ **IMPORTANT: Choose "Web application", NOT "User"**
-4. **Name**: Enter a name like `KnowledgeBot Gmail OAuth`
+4. **Name**: Enter a name like `Digibot Gmail OAuth`
 5. **Authorized JavaScript origins**: 
    - Click **+ Add URI**
    - Add: `https://developers.google.com` (for OAuth Playground)
@@ -326,7 +326,7 @@ FIREBASE_CREDENTIALS_JSON={"type":"service_account","project_id":"your-project-i
 # Gmail Configuration (REQUIRED)
 # Note: We use Gmail API (not SMTP) to avoid Railway network restrictions
 SMTP_USER=your-email@gmail.com
-EMAIL_FROM=noreply@knowledgebot.com
+EMAIL_FROM=noreply@digibot.com
 WIDGET_BASE_URL=https://widget.yourdomain.com
 
 # API Keys (REQUIRED)
