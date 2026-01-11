@@ -72,7 +72,7 @@ INSERT INTO user_unique_ids (
 )
 VALUES (
     'admin@globistaan.com',
-    'ADM-' || LPAD(NEXTVAL('user_unique_ids_id_seq')::TEXT, 6, '0'),
+    'ADM-' || LPAD((RANDOM() * 999999)::INTEGER::TEXT, 6, '0'),
     'admin',
     CURRENT_TIMESTAMP
 )
