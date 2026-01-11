@@ -314,9 +314,9 @@ async def get_user_role(email: str):
             if admin:
                 return {"role": "admin", "email": email}
             
-            # Check if user is a human agent
+            # Check if user is a human agent (recognize both confirmed and pending)
             agent = await conn.fetchrow(
-                "SELECT email FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
                 email
             )
             if agent:

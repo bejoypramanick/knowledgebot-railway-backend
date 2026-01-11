@@ -94,9 +94,9 @@ async def verify_token(request: TokenVerificationRequest):
                         is_admin = True
                         primary_role = 'admin'  # Admin takes precedence
                     
-                    # Check if user is a human agent
+                    # Check if user is a human agent (recognize both confirmed and pending)
                     agent = await conn.fetchrow(
-                        "SELECT email FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                        "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
                         email
                     )
                     if agent:
@@ -174,7 +174,7 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
                     
                     # Check if user is a human agent (can be both admin and agent)
                     agent = await conn.fetchrow(
-                        "SELECT email FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                        "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
                         email
                     )
                     if agent:
@@ -268,9 +268,9 @@ async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)
                         user_roles.append('admin')
                         primary_role = 'admin'  # Admin takes precedence
                     
-                    # Check if user is a human agent
+                    # Check if user is a human agent (recognize both confirmed and pending)
                     agent = await conn.fetchrow(
-                        "SELECT email FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                        "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
                         email
                     )
                     if agent:
