@@ -664,64 +664,8 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                             token_used
                         )
             
-            if not updates:
-                raise HTTPException(status_code=400, detail="No fields to update")
-            
-            # Use INSERT ... ON CONFLICT to handle upsert
-            admin_user_value = 'GLOBISTAAN'
-            
-            # Extract field names from updates
-            update_field_names = [u.split(' = ')[0] for u in updates]
-            
-            # Build INSERT values and placeholders
-            insert_field_names = []
-            insert_values = []
-            insert_placeholders = []
-            param_num = 1
-            
-            # Add admin_user first if not in updates
-            if 'admin_user' not in update_field_names:
-                insert_field_names.append('admin_user')
-                insert_values.append(admin_user_value)
-                insert_placeholders.append(f'${param_num}')
-                param_num += 1
-            
-            # Add all update fields to INSERT
-            for i, update_clause in enumerate(updates):
-                field_name = update_clause.split(' = ')[0]
-                insert_field_names.append(field_name)
-                insert_values.append(values[i])
-                if field_name in ['admin_emails', 'human_agents']:
-                    insert_placeholders.append(f'${param_num}::text[]')
-                else:
-                    insert_placeholders.append(f'${param_num}')
-                param_num += 1
-            
-            # Rebuild UPDATE clause to reference the same parameters as INSERT
-            # If admin_user was added to INSERT, UPDATE parameters start from $2
-            update_clauses = []
-            update_param_start = 2 if 'admin_user' not in update_field_names else 1
-            
-            for i, update_clause in enumerate(updates):
-                field_name = update_clause.split(' = ')[0]
-                param_num = update_param_start + i
-                if field_name in ['admin_emails', 'human_agents']:
-                    update_clauses.append(f"{field_name} = ${param_num}::text[]")
-                else:
-                    update_clauses.append(f"{field_name} = ${param_num}")
-            
-            query = f"""
-                -- NOTE: This function needs to be updated to work with the new 3NF schema
-                -- Configuration is now stored in normalized tables:
-                -- - configuration_metadata, notification_settings, security_settings
-                -- - llm_providers, persona_configurations, admins, human_agents
-                INSERT INTO chatbot_configuration ({', '.join(insert_field_names)})
-                VALUES ({', '.join(insert_placeholders)})
-                ON CONFLICT (admin_user)
-                DO UPDATE SET {', '.join(update_clauses)}, updated_at = CURRENT_TIMESTAMP
-            """
-            
-            await conn.execute(query, *insert_values)
+            # Configuration updates completed using normalized tables
+            logger.info("Configuration saved successfully using normalized tables")
             
             # If human agents are provided, trigger email sending
             logger.info(f"Checking human agents: config.human_agents = {config.human_agents}")

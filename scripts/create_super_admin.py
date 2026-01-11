@@ -90,22 +90,9 @@ async def create_super_admin():
                 )
                 logger.info("Super admin added to database")
             
-            # Update chatbot_configuration to include super admin
-            await conn.execute(
-                """
-                INSERT INTO chatbot_configuration (admin_user, admin_emails)
-                VALUES ($1, ARRAY[$2]::TEXT[])
-                ON CONFLICT (admin_user) 
-                DO UPDATE SET 
-                    admin_emails = CASE 
-                        WHEN $2 = ANY(COALESCE(chatbot_configuration.admin_emails, ARRAY[]::TEXT[])) 
-                        THEN chatbot_configuration.admin_emails
-                        ELSE array_append(COALESCE(chatbot_configuration.admin_emails, ARRAY[]::TEXT[]), $2)
-                    END
-                """,
-                SUPER_ADMIN_EMAIL, SUPER_ADMIN_EMAIL
-            )
-            logger.info("Super admin added to chatbot configuration")
+            # Note: Admin management is now handled through the admins table only
+            # No need to update chatbot_configuration - configuration endpoint reads from admins table
+            logger.info("Super admin management completed using new schema")
         
         logger.info("✅ Super admin created successfully!")
         logger.info(f"   Email: {SUPER_ADMIN_EMAIL}")
