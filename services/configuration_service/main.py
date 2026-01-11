@@ -468,6 +468,15 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                         
                         for email in admin_emails_to_create:
                             try:
+                                # Check if admin already exists and is confirmed
+                                existing_admin = await conn.fetchrow(
+                                    "SELECT status FROM admins WHERE email = $1",
+                                    email
+                                )
+                                if existing_admin and existing_admin['status'] == 'confirmed':
+                                    logger.info(f"Admin {email} is already confirmed, skipping reset to pending")
+                                    continue
+
                                 # Generate a secure random password
                                 generated_password = secrets.token_urlsafe(16)
                                 
