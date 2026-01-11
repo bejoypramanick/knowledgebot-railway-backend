@@ -446,13 +446,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                 values.append(admin_email_list)
                 param_index += 1
                 
-                # Also update admin_user for backward compatibility (use first admin email if available)
-                if len(admin_email_list) > 0:
-                    # Check if admin_user is already in updates to avoid duplicate
-                    if "admin_user" not in " ".join(updates):
-                        updates.append(f"admin_user = ${param_index}")
-                        values.append(admin_email_list[0])
-                        param_index += 1
+                # Don't update admin_user to specific email, keep it as 'GLOBISTAAN' for global config
                 
                 # Create Firebase accounts for admins with auto-generated passwords
                 if admin_emails_to_create:
@@ -620,19 +614,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                 raise HTTPException(status_code=400, detail="No fields to update")
             
             # Use INSERT ... ON CONFLICT to handle upsert
-            # Determine admin_user value for INSERT
             admin_user_value = 'GLOBISTAAN'
-            if config.admin_emails is not None and len(config.admin_emails) > 0:
-                # Extract first email if it's a string, or get email from dict/object
-                first_admin = config.admin_emails[0]
-                if isinstance(first_admin, str):
-                    admin_user_value = first_admin
-                elif isinstance(first_admin, dict):
-                    admin_user_value = first_admin.get('email', 'GLOBISTAAN')
-                elif hasattr(first_admin, 'email'):
-                    admin_user_value = first_admin.email
-                else:
-                    admin_user_value = 'GLOBISTAAN'
             
             # Extract field names from updates
             update_field_names = [u.split(' = ')[0] for u in updates]
