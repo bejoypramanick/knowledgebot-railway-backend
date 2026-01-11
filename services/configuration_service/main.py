@@ -994,6 +994,7 @@ try:
     from services.configuration_service.admin_management import router as admin_management_router
     from services.configuration_service.auth import router as auth_router
     from services.configuration_service.chat_log import router as chat_log_router, public_chat_router
+    from services.configuration_service.user_ids import router as user_ids_router
 
     app.include_router(human_agents_router)
     app.include_router(feedback_router)
@@ -1002,6 +1003,7 @@ try:
     app.include_router(auth_router)
     app.include_router(performance_router)
     app.include_router(chat_log_router)
+    app.include_router(user_ids_router)
     app.include_router(public_chat_router)  # Public chat endpoints (no auth required)
     logger.info("✅ New endpoints (human agents, feedback, token usage, admin management, auth, chat log) loaded successfully")
 except ImportError as e:
