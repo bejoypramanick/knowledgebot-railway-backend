@@ -156,9 +156,10 @@ async def get_agent_online_status(agent_email: str, conn) -> bool:
         heartbeat_activity = await conn.fetchval(
             """
             SELECT COUNT(*) 
-            FROM human_agent_sessions 
-            WHERE customer_session_id = $1
-            AND connected_at > NOW() - INTERVAL '30 minutes'
+            FROM session_assignments sa
+            INNER JOIN chat_sessions cs ON sa.session_id = cs.id
+            WHERE cs.session_id = $1
+            AND sa.assigned_at > NOW() - INTERVAL '30 minutes'
             """,
             heartbeat_session_id
         ) or 0
@@ -172,11 +173,12 @@ async def get_agent_online_status(agent_email: str, conn) -> bool:
         recent_activity = await conn.fetchval(
             """
             SELECT COUNT(*) 
-            FROM human_agent_sessions 
-            WHERE agent_email = $1 
-            AND customer_session_id != $2
-            AND status IN ('waiting', 'connected')
-            AND connected_at > NOW() - INTERVAL '30 minutes'
+            FROM session_assignments sa
+            INNER JOIN chat_sessions cs ON sa.session_id = cs.id
+            WHERE sa.assignee_email = $1 
+            AND cs.session_id != $2
+            AND sa.status IN ('waiting', 'active')
+            AND sa.assigned_at > NOW() - INTERVAL '30 minutes'
             """,
             agent_email, heartbeat_session_id
         ) or 0
@@ -233,31 +235,43 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
                 session_db_id
             )
         
-        # Create or update human_agent_sessions entry
+        # Determine assignee type (admin or agent)
+        assignee_type = await conn.fetchval(
+            """
+            SELECT CASE 
+                WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1 AND status = 'confirmed') 
+                THEN 'admin'
+                ELSE 'agent'
+            END
+            """,
+            agent_email
+        )
+        
+        # Create or update session_assignments entry
         existing = await conn.fetchrow(
             """
-            SELECT id FROM human_agent_sessions 
-            WHERE customer_session_id = $1
+            SELECT id FROM session_assignments 
+            WHERE session_id = $1
             """,
-            session_id
+            session_db_id
         )
         
         if existing:
             await conn.execute(
                 """
-                UPDATE human_agent_sessions
-                SET agent_email = $1, status = 'waiting', connected_at = CURRENT_TIMESTAMP
-                WHERE customer_session_id = $2
+                UPDATE session_assignments
+                SET assignee_email = $1, assignee_type = $2, status = 'waiting', assigned_at = CURRENT_TIMESTAMP
+                WHERE session_id = $3
                 """,
-                agent_email, session_id
+                agent_email, assignee_type, session_db_id
             )
         else:
             await conn.execute(
                 """
-                INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
-                VALUES ($1, $2, 'waiting', CURRENT_TIMESTAMP)
+                INSERT INTO session_assignments (session_id, assignee_email, assignee_type, status, assigned_at)
+                VALUES ($1, $2, $3, 'waiting', CURRENT_TIMESTAMP)
                 """,
-                session_id, agent_email
+                session_db_id, agent_email, assignee_type
             )
         
         # Ensure last_activity_at is updated so the session appears at the top of the list
@@ -280,32 +294,17 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
 async def get_agent_chat_count(agent_email: str, conn) -> int:
     """Get the number of active chats assigned to an agent."""
     try:
-        # Count from both human_agent_sessions and chat_sessions metadata
-        # This ensures we count all active chats regardless of where they're stored
-        count1 = await conn.fetchval(
+        # Count from session_assignments table
+        count = await conn.fetchval(
             """
             SELECT COUNT(*) 
-            FROM human_agent_sessions 
-            WHERE agent_email = $1 AND status IN ('waiting', 'connected')
+            FROM session_assignments 
+            WHERE assignee_email = $1 AND status IN ('waiting', 'active')
             """,
             agent_email
         ) or 0
         
-        # Also count from chat_sessions where agent is assigned in metadata
-        count2 = await conn.fetchval(
-            """
-            SELECT COUNT(*) 
-            FROM chat_sessions 
-            WHERE is_active = TRUE 
-            AND (metadata->>'assigned_agent') = $1
-            AND (metadata->>'status') IN ('active', 'waiting', 'connected')
-            """,
-            agent_email
-        ) or 0
-        
-        # Return the maximum count (to avoid double counting if both exist)
-        # In practice, both should be in sync, but we take max to be safe
-        return max(count1, count2)
+        return count
     except Exception as e:
         logger.error(f"Error getting agent chat count: {e}")
         return 0
@@ -515,61 +514,68 @@ async def agent_heartbeat(
                     raise HTTPException(status_code=403, detail="User is not a confirmed human agent or admin")
             
             # Update last activity timestamp for this agent
-            # We'll use the human_agent_sessions table to track activity
-            # by updating the most recent session's connected_at timestamp
-            # PostgreSQL doesn't support LIMIT in UPDATE, so we use a subquery
-            await conn.execute(
-                """
-                UPDATE human_agent_sessions 
-                SET connected_at = CURRENT_TIMESTAMP
-                WHERE id = (
-                    SELECT id FROM human_agent_sessions
-                    WHERE agent_email = $1 
-                    AND connected_at > NOW() - INTERVAL '1 hour'
-                    LIMIT 1
+            # We'll use the session_assignments table to track activity
+            # Create or update a heartbeat session to mark agent as online
+            
+            # Create a heartbeat session_id
+            heartbeat_session_id = f"heartbeat_{user_email}"
+            
+            # Get or create the heartbeat chat_session
+            heartbeat_cs = await conn.fetchrow(
+                "SELECT id FROM chat_sessions WHERE session_id = $1",
+                heartbeat_session_id
+            )
+            
+            if not heartbeat_cs:
+                # Create heartbeat chat session
+                heartbeat_cs_id = await conn.fetchval(
+                    """
+                    INSERT INTO chat_sessions (session_id, is_active, metadata, last_activity_at, created_at)
+                    VALUES ($1, TRUE, '{}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    RETURNING id
+                    """,
+                    heartbeat_session_id
                 )
+            else:
+                heartbeat_cs_id = heartbeat_cs['id']
+            
+            # Determine assignee type
+            assignee_type = await conn.fetchval(
+                """
+                SELECT CASE 
+                    WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1 AND status = 'confirmed') 
+                    THEN 'admin'
+                    ELSE 'agent'
+                END
                 """,
                 user_email
             )
             
-            # If no existing session was updated, create a dummy session entry to track activity
-            # This ensures agents without assigned chats are still marked as online
-            rows_updated = await conn.fetchval(
-                "SELECT COUNT(*) FROM human_agent_sessions WHERE agent_email = $1 AND connected_at > NOW() - INTERVAL '1 hour'",
-                user_email
-            ) or 0
+            # Check if heartbeat assignment already exists
+            existing = await conn.fetchval(
+                "SELECT id FROM session_assignments WHERE session_id = $1",
+                heartbeat_cs_id
+            )
             
-            if rows_updated == 0:
-                # Create a dummy session entry to track that agent is online
-                # Use a special session_id format to indicate this is a heartbeat entry
-                # Use a consistent session_id per agent (not timestamp-based) so we can update it
-                dummy_session_id = f"heartbeat_{user_email}"
-                
-                # Check if heartbeat entry already exists
-                existing = await conn.fetchval(
-                    "SELECT id FROM human_agent_sessions WHERE customer_session_id = $1",
-                    dummy_session_id
+            if existing:
+                # Update existing heartbeat entry
+                await conn.execute(
+                    """
+                    UPDATE session_assignments 
+                    SET assigned_at = CURRENT_TIMESTAMP, status = 'active', assignee_type = $1
+                    WHERE session_id = $2
+                    """,
+                    assignee_type, heartbeat_cs_id
                 )
-                
-                if existing:
-                    # Update existing heartbeat entry
-                    await conn.execute(
-                        """
-                        UPDATE human_agent_sessions 
-                        SET connected_at = CURRENT_TIMESTAMP, status = 'connected'
-                        WHERE customer_session_id = $1
-                        """,
-                        dummy_session_id
-                    )
-                else:
-                    # Insert new heartbeat entry
-                    await conn.execute(
-                        """
-                        INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
-                        VALUES ($1, $2, 'connected', CURRENT_TIMESTAMP)
-                        """,
-                        dummy_session_id, user_email
-                    )
+            else:
+                # Insert new heartbeat entry
+                await conn.execute(
+                    """
+                    INSERT INTO session_assignments (session_id, assignee_email, assignee_type, status, assigned_at)
+                    VALUES ($1, $2, $3, 'active', CURRENT_TIMESTAMP)
+                    """,
+                    heartbeat_cs_id, user_email, assignee_type
+                )
             
             logger.debug(f"Heartbeat received from agent {user_email}")
             
@@ -638,51 +644,67 @@ async def get_assigned_chat_sessions(
                 async with get_db_connection() as heartbeat_conn:
                     # Always ensure heartbeat entry exists and is up-to-date
                     # This is the primary way we track that an agent is online
-                    dummy_session_id = f"heartbeat_{user_email}"
+                    heartbeat_session_id = f"heartbeat_{user_email}"
                     
-                    # Check if heartbeat entry already exists
+                    # Get or create the heartbeat chat_session
+                    heartbeat_cs = await heartbeat_conn.fetchrow(
+                        "SELECT id FROM chat_sessions WHERE session_id = $1",
+                        heartbeat_session_id
+                    )
+                    
+                    if not heartbeat_cs:
+                        # Create heartbeat chat session
+                        heartbeat_cs_id = await heartbeat_conn.fetchval(
+                            """
+                            INSERT INTO chat_sessions (session_id, is_active, metadata, last_activity_at, created_at)
+                            VALUES ($1, TRUE, '{}'::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            RETURNING id
+                            """,
+                            heartbeat_session_id
+                        )
+                    else:
+                        heartbeat_cs_id = heartbeat_cs['id']
+                    
+                    # Determine assignee type
+                    assignee_type = await heartbeat_conn.fetchval(
+                        """
+                        SELECT CASE 
+                            WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1 AND status = 'confirmed') 
+                            THEN 'admin'
+                            ELSE 'agent'
+                        END
+                        """,
+                        user_email
+                    )
+                    
+                    # Check if heartbeat assignment already exists
                     existing = await heartbeat_conn.fetchval(
-                        "SELECT id FROM human_agent_sessions WHERE customer_session_id = $1",
-                        dummy_session_id
+                        "SELECT id FROM session_assignments WHERE session_id = $1",
+                        heartbeat_cs_id
                     )
                     
                     if existing:
-                        # Update existing heartbeat entry to current timestamp
+                        # Update existing heartbeat entry
                         await heartbeat_conn.execute(
                             """
-                            UPDATE human_agent_sessions 
-                            SET connected_at = CURRENT_TIMESTAMP, status = 'connected'
-                            WHERE customer_session_id = $1
+                            UPDATE session_assignments 
+                            SET assigned_at = CURRENT_TIMESTAMP, status = 'active', assignee_type = $1
+                            WHERE session_id = $2
                             """,
-                            dummy_session_id
+                            assignee_type, heartbeat_cs_id
                         )
                         logger.debug(f"Updated heartbeat for agent {user_email}")
                     else:
                         # Insert new heartbeat entry
                         await heartbeat_conn.execute(
                             """
-                            INSERT INTO human_agent_sessions (customer_session_id, agent_email, status, connected_at)
-                            VALUES ($1, $2, 'connected', CURRENT_TIMESTAMP)
+                            INSERT INTO session_assignments (session_id, assignee_email, assignee_type, status, assigned_at)
+                            VALUES ($1, $2, $3, 'active', CURRENT_TIMESTAMP)
                             """,
-                            dummy_session_id, user_email
+                            heartbeat_cs_id, user_email, assignee_type
                         )
                         logger.debug(f"Created heartbeat entry for agent {user_email}")
                     
-                    # Also update any recent real sessions to show activity
-                    await heartbeat_conn.execute(
-                        """
-                        UPDATE human_agent_sessions 
-                        SET connected_at = CURRENT_TIMESTAMP
-                        WHERE id = (
-                            SELECT id FROM human_agent_sessions
-                            WHERE agent_email = $1 
-                            AND customer_session_id != $2
-                            AND connected_at > NOW() - INTERVAL '1 hour'
-                            LIMIT 1
-                        )
-                        """,
-                        user_email, dummy_session_id
-                    )
                     logger.debug(f"Recorded activity for agent {user_email} via chat-sessions endpoint")
             except Exception as e:
                 logger.warning(f"Could not record heartbeat for {user_email}: {e}")
@@ -705,7 +727,7 @@ async def get_assigned_chat_sessions(
             # Build query based on role
             if role == 'human_agent' and agent_id:
                 # Human agents: only their assigned sessions
-                # Filter by agent_email in human_agent_sessions table to ensure they only see their chats
+                # Filter by assignee_email in session_assignments table to ensure they only see their chats
                 sessions_data = await conn.fetch(
                     """
                     SELECT DISTINCT
@@ -715,12 +737,11 @@ async def get_assigned_chat_sessions(
                         cs.created_at,
                         cs.metadata,
                         cs.is_active,
-                        cs.sentiment,
-                        cs.session_feedback
+                        cs.sentiment
                     FROM chat_sessions cs
-                    INNER JOIN human_agent_sessions has ON cs.session_id = has.customer_session_id
-                    WHERE LOWER(has.agent_email) = LOWER($1)
-                    AND has.status IN ('waiting', 'connected')
+                    INNER JOIN session_assignments sa ON cs.id = sa.session_id
+                    WHERE LOWER(sa.assignee_email) = LOWER($1)
+                    AND sa.status IN ('waiting', 'active')
                     ORDER BY COALESCE(cs.last_activity_at, cs.created_at, cs.updated_at, CURRENT_TIMESTAMP) DESC
                     """,
                     agent_id
@@ -738,10 +759,9 @@ async def get_assigned_chat_sessions(
                         cs.metadata,
                         cs.is_active,
                         cs.sentiment,
-                        cs.session_feedback,
-                        has.agent_email
+                        sa.assignee_email as agent_email
                     FROM chat_sessions cs
-                    LEFT JOIN human_agent_sessions has ON cs.session_id = has.customer_session_id
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
                     ORDER BY cs.last_activity_at DESC
                     """
                 )
@@ -846,13 +866,33 @@ async def get_assigned_chat_sessions(
                     except Exception as e:
                         logger.error(f"Error updating expired session: {e}")
                 
-                # Get sentiment and feedback from database
+                # Get sentiment from database
                 sentiment = session_row.get('sentiment')
-                session_feedback = session_row.get('session_feedback')
-                
-                # Also check metadata for customer_feedback and agent_feedback
-                customer_feedback = metadata.get('customer_feedback')
-                agent_feedback = metadata.get('agent_feedback')
+
+                # Compute feedback on-the-fly from chat_feedback table
+                feedback_result = await conn.fetchrow(
+                    """
+                    SELECT
+                        COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
+                        COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
+                    FROM chat_feedback
+                    WHERE session_id = $1
+                    """,
+                    session_id
+                )
+
+                # Determine session feedback based on aggregated feedback
+                if feedback_result and feedback_result['positive_count'] > 0 and feedback_result['negative_count'] == 0:
+                    session_feedback = 'positive'
+                elif feedback_result and feedback_result['negative_count'] > 0:
+                    session_feedback = 'negative'
+                else:
+                    session_feedback = None
+
+                # For backward compatibility, set customer_feedback and agent_feedback based on session_feedback
+                # In the new schema, we don't distinguish between customer and agent feedback at the session level
+                customer_feedback = session_feedback
+                agent_feedback = session_feedback
                 
                 # If sentiment is not set and session is closed, analyze it
                 if not sentiment and status == 'closed' and len(messages) > 0:
@@ -1257,20 +1297,8 @@ async def update_chat_session(
                 updates.append(f"metadata = ${param_index}::jsonb")
                 params.append(json.dumps(current_metadata))
                 param_index += 1
-                
-                # Also update session_feedback for backward compatibility
-                # If customer feedback, update session_feedback directly
-                # If agent feedback, only update if no customer feedback exists
-                if user_type == 'customer':
-                    updates.append(f"session_feedback = ${param_index}")
-                    params.append(feedback)
-                    param_index += 1
-                elif user_type == 'agent':
-                    # Only update session_feedback if customer_feedback doesn't exist in metadata
-                    if 'customer_feedback' not in current_metadata:
-                        updates.append(f"session_feedback = ${param_index}")
-                        params.append(feedback)
-                        param_index += 1
+
+                # Note: session_feedback column has been removed - feedback is computed on-the-fly
             
             if not updates:
                 raise HTTPException(status_code=400, detail="No updates provided")
@@ -1393,18 +1421,18 @@ async def request_human_agent(
         
         async with get_db_connection() as conn:
             # Check if HIL is enabled (default to true if not set)
-            # Try to get hil_enabled, but default to True if column doesn't exist
+            # Try to get hil_enabled from configuration_metadata, but default to True if not set
             try:
                 config = await conn.fetchrow(
-                    "SELECT hil_enabled FROM chatbot_configuration WHERE admin_user = 'GLOBISTAAN' LIMIT 1"
+                    "SELECT hil_enabled FROM configuration_metadata WHERE id = 1"
                 )
                 
                 # Default to enabled if not set (hil_enabled can be NULL, which means enabled by default)
                 hil_enabled = config.get('hil_enabled') if config and config.get('hil_enabled') is not None else True
             except Exception as e:
-                # If column doesn't exist, default to True (column must be added manually via migration)
-                if 'hil_enabled' in str(e) or 'column' in str(e).lower():
-                    logger.warning(f"hil_enabled column not found in database. Please run migration script to add it. Defaulting to True.")
+                # If table/column doesn't exist, default to True
+                if 'configuration_metadata' in str(e) or 'hil_enabled' in str(e) or 'column' in str(e).lower():
+                    logger.warning(f"configuration_metadata table or hil_enabled column not found. Please run migration script. Defaulting to True.")
                     hil_enabled = True
                 else:
                     # For other errors, default to True
@@ -1432,10 +1460,10 @@ async def request_human_agent(
                     # Check if any agents are online
                     online_count = await conn.fetchval(
                         """
-                        SELECT COUNT(DISTINCT has.agent_email)
-                        FROM human_agent_sessions has
-                        WHERE has.connected_at > NOW() - INTERVAL '30 minutes'
-                        AND has.agent_email IN (SELECT email FROM human_agents WHERE status = 'confirmed')
+                        SELECT COUNT(DISTINCT sa.assignee_email)
+                        FROM session_assignments sa
+                        WHERE sa.assigned_at > NOW() - INTERVAL '30 minutes'
+                        AND sa.assignee_email IN (SELECT email FROM human_agents WHERE status = 'confirmed')
                         """
                     ) or 0
                     
@@ -1499,8 +1527,9 @@ async def websocket_agent_chat(websocket: WebSocket, session_id: str):
             # Check if agent is assigned to this session
             assigned = await conn.fetchrow(
                 """
-                SELECT agent_email FROM human_agent_sessions 
-                WHERE customer_session_id = $1 AND agent_email = $2
+                SELECT sa.assignee_email FROM session_assignments sa
+                INNER JOIN chat_sessions cs ON sa.session_id = cs.id
+                WHERE cs.session_id = $1 AND sa.assignee_email = $2
                 """,
                 session_id, user_email
             )

@@ -33,7 +33,7 @@ async def get_db_connection():
 
 
 async def get_gemini_usage() -> dict:
-    """Get Gemini API token usage from cache or configuration table."""
+    """Get Gemini API token usage from cache or llm_providers table."""
     try:
         db = await get_db_connection()
         if db and hasattr(db, '_pool') and db._pool is not None:
@@ -41,8 +41,8 @@ async def get_gemini_usage() -> dict:
                 # First try token_usage_cache table
                 cached = await conn.fetchrow(
                     """
-                    SELECT used, available, limit_value 
-                    FROM token_usage_cache 
+                    SELECT used, available, limit_value
+                    FROM token_usage_cache
                     WHERE provider = 'gemini'
                     ORDER BY updated_at DESC
                     LIMIT 1
@@ -55,28 +55,28 @@ async def get_gemini_usage() -> dict:
                         "available": cached['available'] or 20000,
                         "limit": cached['limit_value'] or 20000
                     }
-                
-                # Fallback to chatbot_configuration table
+
+                # Fallback to llm_providers table
                 config = await conn.fetchrow(
                     """
-                    SELECT 
-                        COALESCE(llm_token_used_gemini, 0) as used,
-                        COALESCE(llm_token_limit_gemini, 20000) as limit_value
-                    FROM chatbot_configuration
-                    WHERE admin_user = 'GLOBISTAAN'
+                    SELECT
+                        COALESCE(token_used, 0) as used,
+                        COALESCE(token_limit, 20000) as limit_value
+                    FROM llm_providers
+                    WHERE provider_name = 'gemini' AND is_active = true
                     """
                 )
                 if config:
                     used = config['used']
                     limit = config['limit_value']
                     available = limit - used
-                    logger.info(f"Found Gemini usage in config: used={used}, available={available}, limit={limit}")
+                    logger.info(f"Found Gemini usage in llm_providers: used={used}, available={available}, limit={limit}")
                     return {
                         "used": used,
                         "available": available,
                         "limit": limit
                     }
-        
+
         # Default values if no data found
         logger.warning("No Gemini usage data found, returning defaults")
         return {
@@ -94,7 +94,7 @@ async def get_gemini_usage() -> dict:
 
 
 async def get_openai_usage() -> dict:
-    """Get OpenAI API token usage from cache or configuration table."""
+    """Get OpenAI API token usage from cache or llm_providers table."""
     try:
         db = await get_db_connection()
         if db and hasattr(db, '_pool') and db._pool is not None:
@@ -102,8 +102,8 @@ async def get_openai_usage() -> dict:
                 # First try token_usage_cache table
                 cached = await conn.fetchrow(
                     """
-                    SELECT used, available, limit_value 
-                    FROM token_usage_cache 
+                    SELECT used, available, limit_value
+                    FROM token_usage_cache
                     WHERE provider = 'openai'
                     ORDER BY updated_at DESC
                     LIMIT 1
@@ -116,28 +116,28 @@ async def get_openai_usage() -> dict:
                         "available": cached['available'] or 150000,
                         "limit": cached['limit_value'] or 150000
                     }
-                
-                # Fallback to chatbot_configuration table (using deepseek columns for backward compatibility)
+
+                # Fallback to llm_providers table (using deepseek provider for backward compatibility)
                 config = await conn.fetchrow(
                     """
-                    SELECT 
-                        COALESCE(llm_token_used_deepseek, 0) as used,
-                        COALESCE(llm_token_limit_deepseek, 150000) as limit_value
-                    FROM chatbot_configuration
-                    WHERE admin_user = 'GLOBISTAAN'
+                    SELECT
+                        COALESCE(token_used, 0) as used,
+                        COALESCE(token_limit, 150000) as limit_value
+                    FROM llm_providers
+                    WHERE provider_name = 'deepseek' AND is_active = true
                     """
                 )
                 if config:
                     used = config['used']
                     limit = config['limit_value']
                     available = limit - used
-                    logger.info(f"Found OpenAI usage in config: used={used}, available={available}, limit={limit}")
+                    logger.info(f"Found OpenAI usage in llm_providers: used={used}, available={available}, limit={limit}")
                     return {
                         "used": used,
                         "available": available,
                         "limit": limit
                     }
-        
+
         # Default values if no data found
         logger.warning("No OpenAI usage data found, returning defaults")
         return {
@@ -155,24 +155,33 @@ async def get_openai_usage() -> dict:
 
 
 async def initialize_token_usage_if_needed():
-    """Initialize token usage in chatbot_configuration table if not set."""
+    """Initialize token usage in llm_providers table if not set."""
     try:
         db = await get_db_connection()
         if db and hasattr(db, '_pool') and db._pool is not None:
             async with db.acquire() as conn:
-                # Use INSERT ... ON CONFLICT to ensure limits are set
+                # Initialize Gemini provider
                 await conn.execute(
                     """
-                    INSERT INTO chatbot_configuration (admin_user, llm_token_limit_gemini, llm_token_used_gemini, llm_token_limit_deepseek, llm_token_used_deepseek)
-                    VALUES ('GLOBISTAAN', 20000, 0, 150000, 0)
-                    ON CONFLICT (admin_user) DO UPDATE
-                    SET llm_token_limit_gemini = COALESCE(chatbot_configuration.llm_token_limit_gemini, 20000),
-                        llm_token_used_gemini = COALESCE(chatbot_configuration.llm_token_used_gemini, 0),
-                        llm_token_limit_deepseek = COALESCE(chatbot_configuration.llm_token_limit_deepseek, 150000),
-                        llm_token_used_deepseek = COALESCE(chatbot_configuration.llm_token_used_deepseek, 0)
+                    INSERT INTO llm_providers (provider_name, token_limit, token_used, is_active)
+                    VALUES ('gemini', 20000, 0, true)
+                    ON CONFLICT (provider_name) DO UPDATE SET
+                        token_limit = COALESCE(llm_providers.token_limit, 20000),
+                        is_active = true
                     """
                 )
-                logger.info("Ensured token usage limits are initialized in database")
+
+                # Initialize DeepSeek provider (used for OpenAI compatibility)
+                await conn.execute(
+                    """
+                    INSERT INTO llm_providers (provider_name, token_limit, token_used, is_active)
+                    VALUES ('deepseek', 150000, 0, true)
+                    ON CONFLICT (provider_name) DO UPDATE SET
+                        token_limit = COALESCE(llm_providers.token_limit, 150000),
+                        is_active = true
+                    """
+                )
+                logger.info("Ensured token usage limits are initialized in llm_providers table")
     except Exception as e:
         logger.error(f"Error initializing token usage: {e}", exc_info=True)
 

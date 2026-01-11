@@ -227,137 +227,150 @@ async def health_check():
 async def get_chatbot_config():
     """Get chatbot configuration"""
     from fastapi.responses import JSONResponse
-    
+
     try:
         async with get_db_connection() as conn:
-            # Try to select with hil_enabled, but handle gracefully if column doesn't exist
-            # Column must be added manually via migration script
-            try:
-                row = await conn.fetchrow(
-                    """
-                    SELECT 
-                        admin_user,
-                        admin_emails,
-                        human_agents,
-                        hil_enabled,
-                        user_interactions_enabled,
-                        error_alerts_enabled,
-                        feedback_requests_enabled,
-                        response_timeout,
-                        remove_pii,
-                        restrict_config,
-                        response_policy,
-                        backup_logs,
-                        system_prompt,
-                        selected_persona,
-                        llm_token_limit_gemini,
-                        llm_token_used_gemini,
-                        llm_token_limit_deepseek,
-                        llm_token_used_deepseek,
-                        updated_at
-                    FROM chatbot_configuration
-                    WHERE admin_user = 'GLOBISTAAN'
-                    """
-                )
-            except Exception as e:
-                # If hil_enabled column doesn't exist, select without it and default to True
-                if 'hil_enabled' in str(e) or 'column' in str(e).lower():
-                    logger.warning("hil_enabled column not found. Please run migration script to add it. Defaulting to True.")
-                    row = await conn.fetchrow(
-                        """
-                        SELECT 
-                            admin_user,
-                            admin_emails,
-                            human_agents,
-                            user_interactions_enabled,
-                            error_alerts_enabled,
-                            feedback_requests_enabled,
-                            response_timeout,
-                            remove_pii,
-                            restrict_config,
-                            response_policy,
-                            backup_logs,
-                            system_prompt,
-                            selected_persona,
-                            llm_token_limit_gemini,
-                            llm_token_used_gemini,
-                            llm_token_limit_deepseek,
-                            llm_token_used_deepseek,
-                            updated_at
-                        FROM chatbot_configuration
-                        WHERE admin_user = 'GLOBISTAAN'
-                        """
-                    )
-                    # Add hil_enabled with default value
-                    if row:
-                        row = dict(row)
-                        row['hil_enabled'] = True
-                else:
-                    raise
-            
-            # Fetch human agents from the human_agents table (not from chatbot_configuration.human_agents)
-            # Get all confirmed and pending agents
+            # Read from new normalized tables
+            # Get configuration metadata
+            metadata = await conn.fetchrow(
+                """
+                SELECT default_user_role, hil_enabled, response_policy
+                FROM configuration_metadata
+                WHERE id = 1
+                """
+            )
+
+            # Get notification settings
+            notification_rows = await conn.fetch(
+                """
+                SELECT setting_name, is_enabled
+                FROM notification_settings
+                ORDER BY setting_name
+                """
+            )
+
+            # Get security settings
+            security_rows = await conn.fetch(
+                """
+                SELECT setting_name, setting_value, setting_type
+                FROM security_settings
+                ORDER BY setting_name
+                """
+            )
+
+            # Get LLM providers
+            llm_rows = await conn.fetch(
+                """
+                SELECT provider_name, token_limit, token_used
+                FROM llm_providers
+                WHERE is_active = true
+                ORDER BY provider_name
+                """
+            )
+
+            # Get active persona
+            persona = await conn.fetchrow(
+                """
+                SELECT persona_name, system_prompt
+                FROM persona_configurations
+                WHERE is_active = true
+                LIMIT 1
+                """
+            )
+
+            # Fetch human agents from the human_agents table
             human_agents_rows = await conn.fetch(
                 """
-                SELECT email FROM human_agents 
+                SELECT email FROM human_agents
                 WHERE status IN ('confirmed', 'pending')
                 ORDER BY email
                 """
             )
             human_agents_list = [agent["email"] for agent in human_agents_rows] if human_agents_rows else []
             logger.info(f"Fetched {len(human_agents_list)} human agent(s) from human_agents table: {human_agents_list}")
-            
-            # Fetch admins from the admins table (source of truth for admin list)
+
+            # Fetch admins from the admins table
             admin_rows = await conn.fetch(
                 """
-                SELECT email FROM admins 
+                SELECT email FROM admins
                 WHERE status IN ('confirmed', 'pending')
                 ORDER BY email
                 """
             )
             admin_emails_list = [admin["email"] for admin in admin_rows] if admin_rows else []
             logger.info(f"Fetched {len(admin_emails_list)} admin(s) from admins table: {admin_emails_list}")
-            
-            if not row:
-                # Return default configuration with cache headers
-                data = {
-                    "admin_user": "GLOBISTAAN",
-                    "admin_emails": admin_emails_list,
-                    "admin_password": "**********",
-                    "human_agents": human_agents_list,
-                    "hil_enabled": True,  # Default to enabled
-                    "notifications": {
-                        "user_interactions_enabled": False,
-                        "error_alerts_enabled": False,
-                        "feedback_requests_enabled": True
-                    },
-                    "security": {
-                        "response_timeout": 30,
-                        "remove_pii": False,
-                        "restrict_config": False
-                    },
-                    "response_policy": 30,
-                    "data_management": {
-                        "backup_logs": False
-                    },
-                    "persona": {
-                        "system_prompt": "",
-                        "selected_persona": "friendly-receptionist"
-                    },
-                    "llm_tokens": {
-                        "gemini": {
-                            "used": 0,
-                            "available": 20000,
-                            "limit": 20000
-                        },
-                        "deepseek": {
-                            "used": 0,
-                            "available": 150000,
-                            "limit": 150000
-                        }
+
+            # Build notification settings dict
+            notifications = {
+                "user_interactions_enabled": False,
+                "error_alerts_enabled": False,
+                "feedback_requests_enabled": True
+            }
+            for row in notification_rows:
+                if row['setting_name'] == 'user_interactions_enabled':
+                    notifications['user_interactions_enabled'] = row['is_enabled']
+                elif row['setting_name'] == 'error_alerts_enabled':
+                    notifications['error_alerts_enabled'] = row['is_enabled']
+                elif row['setting_name'] == 'feedback_requests_enabled':
+                    notifications['feedback_requests_enabled'] = row['is_enabled']
+
+            # Build security settings dict
+            security = {
+                "response_timeout": 30,
+                "remove_pii": False,
+                "restrict_config": False
+            }
+            for row in security_rows:
+                if row['setting_name'] == 'response_timeout':
+                    security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
+                elif row['setting_name'] == 'remove_pii':
+                    security['remove_pii'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
+                elif row['setting_name'] == 'restrict_config':
+                    security['restrict_config'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
+
+            # Build LLM tokens dict
+            llm_tokens = {
+                "gemini": {"used": 0, "available": 20000, "limit": 20000},
+                "openai": {"used": 0, "available": 0, "limit": 0}
+            }
+            for row in llm_rows:
+                provider = row['provider_name']
+                if provider == 'gemini':
+                    llm_tokens['gemini'] = {
+                        "used": row['token_used'] or 0,
+                        "available": (row['token_limit'] or 0) - (row['token_used'] or 0),
+                        "limit": row['token_limit'] or 0
                     }
-                }
-                response = JSONResponse(content=data)
+                elif provider == 'deepseek':
+                    llm_tokens['openai'] = {
+                        "used": row['token_used'] or 0,
+                        "available": (row['token_limit'] or 0) - (row['token_used'] or 0),
+                        "limit": row['token_limit'] or 0
+                    }
+
+            # Build persona dict
+            persona_config = {
+                "system_prompt": persona['system_prompt'] if persona else "",
+                "selected_persona": persona['persona_name'] if persona else "friendly-receptionist"
+            }
+
+            # Build final configuration
+            data = {
+                "admin_user": "GLOBISTAAN",
+                "admin_emails": admin_emails_list,
+                "admin_password": "**********",
+                "human_agents": human_agents_list,
+                "hil_enabled": metadata['hil_enabled'] if metadata else True,
+                "notifications": notifications,
+                "security": security,
+                "response_policy": metadata['response_policy'] if metadata else 30,
+                "data_management": {
+                    "backup_logs": False  # This was removed from old schema, keeping default
+                },
+                "persona": persona_config,
+                "llm_tokens": llm_tokens
+            }
+            response = JSONResponse(content=data)
                 # Add cache headers for faster loading (5 seconds cache, but allow revalidation)
                 response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
                 return response
@@ -413,41 +426,23 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
     """Save chatbot configuration"""
     try:
         async with get_db_connection() as conn:
-            # Build update query dynamically based on provided fields
-            updates = []
-            values = []
-            param_index = 1
-            
+            # Handle admin emails (create Firebase accounts and add to admins table)
             if config.admin_emails is not None:
-                # Process admin emails - extract emails (passwords will be auto-generated)
-                admin_email_list = []
                 admin_emails_to_create = []
-                
+
                 for admin_item in config.admin_emails:
                     # Handle both dict (AdminAccount) and str formats
                     if isinstance(admin_item, dict):
-                        # New format: {email, password} - extract just email
                         email = admin_item.get('email', '')
                         if email:
-                            admin_email_list.append(email)
                             admin_emails_to_create.append(email)
                     elif hasattr(admin_item, 'email'):
-                        # Pydantic model format - extract just email
                         email = admin_item.email
                         if email:
-                            admin_email_list.append(email)
                             admin_emails_to_create.append(email)
                     elif isinstance(admin_item, str):
-                        # Old format: just email string
-                        admin_email_list.append(admin_item)
                         admin_emails_to_create.append(admin_item)
-                
-                updates.append(f"admin_emails = ${param_index}::text[]")
-                values.append(admin_email_list)
-                param_index += 1
-                
-                # Don't update admin_user to specific email, keep it as 'GLOBISTAAN' for global config
-                
+
                 # Create Firebase accounts for admins with auto-generated passwords
                 if admin_emails_to_create:
                     try:
@@ -456,10 +451,10 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                         from services.configuration_service.admin_management import generate_confirmation_token
                         from shared.email_service import create_email_service
                         import secrets
-                        
+
                         init_firebase_auth()
                         email_service = create_email_service(conn)
-                        
+
                         for email in admin_emails_to_create:
                             try:
                                 # Check if admin already exists and is confirmed
@@ -473,7 +468,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
 
                                 # Generate a secure random password
                                 generated_password = secrets.token_urlsafe(16)
-                                
+
                                 # Check if user already exists in Firebase
                                 try:
                                     existing_user = auth.get_user_by_email(email)
@@ -488,127 +483,228 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                                         email_verified=False
                                     )
                                     logger.info(f"Created Firebase user: {email} (UID: {user.uid})")
-                                
+
                                 # Add to admins table and send verification email with password
                                 token = generate_confirmation_token()
-                                try:
-                                    # Try to insert with auto_generated_password column
-                                    # Column must exist in database (added via migration script)
-                                    await conn.execute(
-                                        """
-                                        INSERT INTO admins (email, status, confirmation_token, auto_generated_password)
-                                        VALUES ($1, 'pending', $2, $3)
-                                        ON CONFLICT (email) 
-                                        DO UPDATE SET confirmation_token = $2, status = 'pending', auto_generated_password = $3
-                                        """,
-                                        email, token, generated_password
-                                    )
-                                except Exception as db_error:
-                                    # If column doesn't exist, fallback to insert without password column
-                                    # Column must be added manually via migration script
-                                    if 'auto_generated_password' in str(db_error).lower() or 'column' in str(db_error).lower():
-                                        logger.warning(f"auto_generated_password column not found. Please run migration script to add it. Inserting without password column.")
-                                        await conn.execute(
-                                            """
-                                            INSERT INTO admins (email, status, confirmation_token)
-                                            VALUES ($1, 'pending', $2)
-                                            ON CONFLICT (email) 
-                                            DO UPDATE SET confirmation_token = $2, status = 'pending'
-                                            """,
-                                            email, token
-                                        )
-                                    else:
-                                        raise
-                                
+                                await conn.execute(
+                                    """
+                                    INSERT INTO admins (email, status, confirmation_token, auto_generated_password)
+                                    VALUES ($1, 'pending', $2, $3)
+                                    ON CONFLICT (email)
+                                    DO UPDATE SET confirmation_token = $2, status = 'pending', auto_generated_password = $3
+                                    """,
+                                    email, token, generated_password
+                                )
+
                                 # Send verification email with generated password
                                 await email_service.send_admin_confirmation_email(email, token, "system", generated_password)
                                 logger.info(f"Verification email with password sent to admin: {email}")
-                                
+
                             except Exception as e:
                                 logger.error(f"Error creating Firebase account for {email}: {e}", exc_info=True)
                                 # Continue with other admins even if one fails
                     except Exception as e:
                         logger.error(f"Error processing admin accounts: {e}", exc_info=True)
                         # Don't fail the whole request if admin creation fails
-            
+
+            # Handle human agents (add to human_agents table)
             if config.human_agents is not None:
-                updates.append(f"human_agents = ${param_index}::text[]")
-                values.append(config.human_agents)
-                param_index += 1
-            
-            if config.hil_enabled is not None:
-                updates.append(f"hil_enabled = ${param_index}")
-                values.append(config.hil_enabled)
-                param_index += 1
-            
+                # Process human agents - they should be email addresses
+                for agent_email in config.human_agents:
+                    if agent_email and isinstance(agent_email, str):
+                        try:
+                            # Check if human agent already exists
+                            existing_agent = await conn.fetchrow(
+                                "SELECT status FROM human_agents WHERE email = $1",
+                                agent_email
+                            )
+                            if not existing_agent:
+                                # Create new human agent
+                                token = generate_confirmation_token()
+                                generated_password = secrets.token_urlsafe(16)
+
+                                # Create Firebase user for agent
+                                try:
+                                    from firebase_admin import auth
+                                    from shared.firebase_auth import init_firebase_auth
+                                    init_firebase_auth()
+
+                                    user = auth.create_user(
+                                        email=agent_email,
+                                        password=generated_password,
+                                        email_verified=False
+                                    )
+                                    logger.info(f"Created Firebase user for agent: {agent_email} (UID: {user.uid})")
+                                except Exception as e:
+                                    logger.error(f"Error creating Firebase account for agent {agent_email}: {e}")
+
+                                # Add to human_agents table
+                                await conn.execute(
+                                    """
+                                    INSERT INTO human_agents (email, status, confirmation_token, auto_generated_password)
+                                    VALUES ($1, 'pending', $2, $3)
+                                    ON CONFLICT (email)
+                                    DO UPDATE SET confirmation_token = $2, status = 'pending', auto_generated_password = $3
+                                    """,
+                                    agent_email, token, generated_password
+                                )
+
+                                # Send confirmation email
+                                try:
+                                    from shared.email_service import create_email_service
+                                    email_service = create_email_service(conn)
+                                    await email_service.send_agent_confirmation_email(agent_email, token, "system", generated_password)
+                                    logger.info(f"Confirmation email sent to agent: {agent_email}")
+                                except Exception as e:
+                                    logger.error(f"Error sending confirmation email to agent {agent_email}: {e}")
+
+                        except Exception as e:
+                            logger.error(f"Error processing human agent {agent_email}: {e}")
+
+            # Update configuration metadata
+            if any([config.hil_enabled is not None, config.response_policy is not None]):
+                updates = []
+                values = []
+                param_index = 1
+
+                if config.hil_enabled is not None:
+                    updates.append(f"hil_enabled = ${param_index}")
+                    values.append(config.hil_enabled)
+                    param_index += 1
+
+                if config.response_policy is not None:
+                    updates.append(f"response_policy = ${param_index}")
+                    values.append(config.response_policy)
+                    param_index += 1
+
+                if updates:
+                    query = f"""
+                    INSERT INTO configuration_metadata (id, {', '.join(field.split(' = ')[0] for field in updates)})
+                    VALUES (1, {', '.join('$' + str(i) for i in range(1, param_index))})
+                    ON CONFLICT (id) DO UPDATE SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+                    """
+                    await conn.execute(query, *values)
+
+            # Update notification settings
             if config.notifications:
                 if config.notifications.user_interactions_enabled is not None:
-                    updates.append(f"user_interactions_enabled = ${param_index}")
-                    values.append(config.notifications.user_interactions_enabled)
-                    param_index += 1
+                    await conn.execute(
+                        """
+                        INSERT INTO notification_settings (setting_name, is_enabled, description)
+                        VALUES ('user_interactions_enabled', $1, 'Enable notifications for user interactions')
+                        ON CONFLICT (setting_name) DO UPDATE SET is_enabled = $1
+                        """,
+                        config.notifications.user_interactions_enabled
+                    )
+
                 if config.notifications.error_alerts_enabled is not None:
-                    updates.append(f"error_alerts_enabled = ${param_index}")
-                    values.append(config.notifications.error_alerts_enabled)
-                    param_index += 1
+                    await conn.execute(
+                        """
+                        INSERT INTO notification_settings (setting_name, is_enabled, description)
+                        VALUES ('error_alerts_enabled', $1, 'Enable error alert notifications')
+                        ON CONFLICT (setting_name) DO UPDATE SET is_enabled = $1
+                        """,
+                        config.notifications.error_alerts_enabled
+                    )
+
                 if config.notifications.feedback_requests_enabled is not None:
-                    updates.append(f"feedback_requests_enabled = ${param_index}")
-                    values.append(config.notifications.feedback_requests_enabled)
-                    param_index += 1
-            
+                    await conn.execute(
+                        """
+                        INSERT INTO notification_settings (setting_name, is_enabled, description)
+                        VALUES ('feedback_requests_enabled', $1, 'Enable feedback request notifications')
+                        ON CONFLICT (setting_name) DO UPDATE SET is_enabled = $1
+                        """,
+                        config.notifications.feedback_requests_enabled
+                    )
+
+            # Update security settings
             if config.security:
                 if config.security.response_timeout is not None:
-                    updates.append(f"response_timeout = ${param_index}")
-                    values.append(config.security.response_timeout)
-                    param_index += 1
+                    await conn.execute(
+                        """
+                        INSERT INTO security_settings (setting_name, setting_value, setting_type, description)
+                        VALUES ('response_timeout', $1, 'integer', 'Response timeout in seconds')
+                        ON CONFLICT (setting_name) DO UPDATE SET setting_value = $1
+                        """,
+                        str(config.security.response_timeout)
+                    )
+
                 if config.security.remove_pii is not None:
-                    updates.append(f"remove_pii = ${param_index}")
-                    values.append(config.security.remove_pii)
-                    param_index += 1
+                    await conn.execute(
+                        """
+                        INSERT INTO security_settings (setting_name, setting_value, setting_type, description)
+                        VALUES ('remove_pii', $1, 'boolean', 'Remove personally identifiable information')
+                        ON CONFLICT (setting_name) DO UPDATE SET setting_value = $1
+                        """,
+                        str(config.security.remove_pii).lower()
+                    )
+
                 if config.security.restrict_config is not None:
-                    updates.append(f"restrict_config = ${param_index}")
-                    values.append(config.security.restrict_config)
-                    param_index += 1
-            
-            if config.response_policy is not None:
-                updates.append(f"response_policy = ${param_index}")
-                values.append(config.response_policy)
-                param_index += 1
-            
-            if config.data_management:
-                if config.data_management.backup_logs is not None:
-                    updates.append(f"backup_logs = ${param_index}")
-                    values.append(config.data_management.backup_logs)
-                    param_index += 1
-            
+                    await conn.execute(
+                        """
+                        INSERT INTO security_settings (setting_name, setting_value, setting_type, description)
+                        VALUES ('restrict_config', $1, 'boolean', 'Restrict configuration access')
+                        ON CONFLICT (setting_name) DO UPDATE SET setting_value = $1
+                        """,
+                        str(config.security.restrict_config).lower()
+                    )
+
+            # Update persona configuration
             if config.persona:
-                if config.persona.system_prompt is not None:
-                    updates.append(f"system_prompt = ${param_index}")
-                    values.append(config.persona.system_prompt)
-                    param_index += 1
-                if config.persona.selected_persona is not None:
-                    updates.append(f"selected_persona = ${param_index}")
-                    values.append(config.persona.selected_persona)
-                    param_index += 1
-            
+                if config.persona.selected_persona and config.persona.system_prompt:
+                    # First, set all personas to inactive
+                    await conn.execute("UPDATE persona_configurations SET is_active = false")
+
+                    # Then insert/update the active persona
+                    await conn.execute(
+                        """
+                        INSERT INTO persona_configurations (persona_name, system_prompt, is_active)
+                        VALUES ($1, $2, true)
+                        ON CONFLICT (persona_name) DO UPDATE SET
+                            system_prompt = $2,
+                            is_active = true
+                        """,
+                        config.persona.selected_persona,
+                        config.persona.system_prompt
+                    )
+
+            # Update LLM provider configurations
             if config.llm_tokens:
                 if "gemini" in config.llm_tokens:
-                    if "used" in config.llm_tokens["gemini"]:
-                        updates.append(f"llm_token_used_gemini = ${param_index}")
-                        values.append(config.llm_tokens["gemini"]["used"])
-                        param_index += 1
-                    if "limit" in config.llm_tokens["gemini"]:
-                        updates.append(f"llm_token_limit_gemini = ${param_index}")
-                        values.append(config.llm_tokens["gemini"]["limit"])
-                        param_index += 1
+                    token_limit = config.llm_tokens["gemini"].get("limit")
+                    token_used = config.llm_tokens["gemini"].get("used")
+                    if token_limit is not None:
+                        await conn.execute(
+                            """
+                            INSERT INTO llm_providers (provider_name, token_limit, is_active)
+                            VALUES ('gemini', $1, true)
+                            ON CONFLICT (provider_name) DO UPDATE SET token_limit = $1
+                            """,
+                            token_limit
+                        )
+                    if token_used is not None:
+                        await conn.execute(
+                            "UPDATE llm_providers SET token_used = $1 WHERE provider_name = 'gemini'",
+                            token_used
+                        )
+
                 if "deepseek" in config.llm_tokens:
-                    if "used" in config.llm_tokens["deepseek"]:
-                        updates.append(f"llm_token_used_deepseek = ${param_index}")
-                        values.append(config.llm_tokens["deepseek"]["used"])
-                        param_index += 1
-                    if "limit" in config.llm_tokens["deepseek"]:
-                        updates.append(f"llm_token_limit_deepseek = ${param_index}")
-                        values.append(config.llm_tokens["deepseek"]["limit"])
-                        param_index += 1
+                    token_limit = config.llm_tokens["deepseek"].get("limit")
+                    token_used = config.llm_tokens["deepseek"].get("used")
+                    if token_limit is not None:
+                        await conn.execute(
+                            """
+                            INSERT INTO llm_providers (provider_name, token_limit, is_active)
+                            VALUES ('deepseek', $1, true)
+                            ON CONFLICT (provider_name) DO UPDATE SET token_limit = $1
+                            """,
+                            token_limit
+                        )
+                    if token_used is not None:
+                        await conn.execute(
+                            "UPDATE llm_providers SET token_used = $1 WHERE provider_name = 'deepseek'",
+                            token_used
+                        )
             
             if not updates:
                 raise HTTPException(status_code=400, detail="No fields to update")
@@ -811,16 +907,16 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
 async def get_widget_config():
     """Get widget configuration"""
     from fastapi.responses import JSONResponse
-    
+
     try:
         async with get_db_connection() as conn:
+            # Get main widget configuration
             row = await conn.fetchrow(
                 """
-                SELECT 
+                SELECT
                     display_name,
                     initial_message,
                     auto_show_duration,
-                    suggested_messages,
                     keep_showing_suggested,
                     theme,
                     primary_color,
@@ -834,7 +930,18 @@ async def get_widget_config():
                 WHERE id = 1
                 """
             )
-            
+
+            # Get suggested messages from normalized table
+            suggested_messages_rows = await conn.fetch(
+                """
+                SELECT message_text
+                FROM widget_suggested_messages
+                WHERE widget_config_id = 1 AND is_active = true
+                ORDER BY display_order
+                """
+            )
+            suggested_messages = [row["message_text"] for row in suggested_messages_rows] if suggested_messages_rows else []
+
             if not row:
                 # Return default configuration with cache headers
                 data = {
@@ -854,12 +961,12 @@ async def get_widget_config():
                 response = JSONResponse(content=data)
                 response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
                 return response
-            
+
             data = {
                 "display_name": row["display_name"],
                 "initial_message": row["initial_message"],
                 "auto_show_duration": row["auto_show_duration"],
-                "suggested_messages": row["suggested_messages"] or [],
+                "suggested_messages": suggested_messages,
                 "keep_showing_suggested": row["keep_showing_suggested"],
                 "theme": row["theme"],
                 "primary_color": row["primary_color"],
@@ -882,16 +989,15 @@ async def save_widget_config(config: WidgetConfigRequest):
     """Save widget configuration"""
     try:
         async with get_db_connection() as conn:
-            # Build update query dynamically
+            # Build update query dynamically for widget_configuration table
             updates = []
             values = []
             param_index = 1
-            
+
             fields_map = {
                 "display_name": "display_name",
                 "initial_message": "initial_message",
                 "auto_show_duration": "auto_show_duration",
-                "suggested_messages": "suggested_messages",
                 "keep_showing_suggested": "keep_showing_suggested",
                 "theme": "theme",
                 "primary_color": "primary_color",
@@ -901,37 +1007,50 @@ async def save_widget_config(config: WidgetConfigRequest):
                 "profile_picture_url": "profile_picture_url",
                 "chat_icon_url": "chat_icon_url"
             }
-            
+
             for field, db_field in fields_map.items():
                 value = getattr(config, field, None)
                 if value is not None:
                     updates.append(f"{db_field} = ${param_index}")
                     values.append(value)
                     param_index += 1
-            
-            if not updates:
-                raise HTTPException(status_code=400, detail="No fields to update")
-            
-            # Use INSERT ... ON CONFLICT to handle upsert (assuming single row with id=1)
-            # First, check if a row exists
-            existing = await conn.fetchrow("SELECT id FROM widget_configuration LIMIT 1")
-            
-            if existing:
-                # Update existing row
-                query = f"""
-                    UPDATE widget_configuration 
-                    SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = {existing['id']}
-                """
-            else:
-                # Insert new row with id=1
-                query = f"""
-                    INSERT INTO widget_configuration (id, {', '.join([u.split(' = ')[0] for u in updates])})
-                    VALUES (1, {', '.join([f'${i+1}' for i in range(len(updates))])})
-                """
-            
-            await conn.execute(query, *values)
-            
+
+            # Handle suggested_messages separately - they go to widget_suggested_messages table
+            if config.suggested_messages is not None:
+                # First, clear existing suggested messages
+                await conn.execute("DELETE FROM widget_suggested_messages WHERE widget_config_id = 1")
+
+                # Then insert new ones
+                for i, message in enumerate(config.suggested_messages):
+                    if message and isinstance(message, str):
+                        await conn.execute(
+                            """
+                            INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active)
+                            VALUES (1, $1, $2, true)
+                            """,
+                            message, i
+                        )
+
+            if updates:
+                # Use INSERT ... ON CONFLICT to handle upsert for widget_configuration
+                existing = await conn.fetchrow("SELECT id FROM widget_configuration LIMIT 1")
+
+                if existing:
+                    # Update existing row
+                    query = f"""
+                        UPDATE widget_configuration
+                        SET {', '.join(updates)}, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = {existing['id']}
+                    """
+                else:
+                    # Insert new row with id=1
+                    query = f"""
+                        INSERT INTO widget_configuration (id, {', '.join([u.split(' = ')[0] for u in updates])})
+                        VALUES (1, {', '.join([f'${i+1}' for i in range(len(updates))])})
+                    """
+
+                await conn.execute(query, *values)
+
             return {"success": True, "message": "Widget configuration saved successfully"}
     except Exception as e:
         logger.error(f"Error saving widget configuration: {e}", exc_info=True)
