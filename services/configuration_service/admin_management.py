@@ -147,25 +147,8 @@ async def confirm_admin(request: ConfirmAdminRequest):
                 admin['id']
             )
             
-            # Update chatbot_configuration admin_emails array
-            await conn.execute(
-                """
-                UPDATE chatbot_configuration
-                SET admin_emails = array_append(COALESCE(admin_emails, ARRAY[]::TEXT[]), $1)
-                WHERE NOT ($1 = ANY(COALESCE(admin_emails, ARRAY[]::TEXT[])))
-                """,
-                admin['email']
-            )
-            
-            # If this is the first admin, also set admin_user for backward compatibility
-            existing_admin = await conn.fetchval(
-                "SELECT admin_user FROM chatbot_configuration LIMIT 1"
-            )
-            if not existing_admin or existing_admin == 'GLOBISTAAN':
-                await conn.execute(
-                    "UPDATE chatbot_configuration SET admin_user = $1 WHERE admin_user = 'GLOBISTAAN' OR admin_user IS NULL",
-                    admin['email']
-                )
+            # Note: Admin emails are now managed through the admins table only
+            # No need to update chatbot_configuration - configuration endpoint reads from admins table
             
             logger.info(f"Admin {admin['email']} confirmed successfully")
             
@@ -274,14 +257,8 @@ async def remove_admin(email: str, current_user: dict = Depends(get_current_user
                 email
             )
             
-            # Remove from chatbot_configuration admin_emails array
-            await conn.execute(
-                """
-                UPDATE chatbot_configuration
-                SET admin_emails = array_remove(admin_emails, $1)
-                """,
-                email
-            )
+            # Note: Admin removal is handled by setting status to 'removed' in admins table
+            # No need to update chatbot_configuration - configuration endpoint reads from admins table
             
             # Send removal email
             email_service = create_email_service(conn)

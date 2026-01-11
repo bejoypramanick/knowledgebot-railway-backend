@@ -32,28 +32,29 @@ async def get_db_connection():
 async def track_openai_usage(input_tokens: int, output_tokens: int):
     """
     Track OpenAI token usage and update the database.
-    
+
     Args:
         input_tokens: Number of input/prompt tokens
         output_tokens: Number of output/completion tokens
     """
     if input_tokens <= 0 and output_tokens <= 0:
         return  # Skip if no tokens used
-    
+
     total_tokens = input_tokens + output_tokens
-    
+
     try:
         db = await get_db_connection()
         if db and hasattr(db, '_pool') and db._pool is not None:
             async with db.acquire() as conn:
-                # Atomically increment token usage
+                # Atomically increment token usage in llm_providers table
                 await conn.execute(
                     """
-                    INSERT INTO chatbot_configuration (admin_user, llm_token_used_deepseek, llm_token_limit_deepseek)
-                    VALUES ('GLOBISTAAN', $1, 150000)
-                    ON CONFLICT (admin_user) DO UPDATE
-                    SET llm_token_used_deepseek = COALESCE(chatbot_configuration.llm_token_used_deepseek, 0) + $1,
-                        llm_token_limit_deepseek = COALESCE(chatbot_configuration.llm_token_limit_deepseek, 150000)
+                    INSERT INTO llm_providers (provider_name, token_used, token_limit, is_active)
+                    VALUES ('deepseek', $1, 150000, true)
+                    ON CONFLICT (provider_name) DO UPDATE
+                    SET token_used = COALESCE(llm_providers.token_used, 0) + $1,
+                        token_limit = COALESCE(llm_providers.token_limit, 150000),
+                        is_active = true
                     """,
                     total_tokens
                 )
@@ -67,28 +68,29 @@ async def track_openai_usage(input_tokens: int, output_tokens: int):
 async def track_gemini_usage(prompt_tokens: int, candidates_tokens: int):
     """
     Track Gemini token usage and update the database.
-    
+
     Args:
         prompt_tokens: Number of prompt tokens
         candidates_tokens: Number of candidate/output tokens
     """
     if prompt_tokens <= 0 and candidates_tokens <= 0:
         return  # Skip if no tokens used
-    
+
     total_tokens = prompt_tokens + candidates_tokens
-    
+
     try:
         db = await get_db_connection()
         if db and hasattr(db, '_pool') and db._pool is not None:
             async with db.acquire() as conn:
-                # Atomically increment token usage
+                # Atomically increment token usage in llm_providers table
                 await conn.execute(
                     """
-                    INSERT INTO chatbot_configuration (admin_user, llm_token_used_gemini, llm_token_limit_gemini)
-                    VALUES ('GLOBISTAAN', $1, 20000)
-                    ON CONFLICT (admin_user) DO UPDATE
-                    SET llm_token_used_gemini = COALESCE(chatbot_configuration.llm_token_used_gemini, 0) + $1,
-                        llm_token_limit_gemini = COALESCE(chatbot_configuration.llm_token_limit_gemini, 20000)
+                    INSERT INTO llm_providers (provider_name, token_used, token_limit, is_active)
+                    VALUES ('gemini', $1, 20000, true)
+                    ON CONFLICT (provider_name) DO UPDATE
+                    SET token_used = COALESCE(llm_providers.token_used, 0) + $1,
+                        token_limit = COALESCE(llm_providers.token_limit, 20000),
+                        is_active = true
                     """,
                     total_tokens
                 )

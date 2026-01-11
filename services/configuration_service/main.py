@@ -371,48 +371,6 @@ async def get_chatbot_config():
                 "llm_tokens": llm_tokens
             }
             response = JSONResponse(content=data)
-                # Add cache headers for faster loading (5 seconds cache, but allow revalidation)
-                response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
-                return response
-            
-            data = {
-                "admin_user": row["admin_user"],
-                "admin_emails": admin_emails_list,
-                "admin_password": "**********",
-                "human_agents": human_agents_list,
-                "hil_enabled": row.get("hil_enabled", True),  # Default to True if column doesn't exist
-                "notifications": {
-                    "user_interactions_enabled": row["user_interactions_enabled"],
-                    "error_alerts_enabled": row["error_alerts_enabled"],
-                    "feedback_requests_enabled": row["feedback_requests_enabled"]
-                },
-                "security": {
-                    "response_timeout": row["response_timeout"],
-                    "remove_pii": row["remove_pii"],
-                    "restrict_config": row["restrict_config"]
-                },
-                "response_policy": row["response_policy"],
-                "data_management": {
-                    "backup_logs": row["backup_logs"]
-                },
-                "persona": {
-                    "system_prompt": row["system_prompt"] or "",
-                    "selected_persona": row["selected_persona"]
-                },
-                "llm_tokens": {
-                    "gemini": {
-                        "used": row["llm_token_used_gemini"],
-                        "available": row["llm_token_limit_gemini"] - row["llm_token_used_gemini"],
-                        "limit": row["llm_token_limit_gemini"]
-                    },
-                    "openai": {
-                        "used": row.get("llm_token_used_deepseek", 0),  # Migrate deepseek to openai
-                        "available": row.get("llm_token_limit_deepseek", 150000) - row.get("llm_token_used_deepseek", 0),
-                        "limit": row.get("llm_token_limit_deepseek", 150000)
-                    }
-                }
-            }
-            response = JSONResponse(content=data)
             # Add cache headers for faster loading (5 seconds cache, but allow revalidation)
             response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
             return response
@@ -753,9 +711,13 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                     update_clauses.append(f"{field_name} = ${param_num}")
             
             query = f"""
+                -- NOTE: This function needs to be updated to work with the new 3NF schema
+                -- Configuration is now stored in normalized tables:
+                -- - configuration_metadata, notification_settings, security_settings
+                -- - llm_providers, persona_configurations, admins, human_agents
                 INSERT INTO chatbot_configuration ({', '.join(insert_field_names)})
                 VALUES ({', '.join(insert_placeholders)})
-                ON CONFLICT (admin_user) 
+                ON CONFLICT (admin_user)
                 DO UPDATE SET {', '.join(update_clauses)}, updated_at = CURRENT_TIMESTAMP
             """
             
