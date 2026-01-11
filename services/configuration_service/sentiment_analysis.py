@@ -153,3 +153,109 @@ async def analyze_and_store_sentiment(session_id: str, messages: List[Dict[str, 
     except Exception as e:
         logger.error(f"Error analyzing and storing sentiment: {e}", exc_info=True)
         return None
+
+
+async def generate_conversation_summary(messages: List[Dict[str, str]]) -> Optional[str]:
+    """
+    Generate a concise summary of the conversation using LLM.
+
+    Args:
+        messages: List of messages with 'sender' and 'text' keys
+
+    Returns:
+        A concise summary of the conversation, or None if generation fails
+    """
+    try:
+        if not messages:
+            logger.warning("No messages provided for summarization")
+            return None
+
+        # Get OpenAI client
+        client = get_openai_client()
+        if not client:
+            logger.warning("OpenAI client not available for summarization")
+            return None
+
+        # Prepare conversation text for summarization
+        conversation_text = ""
+        for msg in messages:
+            sender = msg.get('sender', 'unknown')
+            text = msg.get('text', '').strip()
+            if text:
+                conversation_text += f"{sender}: {text}\n"
+
+        if not conversation_text.strip():
+            logger.warning("No conversation text to summarize")
+            return None
+
+        # Create summarization prompt
+        prompt = f"""Please provide a concise summary of this customer support conversation. Focus on:
+1. The main issue or question raised by the customer
+2. How the issue was addressed or resolved
+3. Key points discussed
+4. Final outcome or resolution
+
+Keep the summary brief but comprehensive, under 200 words.
+
+Conversation:
+{conversation_text}
+
+Summary:"""
+
+        logger.info(f"Sending conversation summarization request to OpenAI for session with {len(messages)} messages")
+
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that summarizes customer support conversations concisely and accurately."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.3
+        )
+
+        summary = response.choices[0].message.content.strip()
+        logger.info(f"Generated conversation summary: {len(summary)} characters")
+
+        return summary
+
+    except Exception as e:
+        logger.error(f"Error generating conversation summary: {e}", exc_info=True)
+        return None
+
+
+async def generate_and_store_conversation_summary(session_id: str, messages: List[Dict[str, str]], conn) -> Optional[str]:
+    """
+    Generate a conversation summary and store it in the database.
+
+    Args:
+        session_id: The session ID string
+        messages: List of messages with 'sender' and 'text' keys
+        conn: Database connection
+
+    Returns:
+        The generated summary text or None
+    """
+    try:
+        # Generate summary
+        summary = await generate_conversation_summary(messages)
+
+        if summary:
+            # Update the session with the conversation summary
+            await conn.execute(
+                """
+                UPDATE chat_sessions
+                SET conversation_summary = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE session_id = $2
+                """,
+                summary, session_id
+            )
+            logger.info(f"Stored conversation summary for session {session_id} ({len(summary)} characters)")
+        else:
+            logger.warning(f"Could not generate conversation summary for session {session_id}")
+
+        return summary
+
+    except Exception as e:
+        logger.error(f"Error storing conversation summary for session {session_id}: {e}", exc_info=True)
+        return None

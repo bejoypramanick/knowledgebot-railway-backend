@@ -750,6 +750,7 @@ async def get_assigned_chat_sessions(
                         cs.id,
                         cs.session_id,
                         cs.archive_status,
+                        cs.conversation_summary,
                         COALESCE(cs.last_activity_at, cs.created_at, cs.updated_at, CURRENT_TIMESTAMP) as last_activity_at,
                         cs.created_at,
                         cs.metadata,
@@ -788,6 +789,7 @@ async def get_assigned_chat_sessions(
                         cs.id,
                         cs.session_id,
                         cs.archive_status,
+                        cs.conversation_summary,
                         cs.last_activity_at,
                         cs.created_at,
                         cs.metadata,
@@ -969,6 +971,7 @@ async def get_assigned_chat_sessions(
                     agent_feedback=agent_feedback,
                     sentiment=sentiment,
                     chat_type=chat_type,
+                    conversation_summary=session_row.get('conversation_summary'),
                     messages=messages
                 ))
             
@@ -1474,6 +1477,17 @@ async def update_chat_session(
                                 logger.info(f"Successfully analyzed and stored sentiment '{sentiment_result}' for closed session {session_id}")
                             else:
                                 logger.warning(f"Sentiment analysis returned None for closed session {session_id}")
+
+                            # Generate and store conversation summary
+                            try:
+                                from services.configuration_service.sentiment_analysis import generate_and_store_conversation_summary
+                                summary_result = await generate_and_store_conversation_summary(session_id, messages_for_analysis, conn)
+                                if summary_result:
+                                    logger.info(f"Successfully generated and stored conversation summary for closed session {session_id}")
+                                else:
+                                    logger.warning(f"Conversation summarization returned None for closed session {session_id}")
+                            except Exception as e:
+                                logger.warning(f"Could not generate conversation summary for closed session {session_id}: {e}")
                 except Exception as e:
                     logger.warning(f"Could not analyze sentiment for closed session {session_id}: {e}")
             
