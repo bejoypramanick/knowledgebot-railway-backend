@@ -120,7 +120,9 @@ class ChatSessionResponse(BaseModel):
     last_message_at: str
     created_at: Optional[str] = None
     assigned_agent: Optional[str] = None
-    feedback: Optional[str] = None  # 'positive', 'negative', None
+    feedback: Optional[str] = None  # 'positive', 'negative', None (backward compatibility)
+    customer_feedback: Optional[str] = None  # 'positive', 'negative', None
+    agent_feedback: Optional[str] = None  # 'positive', 'negative', None
     sentiment: Optional[str] = None  # 'positive', 'negative', 'neutral', None
     chat_type: str  # 'human-handoff' if assigned_agent exists, 'ai-chat' otherwise
     messages: List[ChatMessageResponse] = []
@@ -734,6 +736,10 @@ async def get_assigned_chat_sessions(
                 sentiment = session_row.get('sentiment')
                 session_feedback = session_row.get('session_feedback')
                 
+                # Also check metadata for customer_feedback and agent_feedback
+                customer_feedback = metadata.get('customer_feedback')
+                agent_feedback = metadata.get('agent_feedback')
+                
                 # If sentiment is not set and session is closed, analyze it
                 if not sentiment and status == 'closed' and len(messages) > 0:
                     try:
@@ -761,7 +767,9 @@ async def get_assigned_chat_sessions(
                     last_message_at=session_row['last_activity_at'].isoformat() if session_row['last_activity_at'] else datetime.now().isoformat(),
                     created_at=created_at_str,
                     assigned_agent=assigned_agent,
-                    feedback=session_feedback,
+                    feedback=session_feedback,  # Backward compatibility
+                    customer_feedback=customer_feedback,
+                    agent_feedback=agent_feedback,
                     sentiment=sentiment,
                     chat_type=chat_type,
                     messages=messages
@@ -977,11 +985,13 @@ async def update_chat_session(
     session_id: str,
     status: Optional[str] = Query(None, description="Session status: 'active', 'waiting', or 'closed'"),
     assigned_agent: Optional[str] = Query(None, description="Assigned agent email (set to empty string to remove)"),
+    feedback: Optional[str] = Query(None, description="Session feedback: 'positive' or 'negative'"),
+    user_type: Optional[str] = Query(None, description="User type providing feedback: 'customer' or 'agent'"),
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Update a chat session (e.g., close session, remove assigned agent).
-    Allows both customers and agents/admins to end the session.
+    Update a chat session (e.g., close session, remove assigned agent, update feedback).
+    Allows both customers and agents/admins to end the session and provide feedback.
     """
     try:
         user_email = current_user.get('email')
@@ -1042,6 +1052,29 @@ async def update_chat_session(
                     params.append(json.dumps(current_metadata))
                     param_index += 1
             
+            # Handle feedback with user_type
+            if feedback is not None and user_type is not None:
+                # Store feedback in metadata with user_type key
+                feedback_key = f"{user_type}_feedback"
+                current_metadata[feedback_key] = feedback
+                updates.append(f"metadata = ${param_index}::jsonb")
+                params.append(json.dumps(current_metadata))
+                param_index += 1
+                
+                # Also update session_feedback for backward compatibility
+                # If customer feedback, update session_feedback directly
+                # If agent feedback, only update if no customer feedback exists
+                if user_type == 'customer':
+                    updates.append(f"session_feedback = ${param_index}")
+                    params.append(feedback)
+                    param_index += 1
+                elif user_type == 'agent':
+                    # Only update session_feedback if customer_feedback doesn't exist in metadata
+                    if 'customer_feedback' not in current_metadata:
+                        updates.append(f"session_feedback = ${param_index}")
+                        params.append(feedback)
+                        param_index += 1
+            
             if not updates:
                 raise HTTPException(status_code=400, detail="No updates provided")
             
@@ -1059,7 +1092,7 @@ async def update_chat_session(
             
             await conn.execute(query, *params)
             
-            logger.info(f"Session {session_id} updated by {user_email}: status={status}, assigned_agent={assigned_agent}")
+            logger.info(f"Session {session_id} updated by {user_email}: status={status}, assigned_agent={assigned_agent}, feedback={feedback}, user_type={user_type}")
             
             # If session is being closed, analyze sentiment if not already analyzed
             if status == 'closed':
