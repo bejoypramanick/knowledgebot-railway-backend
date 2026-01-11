@@ -487,14 +487,36 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                                     from shared.firebase_auth import init_firebase_auth
                                     init_firebase_auth()
 
-                                    user = auth.create_user(
-                                        email=agent_email,
-                                        password=generated_password,
-                                        email_verified=False
-                                    )
-                                    logger.info(f"Created Firebase user for agent: {agent_email} (UID: {user.uid})")
+                                    # Check if user already exists
+                                    try:
+                                        existing_user = auth.get_user_by_email(agent_email)
+                                        logger.info(f"Firebase user already exists for agent: {agent_email} (UID: {existing_user.uid})")
+                                        # User exists, we'll update their password if they haven't confirmed yet
+                                        # This handles the case where agent creation was attempted but failed previously
+                                        if existing_user.email_verified:
+                                            logger.info(f"Agent {agent_email} is already verified, skipping password update")
+                                        else:
+                                            # Update password for unverified users (allows them to login with new temp password)
+                                            auth.update_user(existing_user.uid, password=generated_password)
+                                            logger.info(f"Updated password for existing Firebase user: {agent_email}")
+                                    except auth.UserNotFoundError:
+                                        # User doesn't exist, create new one
+                                        user = auth.create_user(
+                                            email=agent_email,
+                                            password=generated_password,
+                                            email_verified=False
+                                        )
+                                        logger.info(f"Created Firebase user for agent: {agent_email} (UID: {user.uid})")
+                                    except Exception as e:
+                                        if "EMAIL_EXISTS" in str(e):
+                                            logger.warning(f"Firebase user already exists for agent {agent_email}, continuing with agent setup")
+                                        else:
+                                            logger.error(f"Unexpected Firebase error for agent {agent_email}: {e}")
+                                            # Continue anyway - Firebase user existence is not critical for agent setup
+
                                 except Exception as e:
-                                    logger.error(f"Error creating Firebase account for agent {agent_email}: {e}")
+                                    logger.error(f"Error managing Firebase account for agent {agent_email}: {e}")
+                                    # Continue with agent setup even if Firebase operations fail
 
                                 # Add to human_agents table
                                 await conn.execute(

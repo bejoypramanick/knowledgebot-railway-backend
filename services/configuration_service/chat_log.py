@@ -130,6 +130,10 @@ class ChatSessionResponse(BaseModel):
 
 class ChatSessionsResponse(BaseModel):
     sessions: List[ChatSessionResponse]
+    total_count: int
+    page: int
+    limit: int
+    total_pages: int
 
 
 class SendMessageRequest(BaseModel):
@@ -599,6 +603,9 @@ async def get_assigned_chat_sessions(
     request: Request,
     role: Optional[str] = Query(None, description="User role: admin, human_agent, or user"),
     agent_id: Optional[str] = Query(None, description="Agent email or ID (optional for admins/users)"),
+    archive_status: Optional[str] = Query("active", description="Filter by archive status: active, closed, archived, transferred"),
+    page: int = Query(1, ge=1, description="Page number for pagination"),
+    limit: int = Query(50, ge=1, le=200, description="Number of sessions per page"),
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -623,6 +630,11 @@ async def get_assigned_chat_sessions(
     # Validate role value
     if role not in ['admin', 'human_agent', 'user']:
         raise HTTPException(status_code=422, detail=f"Invalid role: {role}. Must be one of: admin, human_agent, user")
+
+    # Validate archive_status value
+    valid_statuses = ['active', 'closed', 'archived', 'transferred']
+    if archive_status not in valid_statuses:
+        raise HTTPException(status_code=422, detail=f"Invalid archive_status: {archive_status}. Must be one of: {', '.join(valid_statuses)}")
     
     try:
         user_email = current_user.get('email')
@@ -724,15 +736,20 @@ async def get_assigned_chat_sessions(
         from services.configuration_service.main import get_db_connection
         
         async with get_db_connection() as conn:
+            # Calculate offset for pagination
+            offset = (page - 1) * limit
+
             # Build query based on role
             if role == 'human_agent' and agent_id:
                 # Human agents: only their assigned sessions
                 # Filter by assignee_email in session_assignments table to ensure they only see their chats
+                # Also filter by archive_status
                 sessions_data = await conn.fetch(
                     """
                     SELECT DISTINCT
                         cs.id,
                         cs.session_id,
+                        cs.archive_status,
                         COALESCE(cs.last_activity_at, cs.created_at, cs.updated_at, CURRENT_TIMESTAMP) as last_activity_at,
                         cs.created_at,
                         cs.metadata,
@@ -742,18 +759,35 @@ async def get_assigned_chat_sessions(
                     INNER JOIN session_assignments sa ON cs.id = sa.session_id
                     WHERE LOWER(sa.assignee_email) = LOWER($1)
                     AND sa.status IN ('waiting', 'active')
+                    AND cs.archive_status = $2
                     ORDER BY COALESCE(cs.last_activity_at, cs.created_at, cs.updated_at, CURRENT_TIMESTAMP) DESC
+                    LIMIT $3 OFFSET $4
                     """,
-                    agent_id
+                    agent_id, archive_status, limit, offset
                 )
-                logger.info(f"Found {len(sessions_data)} sessions for human agent {agent_id}")
+
+                # Get total count for pagination
+                total_count = await conn.fetchval(
+                    """
+                    SELECT COUNT(DISTINCT cs.id)
+                    FROM chat_sessions cs
+                    INNER JOIN session_assignments sa ON cs.id = sa.session_id
+                    WHERE LOWER(sa.assignee_email) = LOWER($1)
+                    AND sa.status IN ('waiting', 'active')
+                    AND cs.archive_status = $2
+                    """,
+                    agent_id, archive_status
+                )
+
+                logger.info(f"Found {len(sessions_data)} sessions (page {page}, limit {limit}) for human agent {agent_id} with status {archive_status}")
             else:
-                # Admins and users: all sessions
+                # Admins and users: all sessions filtered by archive_status
                 sessions_data = await conn.fetch(
                     """
                     SELECT DISTINCT
                         cs.id,
                         cs.session_id,
+                        cs.archive_status,
                         cs.last_activity_at,
                         cs.created_at,
                         cs.metadata,
@@ -762,8 +796,21 @@ async def get_assigned_chat_sessions(
                         sa.assignee_email as agent_email
                     FROM chat_sessions cs
                     LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                    WHERE cs.archive_status = $1
                     ORDER BY cs.last_activity_at DESC
+                    LIMIT $2 OFFSET $3
+                    """,
+                    archive_status, limit, offset
+                )
+
+                # Get total count for pagination
+                total_count = await conn.fetchval(
                     """
+                    SELECT COUNT(DISTINCT cs.id)
+                    FROM chat_sessions cs
+                    WHERE cs.archive_status = $1
+                    """,
+                    archive_status
                 )
             
             sessions = []
@@ -818,38 +865,34 @@ async def get_assigned_chat_sessions(
                 if not assigned_agent and agent_id:
                     assigned_agent = agent_id
                 
-                # Determine status
-                # Check if session has expired (5 minutes of inactivity)
-                last_activity = session_row['last_activity_at']
-                is_expired = False
-                if last_activity:
-                    # Handle timezone-aware and naive datetime objects
-                    if last_activity.tzinfo:
-                        # Timezone-aware: convert to UTC naive for comparison
-                        last_activity_naive = last_activity.replace(tzinfo=None) - (last_activity.utcoffset() or timedelta(0))
-                    else:
-                        # Already naive, assume UTC
-                        last_activity_naive = last_activity
-                    
-                    now_utc = datetime.utcnow()
-                    time_diff = now_utc - last_activity_naive
-                    # Expire if no activity for 5 minutes
-                    is_expired = time_diff.total_seconds() > 300  # 5 minutes = 300 seconds
-                
-                # Only mark as 'active' if:
-                # 1. Session is marked as active in DB
-                # 2. Has an assigned agent (human agent session)
-                # 3. Not expired (activity within last 5 minutes)
-                if session_row['is_active'] and assigned_agent and not is_expired:
-                    status = 'active'
-                elif metadata.get('status') and not is_expired:
-                    # Use metadata status if not expired
-                    status = metadata['status']
-                    # But override to 'closed' if expired
-                    if is_expired:
+                # Use archive_status from database
+                status = session_row.get('archive_status', 'active')
+
+                # For backward compatibility, if status is 'active', check if session should be expired
+                if status == 'active':
+                    # Check if session has expired (5 minutes of inactivity)
+                    last_activity = session_row['last_activity_at']
+                    is_expired = False
+                    if last_activity:
+                        # Handle timezone-aware and naive datetime objects
+                        if last_activity.tzinfo:
+                            # Timezone-aware: convert to UTC naive for comparison
+                            last_activity_naive = last_activity.replace(tzinfo=None) - (last_activity.utcoffset() or timedelta(0))
+                        else:
+                            # Already naive, assume UTC
+                            last_activity_naive = last_activity
+
+                        now_utc = datetime.utcnow()
+                        time_diff = now_utc - last_activity_naive
+                        # Expire if no activity for 5 minutes
+                        is_expired = time_diff.total_seconds() > 300  # 5 minutes = 300 seconds
+
+                    # Only keep as 'active' if:
+                    # 1. Session is marked as active in DB
+                    # 2. Has an assigned agent (human agent session)
+                    # 3. Not expired (activity within last 5 minutes)
+                    if not (session_row['is_active'] and assigned_agent and not is_expired):
                         status = 'closed'
-                else:
-                    status = 'closed'
                 
                 # If session expired, update it in the database
                 if is_expired and session_row['is_active']:
@@ -929,13 +972,88 @@ async def get_assigned_chat_sessions(
                     messages=messages
                 ))
             
-            return ChatSessionsResponse(sessions=sessions)
-            
+            # Calculate total pages
+            total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
+
+            return ChatSessionsResponse(
+                sessions=sessions,
+                total_count=total_count,
+                page=page,
+                limit=limit,
+                total_pages=total_pages
+            )
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error fetching assigned chat sessions: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching chat sessions: {str(e)}")
+
+
+@router.patch("/chat-sessions/{session_id}/archive", response_model=dict)
+async def archive_chat_session(
+    session_id: str,
+    archive_status: str = Query(..., description="New archive status: active, closed, archived, transferred"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Archive or change the status of a chat session.
+    Only admins and human agents can archive sessions.
+    """
+    # Validate archive_status
+    valid_statuses = ['active', 'closed', 'archived', 'transferred']
+    if archive_status not in valid_statuses:
+        raise HTTPException(status_code=422, detail=f"Invalid archive_status: {archive_status}. Must be one of: {', '.join(valid_statuses)}")
+
+    try:
+        user_email = current_user.get('email')
+        if not user_email:
+            raise HTTPException(status_code=403, detail="User email not found in token")
+
+        # Check if user is admin or human agent
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
+            user_role = await conn.fetchval(
+                """
+                SELECT CASE
+                    WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1 AND status = 'confirmed') THEN 'admin'
+                    WHEN EXISTS (SELECT 1 FROM human_agents WHERE email = $1 AND status = 'confirmed') THEN 'human_agent'
+                    ELSE 'user'
+                END
+                """,
+                user_email
+            )
+
+            if user_role not in ['admin', 'human_agent']:
+                raise HTTPException(status_code=403, detail="Only admins and human agents can archive sessions")
+
+            # Update the session status
+            result = await conn.execute(
+                """
+                UPDATE chat_sessions
+                SET archive_status = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE session_id = $2
+                """,
+                archive_status, session_id
+            )
+
+            if result == "UPDATE 0":
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            logger.info(f"Session {session_id} status changed to {archive_status} by {user_email}")
+
+            return {
+                "success": True,
+                "message": f"Session status changed to {archive_status}",
+                "session_id": session_id,
+                "archive_status": archive_status
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error archiving session {session_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error archiving session: {str(e)}")
 
 
 @router.get("/chat-sessions/{session_id}/messages", response_model=dict)
