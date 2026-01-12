@@ -56,10 +56,14 @@ async def verify_token(request: TokenVerificationRequest):
         # Get user from Firestore
         uid = decoded_token.get('uid')
         email = decoded_token.get('email')
+        logger.info(f"🔍 Verifying token for uid: {uid}, email: {email}")
+        
         user_data = get_user_from_firestore(uid)
+        logger.info(f"📋 Firestore user data for {email}: {user_data}")
         
         # If user doesn't exist in Firestore, return Firebase Auth data
         if not user_data:
+            logger.info(f"⚠️ User not found in Firestore, creating base user data for {email}")
             user_data = {
                 'uid': uid,
                 'email': email,
@@ -81,30 +85,39 @@ async def verify_token(request: TokenVerificationRequest):
         
         # Check database for exact roles (source of truth)
         try:
+            logger.info(f"🔗 Database connection check: railway_db={railway_db is not None}, has_pool={hasattr(railway_db, '_pool') if railway_db else False}, pool_exists={railway_db._pool is not None if railway_db else False}")
+            
             if railway_db and hasattr(railway_db, '_pool') and railway_db._pool is not None and email:
+                logger.info(f"🔍 Checking database roles for email: {email}")
                 async with railway_db.acquire() as conn:
                     # Check if user is an admin
                     admin = await conn.fetchrow(
                         "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
                         email
                     )
+                    logger.info(f"👤 Admin check result for {email}: {admin}")
+                    
                     if admin:
                         if 'admin' not in user_roles:
                             user_roles.append('admin')
                         is_admin = True
                         primary_role = 'admin'  # Admin takes precedence
+                        logger.info(f"✅ Admin role assigned to {email}")
                     
                     # Check if user is a human agent (recognize both confirmed and pending)
                     agent = await conn.fetchrow(
                         "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
                         email
                     )
+                    logger.info(f"🤖 Agent check result for {email}: {agent}")
+                    
                     if agent:
                         if 'human_agent' not in user_roles:
                             user_roles.append('human_agent')
                         is_human_agent = True
                         if primary_role == 'user':
                             primary_role = 'human_agent'
+                        logger.info(f"✅ Human agent role assigned to {email}")
                             
             # Ensure 'user' is in roles
             if 'user' not in user_roles:
@@ -117,8 +130,13 @@ async def verify_token(request: TokenVerificationRequest):
             user_data['is_admin'] = is_admin
             user_data['is_human_agent'] = is_human_agent
             
+            logger.info(f"🎯 Final role assignment for {email}: primary_role={primary_role}, roles={user_roles}, is_admin={is_admin}")
+            
         except Exception as role_error:
             logger.warning(f"Error determining user roles from database in verify-token: {role_error}")
+            logger.error(f"Database connection error details: {role_error}")
+            # If DB fails, keep existing roles from Firestore
+            logger.warning(f"⚠️ Falling back to Firestore roles: {user_data.get('roles', [])}")
         
         return TokenVerificationResponse(
             valid=True,
