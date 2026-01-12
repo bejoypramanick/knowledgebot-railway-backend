@@ -7,12 +7,12 @@ from typing import Optional, Dict, Any, List
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import httpx
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Header, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-import websockets
 import asyncio
+import json
 
 # Load environment variables
 load_dotenv()
@@ -1344,149 +1344,184 @@ async def proxy_notifications_routes(request: Request, path: str):
         logger.error(f"Unexpected error in notifications proxy: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-# WebSocket proxy endpoints - proxy WebSocket connections to configuration service
-@app.websocket("/api/v1/chat/{session_id}/ws")
-async def proxy_customer_websocket(websocket: WebSocket, session_id: str):
-    """Proxy customer WebSocket connections to configuration service"""
-    try:
-        await websocket.accept()
+# SSE Connection Manager
+class SSEConnectionManager:
+    """Manages SSE connections for real-time communication."""
+    
+    def __init__(self):
+        self.active_connections: List[asyncio.Queue] = []
+        self.lock = asyncio.Lock()
+    
+    async def connect(self):
+        """Connect a new SSE client."""
+        queue = asyncio.Queue()
+        async with self.lock:
+            self.active_connections.append(queue)
+        return queue
+    
+    async def disconnect(self, queue: asyncio.Queue):
+        """Disconnect an SSE client."""
+        async with self.lock:
+            if queue in self.active_connections:
+                self.active_connections.remove(queue)
+    
+    async def broadcast(self, message: dict):
+        """Broadcast a message to all connected SSE clients."""
+        if not self.active_connections:
+            return
         
-        # Build target WebSocket URL
-        base_url = CONFIGURATION_SERVICE_URL.replace('https://', 'wss://').replace('http://', 'ws://')
-        ws_url = f"{base_url}/api/v1/chat/{session_id}/ws"
+        message_str = f"data: {json.dumps(message)}\n\n"
+        disconnected = []
         
-        logger.info(f"Proxying customer WebSocket: {ws_url}")
+        for queue in self.active_connections:
+            try:
+                await queue.put(message_str)
+            except Exception as e:
+                logger.error(f"Error broadcasting to SSE client: {e}")
+                disconnected.append(queue)
         
-        # Connect to upstream WebSocket
-        async with websockets.connect(ws_url) as upstream_ws:
-            # Create tasks for bidirectional message forwarding
-            async def forward_to_upstream():
-                try:
-                    while True:
-                        # Handle both text and JSON messages
-                        try:
-                            data = await websocket.receive_text()
-                            await upstream_ws.send(data)
-                        except:
-                            # Try binary if text fails
-                            try:
-                                data = await websocket.receive_bytes()
-                                await upstream_ws.send(data)
-                            except:
-                                break
-                except (WebSocketDisconnect, websockets.exceptions.ConnectionClosed):
-                    try:
-                        await upstream_ws.close()
-                    except:
-                        pass
-                except Exception as e:
-                    logger.error(f"Error forwarding to upstream: {e}")
-            
-            async def forward_from_upstream():
-                try:
-                    while True:
-                        data = await upstream_ws.recv()
-                        # Send as text if string, otherwise as bytes
-                        if isinstance(data, str):
-                            await websocket.send_text(data)
-                        else:
-                            await websocket.send_bytes(data)
-                except (websockets.exceptions.ConnectionClosed, WebSocketDisconnect):
-                    try:
-                        await websocket.close()
-                    except:
-                        pass
-                except Exception as e:
-                    logger.error(f"Error forwarding from upstream: {e}")
-            
-            # Run both forwarding tasks concurrently
-            await asyncio.gather(
-                forward_to_upstream(),
-                forward_from_upstream(),
-                return_exceptions=True
-            )
-    except WebSocketDisconnect:
-        logger.info("Customer WebSocket disconnected")
-    except Exception as e:
-        logger.error(f"WebSocket proxy error: {e}", exc_info=True)
-        try:
-            await websocket.close(code=1011, reason="Proxy error")
-        except:
-            pass
+        # Clean up disconnected queues
+        if disconnected:
+            async with self.lock:
+                for queue in disconnected:
+                    if queue in self.active_connections:
+                        self.active_connections.remove(queue)
 
-@app.websocket("/api/v1/admin/chat-sessions/{session_id}/ws")
-async def proxy_agent_websocket(websocket: WebSocket, session_id: str):
-    """Proxy agent WebSocket connections to configuration service"""
+# Global SSE connection manager
+sse_manager = SSEConnectionManager()
+
+async def sse_generator(queue: asyncio.Queue):
+    """Generate SSE events for a client."""
     try:
-        await websocket.accept()
-        
-        # Get token from query parameters
-        token = websocket.query_params.get("token", "")
-        
-        # Build target WebSocket URL with token
-        base_url = CONFIGURATION_SERVICE_URL.replace('https://', 'wss://').replace('http://', 'ws://')
-        ws_url = f"{base_url}/api/v1/admin/chat-sessions/{session_id}/ws"
-        if token:
-            ws_url += f"?token={token}"
-        
-        logger.info(f"Proxying agent WebSocket: {ws_url[:100]}...")
-        
-        # Connect to upstream WebSocket
-        async with websockets.connect(ws_url) as upstream_ws:
-            # Create tasks for bidirectional message forwarding
-            async def forward_to_upstream():
-                try:
-                    while True:
-                        # Handle both text and JSON messages
-                        try:
-                            data = await websocket.receive_text()
-                            await upstream_ws.send(data)
-                        except:
-                            # Try binary if text fails
-                            try:
-                                data = await websocket.receive_bytes()
-                                await upstream_ws.send(data)
-                            except:
-                                break
-                except (WebSocketDisconnect, websockets.exceptions.ConnectionClosed):
-                    try:
-                        await upstream_ws.close()
-                    except:
-                        pass
-                except Exception as e:
-                    logger.error(f"Error forwarding to upstream: {e}")
-            
-            async def forward_from_upstream():
-                try:
-                    while True:
-                        data = await upstream_ws.recv()
-                        # Send as text if string, otherwise as bytes
-                        if isinstance(data, str):
-                            await websocket.send_text(data)
-                        else:
-                            await websocket.send_bytes(data)
-                except (websockets.exceptions.ConnectionClosed, WebSocketDisconnect):
-                    try:
-                        await websocket.close()
-                    except:
-                        pass
-                except Exception as e:
-                    logger.error(f"Error forwarding from upstream: {e}")
-            
-            # Run both forwarding tasks concurrently
-            await asyncio.gather(
-                forward_to_upstream(),
-                forward_from_upstream(),
-                return_exceptions=True
-            )
-    except WebSocketDisconnect:
-        logger.info("Agent WebSocket disconnected")
+        while True:
+            try:
+                # Wait for a message with timeout
+                message = await asyncio.wait_for(queue.get(), timeout=30.0)
+                yield message
+            except asyncio.TimeoutError:
+                # Send ping to keep connection alive
+                yield "data: {\"type\": \"ping\"}\n\n"
+    except asyncio.CancelledError:
+        # Client disconnected
+        pass
+
+# SSE endpoint for real-time chat
+@app.get("/ws/events")
+async def websocket_sse_endpoint():
+    """SSE endpoint to replace WebSocket functionality."""
+    queue = await sse_manager.connect()
+    
+    try:
+        return StreamingResponse(
+            sse_generator(queue),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
     except Exception as e:
-        logger.error(f"WebSocket proxy error: {e}", exc_info=True)
-        try:
-            await websocket.close(code=1011, reason="Proxy error")
-        except:
-            pass
+        logger.error(f"SSE endpoint error: {e}")
+        await sse_manager.disconnect(queue)
+        raise HTTPException(status_code=500, detail="SSE connection failed")
+
+# HTTP endpoint for sending messages (replaces WebSocket.send)
+@app.post("/ws/messages")
+async def websocket_message_endpoint(request: Request):
+    """HTTP endpoint to receive messages and broadcast via SSE."""
+    try:
+        data = await request.json()
+        
+        # Process the message and broadcast response
+        message = {
+            "type": "response",
+            "message": data.get("message", ""),
+            "conversation_id": data.get("conversation_id", ""),
+            "timestamp": time.time(),
+            "metadata": data.get("metadata", {})
+        }
+        
+        await sse_manager.broadcast(message)
+        
+        return {"success": True, "message": "Message broadcasted"}
+    except Exception as e:
+        logger.error(f"Error processing message: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process message")
+
+# WebSocket proxy endpoints - proxy WebSocket connections to configuration service
+@app.get("/api/v1/chat/{session_id}/events")
+async def proxy_customer_sse(session_id: str, request: Request):
+    """Proxy customer SSE connections to configuration service"""
+    try:
+        # Build target SSE URL
+        sse_url = f"{CONFIGURATION_SERVICE_URL}/api/v1/chat/{session_id}/events"
+
+        logger.info(f"Proxying customer SSE: {sse_url}")
+
+        # Forward the request to the configuration service
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            # Copy headers but remove host
+            headers = dict(request.headers)
+            headers.pop("host", None)
+
+            response = await client.get(
+                sse_url,
+                headers=headers,
+                params=request.query_params
+            )
+
+            # Return the SSE stream
+            return StreamingResponse(
+                response.aiter_bytes(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": response.headers.get("Cache-Control", "no-cache"),
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                }
+            )
+
+    except Exception as e:
+        logger.error(f"SSE proxy error: {e}")
+        raise HTTPException(status_code=500, detail="SSE proxy error")
+
+@app.get("/api/v1/admin/chat-sessions/{session_id}/events")
+async def proxy_agent_sse(session_id: str, request: Request):
+    """Proxy agent SSE connections to configuration service"""
+    try:
+        # Build target SSE URL
+        sse_url = f"{CONFIGURATION_SERVICE_URL}/api/v1/admin/chat-sessions/{session_id}/events"
+
+        logger.info(f"Proxying agent SSE: {sse_url[:100]}...")
+
+        # Forward the request to the configuration service
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            # Copy headers (includes authorization)
+            headers = dict(request.headers)
+            headers.pop("host", None)
+
+            response = await client.get(
+                sse_url,
+                headers=headers,
+                params=request.query_params
+            )
+
+            # Return the SSE stream
+            return StreamingResponse(
+                response.aiter_bytes(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": response.headers.get("Cache-Control", "no-cache"),
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                }
+            )
+
+    except Exception as e:
+        logger.error(f"SSE proxy error: {e}")
+        raise HTTPException(status_code=500, detail="SSE proxy error")
 
 logger.info("✅ Configuration API proxy endpoints configured")
 logger.info("✅ Admin API proxy endpoints configured")
@@ -1495,4 +1530,4 @@ logger.info("✅ Chat API proxy endpoints configured")
 logger.info("✅ Users API proxy endpoints configured")
 logger.info("✅ Widget API proxy endpoints configured")
 logger.info("✅ Notifications API proxy endpoints configured")
-logger.info("✅ WebSocket proxy endpoints configured")
+logger.info("✅ SSE proxy endpoints configured")

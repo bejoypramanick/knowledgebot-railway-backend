@@ -2,7 +2,8 @@
 Chat Log Endpoints for Human Agents
 Handles chat session management, assignment, and messaging for human agents.
 """
-from fastapi import APIRouter, HTTPException, Depends, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Set
 import logging
@@ -27,81 +28,100 @@ router = APIRouter(prefix="/api/v1/admin", tags=["chat-log"])
 public_chat_router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
 
-# WebSocket Connection Manager
-class ConnectionManager:
-    """Manages WebSocket connections for real-time chat between agents and customers."""
-    
+# SSE Connection Manager
+class SSEConnectionManager:
+    """Manages SSE connections for real-time chat between agents and customers."""
+
     def __init__(self):
-        # Map session_id -> Set of WebSocket connections
+        # Map session_id -> Set of SSE response objects
         # Each session can have multiple connections (agent + customer)
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
-        # Map WebSocket -> session_id for quick lookup
-        self.connection_sessions: Dict[WebSocket, str] = {}
-        # Map WebSocket -> user_type ('agent' or 'customer')
-        self.connection_types: Dict[WebSocket, str] = {}
+        self.active_connections: Dict[str, Set[object]] = {}
+        # Map SSE response -> session_id for quick lookup
+        self.connection_sessions: Dict[object, str] = {}
+        # Map SSE response -> user_type ('agent' or 'customer')
+        self.connection_types: Dict[object, str] = {}
+        # Map SSE response -> queue for sending messages
+        self.message_queues: Dict[object, asyncio.Queue] = {}
         self.lock = asyncio.Lock()
-    
-    async def connect(self, websocket: WebSocket, session_id: str, user_type: str = 'customer'):
-        """Connect a WebSocket to a session."""
-        await websocket.accept()
+
+    async def connect(self, response, session_id: str, user_type: str = 'customer'):
+        """Connect an SSE response to a session."""
         async with self.lock:
             if session_id not in self.active_connections:
                 self.active_connections[session_id] = set()
-            self.active_connections[session_id].add(websocket)
-            self.connection_sessions[websocket] = session_id
-            self.connection_types[websocket] = user_type
-        logger.info(f"WebSocket connected: {user_type} for session {session_id}")
-    
-    async def disconnect(self, websocket: WebSocket):
-        """Disconnect a WebSocket from a session."""
+            self.active_connections[session_id].add(response)
+            self.connection_sessions[response] = session_id
+            self.connection_types[response] = user_type
+            self.message_queues[response] = asyncio.Queue()
+        logger.info(f"SSE connected: {user_type} for session {session_id}")
+
+    async def disconnect(self, response):
+        """Disconnect an SSE response from a session."""
         async with self.lock:
-            session_id = self.connection_sessions.pop(websocket, None)
-            user_type = self.connection_types.pop(websocket, None)
+            session_id = self.connection_sessions.pop(response, None)
+            user_type = self.connection_types.pop(response, None)
             if session_id and session_id in self.active_connections:
-                self.active_connections[session_id].discard(websocket)
+                self.active_connections[session_id].discard(response)
                 if not self.active_connections[session_id]:
                     del self.active_connections[session_id]
-        logger.info(f"WebSocket disconnected: {user_type} from session {session_id}")
-    
-    async def send_personal_message(self, message: dict, websocket: WebSocket):
-        """Send a message to a specific WebSocket connection."""
+            # Clean up message queue
+            if response in self.message_queues:
+                del self.message_queues[response]
+        logger.info(f"SSE disconnected: {user_type} from session {session_id}")
+
+    async def send_personal_message(self, message: dict, response):
+        """Send a message to a specific SSE connection."""
         try:
-            await websocket.send_json(message)
+            if response in self.message_queues:
+                await self.message_queues[response].put(message)
         except Exception as e:
-            logger.error(f"Error sending message to WebSocket: {e}")
-    
-    async def broadcast_to_session(self, message: dict, session_id: str, exclude_websocket: WebSocket = None):
-        """Broadcast a message to all connections in a session."""
+            logger.error(f"Error queueing message for SSE: {e}")
+
+    async def broadcast_to_session(self, message: dict, session_id: str, exclude_response=None):
+        """Broadcast a message to all SSE connections in a session."""
         async with self.lock:
             connections = self.active_connections.get(session_id, set()).copy()
-        
+
         if not connections:
-            logger.warning(f"No active connections for session {session_id}")
+            logger.warning(f"No active SSE connections for session {session_id}")
             return
-        
-        disconnected = []
+
+        # Remove excluded connection if specified
+        if exclude_response and exclude_response in connections:
+            connections.remove(exclude_response)
+
+        if not connections:
+            logger.debug(f"No SSE connections to broadcast to after excluding sender")
+            return
+
+        # Queue messages to all connections
+        send_tasks = []
         for connection in connections:
-            if connection == exclude_websocket:
-                continue
+            send_tasks.append(self.send_personal_message(message, connection))
+
+        # Wait for all queue operations to complete
+        results = await asyncio.gather(*send_tasks, return_exceptions=True)
+        success_count = sum(1 for r in results if not isinstance(r, Exception))
+
+        logger.info(f"Queued message to {success_count}/{len(connections)} SSE connections for session {session_id}")
+
+    async def get_next_message(self, response):
+        """Get the next message for an SSE connection."""
+        if response in self.message_queues:
             try:
-                await connection.send_json(message)
-            except Exception as e:
-                logger.error(f"Error broadcasting to WebSocket: {e}")
-                disconnected.append(connection)
-        
-        # Clean up disconnected connections
-        if disconnected:
-            async with self.lock:
-                for conn in disconnected:
-                    await self.disconnect(conn)
-    
-    def get_session_connections(self, session_id: str) -> Set[WebSocket]:
+                return await asyncio.wait_for(self.message_queues[response].get(), timeout=30.0)
+            except asyncio.TimeoutError:
+                # Send ping to keep connection alive
+                return {"type": "ping"}
+        return None
+
+    def get_session_connections(self, session_id: str):
         """Get all active connections for a session."""
         return self.active_connections.get(session_id, set()).copy()
 
 
 # Global connection manager instance
-connection_manager = ConnectionManager()
+connection_manager = SSEConnectionManager()
 
 
 class ChatMessageResponse(BaseModel):
@@ -1186,7 +1206,7 @@ async def send_agent_message(
             
             logger.info(f"Agent {user_email} sent message to session {session_id}")
             
-            # Broadcast message via WebSocket to customer
+            # Broadcast message via SSE to customer
             message_data = {
                 "type": "agent_message",
                 "message_id": message_id,
@@ -1207,7 +1227,85 @@ async def send_agent_message(
         raise
     except Exception as e:
         logger.error(f"Error sending agent message: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error sending message: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to send message")
+
+# SSE endpoint for customers
+@public_chat_router.get("/{session_id}/events")
+async def customer_chat_sse(session_id: str, request: Request):
+    """SSE endpoint for customer chat events."""
+    try:
+        queue = await connection_manager.connect(response=None, session_id=session_id, user_type='customer')
+        
+        async def sse_generator():
+            try:
+                while True:
+                    try:
+                        message = await connection_manager.get_next_message(queue)
+                        if message:
+                            yield f"data: {json.dumps(message)}\n\n"
+                    except asyncio.TimeoutError:
+                        # Send ping to keep connection alive
+                        yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+            except Exception as e:
+                logger.error(f"Error in SSE generator: {e}")
+            finally:
+                await connection_manager.disconnect(queue)
+        
+        return StreamingResponse(
+            sse_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error setting up customer SSE: {e}")
+        raise HTTPException(status_code=500, detail="Failed to establish SSE connection")
+
+# SSE endpoint for agents
+@router.get("/chat-sessions/{session_id}/events")
+async def agent_chat_sse(session_id: str, request: Request, current_user: dict = Depends(get_current_user)):
+    """SSE endpoint for agent chat events."""
+    try:
+        user_email = current_user.get('email')
+        if not user_email:
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        
+        queue = await connection_manager.connect(response=None, session_id=session_id, user_type='agent')
+        
+        async def sse_generator():
+            try:
+                while True:
+                    try:
+                        message = await connection_manager.get_next_message(queue)
+                        if message:
+                            yield f"data: {json.dumps(message)}\n\n"
+                    except asyncio.TimeoutError:
+                        # Send ping to keep connection alive
+                        yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+            except Exception as e:
+                logger.error(f"Error in agent SSE generator: {e}")
+            finally:
+                await connection_manager.disconnect(queue)
+        
+        return StreamingResponse(
+            sse_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting up agent SSE: {e}")
+        raise HTTPException(status_code=500, detail="Failed to establish SSE connection")
 
 
 @router.post("/chat-sessions/assign", response_model=dict)
@@ -1626,206 +1724,120 @@ async def request_human_agent(
         raise HTTPException(status_code=500, detail=f"Error requesting human agent: {str(e)}")
 
 
-# WebSocket endpoints for real-time chat
-@router.websocket("/chat-sessions/{session_id}/ws")
-async def websocket_agent_chat(websocket: WebSocket, session_id: str):
+# SSE endpoints for real-time chat
+@router.get("/chat-sessions/{session_id}/events")
+async def sse_agent_chat(session_id: str, request: Request, current_user: dict = Depends(get_current_user)):
     """
-    WebSocket endpoint for agents to connect to a chat session.
-    Requires authentication via query parameter token.
+    SSE endpoint for agents to connect to a chat session.
+    Requires authentication.
     """
-    try:
-        # Get token from query parameters
-        token = websocket.query_params.get("token")
-        if not token:
-            await websocket.close(code=1008, reason="Authentication required")
-            return
-        
-        # Verify token and get user
-        try:
-            from shared.firebase_auth import verify_firebase_token
-            user = await verify_firebase_token(token)
-            user_email = user.get('email')
-            if not user_email:
-                await websocket.close(code=1008, reason="Invalid token")
-                return
-        except Exception as e:
-            logger.error(f"Token verification failed: {e}")
-            await websocket.close(code=1008, reason="Invalid token")
-            return
-        
-        # Verify agent has access to this session
-        from services.configuration_service.main import get_db_connection
-        async with get_db_connection() as conn:
-            # Check if agent is assigned to this session
-            assigned = await conn.fetchrow(
-                """
-                SELECT sa.assignee_email FROM session_assignments sa
-                INNER JOIN chat_sessions cs ON sa.session_id = cs.id
-                WHERE cs.session_id = $1 AND sa.assignee_email = $2
-                """,
-                session_id, user_email
+    from fastapi.responses import StreamingResponse
+    import json
+
+    user_email = current_user.get('email')
+    if not user_email:
+        raise HTTPException(status_code=403, detail="User email not found in token")
+
+    # Verify agent has access to this session
+    from services.configuration_service.main import get_db_connection
+    async with get_db_connection() as conn:
+        # Check if agent is assigned to this session
+        assigned = await conn.fetchrow(
+            """
+            SELECT sa.assignee_email FROM session_assignments sa
+            INNER JOIN chat_sessions cs ON sa.session_id = cs.id
+            WHERE cs.session_id = $1 AND sa.assignee_email = $2
+            """,
+            session_id, user_email
+        )
+        if not assigned:
+            # Check if user is admin
+            is_admin = await conn.fetchval(
+                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                user_email
             )
-            if not assigned:
-                # Check if user is admin
-                is_admin = await conn.fetchval(
-                    "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
-                    user_email
-                )
-                if not is_admin:
-                    await websocket.close(code=1008, reason="Access denied")
-                    return
-        
+            if not is_admin:
+                raise HTTPException(status_code=403, detail="Access denied")
+
+    # Create SSE response
+    async def event_generator():
         # Connect to session
-        await connection_manager.connect(websocket, session_id, 'agent')
-        
+        await connection_manager.connect(request, session_id, 'agent')
+
         try:
             while True:
-                # Receive messages from agent
-                data = await websocket.receive_json()
-                
-                if data.get("type") == "ping":
-                    # Respond to ping
-                    await websocket.send_json({"type": "pong"})
-                elif data.get("type") == "message":
-                    # Handle agent sending message via WebSocket
-                    text = data.get("text", "")
-                    if text:
-                        # Save to database and broadcast
-                        from services.configuration_service.main import get_db_connection
-                        async with get_db_connection() as conn:
-                            session_row = await conn.fetchrow(
-                                "SELECT id FROM chat_sessions WHERE session_id = $1",
-                                session_id
-                            )
-                            if session_row:
-                                session_db_id = session_row['id']
-                                message_id = await conn.fetchval(
-                                    """
-                                    INSERT INTO chat_messages (session_id, role, content)
-                                    VALUES ($1, 'agent', $2)
-                                    RETURNING id::text
-                                    """,
-                                    session_db_id, text
-                                )
-                                
-                                # Update session last activity
-                                await conn.execute(
-                                    """
-                                    UPDATE chat_sessions 
-                                    SET last_activity_at = CURRENT_TIMESTAMP,
-                                        message_count = message_count + 1,
-                                        updated_at = CURRENT_TIMESTAMP
-                                    WHERE id = $1
-                                    """,
-                                    session_db_id
-                                )
-                                
-                                # Broadcast to customer
-                                message_data = {
-                                    "type": "agent_message",
-                                    "message_id": message_id,
-                                    "text": text,
-                                    "sender": "agent",
-                                    "session_id": session_id,
-                                    "timestamp": datetime.utcnow().isoformat(),
-                                    "agent_email": user_email
-                                }
-                                await connection_manager.broadcast_to_session(message_data, session_id, exclude_websocket=websocket)
-        except WebSocketDisconnect:
-            await connection_manager.disconnect(websocket)
+                # Wait for next message
+                message = await connection_manager.get_next_message(request)
+                if message:
+                    # Format as SSE event
+                    if message.get('type') == 'ping':
+                        yield f"event: ping\ndata: {json.dumps(message)}\n\n"
+                    else:
+                        yield f"data: {json.dumps(message)}\n\n"
+
         except Exception as e:
-            logger.error(f"WebSocket error: {e}", exc_info=True)
-            await connection_manager.disconnect(websocket)
-    except Exception as e:
-        logger.error(f"WebSocket connection error: {e}", exc_info=True)
-        try:
-            await websocket.close(code=1011, reason="Internal error")
-        except:
-            pass
+            logger.error(f"Error in agent SSE: {e}")
+        finally:
+            # Disconnect from session
+            try:
+                await connection_manager.disconnect(request)
+            except Exception as e:
+                logger.error(f"Error disconnecting agent SSE: {e}")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control",
+        }
+    )
 
 
-@public_chat_router.websocket("/{session_id}/ws")
-async def websocket_customer_chat(websocket: WebSocket, session_id: str):
+@public_chat_router.get("/{session_id}/events")
+async def sse_customer_chat(session_id: str, request: Request):
     """
-    WebSocket endpoint for customers to connect to a chat session.
+    SSE endpoint for customers to connect to a chat session.
     No authentication required for customers.
     """
-    try:
+    from fastapi.responses import StreamingResponse
+    import json
+
+    # Create SSE response
+    async def event_generator():
         # Connect customer to session
-        await connection_manager.connect(websocket, session_id, 'customer')
-        
+        await connection_manager.connect(request, session_id, 'customer')
+
         try:
             while True:
-                # Receive messages from customer
-                data = await websocket.receive_json()
-                
-                if data.get("type") == "ping":
-                    # Respond to ping
-                    await websocket.send_json({"type": "pong"})
-                elif data.get("type") == "message":
-                    # Handle customer sending message via WebSocket
-                    text = data.get("text", "")
-                    if text:
-                        # Save to database and broadcast to agent
-                        from services.configuration_service.main import get_db_connection
-                        async with get_db_connection() as conn:
-                            session_row = await conn.fetchrow(
-                                "SELECT id FROM chat_sessions WHERE session_id = $1",
-                                session_id
-                            )
-                            if not session_row:
-                                # Create session if it doesn't exist
-                                session_db_id = await conn.fetchval(
-                                    """
-                                    INSERT INTO chat_sessions (session_id, is_active, metadata)
-                                    VALUES ($1, TRUE, '{}'::jsonb)
-                                    RETURNING id
-                                    """,
-                                    session_id
-                                )
-                            else:
-                                session_db_id = session_row['id']
-                            
-                                message_id = await conn.fetchval(
-                                    """
-                                    INSERT INTO chat_messages (session_id, role, content)
-                                    VALUES ($1, 'user', $2)
-                                    RETURNING id::text
-                                    """,
-                                    session_db_id, text
-                                )
-                                
-                                # Update session last activity
-                                await conn.execute(
-                                    """
-                                    UPDATE chat_sessions 
-                                    SET last_activity_at = CURRENT_TIMESTAMP,
-                                        message_count = message_count + 1,
-                                        updated_at = CURRENT_TIMESTAMP
-                                    WHERE id = $1
-                                    """,
-                                    session_db_id
-                                )
-                                
-                                # Broadcast to agent
-                                message_data = {
-                                    "type": "customer_message",
-                                    "message_id": message_id,
-                                    "text": text,
-                                    "sender": "user",
-                                    "session_id": session_id,
-                                    "timestamp": datetime.utcnow().isoformat()
-                                }
-                                await connection_manager.broadcast_to_session(message_data, session_id, exclude_websocket=websocket)
-        except WebSocketDisconnect:
-            await connection_manager.disconnect(websocket)
+                # Wait for next message
+                message = await connection_manager.get_next_message(request)
+                if message:
+                    # Format as SSE event
+                    if message.get('type') == 'ping':
+                        yield f"event: ping\ndata: {json.dumps(message)}\n\n"
+                    else:
+                        yield f"data: {json.dumps(message)}\n\n"
+
         except Exception as e:
-            logger.error(f"WebSocket error: {e}", exc_info=True)
-            await connection_manager.disconnect(websocket)
-    except Exception as e:
-        logger.error(f"WebSocket connection error: {e}", exc_info=True)
-        try:
-            await websocket.close(code=1011, reason="Internal error")
-        except:
-            pass
+            logger.error(f"Error in customer SSE: {e}")
+        finally:
+            # Disconnect from session
+            try:
+                await connection_manager.disconnect(request)
+            except Exception as e:
+                logger.error(f"Error disconnecting customer SSE: {e}")
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control",
+        }
+    )
 
