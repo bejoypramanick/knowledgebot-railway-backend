@@ -23,7 +23,7 @@ class Database:
         self._pool: Optional[asyncpg.Pool] = None
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=3))
-    async def connect(self, min_size: int = 1, max_size: int = 5, server_timeout: int = 30):
+    async def connect(self, min_size: int = 5, max_size: int = 20, server_timeout: int = 60):
         """Create connection pool with retry logic and serverless optimization."""
         try:
             self._pool = await asyncpg.create_pool(
@@ -139,7 +139,7 @@ async def init_railway_db(connection_url: str):
         if hasattr(railway_db, 'connection_url') and railway_db.connection_url == connection_url:
             logger.info("🔄 Railway database instance exists but pool is missing, attempting to connect...")
             try:
-                await railway_db.connect(min_size=1, max_size=5)  # Serverless-optimized
+                await railway_db.connect(min_size=5, max_size=20)  # Production-optimized
                 return railway_db
             except Exception as e:
                 logger.warning(f"⚠️ Failed to connect existing instance: {e}")
@@ -147,7 +147,7 @@ async def init_railway_db(connection_url: str):
     # Create new database instance with serverless-optimized settings
     logger.info("🆕 Creating new Railway database connection pool (serverless optimized)")
     railway_db = Database(connection_url=connection_url)
-    await railway_db.connect(min_size=1, max_size=5)  # Serverless-optimized
+    await railway_db.connect(min_size=5, max_size=20)  # Production-optimized
     return railway_db
 
 
