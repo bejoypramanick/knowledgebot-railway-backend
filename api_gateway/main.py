@@ -179,6 +179,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# COOP/COEP headers middleware to fix Cross-Origin-Opener-Policy issues
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Add security headers to prevent COOP/COEP issues with popup windows."""
+    response = await call_next(request)
+    
+    # Set COOP and COEP headers to allow popup operations
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    
+    return response
+
 
 # Service URLs from environment
 KNOWLEDGEBASE_INGESTION_URL = os.getenv(
