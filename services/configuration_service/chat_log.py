@@ -443,7 +443,7 @@ async def get_online_agents(current_user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=403, detail="User email not found in token")
 
         from services.configuration_service.main import get_db_connection
-            async with get_db_connection() as conn:
+        async with get_db_connection() as conn:
                 # Check if current user is an admin or agent
                 is_agent = await conn.fetchval(
                     "SELECT COUNT(*) FROM human_agents WHERE email = $1 AND status = 'confirmed'",
