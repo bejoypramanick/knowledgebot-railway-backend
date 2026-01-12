@@ -23,13 +23,21 @@ class Database:
         self._pool: Optional[asyncpg.Pool] = None
     
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=3))
-    async def connect(self, min_size: int = 5, max_size: int = 20):
-        """Create connection pool with retry logic."""
+    async def connect(self, min_size: int = 1, max_size: int = 5, server_timeout: int = 30):
+        """Create connection pool with retry logic and serverless optimization."""
         try:
             self._pool = await asyncpg.create_pool(
                 self.connection_url,
-                min_size=min_size,
-                max_size=max_size
+                min_size=min_size,    # Serverless: start with 1 connection
+                max_size=max_size,    # Serverless: max 5 connections
+                server_settings={
+                    'application_name': 'knowledgebot_config_service',
+                    'timezone': 'UTC',
+                },
+                command_timeout=server_timeout,  # Serverless: shorter timeout
+                setup=lambda conn: conn.add_log_listener(
+                    lambda record: logger.debug(f"PostgreSQL log: {record}")
+                )
             )
             # Log pool creation and redact connection URL for diagnostics
             try:
@@ -41,12 +49,12 @@ class Database:
                     if ':' in creds:
                         user, _pwd = creds.split(':', 1)
                         redacted = f"{prefix}//{user}:***@{host}"
-                logger.info("Database connection pool created successfully (%s)", redacted)
+                logger.info(f"✅ Database connection pool created successfully ({redacted}) - min_size={min_size}, max_size={max_size}")
             except Exception:
-                logger.info("Database connection pool created successfully (connection URL redaction failed)")
+                logger.info("✅ Database connection pool created successfully (connection URL redaction failed)")
         except Exception as e:
-            logger.error(f"Failed to create database connection pool: {e}")
-            logger.debug("Connection URL: %s", self.connection_url)
+            logger.error(f"❌ Failed to create database connection pool: {e}")
+            logger.debug(f"Connection URL: {self.connection_url}")
             raise
     
     async def disconnect(self):
@@ -106,23 +114,40 @@ neon_db: Optional[Database] = None
 
 
 async def init_railway_db(connection_url: str):
-    """Initialize Railway PostgreSQL database connection."""
+    """Initialize Railway PostgreSQL database connection with serverless optimization."""
     global railway_db
     
-    # If railway_db already exists and has a pool, reuse it
+    # If railway_db already exists and has a healthy pool, reuse it
     if railway_db is not None:
         if hasattr(railway_db, '_pool') and railway_db._pool is not None:
-            logger.debug("Reusing existing Railway database connection pool")
-            return railway_db
+            # Test pool health before reusing
+            try:
+                async with railway_db._pool.acquire() as conn:
+                    await conn.execute("SELECT 1")  # Health check
+                logger.debug("✅ Reusing existing healthy Railway database connection pool")
+                return railway_db
+            except Exception as e:
+                logger.warning(f"⚠️ Existing pool health check failed: {e}")
+                logger.info("🔄 Creating new connection pool...")
+                # Close old pool and create new one
+                try:
+                    await railway_db.disconnect()
+                except:
+                    pass  # Ignore errors during cleanup
+        
         # If it exists but has no pool, try to connect it
-        if railway_db.connection_url == connection_url:
-            logger.info("Railway database instance exists but pool is missing, attempting to connect...")
-            await railway_db.connect()
-            return railway_db
+        if hasattr(railway_db, 'connection_url') and railway_db.connection_url == connection_url:
+            logger.info("🔄 Railway database instance exists but pool is missing, attempting to connect...")
+            try:
+                await railway_db.connect(min_size=1, max_size=5)  # Serverless-optimized
+                return railway_db
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to connect existing instance: {e}")
     
-    # Create new database instance only if one doesn't exist
+    # Create new database instance with serverless-optimized settings
+    logger.info("🆕 Creating new Railway database connection pool (serverless optimized)")
     railway_db = Database(connection_url=connection_url)
-    await railway_db.connect()
+    await railway_db.connect(min_size=1, max_size=5)  # Serverless-optimized
     return railway_db
 
 

@@ -43,26 +43,51 @@ logger.info(f"Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'development')}")
 PORT = int(os.getenv('CONFIGURATION_SERVICE_PORT', os.getenv('PORT', '8004')))
 logger.info(f"PORT being used: {PORT}")
 
+# Database dependency for lazy initialization
+async def get_database():
+    """Get database connection with lazy initialization."""
+    from shared.db import railway_db, init_railway_db
+    
+    # If database is already initialized and healthy, return it
+    if railway_db is not None:
+        if hasattr(railway_db, '_pool') and railway_db._pool is not None:
+            try:
+                async with railway_db._pool.acquire() as conn:
+                    await conn.execute("SELECT 1")  # Health check
+                return railway_db
+            except Exception as e:
+                logger.warning(f"⚠️ Database health check failed: {e}")
+    
+    # Initialize database if not available or unhealthy
+    database_url = getattr(app.state, 'database_url', None)
+    if not database_url:
+        raise HTTPException(status_code=503, detail="Database not configured")
+    
+    try:
+        return await init_railway_db(database_url)
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize database: {e}")
+        raise HTTPException(status_code=503, detail="Database connection failed")
+
 # Lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     try:
-        # Initialize database
+        # Store database URL for lazy initialization
         database_url = (
             os.getenv("DATABASE_URL") or 
             os.getenv("RAILWAY_POSTGRES_URL") or 
             os.getenv("POSTGRES_URL")
         )
+        
         if database_url:
-            try:
-                await init_railway_db(database_url)
-                logger.info("✅ Database initialized for configuration service")
-            except Exception as e:
-                logger.error(f"❌ Could not initialize database: {e}")
-                logger.error("Configuration endpoints will not work without database connection")
+            # Store for lazy initialization - don't connect immediately
+            app.state.database_url = database_url
+            logger.info("✅ Database URL stored for lazy initialization")
         else:
             logger.error("❌ DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
+            app.state.database_url = None
         
         # Initialize Firebase Auth and Firestore
         try:
