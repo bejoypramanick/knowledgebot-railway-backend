@@ -12,6 +12,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import asyncio
+import asyncpg
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
