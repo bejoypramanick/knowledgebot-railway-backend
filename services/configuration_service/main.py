@@ -376,10 +376,8 @@ async def health_check():
 
 
 # Chatbot Configuration Endpoints
-from shared.utils import retry_database_operation
 
 @app.get("/api/v1/configuration/chatbot")
-@retry_database_operation
 async def get_chatbot_config():
     """Get chatbot configuration"""
     from fastapi.responses import JSONResponse
@@ -536,7 +534,6 @@ async def get_chatbot_config():
 
 
 @app.post("/api/v1/configuration/chatbot")
-@retry_database_operation
 async def save_chatbot_config(config: ChatbotConfigRequest):
     """Save chatbot configuration"""
     try:
@@ -989,7 +986,6 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
 
 # Widget Configuration Endpoints
 @app.get("/api/v1/configuration/widget")
-@retry_database_operation
 async def get_widget_config():
     """Get widget configuration"""
     from fastapi.responses import JSONResponse
@@ -1071,7 +1067,6 @@ async def get_widget_config():
 
 
 @app.post("/api/v1/configuration/widget")
-@retry_database_operation
 async def save_widget_config(config: WidgetConfigRequest):
     """Save widget configuration"""
     try:
