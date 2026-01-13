@@ -2,70 +2,254 @@
 import asyncpg
 import os
 import logging
-from typing import Optional
+import asyncio
+from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
 
+class DatabasePool:
+    """Enhanced database connection pool manager with health checks and auto-recovery."""
+
+    def __init__(self):
+        self._pool: Optional[asyncpg.Pool] = None
+        self._dsn: Optional[str] = None
+        self._pool_config: Dict[str, Any] = {}
+        self._lock = asyncio.Lock()
+        self._health_check_interval = 30  # seconds
+        self._last_health_check = 0
+
+    async def initialize_pool(
+        self,
+        dsn: str,
+        min_size: int = 5,
+        max_size: int = 20,
+        command_timeout: float = 60.0,
+        server_settings: Optional[Dict[str, str]] = None
+    ) -> None:
+        """Initialize the database connection pool with Railway optimizations."""
+        async with self._lock:
+            if self._pool is not None:
+                await self.close_pool()
+
+            self._dsn = dsn
+            self._pool_config = {
+                'min_size': min_size,
+                'max_size': max_size,
+                'command_timeout': command_timeout,
+                'server_settings': server_settings or {}
+            }
+
+            # Add Railway-specific optimizations
+            self._pool_config['server_settings'].update({
+                'timezone': 'UTC',
+                'application_name': 'knowledgebot_configuration_service',
+                # Railway serverless optimizations
+                'tcp_keepalives_idle': '60',
+                'tcp_keepalives_interval': '10',
+                'tcp_keepalives_count': '3'
+            })
+
+            await self._create_pool()
+
+    async def _create_pool(self) -> None:
+        """Create a new connection pool."""
+        try:
+            logger.info("🆕 Creating new Railway database connection pool (serverless optimized)")
+            self._pool = await asyncpg.create_pool(
+                dsn=self._dsn,
+                **self._pool_config
+            )
+
+            # Test the pool immediately
+            if await self._test_pool_health():
+                try:
+                    redacted = self._dsn
+                    # Redact password if present
+                    if '//' in redacted and '@' in redacted:
+                        prefix, rest = redacted.split('//', 1)
+                        creds, host = rest.split('@', 1)
+                        if ':' in creds:
+                            user, _pwd = creds.split(':', 1)
+                            redacted = f"{prefix}//{user}:***@{host}"
+                    logger.info(f"✅ Database connection pool created successfully ({redacted}) - min_size={self._pool_config['min_size']}, max_size={self._pool_config['max_size']}")
+                except Exception:
+                    logger.info("✅ Database connection pool created successfully (connection URL redaction failed)")
+            else:
+                raise RuntimeError("Pool health check failed immediately after creation")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to create database connection pool: {e}")
+            self._pool = None
+            raise
+
+    async def _test_pool_health(self) -> bool:
+        """Test if the pool is healthy by acquiring and releasing a connection."""
+        if self._pool is None:
+            return False
+
+        try:
+            async with self._pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            return True
+        except Exception as e:
+            logger.warning(f"⚠️ Pool health check failed: {e}")
+            return False
+
+    async def acquire(self) -> asyncpg.Connection:
+        """Acquire a database connection with health checks and None handling."""
+        # Check pool health before acquiring
+        if not await self._ensure_pool_health():
+            raise RuntimeError("Database pool is unhealthy and could not be recovered")
+
+        if self._pool is None:
+            raise RuntimeError("Database pool is not initialized")
+
+        try:
+            # Acquire connection with timeout
+            conn = await asyncio.wait_for(
+                self._pool.acquire(),
+                timeout=10.0
+            )
+
+            # Double-check that we got a valid connection
+            if conn is None:
+                logger.error("❌ Pool.acquire() returned None - pool corruption detected")
+                # Try to recreate the pool
+                await self._recreate_pool_on_failure()
+                raise RuntimeError("Database connection pool returned None - pool corrupted")
+
+            return conn
+
+        except asyncio.TimeoutError:
+            logger.error("⏰ Database connection acquisition timed out")
+            await self._recreate_pool_on_failure()
+            raise RuntimeError("Database connection acquisition timed out")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to acquire database connection: {e}")
+            await self._recreate_pool_on_failure()
+            raise
+
+    async def _ensure_pool_health(self) -> bool:
+        """Ensure the pool is healthy, recreate if necessary."""
+        current_time = asyncio.get_event_loop().time()
+
+        # Skip health check if recently performed
+        if current_time - self._last_health_check < self._health_check_interval:
+            return self._pool is not None
+
+        self._last_health_check = current_time
+
+        if self._pool is None:
+            logger.info("🔄 Pool is None, attempting to recreate...")
+            try:
+                await self._create_pool()
+                return True
+            except Exception as e:
+                logger.error(f"❌ Failed to recreate pool: {e}")
+                return False
+
+        # Test pool health
+        if not await self._test_pool_health():
+            logger.warning("⚠️ Existing pool health check failed: object NoneType can't be used in 'await' expression")
+            logger.info("🔄 Creating new connection pool...")
+            try:
+                await self._create_pool()
+                return True
+            except Exception as e:
+                logger.error(f"❌ Failed to recreate unhealthy pool: {e}")
+                return False
+
+        return True
+
+    async def _recreate_pool_on_failure(self) -> None:
+        """Recreate the pool when acquisition fails."""
+        try:
+            if self._pool is not None:
+                logger.info("🔄 Database connection pool closed")
+                await self.close_pool()
+
+            logger.info("🔄 Railway database instance exists but pool is missing, attempting to connect...")
+            await self._create_pool()
+
+        except Exception as e:
+            logger.error(f"❌ Failed to recreate pool after acquisition failure: {e}")
+            self._pool = None
+
+    async def close_pool(self) -> None:
+        """Close the database connection pool."""
+        if self._pool is not None:
+            try:
+                await self._pool.close()
+                logger.info("Database connection pool closed")
+            except Exception as e:
+                logger.error(f"❌ Error closing database pool: {e}")
+            finally:
+                self._pool = None
+
+    @property
+    def pool(self) -> Optional[asyncpg.Pool]:
+        """Get the current pool instance."""
+        return self._pool
+
+    async def get_connection_stats(self) -> Dict[str, Any]:
+        """Get connection pool statistics."""
+        if self._pool is None:
+            return {"status": "not_initialized"}
+
+        try:
+            stats = {
+                "status": "healthy",
+                "min_size": self._pool_config.get('min_size', 0),
+                "max_size": self._pool_config.get('max_size', 0),
+                "current_size": len(self._pool._holders) if hasattr(self._pool, '_holders') else 0,
+                "available_connections": self._pool._queue.qsize() if hasattr(self._pool, '_queue') else 0
+            }
+            return stats
+        except Exception as e:
+            return {"status": "error", "error": str(e)}
+
+
 class Database:
-    """Database connection manager for PostgreSQL."""
-    
+    """Legacy database connection manager for PostgreSQL - updated with fixes."""
+
     def __init__(self, connection_url: str):
         """
         Initialize database connection.
-        
+
         Args:
             connection_url: Full PostgreSQL connection URL (e.g., postgresql://user:pass@host:port/db)
         """
         self.connection_url = connection_url
         self._pool: Optional[asyncpg.Pool] = None
-    
+
     async def connect(self, min_size: int = 5, max_size: int = 20, server_timeout: int = 60):
-        """Create connection pool with retry logic and serverless optimization."""
-        for attempt in range(3):
-            try:
-                self._pool = await asyncpg.create_pool(
-                    self.connection_url,
-                    min_size=min_size,    # Serverless: start with 5 connections
-                    max_size=max_size,    # Serverless: max 20 connections
-                    server_settings={
-                        'application_name': 'knowledgebot_config_service',
-                        'timezone': 'UTC',
-                    },
-                    command_timeout=server_timeout,  # Serverless: 60 second timeout
-                    setup=lambda conn: conn.add_log_listener(
-                        lambda record: logger.debug(f"PostgreSQL log: {record}")
-                    )
-                )
-                # Only log success if pool is actually created
-                if self._pool is not None:
-                    try:
-                        redacted = self.connection_url
-                        # Redact password if present
-                        if '//' in redacted and '@' in redacted:
-                            prefix, rest = redacted.split('//', 1)
-                            creds, host = rest.split('@', 1)
-                            if ':' in creds:
-                                user, _pwd = creds.split(':', 1)
-                                redacted = f"{prefix}//{user}:***@{host}"
-                        logger.info(f"✅ Database connection pool created successfully ({redacted}) - min_size={min_size}, max_size={max_size}")
-                    except Exception:
-                        logger.info("✅ Database connection pool created successfully (connection URL redaction failed)")
-                    return  # Success - exit retry loop
-                else:
-                    logger.error("❌ Pool creation returned None - retrying...")
-                    
-            except Exception as e:
-                if attempt == 2:  # Last attempt
-                    logger.error(f"❌ Failed to create database connection pool after 3 attempts: {e}")
-                    logger.debug(f"Connection URL: {self.connection_url}")
-                    raise
-                else:
-                    logger.warning(f"⚠️ Pool creation attempt {attempt + 1} failed, retrying: {e}")
-                    await asyncio.sleep(1)  # Brief delay before retry
-    
+        """Create connection pool with enhanced error handling and Railway optimization."""
+        try:
+            # Use the new DatabasePool for enhanced functionality
+            pool_manager = DatabasePool()
+            await pool_manager.initialize_pool(
+                dsn=self.connection_url,
+                min_size=min_size,
+                max_size=max_size,
+                command_timeout=server_timeout,
+                server_settings={
+                    'application_name': 'knowledgebot_config_service',
+                    'timezone': 'UTC',
+                    'tcp_keepalives_idle': '60',
+                    'tcp_keepalives_interval': '10',
+                    'tcp_keepalives_count': '3'
+                }
+            )
+            self._pool = pool_manager.pool
+        except Exception as e:
+            logger.error(f"❌ Failed to create database connection pool: {e}")
+            logger.debug(f"Connection URL: {self.connection_url}")
+            raise
+
     async def disconnect(self):
         """Close connection pool."""
         if self._pool:
@@ -115,6 +299,37 @@ class Database:
             except Exception as e:
                 logger.exception("DB fetchval failed. Query: %s Args: %s", query, args)
                 raise
+
+
+# Context manager for database connections
+class DatabaseConnection:
+    """Context manager for database connections."""
+
+    def __init__(self):
+        self._conn: Optional[asyncpg.Connection] = None
+
+    async def __aenter__(self) -> asyncpg.Connection:
+        # Get database connection from the enhanced pool
+        if railway_db and hasattr(railway_db, '_pool') and railway_db._pool:
+            # Use the enhanced pool directly for better error handling
+            pool_manager = DatabasePool()
+            pool_manager._pool = railway_db._pool
+            self._conn = await pool_manager.acquire()
+        else:
+            # Fallback to legacy method
+            async with railway_db.acquire() as conn:
+                self._conn = conn
+        return self._conn
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._conn is not None:
+            try:
+                # Return connection to pool
+                if railway_db and hasattr(railway_db, '_pool'):
+                    await railway_db._pool.release(self._conn)
+                logger.debug("Database connection released")
+            except Exception as e:
+                logger.warning(f"Error releasing database connection: {e}")
 
 
 # Global database instances

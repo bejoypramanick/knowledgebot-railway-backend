@@ -1,6 +1,6 @@
 """Shared utility functions."""
 import httpx
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable, TypeVar, Tuple
 import logging
 from fastapi import HTTPException, FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -11,10 +11,100 @@ import asyncio
 import signal
 import traceback
 import faulthandler
+import time
 from tenacity import retry, stop_after_attempt, wait_exponential
 import psutil
 
 logger = logging.getLogger(__name__)
+
+
+# Enhanced retry configuration for Railway network issues
+class RetryConfig:
+    """Configuration for retry logic."""
+
+    def __init__(
+        self,
+        max_attempts: int = 3,
+        initial_delay: float = 1.0,
+        max_delay: float = 30.0,
+        backoff_factor: float = 2.0,
+        jitter: bool = True
+    ):
+        self.max_attempts = max_attempts
+        self.initial_delay = initial_delay
+        self.max_delay = max_delay
+        self.backoff_factor = backoff_factor
+        self.jitter = jitter
+
+
+def retry_with_backoff(
+    config: Optional[RetryConfig] = None,
+    exceptions: tuple = (Exception,)
+) -> callable:
+    """
+    Decorator that implements exponential backoff retry logic.
+
+    Specifically designed for Railway's network initialization delays.
+    """
+    if config is None:
+        config = RetryConfig()
+
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+
+            for attempt in range(config.max_attempts):
+                try:
+                    return await func(*args, **kwargs)
+                except exceptions as e:
+                    last_exception = e
+
+                    if attempt == config.max_attempts - 1:
+                        # Last attempt failed
+                        logger.error(f"❌ All {config.max_attempts} attempts failed for {func.__name__}: {e}")
+                        raise e
+
+                    # Calculate delay with exponential backoff
+                    delay = min(
+                        config.initial_delay * (config.backoff_factor ** attempt),
+                        config.max_delay
+                    )
+
+                    # Add jitter to prevent thundering herd
+                    if config.jitter:
+                        import random
+                        delay = delay * (0.5 + random.random() * 0.5)
+
+                    logger.warning(f"⚠️ Attempt {attempt + 1}/{config.max_attempts} failed for {func.__name__}: {e}. Retrying in {delay:.2f}s...")
+                    await asyncio.sleep(delay)
+
+            # This should never be reached, but just in case
+            raise last_exception
+
+        return wrapper
+    return decorator
+
+
+# Pre-configured retry decorators for common scenarios
+retry_database_operation = retry_with_backoff(
+    config=RetryConfig(
+        max_attempts=5,
+        initial_delay=0.5,
+        max_delay=10.0,
+        backoff_factor=1.5
+    ),
+    exceptions=(RuntimeError, ConnectionError, asyncio.TimeoutError, asyncpg.exceptions.PostgresError)
+)
+
+retry_network_operation = retry_with_backoff(
+    config=RetryConfig(
+        max_attempts=3,
+        initial_delay=2.0,
+        max_delay=15.0,
+        backoff_factor=2.0
+    ),
+    exceptions=(ConnectionError, asyncio.TimeoutError, OSError)
+)
 
 
 @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -187,3 +277,121 @@ def log_endpoint_request(service_name: str, endpoint_type: str, request: Request
     svc_logger = logging.getLogger(service_name)
     url = str(request.url)
     svc_logger.info(f"🔍 {endpoint_type.capitalize()} check invoked: {url}")
+
+
+async def wait_for_railway_network() -> None:
+    """
+    Wait for Railway's private network to initialize.
+
+    Railway's private networks can take up to 3 seconds to initialize.
+    """
+    logger.info("⏳ Waiting for Railway network initialization...")
+    await asyncio.sleep(3)
+    logger.info("✅ Railway network initialization delay complete")
+
+
+def validate_environment() -> None:
+    """Validate required environment variables."""
+    required_vars = [
+        'DATABASE_URL',
+        'GEMINI_API_KEY'
+    ]
+
+    missing_vars = []
+    for var in required_vars:
+        if not os.getenv(var):
+            missing_vars.append(var)
+
+    if missing_vars:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+
+    # Log configuration status
+    logger.info(f"INFO:main:GEMINI_API_KEY configured: {'YES' if os.getenv('GEMINI_API_KEY') else 'NO'}")
+
+
+class GracefulShutdown:
+    """Handles graceful shutdown with signal handling."""
+
+    def __init__(self):
+        self.shutdown_event = asyncio.Event()
+        self._shutdown_handlers: list = []
+
+    def add_shutdown_handler(self, handler):
+        """Add a shutdown handler function."""
+        self._shutdown_handlers.append(handler)
+
+    def _signal_handler(self, signum, frame):
+        """Handle shutdown signals."""
+        signal_name = signal.Signals(signum).name if hasattr(signal, 'Signals') else str(signum)
+        logger.warning(f"Received signal {signum} ({signal_name}) - initiating shutdown; dumping tracebacks for diagnostics")
+
+        # Log current stack traces for debugging
+        import traceback
+        import threading
+
+        logger.info("Current thread dump:")
+        for thread in threading.enumerate():
+            logger.info(f"Thread {thread.name} (ident: {thread.ident}):")
+            if thread.is_alive():
+                # Get stack trace for alive threads
+                stack = traceback.format_stack(sys._current_frames().get(thread.ident))
+                logger.info("".join(stack))
+
+        # Set shutdown event
+        self.shutdown_event.set()
+
+    async def wait_for_shutdown(self):
+        """Wait for shutdown signal."""
+        # Register signal handlers
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
+
+        # Wait for shutdown event
+        await self.shutdown_event.wait()
+
+        # Execute shutdown handlers
+        logger.info("🛑 Executing shutdown handlers...")
+        for handler in self._shutdown_handlers:
+            try:
+                if asyncio.iscoroutinefunction(handler):
+                    await handler()
+                else:
+                    await asyncio.get_event_loop().run_in_executor(None, handler)
+            except Exception as e:
+                logger.error(f"Error in shutdown handler: {e}")
+
+        logger.info("✅ All shutdown handlers completed")
+
+
+# Global shutdown handler
+shutdown_handler = GracefulShutdown()
+
+
+class ServiceStatus:
+    """Service status tracking."""
+
+    def __init__(self):
+        self._status = "initializing"
+        self._start_time = time.time()
+        self._stats: Dict[str, Any] = {}
+
+    def set_status(self, status: str):
+        """Set the current service status."""
+        self._status = status
+        logger.info(f"Service status changed to: {status}")
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get current service status."""
+        return {
+            "status": self._status,
+            "uptime": time.time() - self._start_time,
+            "stats": self._stats
+        }
+
+    def update_stats(self, key: str, value: Any):
+        """Update service statistics."""
+        self._stats[key] = value
+
+
+# Global service status
+service_status = ServiceStatus()

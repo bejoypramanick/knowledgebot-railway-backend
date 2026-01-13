@@ -18,6 +18,7 @@ from asyncpg import exceptions as asyncpg_exceptions
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.db import init_railway_db, close_databases, railway_db
+from shared.utils import validate_environment, wait_for_railway_network, service_status
 
 load_dotenv()
 
@@ -74,15 +75,28 @@ async def get_database():
 # Lifespan context manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Handle application startup and shutdown events."""
+    """Handle application startup and shutdown events with Railway fixes."""
     try:
+        service_status.set_status("starting")
+
+        # Validate environment variables
+        try:
+            validate_environment()
+        except ValueError as e:
+            logger.error(f"❌ Environment validation failed: {e}")
+            service_status.set_status("error")
+            raise
+
+        # Wait for Railway network initialization
+        await wait_for_railway_network()
+
         # Store database URL for lazy initialization
         database_url = (
-            os.getenv("DATABASE_URL") or 
-            os.getenv("RAILWAY_POSTGRES_URL") or 
+            os.getenv("DATABASE_URL") or
+            os.getenv("RAILWAY_POSTGRES_URL") or
             os.getenv("POSTGRES_URL")
         )
-        
+
         if database_url:
             # Store for lazy initialization - don't connect immediately
             app.state.database_url = database_url
@@ -90,7 +104,9 @@ async def lifespan(app: FastAPI):
         else:
             logger.error("❌ DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
             app.state.database_url = None
-        
+            service_status.set_status("error")
+            raise ValueError("Database URL not configured")
+
         # Initialize Firebase Auth and Firestore
         try:
             from shared.firebase_auth import init_firebase_auth
@@ -99,14 +115,17 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"⚠️ Firebase Auth/Firestore not initialized: {e}")
             logger.warning("Authentication endpoints will not work without Firebase")
-        
+
+        service_status.set_status("running")
         logger.info(f"🚀 Configuration service started successfully on port {PORT}")
         yield
-        
+
         # Shutdown
+        service_status.set_status("stopping")
         await close_databases()
         logger.info("✅ Configuration service shutdown complete")
     except Exception as e:
+        service_status.set_status("error")
         logger.error(f"❌ Error in lifespan handler: {e}")
         raise
 
@@ -188,182 +207,132 @@ class WidgetConfigRequest(BaseModel):
 
 @asynccontextmanager
 async def get_db_connection():
-    """Get database connection from shared pool - optimized for performance with enhanced error handling"""
-    conn = None
+    """
+    Get database connection with enhanced error handling and Railway fixes.
+
+    This function now uses the fixed database connection logic:
+    1. Pool health checks before acquisition
+    2. Proper None handling with the DatabaseConnection context manager
+    3. Automatic pool recreation on failure
+    4. Better error messages and logging
+    """
     try:
-        # Quick check - if railway_db exists and has a pool, use it directly
-        if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
-            try:
-                conn = await railway_db._pool.acquire()
-                logger.debug("Database connection acquired from existing pool")
-                yield conn
-                return
-            except asyncpg_exceptions.TooManyConnectionsError:
-                logger.warning("⚠️ Connection pool exhausted, attempting pool expansion...")
-                # Try to create additional connections if possible
-                try:
-                    # Check if we can expand the pool dynamically
-                    current_size = len(railway_db._pool._holders) if hasattr(railway_db._pool, '_holders') else 0
-                    if current_size < 20:  # Allow expansion up to max_size
-                        conn = await railway_db._pool.acquire()
-                        logger.debug("Database connection acquired after pool expansion")
-                        yield conn
-                        return
-                    else:
-                        logger.error("❌ Connection pool at maximum capacity")
-                        raise HTTPException(
-                            status_code=503,
-                            detail="Database connection pool exhausted. Please try again in a few moments."
-                        )
-                except Exception:
-                    pass  # Fall through to initialization
+        # Use the enhanced DatabaseConnection context manager
+        from shared.db import DatabaseConnection
+        async with DatabaseConnection() as conn:
+            yield conn
 
-        # Fallback: Try to initialize if not already initialized (should rarely happen)
-        # Use lock to prevent concurrent initialization
-        async with _db_init_lock:
-            # Check again after acquiring lock - another request might have initialized it
-            if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
-                try:
-                    conn = await railway_db._pool.acquire()
-                    logger.debug("Database connection acquired from pool after lock")
-                    yield conn
-                    return
-                except asyncpg_exceptions.TooManyConnectionsError:
-                    logger.error("❌ Connection pool still exhausted after lock - database overloaded")
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Database connection pool exhausted. Please try again in a few moments."
-                    )
+    except RuntimeError as e:
+        error_msg = str(e)
+        if "returned None" in error_msg:
+            logger.error("❌ Database connection pool returned None - this indicates pool corruption")
+            raise HTTPException(
+                status_code=503,
+                detail="Database service temporarily unavailable due to connection pool corruption. Please try again."
+            )
+        elif "timed out" in error_msg:
+            logger.error("❌ Database connection acquisition timed out")
+            raise HTTPException(
+                status_code=503,
+                detail="Database connection timeout. Please try again."
+            )
+        elif "unhealthy" in error_msg:
+            logger.error("❌ Database pool health check failed")
+            raise HTTPException(
+                status_code=503,
+                detail="Database service temporarily unavailable. Please try again."
+            )
+        else:
+            logger.error(f"❌ Database runtime error: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Database service temporarily unavailable"
+            )
 
-            from shared.db import init_railway_db
-
-            database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
-            if not database_url:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Database not initialized. DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL environment variable not set."
-                )
-
-            try:
-                # Initialize the database and get the instance with larger pool
-                logger.info("🔄 Initializing database connection pool on-demand...")
-                initialized_db = await init_railway_db(database_url)
-
-                if initialized_db is None:
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Database initialization returned None"
-                    )
-
-                if not hasattr(initialized_db, '_pool') or initialized_db._pool is None:
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Database connection pool not available after initialization"
-                    )
-
-                # Use the initialized database instance directly
-                if initialized_db._pool is None:
-                    logger.error("❌ Database pool is None after initialization - this should not happen")
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Database pool initialization failed - pool is None"
-                    )
-                
-                conn = await initialized_db._pool.acquire()
-                logger.info("✅ Database connection acquired from newly initialized pool")
-                yield conn
-
-            except asyncpg_exceptions.TooManyConnectionsError:
-                logger.error("❌ Railway database connection limit exceeded during initialization")
-                raise HTTPException(
-                    status_code=503,
-                    detail="Database connection limit exceeded. Please contact support if this persists."
-                )
-            except Exception as e:
-                error_msg = str(e)
-                # Handle specific database errors
-                if "too many clients already" in error_msg.lower():
-                    logger.error(f"❌ Railway PostgreSQL connection limit exceeded: {e}")
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Database connection limit exceeded. Please wait and retry."
-                    )
-                elif "connection timed out" in error_msg.lower() or "connection timeout" in error_msg.lower():
-                    logger.error(f"❌ Database connection timeout: {e}")
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Database connection timeout. Please try again."
-                    )
-                elif "authentication failed" in error_msg.lower():
-                    logger.error(f"❌ Database authentication failed")
-                    raise HTTPException(
-                        status_code=503,
-                        detail="Database authentication error. Please contact support."
-                    )
-                else:
-                    logger.error(f"❌ Failed to initialize database: {e}", exc_info=True)
-                    raise HTTPException(
-                        status_code=503,
-                        detail=f"Database initialization failed. Error: {error_msg}"
-                    )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Unexpected error in get_db_connection: {e}", exc_info=True)
+    except asyncpg_exceptions.TooManyConnectionsError:
+        logger.error("❌ Database connection pool exhausted")
         raise HTTPException(
             status_code=503,
-            detail="Database service temporarily unavailable"
+            detail="Database connection pool exhausted. Please try again in a few moments."
         )
-    finally:
-        if conn and railway_db and hasattr(railway_db, '_pool'):
-            try:
-                await railway_db._pool.release(conn)
-                logger.debug("Database connection released")
-            except Exception as e:
-                logger.warning(f"Error releasing database connection: {e}")
+
+    except Exception as e:
+        error_msg = str(e)
+        # Handle specific database errors
+        if "too many clients already" in error_msg.lower():
+            logger.error(f"❌ Railway PostgreSQL connection limit exceeded: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Database connection limit exceeded. Please wait and retry."
+            )
+        elif "connection timed out" in error_msg.lower() or "connection timeout" in error_msg.lower():
+            logger.error(f"❌ Database connection timeout: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="Database connection timeout. Please try again."
+            )
+        elif "authentication failed" in error_msg.lower():
+            logger.error(f"❌ Database authentication failed")
+            raise HTTPException(
+                status_code=503,
+                detail="Database authentication error. Please contact support."
+            )
+        else:
+            logger.error(f"❌ Unexpected error in get_db_connection: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=503,
+                detail="Database service temporarily unavailable"
+            )
 
 
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    """Health check endpoint with database pool monitoring"""
+    """Health check endpoint with enhanced database pool monitoring"""
     db_status = "disconnected"
     pool_stats = None
 
     if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
         db_status = "connected"
         try:
-            # Get pool statistics
-            pool = railway_db._pool
-            pool_stats = {
-                "min_size": getattr(pool, '_minsize', 'unknown'),
-                "max_size": getattr(pool, '_maxsize', 'unknown'),
-                "current_size": len(getattr(pool, '_holders', [])),
-                "available_connections": getattr(pool, '_queue', None) and pool._queue.qsize() or 0,
-                "active_connections": len(getattr(pool, '_holders', [])) - (getattr(pool, '_queue', None) and pool._queue.qsize() or 0)
-            }
+            # Get enhanced pool statistics using the DatabasePool class
+            from shared.db import DatabasePool
+            pool_manager = DatabasePool()
+            pool_manager._pool = railway_db._pool
+            pool_stats = await pool_manager.get_connection_stats()
 
-            # Quick health check
-            async with railway_db.acquire() as conn:
+            # Quick health check using enhanced method
+            try:
+                async with railway_db.acquire() as conn:
+                    await conn.execute("SELECT 1")
+                    db_status = "healthy"
+            except Exception:
+                # Try with enhanced pool manager
+                conn = await pool_manager.acquire()
                 await conn.execute("SELECT 1")
+                await pool_manager._pool.release(conn)
                 db_status = "healthy"
 
         except Exception as e:
             db_status = f"error: {str(e)[:100]}"  # Truncate error message
             logger.warning(f"Database health check failed: {e}")
 
-    return {
-        "status": "healthy" if db_status in ["connected", "healthy"] else "degraded",
-        "service": "configuration_service",
+    # Get overall service status
+    service_info = service_status.get_status()
+    service_info.update({
         "database": db_status,
         "pool_stats": pool_stats,
-        "timestamp": "2026-01-12T00:00:00Z"  # Using the current date from context
-    }
+        "timestamp": "2026-01-13T07:34:00Z"  # Current date
+    })
+
+    return service_info
 
 
 # Chatbot Configuration Endpoints
+from shared.utils import retry_database_operation
+
 @app.get("/api/v1/configuration/chatbot")
+@retry_database_operation
 async def get_chatbot_config():
     """Get chatbot configuration"""
     from fastapi.responses import JSONResponse
@@ -520,6 +489,7 @@ async def get_chatbot_config():
 
 
 @app.post("/api/v1/configuration/chatbot")
+@retry_database_operation
 async def save_chatbot_config(config: ChatbotConfigRequest):
     """Save chatbot configuration"""
     try:
@@ -972,6 +942,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
 
 # Widget Configuration Endpoints
 @app.get("/api/v1/configuration/widget")
+@retry_database_operation
 async def get_widget_config():
     """Get widget configuration"""
     from fastapi.responses import JSONResponse
@@ -1053,6 +1024,7 @@ async def get_widget_config():
 
 
 @app.post("/api/v1/configuration/widget")
+@retry_database_operation
 async def save_widget_config(config: WidgetConfigRequest):
     """Save widget configuration"""
     try:
