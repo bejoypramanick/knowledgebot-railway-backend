@@ -739,7 +739,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 db_metadata = {}
                 try:
                     if db:
-                        # Query file_uploads table for additional metadata
+                        # First try exact match with f.name
                         file_record = await db.fetchrow("""
                             SELECT id, cloudflare_r2_key, original_filename, display_name,
                                    mime_type, size_bytes, metadata, created_at
@@ -748,6 +748,32 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                             ORDER BY created_at DESC
                             LIMIT 1
                         """, f.name)
+
+                        # If no exact match, try matching by original filename
+                        if not file_record and original_filename:
+                            logger.debug(f"No exact match for gemini_file_name '{f.name}', trying original_filename '{original_filename}'")
+                            file_record = await db.fetchrow("""
+                                SELECT id, cloudflare_r2_key, original_filename, display_name,
+                                       mime_type, size_bytes, metadata, created_at
+                                FROM file_uploads
+                                WHERE original_filename = $1
+                                ORDER BY created_at DESC
+                                LIMIT 1
+                            """, original_filename)
+
+                        # If still no match, try partial match on gemini_file_name
+                        if not file_record:
+                            # Extract just the filename part (after last slash)
+                            filename_part = f.name.split('/')[-1] if '/' in f.name else f.name
+                            logger.debug(f"Trying partial match with filename part: {filename_part}")
+                            file_record = await db.fetchrow("""
+                                SELECT id, cloudflare_r2_key, original_filename, display_name,
+                                       mime_type, size_bytes, metadata, created_at
+                                FROM file_uploads
+                                WHERE gemini_file_name LIKE $1
+                                ORDER BY created_at DESC
+                                LIMIT 1
+                            """, f"%{filename_part}%")
 
                         if file_record:
                             db_metadata = {
@@ -760,8 +786,11 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                                 'upload_date': file_record['created_at'].isoformat() if file_record['created_at'] else None,
                                 'db_metadata': dict(file_record['metadata']) if file_record['metadata'] else {}
                             }
+                            logger.debug(f"Found database metadata for file {f.name}: {db_metadata}")
+                        else:
+                            logger.debug(f"No database record found for file {f.name} or original_filename {original_filename}")
                 except Exception as e:
-                    logger.debug(f"Could not fetch file metadata from database: {e}")
+                    logger.warning(f"Could not fetch file metadata from database: {e}")
 
                 file_metadata_map[f.name] = {
                     'display_name': display_name,
@@ -783,12 +812,13 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             Instructions:
             1. Search through the attached files for information relevant to the query.
             2. Extract direct quotes, data points, and context that answer the question.
-            3. If the files contain the answer, provide a detailed summary of the relevant information.
-            4. If the files do NOT contain the answer, state "No relevant information found in the knowledge base."
+            3. If the files contain the answer, provide ONLY the relevant text content without any line numbers, page references, or formatting.
+            4. Do NOT include line numbers, page numbers, or section headers in your response.
+            5. If the files do NOT contain the answer, state "No relevant information found in the knowledge base."
 
             Output Format:
-            - Source File: [Filename]
-            - Relevant Content: [Extracted Information]
+            Source File: [Exact filename as shown in the file]
+            Content: [Direct text content only - no line numbers, no page numbers, no formatting]
             """
 
             # Generate content using the new API with files attached
@@ -802,14 +832,77 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 await track_gemini_usage_from_response(response.usage_metadata)
 
-            # Parse the response to extract actual file names
-            response_text = response.text
-            
+            # Parse the response to extract actual file names and clean content
+            raw_response_text = response.text
+            logger.debug(f"Raw Gemini response: {raw_response_text[:500]}...")
+
+            # Clean the response to extract only the actual content
+            def clean_gemini_response(response_text: str) -> str:
+                """Clean Gemini response to extract only the relevant content without metadata."""
+                lines = response_text.strip().split('\n')
+
+                # Remove empty lines at start and end
+                while lines and not lines[0].strip():
+                    lines.pop(0)
+                while lines and not lines[-1].strip():
+                    lines.pop()
+
+                # Look for "Content:" marker and extract everything after it
+                content_lines = []
+                found_content_marker = False
+
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    # Skip metadata lines
+                    if line.lower().startswith(('source file:', 'content:')):
+                        if line.lower().startswith('content:'):
+                            found_content_marker = True
+                            # Extract content after "Content:" marker
+                            content_part = line[8:].strip()  # Remove "Content:" prefix
+                            if content_part:
+                                content_lines.append(content_part)
+                        continue
+                    elif any(line.lower().startswith(prefix) for prefix in [
+                        'relevant content:', 'extracted information:', 'summary:', 'answer:'
+                    ]):
+                        # Skip these headers
+                        continue
+                    elif found_content_marker or not any(line.lower().startswith(prefix) for prefix in [
+                        'user query:', 'instructions:', 'output format:', '- '
+                    ]):
+                        # This is likely content
+                        # Remove line numbers like "12", "13", etc. at the beginning
+                        line = re.sub(r'^\d+\s*', '', line)
+                        # Remove page references
+                        line = re.sub(r'\bpage\s+\d+\b', '', line, flags=re.IGNORECASE)
+                        line = line.strip()
+                        if line:
+                            content_lines.append(line)
+
+                # Join content lines and clean up
+                content = ' '.join(content_lines)
+
+                # Remove multiple spaces and clean up
+                content = re.sub(r'\s+', ' ', content)
+                content = content.strip()
+
+                # If content is too short or looks like a line number, it might be invalid
+                if len(content) < 10 or re.match(r'^\d+$', content.strip()):
+                    logger.warning(f"Extracted content appears invalid: '{content[:100]}...'")
+                    return response_text.strip()  # Return original as fallback
+
+                return content
+
+            response_text = clean_gemini_response(raw_response_text)
+
             # Try to extract file name from response text
             # Look for "Source File: [filename]" pattern
             source_file_pattern = r'Source File:\s*([^\n]+)'
-            matches = re.finditer(source_file_pattern, response_text, re.IGNORECASE)
-            
+            matches = re.finditer(source_file_pattern, raw_response_text, re.IGNORECASE)
+
             found_files = []
             for match in matches:
                 found_file_name = match.group(1).strip()
