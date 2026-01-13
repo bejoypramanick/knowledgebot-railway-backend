@@ -255,6 +255,22 @@ async def get_db_connection():
     4. Better error messages and logging
     """
     try:
+        # Ensure database is initialized before using it
+        from shared.db import railway_db, init_railway_db
+        
+        if railway_db is None:
+            logger.info("🔄 Database not initialized, initializing now...")
+            database_url = (
+                os.getenv("DATABASE_URL") or
+                os.getenv("RAILWAY_POSTGRES_URL") or
+                os.getenv("POSTGRES_URL")
+            )
+            if database_url:
+                await init_railway_db(database_url)
+                logger.info("✅ Database initialized successfully")
+            else:
+                raise RuntimeError("Database URL not configured")
+        
         # Use the enhanced DatabaseConnection context manager
         from shared.db import DatabaseConnection
         async with DatabaseConnection() as conn:
@@ -1146,7 +1162,7 @@ try:
     from services.configuration_service.token_usage import router as token_usage_router
     from services.configuration_service.performance import router as performance_router
     from services.configuration_service.admin_management import router as admin_management_router
-    from services.configuration_service.auth import router as auth_router
+    from services.configuration_service.auth_optimized import router as auth_router
     from services.configuration_service.chat_log import router as chat_log_router, public_chat_router
     from services.configuration_service.user_ids import router as user_ids_router
 
