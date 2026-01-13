@@ -130,33 +130,33 @@ async def verify_token_optimized(request: TokenVerificationRequest):
         # Execute database operations with retry logic
         roles_result, db_time = await execute_database_operations_with_retry(email)
 
-            logger.info(f"Database query took {db_time:.3f}s for email: {email}")
+        logger.info(f"Database query took {db_time:.3f}s for email: {email}")
 
-            # Process results
-            for row in roles_result:
-                role = row['role']
-                if role == 'admin':
-                    is_admin = True
-                    primary_role = 'admin'  # Admin takes precedence
-                    if 'admin' not in user_roles:
-                        user_roles.append('admin')
-                elif role == 'human_agent':
-                    is_human_agent = True
-                    if primary_role == 'user':
-                        primary_role = 'human_agent'
-                    if 'human_agent' not in user_roles:
-                        user_roles.append('human_agent')
+        # Process results
+        for row in roles_result:
+            role = row['role']
+            if role == 'admin':
+                is_admin = True
+                primary_role = 'admin'  # Admin takes precedence
+                if 'admin' not in user_roles:
+                    user_roles.append('admin')
+            elif role == 'human_agent':
+                is_human_agent = True
+                if primary_role == 'user':
+                    primary_role = 'human_agent'
+                if 'human_agent' not in user_roles:
+                    user_roles.append('human_agent')
 
-            # Ensure 'user' is in roles
-            if 'user' not in user_roles:
-                user_roles.append('user')
+        # Ensure 'user' is in roles
+        if 'user' not in user_roles:
+            user_roles.append('user')
 
-            # Update user_data with latest roles from DB
-            user_data['role'] = primary_role
-            user_data['primary_role'] = primary_role
-            user_data['roles'] = user_roles
-            user_data['is_admin'] = is_admin
-            user_data['is_human_agent'] = is_human_agent
+        # Update user_data with latest roles from DB
+        user_data['role'] = primary_role
+        user_data['primary_role'] = primary_role
+        user_data['roles'] = user_roles
+        user_data['is_admin'] = is_admin
+        user_data['is_human_agent'] = is_human_agent
         
         total_time = time.time() - start_time
         logger.info(f"verify-token completed in {total_time:.3f}s for email: {email}")
