@@ -47,7 +47,6 @@ async def execute_role_query_with_retry(conn, query: str, email: str) -> list:
     return await conn.fetch(query, email)
 
 
-@retry_database_operation
 async def execute_database_operations_with_retry(email: str) -> tuple:
     """
     Execute all database operations with enhanced retry logic and connection handling.
