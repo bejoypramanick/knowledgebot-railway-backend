@@ -309,14 +309,27 @@ class DatabaseConnection:
         self._conn: Optional[asyncpg.Connection] = None
 
     async def __aenter__(self) -> asyncpg.Connection:
-        # Get database connection from the enhanced pool
+        # Check if railway_db is properly initialized
+        if railway_db is None:
+            logger.error("❌ railway_db is None - attempting to initialize")
+            from shared.db import init_railway_db
+            database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+            if database_url:
+                global railway_db
+                railway_db = await init_railway_db(database_url)
+            else:
+                raise RuntimeError("Database URL not configured")
+        
+        # Check if pool is available
         if railway_db and hasattr(railway_db, '_pool') and railway_db._pool:
             # Use the enhanced pool directly for better error handling
             pool_manager = DatabasePool()
             pool_manager._pool = railway_db._pool
             self._conn = await pool_manager.acquire()
         else:
-            # Fallback to legacy method
+            # Fallback to legacy method - but with proper error handling
+            if railway_db is None:
+                raise RuntimeError("railway_db is None after initialization")
             async with railway_db.acquire() as conn:
                 self._conn = conn
         return self._conn
