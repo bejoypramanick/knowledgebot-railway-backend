@@ -55,6 +55,25 @@ async def get_railway_db():
             logger.info("🔄 Lazy initializing Railway PostgreSQL database...")
             railway_db = await init_railway_db(settings.railway_postgres_url)
             logger.info("✅ Railway PostgreSQL database initialized")
+
+            # Debug: Show available files in database
+            try:
+                files_count = await railway_db.fetchval("SELECT COUNT(*) FROM file_uploads")
+                logger.info(f"📊 Database contains {files_count} file records")
+
+                if files_count > 0:
+                    sample_files = await railway_db.fetch("""
+                        SELECT gemini_file_name, original_filename, display_name
+                        FROM file_uploads
+                        ORDER BY created_at DESC
+                        LIMIT 3
+                    """)
+                    logger.info("📋 Sample files in database:")
+                    for sf in sample_files:
+                        logger.info(f"   • Gemini: '{sf['gemini_file_name']}' | Original: '{sf['original_filename']}' | Display: '{sf['display_name']}'")
+            except Exception as db_debug_e:
+                logger.warning(f"Could not check database contents: {db_debug_e}")
+
         except Exception as e:
             logger.error(f"❌ Failed to initialize Railway PostgreSQL database: {e}")
             raise
@@ -735,31 +754,43 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 display_name = getattr(f, 'display_name', f.name)
                 original_filename = extract_original_filename(display_name)
 
+                logger.debug(f"Processing Gemini file: name='{f.name}', display_name='{display_name}', extracted_original='{original_filename}'")
+                logger.debug(f"File object attributes: {dir(f)}")
+
                 # Try to get additional metadata from database
                 db_metadata = {}
                 try:
                     if db:
+                        logger.debug(f"Attempting to fetch metadata for Gemini file: {f.name}, original_filename: {original_filename}")
+
+                        # Test database connection
+                        test_count = await db.fetchval("SELECT COUNT(*) FROM file_uploads")
+                        logger.debug(f"Database connection test: {test_count} files in database")
+
                         # First try exact match with f.name
                         file_record = await db.fetchrow("""
                             SELECT id, cloudflare_r2_key, original_filename, display_name,
-                                   mime_type, size_bytes, metadata, created_at
+                                   mime_type, size_bytes, metadata, created_at, gemini_file_name
                             FROM file_uploads
                             WHERE gemini_file_name = $1
                             ORDER BY created_at DESC
                             LIMIT 1
                         """, f.name)
 
+                        logger.debug(f"Exact match query result for '{f.name}': {file_record is not None}")
+
                         # If no exact match, try matching by original filename
                         if not file_record and original_filename:
                             logger.debug(f"No exact match for gemini_file_name '{f.name}', trying original_filename '{original_filename}'")
                             file_record = await db.fetchrow("""
                                 SELECT id, cloudflare_r2_key, original_filename, display_name,
-                                       mime_type, size_bytes, metadata, created_at
+                                       mime_type, size_bytes, metadata, created_at, gemini_file_name
                                 FROM file_uploads
                                 WHERE original_filename = $1
                                 ORDER BY created_at DESC
                                 LIMIT 1
                             """, original_filename)
+                            logger.debug(f"Original filename match result for '{original_filename}': {file_record is not None}")
 
                         # If still no match, try partial match on gemini_file_name
                         if not file_record:
@@ -768,14 +799,33 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                             logger.debug(f"Trying partial match with filename part: {filename_part}")
                             file_record = await db.fetchrow("""
                                 SELECT id, cloudflare_r2_key, original_filename, display_name,
-                                       mime_type, size_bytes, metadata, created_at
+                                       mime_type, size_bytes, metadata, created_at, gemini_file_name
                                 FROM file_uploads
                                 WHERE gemini_file_name LIKE $1
                                 ORDER BY created_at DESC
                                 LIMIT 1
                             """, f"%{filename_part}%")
+                            logger.debug(f"Partial match result for '{filename_part}': {file_record is not None}")
 
+                        # As a last resort, try to find any file with similar name
+                        if not file_record:
+                            # Try to match the base filename without extension
+                            base_name = original_filename.rsplit('.', 1)[0] if '.' in original_filename else original_filename
+                            logger.debug(f"Trying base name match: {base_name}")
+                            file_record = await db.fetchrow("""
+                                SELECT id, cloudflare_r2_key, original_filename, display_name,
+                                       mime_type, size_bytes, metadata, created_at, gemini_file_name
+                                FROM file_uploads
+                                WHERE original_filename LIKE $1 OR display_name LIKE $1
+                                ORDER BY created_at DESC
+                                LIMIT 1
+                            """, f"%{base_name}%")
+                            logger.debug(f"Base name match result for '{base_name}': {file_record is not None}")
+
+                        # Debug: Show what we found in the database
                         if file_record:
+                            logger.debug(f"Found database record: gemini_file_name='{file_record.get('gemini_file_name')}', original_filename='{file_record.get('original_filename')}', display_name='{file_record.get('display_name')}'")
+
                             db_metadata = {
                                 'document_id': str(file_record['id']),
                                 's3_key': file_record['cloudflare_r2_key'],
@@ -786,11 +836,22 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                                 'upload_date': file_record['created_at'].isoformat() if file_record['created_at'] else None,
                                 'db_metadata': dict(file_record['metadata']) if file_record['metadata'] else {}
                             }
-                            logger.debug(f"Found database metadata for file {f.name}: {db_metadata}")
+                            logger.info(f"Successfully retrieved database metadata for file {f.name}")
                         else:
-                            logger.debug(f"No database record found for file {f.name} or original_filename {original_filename}")
+                            logger.warning(f"No database record found for file {f.name} (original: {original_filename}). Available files in DB:")
+                            # Debug: Show some available files
+                            available_files = await db.fetch("""
+                                SELECT gemini_file_name, original_filename, display_name
+                                FROM file_uploads
+                                ORDER BY created_at DESC
+                                LIMIT 5
+                            """)
+                            for af in available_files:
+                                logger.warning(f"  DB: gemini='{af['gemini_file_name']}', orig='{af['original_filename']}', display='{af['display_name']}'")
                 except Exception as e:
-                    logger.warning(f"Could not fetch file metadata from database: {e}")
+                    logger.error(f"Could not fetch file metadata from database: {e}")
+                    import traceback
+                    logger.error(f"Database error traceback: {traceback.format_exc()}")
 
                 file_metadata_map[f.name] = {
                     'display_name': display_name,
