@@ -287,3 +287,109 @@ async def verify_token(request: TokenVerificationRequest):
             valid=False,
             message=f"Error: {str(e)}"
         )
+
+
+@router.post("/sync-user")
+async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Sync Firebase Auth user to Firestore.
+    Called after user signs up or logs in.
+    Determines user role from database (admin, human_agent, or user).
+    """
+    try:
+        firebase_uid = user.get('uid')
+        email = user.get('email')
+        
+        if not firebase_uid or not email:
+            raise HTTPException(status_code=400, detail="Missing uid or email in token")
+        
+        # Get existing user from Firestore
+        existing_user = get_user_from_firestore(firebase_uid)
+        
+        # Determine all user roles from database (user can have multiple roles)
+        user_roles = []  # List of all roles user has
+        primary_role = 'user'  # Default primary role
+        is_admin = False
+        is_human_agent = False
+        
+        try:
+            # Import here to avoid circular dependency
+            from shared.db import railway_db
+            
+            if railway_db and hasattr(railway_db, '_pool') and railway_db._pool is not None:
+                async with railway_db.acquire() as conn:
+                    # Check if user is an admin
+                    admin = await conn.fetchrow(
+                        "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
+                        email
+                    )
+                    if admin:
+                        user_roles.append('admin')
+                        is_admin = True
+                        primary_role = 'admin'  # Admin takes precedence
+                    
+                    # Check if user is a human agent (can be both admin and agent)
+                    agent = await conn.fetchrow(
+                        "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                        email
+                    )
+                    if agent:
+                        user_roles.append('human_agent')
+                        is_human_agent = True
+                        if primary_role == 'user':
+                            primary_role = 'human_agent'
+        except Exception as role_error:
+            logger.warning(f"Error determining user roles from database: {role_error}, defaulting to 'user'")
+        
+        # Always include 'user' role as fallback
+        if 'user' not in user_roles:
+            user_roles.append('user')
+        
+        # If no roles found, default to user
+        if not user_roles:
+            user_roles = ['user']
+            primary_role = 'user'
+        
+        # Preserve role if user already exists in Firestore (unless database says otherwise)
+        if existing_user and 'role' in existing_user:
+            # Only update if database has a different primary role (database is source of truth)
+            if primary_role != existing_user.get('role'):
+                logger.info(f"Updating user role from {existing_user.get('role')} to {primary_role} based on database")
+            else:
+                primary_role = existing_user.get('role')
+        
+        # Prepare user data
+        user_data = {
+            'email': email,
+            'display_name': user.get('name'),
+            'email_verified': user.get('email_verified', False),
+            'photo_url': user.get('picture'),
+            'role': primary_role,  # Primary role for backward compatibility
+            'primary_role': primary_role,
+            'roles': user_roles,  # All available roles
+            'is_admin': is_admin,
+            'is_human_agent': is_human_agent,
+        }
+        
+        # Save to Firestore
+        success = save_user_to_firestore(firebase_uid, user_data)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save user to Firestore")
+        
+        logger.info(f"User {firebase_uid} synced to Firestore with roles: {user_roles}, primary: {primary_role}")
+        return {
+            "success": True, 
+            "message": "User synced successfully", 
+            "role": primary_role,  # For backward compatibility
+            "primary_role": primary_role,
+            "roles": user_roles,  # All available roles
+            "is_admin": is_admin,
+            "is_human_agent": is_human_agent
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error syncing user: {e}")
+        raise HTTPException(status_code=500, detail=f"Error syncing user: {str(e)}")

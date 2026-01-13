@@ -1146,7 +1146,7 @@ try:
     from services.configuration_service.token_usage import router as token_usage_router
     from services.configuration_service.performance import router as performance_router
     from services.configuration_service.admin_management import router as admin_management_router
-    from services.configuration_service.auth_optimized import router as auth_router
+    from services.configuration_service.auth import router as auth_router
     from services.configuration_service.chat_log import router as chat_log_router, public_chat_router
     from services.configuration_service.user_ids import router as user_ids_router
 
