@@ -1470,7 +1470,9 @@ async def proxy_customer_sse(session_id: str, request: Request):
         # Build target SSE URL
         sse_url = f"{CONFIGURATION_SERVICE_URL}/api/v1/chat/{session_id}/events"
 
-        logger.info(f"Proxying customer SSE: {sse_url}")
+        logger.info(f"🔍 Proxying customer SSE: {sse_url}")
+        logger.info(f"🔍 Session ID: {session_id}")
+        logger.info(f"🔍 Request headers: {dict(request.headers)}")
 
         # Forward the request to the configuration service
         async with httpx.AsyncClient(timeout=300.0) as client:
@@ -1478,11 +1480,15 @@ async def proxy_customer_sse(session_id: str, request: Request):
             headers = dict(request.headers)
             headers.pop("host", None)
 
+            logger.info(f"🔍 Forwarding request to configuration service...")
             response = await client.get(
                 sse_url,
                 headers=headers,
                 params=request.query_params
             )
+            
+            logger.info(f"🔍 Configuration service response status: {response.status_code}")
+            logger.info(f"🔍 Response headers: {dict(response.headers)}")
 
             # Return the SSE stream
             return StreamingResponse(
@@ -1496,7 +1502,7 @@ async def proxy_customer_sse(session_id: str, request: Request):
             )
 
     except Exception as e:
-        logger.error(f"SSE proxy error: {e}")
+        logger.error(f"❌ SSE proxy error: {e}")
         raise HTTPException(status_code=500, detail="SSE proxy error")
 
 @app.get("/api/v1/admin/chat-sessions/{session_id}/events")

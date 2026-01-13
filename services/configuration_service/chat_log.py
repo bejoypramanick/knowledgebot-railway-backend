@@ -1858,30 +1858,37 @@ async def sse_customer_chat(session_id: str, request: Request):
     from fastapi.responses import StreamingResponse
     import json
 
+    logger.info(f"🔍 Customer SSE connection attempt for session: {session_id}")
+    logger.info(f"🔍 Request headers: {dict(request.headers)}")
+
     # Create SSE response
     async def event_generator():
-        # Connect customer to session
-        await connection_manager.connect(request, session_id, 'customer')
-
         try:
-            while True:
-                # Wait for next message
-                message = await connection_manager.get_next_message(request)
-                if message:
-                    # Format as SSE event
-                    if message.get('type') == 'ping':
-                        yield f"event: ping\ndata: {json.dumps(message)}\n\n"
-                    else:
-                        yield f"data: {json.dumps(message)}\n\n"
+            # Connect customer to session
+            logger.info(f"🔍 Connecting customer to session: {session_id}")
+            await connection_manager.connect(request, session_id, 'customer')
+            logger.info(f"✅ Customer connected to SSE for session: {session_id}")
 
-        except Exception as e:
-            logger.error(f"Error in customer SSE: {e}")
+            try:
+                while True:
+                    # Wait for next message
+                    message = await connection_manager.get_next_message(request)
+                    if message:
+                        # Format as SSE event
+                        if message.get('type') == 'ping':
+                            yield f"event: ping\ndata: {json.dumps(message)}\n\n"
+                        else:
+                            yield f"data: {json.dumps(message)}\n\n"
+
+            except Exception as e:
+                logger.error(f"❌ Error in customer SSE event loop: {e}")
         finally:
             # Disconnect from session
             try:
                 await connection_manager.disconnect(request)
+                logger.info(f"🔌 Customer disconnected from SSE for session: {session_id}")
             except Exception as e:
-                logger.error(f"Error disconnecting customer SSE: {e}")
+                logger.error(f"❌ Error disconnecting customer SSE: {e}")
 
     return StreamingResponse(
         event_generator(),
