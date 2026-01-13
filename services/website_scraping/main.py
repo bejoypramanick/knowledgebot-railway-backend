@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl, validator, Field
 from typing import Optional, Dict, Any, List
 from google import genai
+from google.genai import types
 import os
 import logging
 import re
@@ -408,7 +409,7 @@ async def scrape_website(request: ScrapeRequest):
                     try:
                         uploaded_file = genai_client.files.upload(
                             file=tmp_path,
-                            config=dict(display_name=display_name_with_metadata, mime_type="text/markdown")
+                            config=types.UploadFileConfig(display_name=display_name_with_metadata, mime_type="text/markdown")
                         )
                         break
                     except Exception as e:

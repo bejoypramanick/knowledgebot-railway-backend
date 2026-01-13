@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl, Field, validator
 from typing import Optional, List, Dict, Any, Union
 from google import genai
+from google.genai import types
 import os
 import logging
 from dotenv import load_dotenv
@@ -600,7 +601,7 @@ async def _process_with_gemini(tmp_path: str, file_display_name: str, original_f
     logger.info(f"🤖 [GEMINI] Uploading to FileSearch - Display: {gemini_display_name}, Original: {original_filename}, MIME: {final_mime_type}...")
     uploaded_file = genai_client.files.upload(
         file=tmp_path,
-        config=dict(
+        config=types.UploadFileConfig(
             display_name=gemini_display_name,
             mime_type=final_mime_type
         )
