@@ -310,12 +310,12 @@ class DatabaseConnection:
 
     async def __aenter__(self) -> asyncpg.Connection:
         # Check if railway_db is properly initialized
+        global railway_db
         if railway_db is None:
             logger.error("❌ railway_db is None - attempting to initialize")
             from shared.db import init_railway_db
             database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
             if database_url:
-                global railway_db
                 railway_db = await init_railway_db(database_url)
             else:
                 raise RuntimeError("Database URL not configured")
