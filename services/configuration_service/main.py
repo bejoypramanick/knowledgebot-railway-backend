@@ -329,28 +329,36 @@ async def health_check():
     """Health check endpoint with enhanced database pool monitoring"""
     db_status = "disconnected"
     pool_stats = None
+    tables_status = {}
 
     if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
         db_status = "connected"
         try:
-            # Get enhanced pool statistics using the DatabasePool class
-            from shared.db import DatabasePool
-            pool_manager = DatabasePool()
-            pool_manager._pool = railway_db._pool
-            pool_stats = await pool_manager.get_connection_stats()
-
-            # Quick health check using enhanced method
-            try:
-                async with railway_db.acquire() as conn:
-                    await conn.execute("SELECT 1")
-                    db_status = "healthy"
-            except Exception:
-                # Try with enhanced pool manager
-                conn = await pool_manager.acquire()
-                await conn.execute("SELECT 1")
-                await pool_manager._pool.release(conn)
-                db_status = "healthy"
-
+            # Check if required tables exist
+            async with railway_db.acquire() as conn:
+                required_tables = [
+                    'widget_configuration',
+                    'widget_suggested_messages',
+                    'configuration_metadata',
+                    'notification_settings',
+                    'security_settings',
+                    'llm_providers',
+                    'persona_configurations',
+                    'admins',
+                    'human_agents'
+                ]
+                
+                for table in required_tables:
+                    exists = await conn.fetchval(
+                        "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)",
+                        table
+                    )
+                    tables_status[table] = exists
+                
+                # Only mark as healthy if all required tables exist
+                all_tables_exist = all(tables_status.values())
+                db_status = "healthy" if all_tables_exist else "missing_tables"
+                
         except Exception as e:
             db_status = f"error: {str(e)[:100]}"  # Truncate error message
             logger.warning(f"Database health check failed: {e}")
@@ -359,6 +367,7 @@ async def health_check():
     service_info = service_status.get_status()
     service_info.update({
         "database": db_status,
+        "tables": tables_status,
         "pool_stats": pool_stats,
         "timestamp": "2026-01-13T07:34:00Z"  # Current date
     })
