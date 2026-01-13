@@ -189,9 +189,9 @@ async def add_security_headers(request: Request, call_next):
     """Add security headers to prevent COOP/COEP issues with popup windows."""
     response = await call_next(request)
     
-    # Set COOP and COEP headers to allow popup operations
-    response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
-    response.headers["Cross-Origin-Embedder-Policy"] = "require-corp"
+    # Set COOP and COEP headers to allow popup operations without restrictions
+    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+    response.headers["Cross-Origin-Embedder-Policy"] = "unsafe-none"
     
     return response
 
