@@ -37,12 +37,7 @@ class TokenVerificationResponse(BaseModel):
     message: Optional[str] = None
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=0.5, max=4),
-    retry_if_exception_type(Exception),
-    reraise=True
-)
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=0.5, max=4))
 async def execute_role_query_with_retry(conn, query: str, email: str) -> list:
     """
     Execute database role query with retry logic.
@@ -51,12 +46,7 @@ async def execute_role_query_with_retry(conn, query: str, email: str) -> list:
     return await conn.fetch(query, email)
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=5),
-    retry_if_exception_type(Exception),
-    reraise=True
-)
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
 async def execute_database_operations_with_retry(email: str) -> tuple:
     """
     Execute all database operations with retry logic.
