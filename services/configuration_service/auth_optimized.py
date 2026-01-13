@@ -22,7 +22,8 @@ from shared.firebase_auth import (
     update_user_role_in_firestore
 )
 from shared.auth_middleware import get_current_user
-from shared.db import railway_db
+from shared.db import railway_db, DatabaseConnection
+from shared.utils import retry_database_operation
 
 logger = logging.getLogger(__name__)
 
@@ -46,16 +47,16 @@ async def execute_role_query_with_retry(conn, query: str, email: str) -> list:
     return await conn.fetch(query, email)
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
+@retry_database_operation
 async def execute_database_operations_with_retry(email: str) -> tuple:
     """
-    Execute all database operations with retry logic.
-    Retries up to 3 times with exponential backoff on any database error.
+    Execute all database operations with enhanced retry logic and connection handling.
+    Uses the new DatabaseConnection context manager for robust database access.
     Returns (roles_result, db_time)
     """
     db_start_time = time.time()
 
-    async with railway_db.acquire() as conn:
+    async with DatabaseConnection() as conn:
         # OPTIMIZED: Single query with UNION instead of multiple queries
         role_query = """
             SELECT role FROM (
@@ -73,6 +74,7 @@ async def execute_database_operations_with_retry(email: str) -> tuple:
         return roles_result, db_time
 
 @router.post("/verify-token", response_model=TokenVerificationResponse)
+@retry_database_operation
 async def verify_token_optimized(request: TokenVerificationRequest):
     """
     Optimized Firebase Auth token verification with single database query.
@@ -114,13 +116,7 @@ async def verify_token_optimized(request: TokenVerificationRequest):
         is_admin = False
         is_human_agent = False
 
-        # REQUIRE database connection - no fallback security
-        if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
-            raise HTTPException(
-                status_code=503,
-                detail="Database connection unavailable - authentication service is down"
-            )
-
+        # Validate email is available
         if not email:
             raise HTTPException(
                 status_code=400,
