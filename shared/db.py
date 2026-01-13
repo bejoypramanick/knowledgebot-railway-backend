@@ -22,40 +22,49 @@ class Database:
         self.connection_url = connection_url
         self._pool: Optional[asyncpg.Pool] = None
     
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=3))
     async def connect(self, min_size: int = 5, max_size: int = 20, server_timeout: int = 60):
         """Create connection pool with retry logic and serverless optimization."""
-        try:
-            self._pool = await asyncpg.create_pool(
-                self.connection_url,
-                min_size=min_size,    # Serverless: start with 1 connection
-                max_size=max_size,    # Serverless: max 5 connections
-                server_settings={
-                    'application_name': 'knowledgebot_config_service',
-                    'timezone': 'UTC',
-                },
-                command_timeout=server_timeout,  # Serverless: shorter timeout
-                setup=lambda conn: conn.add_log_listener(
-                    lambda record: logger.debug(f"PostgreSQL log: {record}")
-                )
-            )
-            # Log pool creation and redact connection URL for diagnostics
+        for attempt in range(3):
             try:
-                redacted = self.connection_url
-                # Redact password if present
-                if '//' in redacted and '@' in redacted:
-                    prefix, rest = redacted.split('//', 1)
-                    creds, host = rest.split('@', 1)
-                    if ':' in creds:
-                        user, _pwd = creds.split(':', 1)
-                        redacted = f"{prefix}//{user}:***@{host}"
-                logger.info(f"✅ Database connection pool created successfully ({redacted}) - min_size={min_size}, max_size={max_size}")
-            except Exception:
-                logger.info("✅ Database connection pool created successfully (connection URL redaction failed)")
-        except Exception as e:
-            logger.error(f"❌ Failed to create database connection pool: {e}")
-            logger.debug(f"Connection URL: {self.connection_url}")
-            raise
+                self._pool = await asyncpg.create_pool(
+                    self.connection_url,
+                    min_size=min_size,    # Serverless: start with 5 connections
+                    max_size=max_size,    # Serverless: max 20 connections
+                    server_settings={
+                        'application_name': 'knowledgebot_config_service',
+                        'timezone': 'UTC',
+                    },
+                    command_timeout=server_timeout,  # Serverless: 60 second timeout
+                    setup=lambda conn: conn.add_log_listener(
+                        lambda record: logger.debug(f"PostgreSQL log: {record}")
+                    )
+                )
+                # Only log success if pool is actually created
+                if self._pool is not None:
+                    try:
+                        redacted = self.connection_url
+                        # Redact password if present
+                        if '//' in redacted and '@' in redacted:
+                            prefix, rest = redacted.split('//', 1)
+                            creds, host = rest.split('@', 1)
+                            if ':' in creds:
+                                user, _pwd = creds.split(':', 1)
+                                redacted = f"{prefix}//{user}:***@{host}"
+                        logger.info(f"✅ Database connection pool created successfully ({redacted}) - min_size={min_size}, max_size={max_size}")
+                    except Exception:
+                        logger.info("✅ Database connection pool created successfully (connection URL redaction failed)")
+                    return  # Success - exit retry loop
+                else:
+                    logger.error("❌ Pool creation returned None - retrying...")
+                    
+            except Exception as e:
+                if attempt == 2:  # Last attempt
+                    logger.error(f"❌ Failed to create database connection pool after 3 attempts: {e}")
+                    logger.debug(f"Connection URL: {self.connection_url}")
+                    raise
+                else:
+                    logger.warning(f"⚠️ Pool creation attempt {attempt + 1} failed, retrying: {e}")
+                    await asyncio.sleep(1)  # Brief delay before retry
     
     async def disconnect(self):
         """Close connection pool."""
