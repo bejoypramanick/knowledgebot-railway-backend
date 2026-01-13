@@ -309,7 +309,7 @@ class DatabaseConnection:
         self._conn: Optional[asyncpg.Connection] = None
 
     async def __aenter__(self) -> asyncpg.Connection:
-        # Use the pre-initialized database pool directly
+        # Use the pre-initialized Database class with proper acquire method
         global railway_db
         
         # If pool is not available, try to initialize it
@@ -323,9 +323,9 @@ class DatabaseConnection:
             else:
                 raise RuntimeError("Database URL not configured")
         
-        # Use the pool directly
+        # Use the Database class's acquire method to get a connection
         if railway_db and hasattr(railway_db, '_pool') and railway_db._pool:
-            self._conn = await railway_db._pool.acquire()
+            self._conn = await railway_db.acquire()
         else:
             raise RuntimeError("Database pool is not available for connection")
 
