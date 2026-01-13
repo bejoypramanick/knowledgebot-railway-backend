@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import uuid
 import json
+import time
 import os
 import asyncio
 
@@ -1726,6 +1727,89 @@ async def request_human_agent(
     except Exception as e:
         logger.error(f"Error requesting human agent: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error requesting human agent: {str(e)}")
+
+
+@public_chat_router.patch("/{session_id}/end", response_model=dict)
+async def end_customer_session(
+    session_id: str,
+    request: Request
+):
+    """
+    End a chat session from the customer side.
+    This endpoint is called when a customer closes the chat window.
+    No authentication required - called from public chatbot widget.
+    """
+    try:
+        # Use get_db_connection context manager to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        
+        async with get_db_connection() as conn:
+            # Get session database ID
+            session_row = await conn.fetchrow(
+                "SELECT id, metadata FROM chat_sessions WHERE session_id = $1",
+                session_id
+            )
+            
+            if not session_row:
+                raise HTTPException(status_code=404, detail="Chat session not found")
+            
+            session_db_id = session_row['id']
+            
+            # Parse metadata
+            raw_metadata = session_row['metadata']
+            if raw_metadata is None:
+                current_metadata = {}
+            elif isinstance(raw_metadata, str):
+                try:
+                    current_metadata = json.loads(raw_metadata)
+                except (json.JSONDecodeError, TypeError):
+                    current_metadata = {}
+            elif isinstance(raw_metadata, dict):
+                current_metadata = raw_metadata
+            else:
+                current_metadata = {}
+            
+            # Update session status to closed and remove assigned agent
+            if 'assigned_agent' in current_metadata:
+                del current_metadata['assigned_agent']
+            
+            # Update the session
+            await conn.execute(
+                """
+                UPDATE chat_sessions 
+                SET is_active = false, 
+                    metadata = $1, 
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = $2
+                """,
+                json.dumps(current_metadata), session_db_id
+            )
+            
+            logger.info(f"Customer ended session {session_id}")
+            
+            # Broadcast session ended message to all connections in this session
+            session_ended_message = {
+                'type': 'session_ended',
+                'session_id': session_id,
+                'ended_by': 'customer',
+                'text': 'The session has ended by the customer.',
+                'timestamp': time.time()
+            }
+            
+            await connection_manager.broadcast_to_session(session_ended_message, session_id)
+            logger.info(f"Broadcasted session ended message to session {session_id}: ended by customer")
+            
+            return {
+                "success": True,
+                "message": "Session ended successfully",
+                "session_id": session_id
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error ending customer session: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error ending session: {str(e)}")
 
 
 # SSE endpoints for real-time chat
