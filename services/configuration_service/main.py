@@ -128,9 +128,15 @@ async def lifespan(app: FastAPI):
         )
 
         if database_url:
-            # Store for lazy initialization - don't connect immediately
+            # Initialize database connection pool during startup
             app.state.database_url = database_url
-            logger.info("✅ Database URL stored for lazy initialization")
+            try:
+                from shared.db import init_railway_db
+                await init_railway_db(database_url)
+                logger.info("✅ Database connection pool initialized during startup")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize database pool: {e}")
+                # Don't fail startup, but log the error
             
             # Initialize database schema if needed
             try:
@@ -246,32 +252,12 @@ class WidgetConfigRequest(BaseModel):
 @asynccontextmanager
 async def get_db_connection():
     """
-    Get database connection with enhanced error handling and Railway fixes.
-
-    This function now uses the fixed database connection logic:
-    1. Pool health checks before acquisition
-    2. Proper None handling with the DatabaseConnection context manager
-    3. Automatic pool recreation on failure
-    4. Better error messages and logging
+    Get database connection using the pre-initialized connection pool.
+    
+    The database pool is initialized during service startup for optimal performance.
     """
     try:
-        # Ensure database is initialized before using it
-        from shared.db import railway_db, init_railway_db
-        
-        if railway_db is None:
-            logger.info("🔄 Database not initialized, initializing now...")
-            database_url = (
-                os.getenv("DATABASE_URL") or
-                os.getenv("RAILWAY_POSTGRES_URL") or
-                os.getenv("POSTGRES_URL")
-            )
-            if database_url:
-                await init_railway_db(database_url)
-                logger.info("✅ Database initialized successfully")
-            else:
-                raise RuntimeError("Database URL not configured")
-        
-        # Use the enhanced DatabaseConnection context manager
+        # Use the pre-initialized DatabaseConnection context manager
         from shared.db import DatabaseConnection
         async with DatabaseConnection() as conn:
             yield conn
