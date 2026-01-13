@@ -85,30 +85,29 @@ def retry_with_backoff(
     return decorator
 
 
-# Pre-configured retry decorators for common scenarios
-# Handle the case where asyncpg is not available (for services that don't use database directly)
+# Handle asyncpg import at module level to avoid NameError during import
 try:
     import asyncpg
-    retry_database_operation = retry_with_backoff(
-        config=RetryConfig(
-            max_attempts=5,
-            initial_delay=0.5,
-            max_delay=10.0,
-            backoff_factor=1.5
-        ),
-        exceptions=(RuntimeError, ConnectionError, asyncio.TimeoutError, asyncpg.exceptions.PostgresError)
-    )
+    HAS_ASYNCPG = True
 except ImportError:
-    # For services that don't have asyncpg installed (like API Gateway)
-    retry_database_operation = retry_with_backoff(
-        config=RetryConfig(
-            max_attempts=5,
-            initial_delay=0.5,
-            max_delay=10.0,
-            backoff_factor=1.5
-        ),
-        exceptions=(RuntimeError, ConnectionError, asyncio.TimeoutError)
-    )
+    HAS_ASYNCPG = False
+    # Create a dummy asyncpg module to avoid NameError
+    class DummyAsyncpg:
+        class exceptions:
+            class PostgresError(Exception):
+                pass
+    asyncpg = DummyAsyncpg()
+
+# Pre-configured retry decorators for common scenarios
+retry_database_operation = retry_with_backoff(
+    config=RetryConfig(
+        max_attempts=5,
+        initial_delay=0.5,
+        max_delay=10.0,
+        backoff_factor=1.5
+    ),
+    exceptions=(RuntimeError, ConnectionError, asyncio.TimeoutError, asyncpg.exceptions.PostgresError)
+)
 
 retry_network_operation = retry_with_backoff(
     config=RetryConfig(
