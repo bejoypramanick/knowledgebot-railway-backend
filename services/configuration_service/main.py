@@ -262,6 +262,13 @@ async def get_db_connection():
                     )
 
                 # Use the initialized database instance directly
+                if initialized_db._pool is None:
+                    logger.error("❌ Database pool is None after initialization - this should not happen")
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Database pool initialization failed - pool is None"
+                    )
+                
                 conn = await initialized_db._pool.acquire()
                 logger.info("✅ Database connection acquired from newly initialized pool")
                 yield conn
