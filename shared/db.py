@@ -312,6 +312,8 @@ class DatabaseConnection:
         # Use the pre-initialized Database class with proper acquire method
         global railway_db
         
+        logger.debug(f"🔍 DatabaseConnection.__aenter__ called, railway_db: {railway_db}")
+        
         # If pool is not available, try to initialize it
         if railway_db is None or not hasattr(railway_db, '_pool') or railway_db._pool is None:
             logger.error("❌ Database pool not available - attempting to initialize")
@@ -325,8 +327,12 @@ class DatabaseConnection:
         
         # Use the Database class's pool directly to get a connection
         if railway_db and hasattr(railway_db, '_pool') and railway_db._pool:
+            logger.debug(f"🔍 Acquiring connection from pool, pool size: {railway_db._pool.get_size()}")
             self._conn = await railway_db._pool.acquire()
+            logger.debug(f"✅ Connection acquired: {type(self._conn)}")
+            return self._conn
         else:
+            logger.error(f"❌ Database pool is not available for connection, railway_db: {railway_db}")
             raise RuntimeError("Database pool is not available for connection")
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
