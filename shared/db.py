@@ -323,9 +323,9 @@ class DatabaseConnection:
             else:
                 raise RuntimeError("Database URL not configured")
         
-        # Use the Database class's acquire method to get a connection
+        # Use the Database class's pool directly to get a connection
         if railway_db and hasattr(railway_db, '_pool') and railway_db._pool:
-            self._conn = await railway_db.acquire()
+            self._conn = await railway_db._pool.acquire()
         else:
             raise RuntimeError("Database pool is not available for connection")
 
