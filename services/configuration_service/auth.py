@@ -65,9 +65,7 @@ async def verify_token(request: TokenVerificationRequest):
         if not user_data:
             logger.info(f"⚠️ User not found in Firestore, creating base user data for {email}")
             user_data = {
-                'uid': uid,
                 'email': email,
-                'email_verified': decoded_token.get('email_verified', False),
                 'display_name': decoded_token.get('name'),
                 'photo_url': decoded_token.get('picture'),
                 'role': 'user',

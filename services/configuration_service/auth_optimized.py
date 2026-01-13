@@ -9,12 +9,13 @@ import logging
 import sys
 from pathlib import Path
 import time
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.firebase_auth import (
-    verify_firebase_token, 
-    get_user_by_uid, 
+    verify_firebase_token,
+    get_user_by_uid,
     init_firebase_auth,
     get_user_from_firestore,
     save_user_to_firestore,
@@ -34,6 +35,52 @@ class TokenVerificationResponse(BaseModel):
     valid: bool
     user: Optional[Dict[str, Any]] = None
     message: Optional[str] = None
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=0.5, max=4),
+    retry_if_exception_type(Exception),
+    reraise=True
+)
+async def execute_role_query_with_retry(conn, query: str, email: str) -> list:
+    """
+    Execute database role query with retry logic.
+    Retries up to 3 times with exponential backoff.
+    """
+    return await conn.fetch(query, email)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=5),
+    retry_if_exception_type(Exception),
+    reraise=True
+)
+async def execute_database_operations_with_retry(email: str) -> tuple:
+    """
+    Execute all database operations with retry logic.
+    Retries up to 3 times with exponential backoff on any database error.
+    Returns (roles_result, db_time)
+    """
+    db_start_time = time.time()
+
+    async with railway_db.acquire() as conn:
+        # OPTIMIZED: Single query with UNION instead of multiple queries
+        role_query = """
+            SELECT role FROM (
+                SELECT 'admin' as role, email FROM admins WHERE email = $1 AND status = 'confirmed'
+                UNION ALL
+                SELECT 'human_agent' as role, email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')
+            ) user_roles
+            WHERE email = $1
+        """
+
+        # Execute with retry logic - throws exact error if all retries fail
+        roles_result = await execute_role_query_with_retry(conn, role_query, email)
+        db_time = time.time() - db_start_time
+
+        return roles_result, db_time
 
 @router.post("/verify-token", response_model=TokenVerificationResponse)
 async def verify_token_optimized(request: TokenVerificationRequest):
@@ -61,9 +108,7 @@ async def verify_token_optimized(request: TokenVerificationRequest):
         # Step 3: If user doesn't exist in Firestore, return Firebase Auth data
         if not user_data:
             user_data = {
-                'uid': uid,
                 'email': email,
-                'email_verified': decoded_token.get('email_verified', False),
                 'display_name': decoded_token.get('name'),
                 'photo_url': decoded_token.get('picture'),
                 'role': 'user',
@@ -78,56 +123,50 @@ async def verify_token_optimized(request: TokenVerificationRequest):
         primary_role = user_data.get('role', 'user')
         is_admin = False
         is_human_agent = False
-        
-        try:
-            if railway_db and hasattr(railway_db, '_pool') and railway_db._pool is not None and email:
-                db_start_time = time.time()
-                
-                async with railway_db.acquire() as conn:
-                    # OPTIMIZED: Single query with UNION instead of multiple queries
-                    role_query = """
-                        SELECT role FROM (
-                            SELECT 'admin' as role, email FROM admins WHERE email = $1 AND status = 'confirmed'
-                            UNION ALL
-                            SELECT 'human_agent' as role, email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')
-                        ) user_roles
-                        WHERE email = $1
-                    """
-                    
-                    roles_result = await conn.fetch(role_query, email)
-                    db_time = time.time() - db_start_time
-                    
-                    logger.info(f"Database query took {db_time:.3f}s for email: {email}")
-                    
-                    # Process results
-                    for row in roles_result:
-                        role = row['role']
-                        if role == 'admin':
-                            is_admin = True
-                            primary_role = 'admin'  # Admin takes precedence
-                            if 'admin' not in user_roles:
-                                user_roles.append('admin')
-                        elif role == 'human_agent':
-                            is_human_agent = True
-                            if primary_role == 'user':
-                                primary_role = 'human_agent'
-                            if 'human_agent' not in user_roles:
-                                user_roles.append('human_agent')
-                    
-                    # Ensure 'user' is in roles
-                    if 'user' not in user_roles:
-                        user_roles.append('user')
-                        
-                    # Update user_data with latest roles from DB
-                    user_data['role'] = primary_role
-                    user_data['primary_role'] = primary_role
-                    user_data['roles'] = user_roles
-                    user_data['is_admin'] = is_admin
-                    user_data['is_human_agent'] = is_human_agent
-                    
-        except Exception as role_error:
-            logger.warning(f"Error determining user roles from database in verify-token: {role_error}")
-            # Fallback to existing user_data if database fails
+
+        # REQUIRE database connection - no fallback security
+        if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Database connection unavailable - authentication service is down"
+            )
+
+        if not email:
+            raise HTTPException(
+                status_code=400,
+                detail="Email not available from Firebase token"
+            )
+
+        # Execute database operations with retry logic
+        roles_result, db_time = await execute_database_operations_with_retry(email)
+
+            logger.info(f"Database query took {db_time:.3f}s for email: {email}")
+
+            # Process results
+            for row in roles_result:
+                role = row['role']
+                if role == 'admin':
+                    is_admin = True
+                    primary_role = 'admin'  # Admin takes precedence
+                    if 'admin' not in user_roles:
+                        user_roles.append('admin')
+                elif role == 'human_agent':
+                    is_human_agent = True
+                    if primary_role == 'user':
+                        primary_role = 'human_agent'
+                    if 'human_agent' not in user_roles:
+                        user_roles.append('human_agent')
+
+            # Ensure 'user' is in roles
+            if 'user' not in user_roles:
+                user_roles.append('user')
+
+            # Update user_data with latest roles from DB
+            user_data['role'] = primary_role
+            user_data['primary_role'] = primary_role
+            user_data['roles'] = user_roles
+            user_data['is_admin'] = is_admin
+            user_data['is_human_agent'] = is_human_agent
         
         total_time = time.time() - start_time
         logger.info(f"verify-token completed in {total_time:.3f}s for email: {email}")
@@ -187,46 +226,53 @@ async def verify_token(request: TokenVerificationRequest):
         is_admin = user_data.get('is_admin', False)
         is_human_agent = user_data.get('is_human_agent', False)
         
-        # Check database for exact roles (source of truth)
-        try:
-            if railway_db and hasattr(railway_db, '_pool') and railway_db._pool is not None and email:
-                async with railway_db.acquire() as conn:
-                    # Check if user is an admin
-                    admin = await conn.fetchrow(
-                        "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
-                        email
-                    )
-                    if admin:
-                        if 'admin' not in user_roles:
-                            user_roles.append('admin')
-                        is_admin = True
-                        primary_role = 'admin'  # Admin takes precedence
-                    
-                    # Check if user is a human agent (recognize both confirmed and pending)
-                    agent = await conn.fetchrow(
-                        "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
-                        email
-                    )
-                    if agent:
-                        if 'human_agent' not in user_roles:
-                            user_roles.append('human_agent')
-                        is_human_agent = True
-                        if primary_role == 'user':
-                            primary_role = 'human_agent'
-                            
-            # Ensure 'user' is in roles
-            if 'user' not in user_roles:
-                user_roles.append('user')
-                
-            # Update user_data with latest roles from DB
-            user_data['role'] = primary_role
-            user_data['primary_role'] = primary_role
-            user_data['roles'] = user_roles
-            user_data['is_admin'] = is_admin
-            user_data['is_human_agent'] = is_human_agent
-            
-        except Exception as role_error:
-            logger.warning(f"Error determining user roles from database in verify-token: {role_error}")
+        # Check database for exact roles (source of truth) - REQUIRED, no fallback
+        if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Database connection unavailable - authentication service is down"
+            )
+
+        if not email:
+            raise HTTPException(
+                status_code=400,
+                detail="Email not available from Firebase token"
+            )
+
+        async with railway_db.acquire() as conn:
+            # Check if user is an admin
+            admin = await conn.fetchrow(
+                "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
+                email
+            )
+            if admin:
+                if 'admin' not in user_roles:
+                    user_roles.append('admin')
+                is_admin = True
+                primary_role = 'admin'  # Admin takes precedence
+
+            # Check if user is a human agent (recognize both confirmed and pending)
+            agent = await conn.fetchrow(
+                "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                email
+            )
+            if agent:
+                if 'human_agent' not in user_roles:
+                    user_roles.append('human_agent')
+                is_human_agent = True
+                if primary_role == 'user':
+                    primary_role = 'human_agent'
+
+        # Ensure 'user' is in roles
+        if 'user' not in user_roles:
+            user_roles.append('user')
+
+        # Update user_data with latest roles from DB
+        user_data['role'] = primary_role
+        user_data['primary_role'] = primary_role
+        user_data['roles'] = user_roles
+        user_data['is_admin'] = is_admin
+        user_data['is_human_agent'] = is_human_agent
         
         return TokenVerificationResponse(
             valid=True,

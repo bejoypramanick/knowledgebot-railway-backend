@@ -176,7 +176,10 @@ def get_user_from_firestore(uid: str) -> Optional[Dict[str, Any]]:
             return None
         
         data = doc.to_dict()
-        data['uid'] = uid  # Ensure UID is included
+        # Remove redundant fields not used by frontend
+        data.pop('email_verified', None)
+        data.pop('created_at', None)
+        data.pop('updated_at', None)
         return data
     except Exception as e:
         logger.error(f"Error getting user from Firestore {uid}: {e}")
