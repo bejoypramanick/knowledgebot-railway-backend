@@ -74,15 +74,31 @@ async def execute_database_operations_with_retry(email: str) -> tuple:
         return roles_result, db_time
 
 @router.post("/verify-token", response_model=TokenVerificationResponse)
-@retry_database_operation
-async def verify_token_optimized(request: TokenVerificationRequest):
+async def verify_token_optimized(request_data: Dict[str, Any]):
     """
     Optimized Firebase Auth token verification with single database query.
     This endpoint is used by frontend to verify tokens.
     """
     start_time = time.time()
-    
+
     try:
+        # Debug logging to understand the request
+        logger.info(f"verify-token called with request_data: {request_data}")
+
+        # Extract id_token from request data
+        id_token = request_data.get('id_token')
+        if not id_token:
+            return TokenVerificationResponse(
+                valid=False,
+                message="id_token is required"
+            )
+
+        # Create request object for compatibility
+        from pydantic import BaseModel
+        class TempRequest(BaseModel):
+            id_token: str
+
+        request = TempRequest(id_token=id_token)
         # Step 1: Verify Firebase token
         decoded_token = verify_firebase_token(request.id_token)
         
