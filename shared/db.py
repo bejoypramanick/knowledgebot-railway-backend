@@ -309,30 +309,25 @@ class DatabaseConnection:
         self._conn: Optional[asyncpg.Connection] = None
 
     async def __aenter__(self) -> asyncpg.Connection:
-        # Check if railway_db is properly initialized
+        # Use the pre-initialized database pool directly
         global railway_db
-        if railway_db is None:
-            logger.error("❌ railway_db is None - attempting to initialize")
+        
+        # If pool is not available, try to initialize it
+        if railway_db is None or not hasattr(railway_db, '_pool') or railway_db._pool is None:
+            logger.error("❌ Database pool not available - attempting to initialize")
             from shared.db import init_railway_db
             database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
             if database_url:
                 railway_db = await init_railway_db(database_url)
+                logger.info("✅ Database pool initialized in DatabaseConnection")
             else:
                 raise RuntimeError("Database URL not configured")
         
-        # Check if pool is available
+        # Use the pool directly
         if railway_db and hasattr(railway_db, '_pool') and railway_db._pool:
-            # Use the enhanced pool directly for better error handling
-            pool_manager = DatabasePool()
-            pool_manager._pool = railway_db._pool
-            self._conn = await pool_manager.acquire()
+            self._conn = await railway_db._pool.acquire()
         else:
-            # Fallback to legacy method - but with proper error handling
-            if railway_db is None:
-                raise RuntimeError("railway_db is None after initialization")
-            async with railway_db.acquire() as conn:
-                self._conn = conn
-        return self._conn
+            raise RuntimeError("Database pool is not available for connection")
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         if self._conn is not None:
