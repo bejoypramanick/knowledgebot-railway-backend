@@ -444,67 +444,63 @@ async def get_online_agents(current_user: dict = Depends(get_current_user)):
 
         from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
-                # Check if current user is an admin or agent
-                is_agent = await conn.fetchval(
-                    "SELECT COUNT(*) FROM human_agents WHERE email = $1 AND status = 'confirmed'",
-                    user_email
-                )
-                is_admin = await conn.fetchval(
-                    "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
-                    user_email
-                )
+            # Check if current user is an admin or agent
+            is_agent = await conn.fetchval(
+                "SELECT COUNT(*) FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                user_email
+            )
+            is_admin = await conn.fetchval(
+                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                user_email
+            )
 
-                if not is_agent and not is_admin:
-                    raise HTTPException(status_code=403, detail="Access denied")
+            if not is_agent and not is_admin:
+                raise HTTPException(status_code=403, detail="Access denied")
 
-                # Fetch all confirmed agents
-                agents = await conn.fetch("SELECT email FROM human_agents WHERE status = 'confirmed'")
-                # Fetch all confirmed admins
-                admins = await conn.fetch("SELECT email FROM admins WHERE status = 'confirmed'")
+            # Fetch all confirmed agents
+            agents = await conn.fetch("SELECT email FROM human_agents WHERE status = 'confirmed'")
+            # Fetch all confirmed admins
+            admins = await conn.fetch("SELECT email FROM admins WHERE status = 'confirmed'")
 
-                online_users = []
+            online_users = []
 
-                # Check online status and load for each agent
-                for row in agents:
-                    email = row['email']
-                    is_online = await get_agent_online_status(email, conn)
-                    if is_online:
-                        chat_count = await get_agent_chat_count(email, conn)
-                        online_users.append({
-                            "email": email,
-                            "role": "agent",
-                            "is_online": True,
-                            "active_sessions": chat_count
-                        })
+            # Check online status and load for each agent
+            for row in agents:
+                email = row['email']
+                is_online = await get_agent_online_status(email, conn)
+                if is_online:
+                    chat_count = await get_agent_chat_count(email, conn)
+                    online_users.append({
+                        "email": email,
+                        "role": "agent",
+                        "is_online": True,
+                        "active_sessions": chat_count
+                    })
 
-                # Check online status and load for each admin
-                for row in admins:
-                    email = row['email']
-                    is_online = await get_agent_online_status(email, conn)
-                    if is_online:
-                        chat_count = await get_agent_chat_count(email, conn)
-                        online_users.append({
-                            "email": email,
-                            "role": "admin",
-                            "is_online": True,
-                            "active_sessions": chat_count
-                        })
+            # Check online status and load for each admin
+            for row in admins:
+                email = row['email']
+                is_online = await get_agent_online_status(email, conn)
+                if is_online:
+                    chat_count = await get_agent_chat_count(email, conn)
+                    online_users.append({
+                        "email": email,
+                        "role": "admin",
+                        "is_online": True,
+                        "active_sessions": chat_count
+                    })
 
-                return {
-                    "success": True,
-                    "agents": online_users
-                }
-        except Exception as db_error:
-            logger.warning(f"Database unavailable for get_online_agents, returning empty list: {db_error}")
-            # Return empty list instead of failing completely - allows frontend to continue working
             return {
-                "success": True,
-                "agents": [],
-                "note": "Database temporarily unavailable - agent status may be incomplete"
-            }
-    except Exception as e:
-        logger.error(f"Error getting online agents: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+            "success": True,
+            "agents": online_users
+        }
+    except Exception as db_error:
+        logger.warning(f"Database unavailable for get_online_agents, returning empty list: {db_error}")
+        # Return empty list instead of failing completely - allows frontend to continue working
+        return {
+            "success": True,
+            "agents": []
+        }
 
 
 @router.post("/agents/heartbeat")
