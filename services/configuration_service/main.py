@@ -25,6 +25,36 @@ load_dotenv()
 # Lock for database initialization to prevent race conditions
 _db_init_lock = asyncio.Lock()
 
+async def init_database_schema(database_url: str):
+    """Initialize database schema if tables don't exist"""
+    try:
+        conn = await asyncpg.connect(database_url)
+        
+        # Check if widget_configuration table exists
+        widget_exists = await conn.fetchval(
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'widget_configuration')"
+        )
+        
+        if not widget_exists:
+            logger.info("📊 Database tables not found, initializing schema...")
+            
+            # Read and execute schema
+            schema_path = Path(__file__).parent.parent.parent / "sql" / "schema_3nf.sql"
+            if schema_path.exists():
+                schema_sql = schema_path.read_text()
+                await conn.execute(schema_sql)
+                logger.info("✅ Database schema initialized successfully")
+            else:
+                logger.warning(f"⚠️ Schema file not found: {schema_path}")
+        else:
+            logger.info("✅ Database tables already exist")
+            
+        await conn.close()
+        
+    except Exception as e:
+        logger.error(f"❌ Database schema initialization error: {e}")
+        raise
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -101,6 +131,14 @@ async def lifespan(app: FastAPI):
             # Store for lazy initialization - don't connect immediately
             app.state.database_url = database_url
             logger.info("✅ Database URL stored for lazy initialization")
+            
+            # Initialize database schema if needed
+            try:
+                await init_database_schema(database_url)
+                logger.info("✅ Database schema initialized/verified")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize database schema: {e}")
+                # Don't fail startup, but log the error
         else:
             logger.error("❌ DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
             app.state.database_url = None
