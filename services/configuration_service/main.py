@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import asyncio
 import asyncpg
+from asyncpg import exceptions as asyncpg_exceptions
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -197,7 +198,7 @@ async def get_db_connection():
                 logger.debug("Database connection acquired from existing pool")
                 yield conn
                 return
-            except asyncpg.exceptions.TooManyConnectionsError:
+            except asyncpg_exceptions.TooManyConnectionsError:
                 logger.warning("⚠️ Connection pool exhausted, attempting pool expansion...")
                 # Try to create additional connections if possible
                 try:
@@ -208,6 +209,12 @@ async def get_db_connection():
                         logger.debug("Database connection acquired after pool expansion")
                         yield conn
                         return
+                    else:
+                        logger.error("❌ Connection pool at maximum capacity")
+                        raise HTTPException(
+                            status_code=503,
+                            detail="Database connection pool exhausted. Please try again in a few moments."
+                        )
                 except Exception:
                     pass  # Fall through to initialization
 
@@ -221,7 +228,7 @@ async def get_db_connection():
                     logger.debug("Database connection acquired from pool after lock")
                     yield conn
                     return
-                except asyncpg.exceptions.TooManyConnectionsError:
+                except asyncpg_exceptions.TooManyConnectionsError:
                     logger.error("❌ Connection pool still exhausted after lock - database overloaded")
                     raise HTTPException(
                         status_code=503,
@@ -259,7 +266,7 @@ async def get_db_connection():
                 logger.info("✅ Database connection acquired from newly initialized pool")
                 yield conn
 
-            except asyncpg.exceptions.TooManyConnectionsError:
+            except asyncpg_exceptions.TooManyConnectionsError:
                 logger.error("❌ Railway database connection limit exceeded during initialization")
                 raise HTTPException(
                     status_code=503,
