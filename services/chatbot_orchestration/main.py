@@ -197,10 +197,23 @@ sessions: Dict[str, Dict[str, Any]] = {}
 
 # Pydantic models for structured outputs
 class SearchResult(BaseModel):
-    """Search result from Gemini FileSearch."""
+    """Search result from Gemini FileSearch with comprehensive metadata."""
+    # Original fields
     file_name: str
     content: str
     relevance_score: Optional[float] = None
+
+    # Enhanced metadata fields to match frontend DocumentSource interface
+    chunk_id: Optional[str] = None
+    document_id: Optional[str] = None
+    source: Optional[str] = None
+    s3_key: Optional[str] = None
+    original_filename: Optional[str] = None
+    page_number: Optional[int] = None
+    element_type: Optional[str] = None
+    hierarchy_level: Optional[int] = None
+    similarity_score: Optional[float] = None  # Alias for relevance_score
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class ChatResponse(BaseModel):
@@ -641,7 +654,11 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         return [SearchResult(
             file_name="System_Error",
             content="Gemini API client not configured - cannot search knowledge base",
-            relevance_score=0.0
+            relevance_score=0.0,
+            similarity_score=0.0,
+            element_type="error",
+            hierarchy_level=0,
+            page_number=0
         )]
 
     try:
@@ -712,14 +729,49 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                     # No separator - display_name IS the original filename
                     return display_name
             
-            # Create a mapping of file names to display names and original filenames
+            # Create a mapping of file names to comprehensive metadata
             file_metadata_map = {}
             for f in files_to_search:
                 display_name = getattr(f, 'display_name', f.name)
                 original_filename = extract_original_filename(display_name)
+
+                # Try to get additional metadata from database
+                db_metadata = {}
+                try:
+                    if db:
+                        # Query file_uploads table for additional metadata
+                        file_record = await db.fetchrow("""
+                            SELECT id, cloudflare_r2_key, original_filename, display_name,
+                                   mime_type, size_bytes, metadata, created_at
+                            FROM file_uploads
+                            WHERE gemini_file_name = $1
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                        """, f.name)
+
+                        if file_record:
+                            db_metadata = {
+                                'document_id': str(file_record['id']),
+                                's3_key': file_record['cloudflare_r2_key'],
+                                'original_filename': file_record['original_filename'] or original_filename,
+                                'display_name': file_record['display_name'] or display_name,
+                                'mime_type': file_record['mime_type'],
+                                'size_bytes': file_record['size_bytes'],
+                                'upload_date': file_record['created_at'].isoformat() if file_record['created_at'] else None,
+                                'db_metadata': dict(file_record['metadata']) if file_record['metadata'] else {}
+                            }
+                except Exception as e:
+                    logger.debug(f"Could not fetch file metadata from database: {e}")
+
                 file_metadata_map[f.name] = {
                     'display_name': display_name,
-                    'original_filename': original_filename
+                    'original_filename': original_filename,
+                    'document_id': db_metadata.get('document_id'),
+                    's3_key': db_metadata.get('s3_key'),
+                    'mime_type': db_metadata.get('mime_type'),
+                    'size_bytes': db_metadata.get('size_bytes'),
+                    'upload_date': db_metadata.get('upload_date'),
+                    'db_metadata': db_metadata.get('db_metadata', {})
                 }
             
             # Construct the retrieval prompt
@@ -798,10 +850,45 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 
             # Create a single consolidated result from the LLM's retrieval
             # This acts as the "context" for the downstream orchestration agent
+            # Generate a chunk ID for this search result
+            chunk_id = f"search_{uuid.uuid4().hex[:16]}"
+
+            # Get additional metadata from file_metadata_map
+            file_metadata = {}
+            if files_to_search:
+                file_metadata = file_metadata_map.get(files_to_search[0].name, {})
+
+            # Extract page number from content if possible (basic heuristic)
+            page_number = None
+            page_match = re.search(r'Page\s*(\d+)', response_text[:200], re.IGNORECASE)
+            if page_match:
+                page_number = int(page_match.group(1))
+
+            # Build comprehensive metadata
+            comprehensive_metadata = {
+                "search_query": query,
+                "files_searched": len(files_to_search),
+                "gemini_model": "gemini-2.5-flash-lite",
+                "search_method": "semantic_retrieval",
+                "response_length": len(response_text),
+                "extraction_timestamp": datetime.utcnow().isoformat(),
+                "file_metadata": file_metadata
+            }
+
             return [SearchResult(
                 file_name=actual_file_name,
                 content=response_text,
-                relevance_score=1.0
+                relevance_score=1.0,
+                similarity_score=1.0,
+                chunk_id=chunk_id,
+                document_id=file_metadata.get('document_id') or str(uuid.uuid4()),
+                source="gemini_search",
+                s3_key=file_metadata.get('s3_key'),
+                original_filename=file_metadata.get('original_filename') or actual_file_name,
+                page_number=page_number or 1,
+                element_type="search_result",
+                hierarchy_level=1,
+                metadata=comprehensive_metadata
             )]
             
         except Exception as e:
@@ -811,7 +898,17 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             return [SearchResult(
                 file_name="System_Error",
                 content=f"Error performing semantic search: {str(e)}. Files attempting to search: {', '.join(f.name for f in files_to_search)}",
-                relevance_score=0.1
+                relevance_score=0.1,
+                similarity_score=0.1,
+                chunk_id=f"error_{uuid.uuid4().hex[:16]}",
+                element_type="error",
+                hierarchy_level=0,
+                page_number=0,
+                metadata={
+                    "error_type": "search_failed",
+                    "error_message": str(e),
+                    "files_attempted": [f.name for f in files_to_search]
+                }
             )]
         
     except Exception as e:
