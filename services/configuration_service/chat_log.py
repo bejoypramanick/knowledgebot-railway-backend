@@ -1234,41 +1234,6 @@ async def send_agent_message(
         logger.error(f"Error sending agent message: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to send message")
 
-# SSE endpoint for customers
-@public_chat_router.get("/{session_id}/events")
-async def customer_chat_sse(session_id: str, request: Request):
-    """SSE endpoint for customer chat events."""
-    try:
-        queue = await connection_manager.connect(response=None, session_id=session_id, user_type='customer')
-        
-        async def sse_generator():
-            try:
-                while True:
-                    try:
-                        message = await connection_manager.get_next_message(queue)
-                        if message:
-                            yield f"data: {json.dumps(message)}\n\n"
-                    except asyncio.TimeoutError:
-                        # Send ping to keep connection alive
-                        yield f"data: {json.dumps({'type': 'ping'})}\n\n"
-            except Exception as e:
-                logger.error(f"Error in SSE generator: {e}")
-            finally:
-                await connection_manager.disconnect(queue)
-        
-        return StreamingResponse(
-            sse_generator(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "*",
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error setting up customer SSE: {e}")
-        raise HTTPException(status_code=500, detail="Failed to establish SSE connection")
 
 # SSE endpoint for agents
 @router.get("/chat-sessions/{session_id}/events")
