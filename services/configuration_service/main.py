@@ -247,6 +247,11 @@ class WidgetConfigRequest(BaseModel):
     align_bubble: Optional[str] = None
     profile_picture_url: Optional[str] = None
     chat_icon_url: Optional[str] = None
+    # NEW FIELDS - Add zoom and position fields
+    profile_zoom: Optional[float] = None
+    chat_icon_zoom: Optional[float] = None
+    profile_position: Optional[dict] = None
+    chat_icon_position: Optional[dict] = None
 
 
 @asynccontextmanager
@@ -1009,6 +1014,10 @@ async def get_widget_config():
                     align_bubble,
                     profile_picture_url,
                     chat_icon_url,
+                    profile_zoom,
+                    chat_icon_zoom,
+                    profile_position,
+                    chat_icon_position,
                     updated_at
                 FROM widget_configuration
                 WHERE id = 1
@@ -1040,7 +1049,11 @@ async def get_widget_config():
                     "chat_bubble_color": "#3B81F6",
                     "align_bubble": "right",
                     "profile_picture_url": None,
-                    "chat_icon_url": None
+                    "chat_icon_url": None,
+                    "profile_zoom": 1.0,
+                    "chat_icon_zoom": 1.0,
+                    "profile_position": {"x": 0, "y": 0},
+                    "chat_icon_position": {"x": 0, "y": 0}
                 }
                 response = JSONResponse(content=data)
                 response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
@@ -1058,7 +1071,11 @@ async def get_widget_config():
                 "chat_bubble_color": row["chat_bubble_color"],
                 "align_bubble": row["align_bubble"],
                 "profile_picture_url": row["profile_picture_url"],
-                "chat_icon_url": row["chat_icon_url"]
+                "chat_icon_url": row["chat_icon_url"],
+                "profile_zoom": float(row["profile_zoom"]) if row["profile_zoom"] is not None else 1.0,
+                "chat_icon_zoom": float(row["chat_icon_zoom"]) if row["chat_icon_zoom"] is not None else 1.0,
+                "profile_position": row["profile_position"] if row["profile_position"] is not None else {"x": 0, "y": 0},
+                "chat_icon_position": row["chat_icon_position"] if row["chat_icon_position"] is not None else {"x": 0, "y": 0}
             }
             response = JSONResponse(content=data)
             response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
@@ -1089,7 +1106,12 @@ async def save_widget_config(config: WidgetConfigRequest):
                 "chat_bubble_color": "chat_bubble_color",
                 "align_bubble": "align_bubble",
                 "profile_picture_url": "profile_picture_url",
-                "chat_icon_url": "chat_icon_url"
+                "chat_icon_url": "chat_icon_url",
+                # NEW FIELDS - Add zoom and position fields
+                "profile_zoom": "profile_zoom",
+                "chat_icon_zoom": "chat_icon_zoom",
+                "profile_position": "profile_position",
+                "chat_icon_position": "chat_icon_position"
             }
 
             for field, db_field in fields_map.items():
