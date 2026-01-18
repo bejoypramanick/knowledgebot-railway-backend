@@ -1095,8 +1095,8 @@ async def get_widget_config():
                 "chat_icon_zoom": float(row["chat_icon_zoom"]) if row["chat_icon_zoom"] is not None else 1.0,
                 "profile_position": row["profile_position"] if row["profile_position"] is not None and isinstance(row["profile_position"], dict) else {"x": 0, "y": 0},
                 "chat_icon_position": row["chat_icon_position"] if row["chat_icon_position"] is not None and isinstance(row["chat_icon_position"], dict) else {"x": 0, "y": 0},
-                "profile_picture_filename": row["profile_picture_filename"],
-                "chat_icon_filename": row["chat_icon_filename"]
+                "profile_picture_filename": row.get("profile_picture_filename"),
+                "chat_icon_filename": row.get("chat_icon_filename")
             }
             response = JSONResponse(content=data)
             response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
