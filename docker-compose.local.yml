@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: knowledgebot_local
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  configuration-service:
+    build:
+      context: .
+      dockerfile: services/configuration_service/Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      - CONFIGURATION_SERVICE_PORT=8004
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/knowledgebot_local
+      - RAILWAY_ENVIRONMENT=development
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+
+volumes:
+  postgres_data:
