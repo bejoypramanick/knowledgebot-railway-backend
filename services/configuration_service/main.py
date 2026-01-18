@@ -234,6 +234,21 @@ class ChatbotConfigRequest(BaseModel):
     persona: Optional[PersonaUpdate] = None
     llm_tokens: Optional[dict] = None
 
+# Position field validation model
+class PositionData(BaseModel):
+    x: int = 0
+    y: int = 0
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Validate coordinates are reasonable
+        for coord in ['x', 'y']:
+            value = getattr(self, coord)
+            if not isinstance(value, int):
+                raise ValueError(f'{coord} must be an integer')
+            if abs(value) > 10000:  # Reasonable bounds
+                raise ValueError(f'{coord} value is too large')
+
 class WidgetConfigRequest(BaseModel):
     display_name: Optional[str] = None
     initial_message: Optional[str] = None
@@ -247,11 +262,11 @@ class WidgetConfigRequest(BaseModel):
     align_bubble: Optional[str] = None
     profile_picture_url: Optional[str] = None
     chat_icon_url: Optional[str] = None
-    # NEW FIELDS - Add zoom and position fields
+    # NEW FIELDS - Add zoom and position fields with proper validation
     profile_zoom: Optional[float] = None
     chat_icon_zoom: Optional[float] = None
-    profile_position: Optional[dict] = None
-    chat_icon_position: Optional[dict] = None
+    profile_position: Optional[PositionData] = None
+    chat_icon_position: Optional[PositionData] = None
 
 
 @asynccontextmanager
@@ -1117,17 +1132,15 @@ async def save_widget_config(config: WidgetConfigRequest):
             for field, db_field in fields_map.items():
                 value = getattr(config, field, None)
                 if value is not None:
-                    # Handle position fields specially - ensure they're JSON objects
+                    # Position fields are now validated by Pydantic as PositionData objects
+                    # Convert to dict for JSONB storage
                     if field in ['profile_position', 'chat_icon_position']:
-                        if isinstance(value, str):
-                            # If it's a JSON string, parse it
-                            import json
-                            try:
-                                value = json.loads(value)
-                            except:
-                                value = {"x": 0, "y": 0}
-                        elif not isinstance(value, dict):
-                            value = {"x": 0, "y": 0}
+                        if hasattr(value, 'dict'):  # Pydantic model
+                            value = value.dict()
+                        elif isinstance(value, dict):
+                            value = value  # Already a dict
+                        else:
+                            value = {"x": 0, "y": 0}  # Fallback
 
                     updates.append(f"{db_field} = ${param_index}")
                     values.append(value)
