@@ -1037,6 +1037,8 @@ async def get_widget_config():
                     chat_icon_zoom,
                     profile_position,
                     chat_icon_position,
+                    profile_picture_filename,
+                    chat_icon_filename,
                     updated_at
                 FROM widget_configuration
                 WHERE id = 1
