@@ -1074,8 +1074,8 @@ async def get_widget_config():
                 "chat_icon_url": row["chat_icon_url"],
                 "profile_zoom": float(row["profile_zoom"]) if row["profile_zoom"] is not None else 1.0,
                 "chat_icon_zoom": float(row["chat_icon_zoom"]) if row["chat_icon_zoom"] is not None else 1.0,
-                "profile_position": row["profile_position"] if row["profile_position"] is not None else {"x": 0, "y": 0},
-                "chat_icon_position": row["chat_icon_position"] if row["chat_icon_position"] is not None else {"x": 0, "y": 0}
+                "profile_position": row["profile_position"] if row["profile_position"] is not None and isinstance(row["profile_position"], dict) else {"x": 0, "y": 0},
+                "chat_icon_position": row["chat_icon_position"] if row["chat_icon_position"] is not None and isinstance(row["chat_icon_position"], dict) else {"x": 0, "y": 0}
             }
             response = JSONResponse(content=data)
             response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
@@ -1117,6 +1117,18 @@ async def save_widget_config(config: WidgetConfigRequest):
             for field, db_field in fields_map.items():
                 value = getattr(config, field, None)
                 if value is not None:
+                    # Handle position fields specially - ensure they're JSON objects
+                    if field in ['profile_position', 'chat_icon_position']:
+                        if isinstance(value, str):
+                            # If it's a JSON string, parse it
+                            import json
+                            try:
+                                value = json.loads(value)
+                            except:
+                                value = {"x": 0, "y": 0}
+                        elif not isinstance(value, dict):
+                            value = {"x": 0, "y": 0}
+
                     updates.append(f"{db_field} = ${param_index}")
                     values.append(value)
                     param_index += 1
