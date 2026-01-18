@@ -268,6 +268,9 @@ class WidgetConfigRequest(BaseModel):
     chat_icon_zoom: Optional[float] = None
     profile_position: Optional[PositionData] = None
     chat_icon_position: Optional[PositionData] = None
+    # NEW FIELDS - Add filename fields for displaying original filenames
+    profile_picture_filename: Optional[str] = None
+    chat_icon_filename: Optional[str] = None
 
 
 @asynccontextmanager
@@ -1091,7 +1094,9 @@ async def get_widget_config():
                 "profile_zoom": float(row["profile_zoom"]) if row["profile_zoom"] is not None else 1.0,
                 "chat_icon_zoom": float(row["chat_icon_zoom"]) if row["chat_icon_zoom"] is not None else 1.0,
                 "profile_position": row["profile_position"] if row["profile_position"] is not None and isinstance(row["profile_position"], dict) else {"x": 0, "y": 0},
-                "chat_icon_position": row["chat_icon_position"] if row["chat_icon_position"] is not None and isinstance(row["chat_icon_position"], dict) else {"x": 0, "y": 0}
+                "chat_icon_position": row["chat_icon_position"] if row["chat_icon_position"] is not None and isinstance(row["chat_icon_position"], dict) else {"x": 0, "y": 0},
+                "profile_picture_filename": row["profile_picture_filename"],
+                "chat_icon_filename": row["chat_icon_filename"]
             }
             response = JSONResponse(content=data)
             response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
@@ -1127,7 +1132,10 @@ async def save_widget_config(config: WidgetConfigRequest):
                 "profile_zoom": "profile_zoom",
                 "chat_icon_zoom": "chat_icon_zoom",
                 "profile_position": "profile_position",
-                "chat_icon_position": "chat_icon_position"
+                "chat_icon_position": "chat_icon_position",
+                # NEW FIELDS - Add filename fields
+                "profile_picture_filename": "profile_picture_filename",
+                "chat_icon_filename": "chat_icon_filename"
             }
 
             for field, db_field in fields_map.items():
