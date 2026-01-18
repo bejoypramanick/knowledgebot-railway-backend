@@ -8,6 +8,7 @@ from typing import List, Optional, Union
 import os
 import logging
 import sys
+import json
 from pathlib import Path
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -1133,14 +1134,14 @@ async def save_widget_config(config: WidgetConfigRequest):
                 value = getattr(config, field, None)
                 if value is not None:
                     # Position fields are now validated by Pydantic as PositionData objects
-                    # Convert to dict for JSONB storage
+                    # Convert to JSON string for JSONB storage
                     if field in ['profile_position', 'chat_icon_position']:
                         if hasattr(value, 'dict'):  # Pydantic model
-                            value = value.dict()
+                            value = json.dumps(value.dict())
                         elif isinstance(value, dict):
-                            value = value  # Already a dict
+                            value = json.dumps(value)  # Convert dict to JSON string
                         else:
-                            value = {"x": 0, "y": 0}  # Fallback
+                            value = json.dumps({"x": 0, "y": 0})  # Fallback as JSON string
 
                     updates.append(f"{db_field} = ${param_index}")
                     values.append(value)
