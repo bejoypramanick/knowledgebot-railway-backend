@@ -44,7 +44,7 @@ except ImportError as e:
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.config import settings
 from shared.db import init_railway_db, init_neon_db, railway_db, neon_db
-from shared.token_tracker import track_openai_usage_from_response, track_gemini_usage_from_response, track_openai_usage_with_db, track_gemini_usage_with_db
+from shared.token_tracker import track_openai_usage_from_response, track_gemini_usage_from_response
 
 # Lazy database initialization for serverless optimization
 async def get_railway_db():
@@ -889,14 +889,28 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 contents=contents
             )
 
-            # Log the full Gemini response for debugging token usage
+            # Track Gemini token usage from response
             logger.info(f"🔍 Gemini RAG Response Details: usage_metadata={getattr(response, 'usage_metadata', 'NO_USAGE_METADATA')}")
+            # Check multiple possible field names for Gemini usage
+            usage_data = None
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                logger.info(f"📊 Gemini RAG Usage Metadata: {response.usage_metadata}")
+                usage_data = response.usage_metadata
+                logger.info(f"📊 Gemini RAG Usage Metadata (usage_metadata): {usage_data}")
+            elif hasattr(response, 'usage') and response.usage:
+                usage_data = response.usage
+                logger.info(f"📊 Gemini RAG Usage (usage): {usage_data}")
+            elif hasattr(response, 'metadata') and response.metadata and hasattr(response.metadata, 'usage'):
+                usage_data = response.metadata.usage
+                logger.info(f"📊 Gemini RAG Usage (metadata.usage): {usage_data}")
 
-            # Track Gemini token usage from response (correlated with session)
-            if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                await track_gemini_usage_from_response(response.usage_metadata, session_id, None, 'rag', 'gemini-2.5-flash-lite')
+            if usage_data:
+                await track_gemini_usage_from_response(usage_data, api_call_type='rag')
+            else:
+                logger.warning(f"⚠️ Gemini RAG response missing usage data. Response attributes: {[attr for attr in dir(response) if not attr.startswith('_')]}")
+                # Try to log any usage-related attributes
+                for attr in dir(response):
+                    if 'usage' in attr.lower() or 'token' in attr.lower():
+                        logger.info(f"Found potential usage attr: {attr} = {getattr(response, attr, 'NOT_FOUND')}")
 
             # Parse the response to extract actual file names and clean content
             raw_response_text = response.text
@@ -1164,7 +1178,7 @@ def create_session_dependency(session_id: str) -> ChatSessionDeps:
 # Initialize base agent with all tools
 def create_agent(file_context: Optional[List[SearchResult]] = None, custom_system_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> Optional[Agent]:
     """Create a Pydantic AI agent with intelligent data source routing."""
-
+    
     # Check if model is available
     if openai_model is None:
         logger.error("Cannot create agent - OpenAI API key not configured")
@@ -1172,18 +1186,18 @@ def create_agent(file_context: Optional[List[SearchResult]] = None, custom_syste
 
     # Build list of available tools
     tools = [search_knowledge_base]
-
+    
     # Add human agent connection tool (requires session_id from deps)
     tools.append(request_human_agent_connection)
-
+    
     # Add PostgreSQL tool if available
     if railway_db:
         tools.append(query_railway_postgres)
-
+    
     # Add Neon DB tool if available
     if neon_db:
         tools.append(query_neon_db)
-
+    
     # Add internet search tool if available
     if tavily_client:
         tools.append(search_internet)
@@ -1207,7 +1221,7 @@ def create_agent(file_context: Optional[List[SearchResult]] = None, custom_syste
         tools=tools,
         deps_type=ChatSessionDeps,
     )
-
+    
     return agent
 
 
@@ -1334,36 +1348,19 @@ async def chat(request: ChatRequest):
             data_sources_used=data_sources_used if data_sources_used else ["rag"] if file_context else []
         )
 
-        # Extract usage information from agent result using pydantic-ai's built-in usage() method
+        # Extract usage information from agent result (ensure defined before DB persistence)
         usage_info = None
         try:
-            # Use pydantic-ai's built-in usage() method - this is the correct way
-            if hasattr(result, 'usage') and callable(result.usage):
-                run_usage = result.usage()
-                logger.info("📊 Pydantic-ai RunUsage object: %s", run_usage)
-
-                # Extract token counts from RunUsage object
+            if hasattr(result, 'usage') and result.usage:
                 usage_info = {
-                    "input_tokens": getattr(run_usage, 'input_tokens', 0),
-                    "output_tokens": getattr(run_usage, 'output_tokens', 0),
-                    "total_tokens": getattr(run_usage, 'total_tokens', 0),
-                    "requests": getattr(run_usage, 'requests', 0),
-                    "tool_calls": getattr(run_usage, 'tool_calls', 0),
+                    "input_tokens": getattr(result.usage, 'input_tokens', 0),
+                    "output_tokens": getattr(result.usage, 'output_tokens', 0),
                 }
-
-                # Token tracking will be done after database persistence (when session_db_id and assistant_message_id are available)
-                logger.info("✅ Usage info extracted from pydantic-ai result: %s", usage_info)
-            else:
-                logger.warning("⚠️ Result object does not have usage() method")
-                # Log available methods for debugging
-                available_methods = [attr for attr in dir(result) if not attr.startswith('_') and callable(getattr(result, attr))]
-                logger.info("📋 Available callable methods on result: %s", available_methods[:10])
-
+                # Track token usage in database
+                await track_openai_usage_from_response(result.usage)
+            logger.debug("Usage info extracted: %s", usage_info)
         except Exception as e:
-            logger.error("❌ Failed to extract usage info from pydantic-ai: %s", e)
-            # Log more details for debugging
-            logger.info("Result object type: %s", type(result))
-            logger.info("Result object attributes: %s", [attr for attr in dir(result) if not attr.startswith('_')][:15])
+            logger.debug("Failed to extract usage info: %s", e)
 
         # Detailed tracing logs for each major step — helps identify which step failed
         logger.info("Chat handling progress: building response completed")
@@ -1407,14 +1404,12 @@ async def chat(request: ChatRequest):
                     logger.info("DB persistence: existing chat_sessions id=%s will be used", session_db_id)
 
                 # Save user message
-                user_message_id = None
                 try:
                     logger.info("DB persistence: inserting user message for session_db_id=%s", session_db_id)
-                    user_message_id = await db.fetchval(
+                    await db.execute(
                         """
                         INSERT INTO chat_messages (session_id, role, content, used_rag, used_postgres, used_neon_db, used_internet_search)
                         VALUES ($1, $2, $3, $4, $5, $6, $7)
-                        RETURNING id
                         """,
                         session_db_id,
                         "user",
@@ -1424,22 +1419,20 @@ async def chat(request: ChatRequest):
                         "neon_db" in response_data.data_sources_used,
                         "internet" in response_data.data_sources_used
                     )
-                    logger.info("DB persistence: user message inserted with id=%s for session_db_id=%s", user_message_id, session_db_id)
+                    logger.info("DB persistence: user message inserted for session_db_id=%s", session_db_id)
                 except Exception as e:
                     logger.exception("DB persistence: failed to insert user message for session_db_id=%s: %s", session_db_id, e)
 
                 # Save assistant message
-                assistant_message_id = None
                 try:
                     logger.info("DB persistence: inserting assistant message for session_db_id=%s", session_db_id)
-                    assistant_message_id = await db.fetchval(
+                    await db.execute(
                         """
                         INSERT INTO chat_messages (session_id, role, content, used_rag, used_postgres, used_neon_db, used_internet_search, confidence_score, sources, usage_info)
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                        RETURNING id
                         """,
                         session_db_id,
-                        "bot",
+                        "assistant",
                         response_data.answer,
                         "rag" in response_data.data_sources_used,
                         "postgres" in response_data.data_sources_used,
@@ -1449,7 +1442,7 @@ async def chat(request: ChatRequest):
                         json.dumps([{"file_name": s.file_name, "relevance_score": s.relevance_score} for s in response_data.sources]),
                         json.dumps(usage_info) if usage_info else None
                     )
-                    logger.info("DB persistence: assistant message inserted with id=%s for session_db_id=%s", assistant_message_id, session_db_id)
+                    logger.info("DB persistence: assistant message inserted for session_db_id=%s", session_db_id)
                 except Exception as e:
                     logger.exception("DB persistence: failed to insert assistant message for session_db_id=%s: %s", session_db_id, e)
 
@@ -1473,22 +1466,7 @@ async def chat(request: ChatRequest):
 
             except Exception as e:
                 logger.exception("DB persistence: unexpected error while saving chat messages: %s", e)
-
-            # Now that we have session_db_id and assistant_message_id, track token usage
-            if usage_info and (usage_info["input_tokens"] > 0 or usage_info["output_tokens"] > 0):
-                try:
-                    # For OpenAI, use the openai tracking function with the existing database connection
-                    if 'gpt' in MODEL_NAME.lower():
-                        await track_openai_usage_with_db(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME, db)
-                    # For Gemini, use the gemini tracking function with the existing database connection
-                    elif 'gemini' in MODEL_NAME.lower():
-                        await track_gemini_usage_with_db(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME, db)
-                    logger.info("✅ Token usage tracked in database for session %s", session_db_id)
-                except Exception as e:
-                    logger.error("❌ Failed to track token usage in database: %s", e)
-            else:
-                logger.warning("⚠️ Skipping token tracking - no usage data or zero tokens")
-
+        
         # Update session history
         session["messages"].append({
             "role": "user",
@@ -1503,30 +1481,13 @@ async def chat(request: ChatRequest):
         
         # Extract usage information
         usage_info = None
-        try:
-            # Try to get usage from pydantic-ai result object
-            usage_obj = None
-            if hasattr(result, 'usage') and result.usage:
-                usage_obj = result.usage
-            # Try to access underlying model response if available
-            elif hasattr(result, '_model_response') and hasattr(result._model_response, 'usage'):
-                usage_obj = result._model_response.usage
-            elif hasattr(result, '_last_model_response') and hasattr(result._last_model_response, 'usage'):
-                usage_obj = result._last_model_response.usage
-            # Try to access the model's last response
-            elif hasattr(result, '_last_response') and hasattr(result._last_response, 'usage'):
-                usage_obj = result._last_response.usage
-
-            if usage_obj:
-                usage_info = {
-                    "input_tokens": getattr(usage_obj, 'input_tokens', 0) or getattr(usage_obj, 'prompt_tokens', 0),
-                    "output_tokens": getattr(usage_obj, 'output_tokens', 0) or getattr(usage_obj, 'completion_tokens', 0),
-                }
-                # Track token usage in database with session and message correlation
-                await track_openai_usage_from_response(usage_obj, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
-                logger.info("✅ Usage info extracted from agent result: %s", usage_info)
-        except Exception as e:
-            logger.error("❌ Failed to extract usage info: %s", e)
+        if hasattr(result, 'usage') and result.usage:
+            usage_info = {
+                "input_tokens": getattr(result.usage, 'input_tokens', 0),
+                "output_tokens": getattr(result.usage, 'output_tokens', 0),
+            }
+            # Track token usage in database
+            await track_openai_usage_from_response(result.usage)
         
         return ChatSessionResponse(
             session_id=session_id,
@@ -1719,36 +1680,15 @@ Only return the JSON array, nothing else."""
                 "I have another question"
             ]
         
-        # Extract usage information using pydantic-ai's built-in usage() method
+        # Extract usage information
         usage_info = None
-        try:
-            # Use pydantic-ai's built-in usage() method
-            if hasattr(result, 'usage') and callable(result.usage):
-                run_usage = result.usage()
-                logger.info("📊 Pydantic-ai RunUsage for suggested messages: %s", run_usage)
-
-                # Extract token counts from RunUsage object
-                usage_info = {
-                    "input_tokens": getattr(run_usage, 'input_tokens', 0),
-                    "output_tokens": getattr(run_usage, 'output_tokens', 0),
-                    "total_tokens": getattr(run_usage, 'total_tokens', 0),
-                }
-
-                # Track token usage for suggested messages generation
-                if usage_info["input_tokens"] > 0 or usage_info["output_tokens"] > 0:
-                    # For OpenAI, use the openai tracking function
-                    if 'gpt' in MODEL_NAME.lower():
-                        await track_openai_usage_from_response(run_usage, str(request.session_id), None, 'suggested_messages', MODEL_NAME)
-                    # For Gemini, use the gemini tracking function
-                    elif 'gemini' in MODEL_NAME.lower():
-                        await track_gemini_usage_from_response(run_usage, str(request.session_id), None, 'suggested_messages', MODEL_NAME)
-                    logger.info("✅ Usage info extracted from suggested messages agent result: %s", usage_info)
-                else:
-                    logger.warning("⚠️ Suggested messages RunUsage returned zero tokens")
-            else:
-                logger.warning("⚠️ Suggested messages result object does not have usage() method")
-        except Exception as e:
-            logger.error("❌ Failed to extract usage info from suggested messages: %s", e)
+        if hasattr(result, 'usage') and result.usage:
+            usage_info = {
+                "input_tokens": getattr(result.usage, 'input_tokens', 0),
+                "output_tokens": getattr(result.usage, 'output_tokens', 0),
+            }
+            # Track token usage
+            await track_openai_usage_from_response(result.usage)
         
         return SuggestedMessagesResponse(
             suggested_messages=suggested_messages,
