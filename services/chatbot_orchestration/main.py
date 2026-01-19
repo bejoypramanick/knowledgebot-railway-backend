@@ -1334,55 +1334,45 @@ async def chat(request: ChatRequest):
             data_sources_used=data_sources_used if data_sources_used else ["rag"] if file_context else []
         )
 
-        # Extract usage information from agent result (ensure defined before DB persistence)
+        # Extract usage information from agent result using pydantic-ai's built-in usage() method
         usage_info = None
         try:
-            # Try to get usage from pydantic-ai result object
-            usage_obj = None
-            if hasattr(result, 'usage') and result.usage:
-                usage_obj = result.usage
-            # Try to access underlying model response if available
-            elif hasattr(result, '_model_response') and hasattr(result._model_response, 'usage'):
-                usage_obj = result._model_response.usage
-            elif hasattr(result, '_last_model_response') and hasattr(result._last_model_response, 'usage'):
-                usage_obj = result._last_model_response.usage
-            # Try to access the model's last response
-            elif hasattr(result, '_last_response') and hasattr(result._last_response, 'usage'):
-                usage_obj = result._last_response.usage
+            # Use pydantic-ai's built-in usage() method - this is the correct way
+            if hasattr(result, 'usage') and callable(result.usage):
+                run_usage = result.usage()
+                logger.info("📊 Pydantic-ai RunUsage object: %s", run_usage)
 
-            if usage_obj:
+                # Extract token counts from RunUsage object
                 usage_info = {
-                    "input_tokens": getattr(usage_obj, 'input_tokens', 0) or getattr(usage_obj, 'prompt_tokens', 0),
-                    "output_tokens": getattr(usage_obj, 'output_tokens', 0) or getattr(usage_obj, 'completion_tokens', 0),
+                    "input_tokens": getattr(run_usage, 'input_tokens', 0),
+                    "output_tokens": getattr(run_usage, 'output_tokens', 0),
+                    "total_tokens": getattr(run_usage, 'total_tokens', 0),
+                    "requests": getattr(run_usage, 'requests', 0),
+                    "tool_calls": getattr(run_usage, 'tool_calls', 0),
                 }
+
                 # Track token usage in database with session and message correlation
-                await track_openai_usage_from_response(usage_obj, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
-                logger.info("✅ Usage info extracted from agent result: %s", usage_info)
-            else:
-                logger.warning("⚠️ No usage information found in agent result, checking available attributes...")
-                # Log available attributes for debugging
-                available_attrs = [attr for attr in dir(result) if not attr.startswith('_') and 'usage' in attr.lower()]
-                if available_attrs:
-                    logger.info("📋 Available usage-related attributes: %s", available_attrs)
+                if usage_info["input_tokens"] > 0 or usage_info["output_tokens"] > 0:
+                    # For OpenAI, use the openai tracking function
+                    if 'gpt' in MODEL_NAME.lower():
+                        await track_openai_usage_from_response(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
+                    # For Gemini, use the gemini tracking function
+                    elif 'gemini' in MODEL_NAME.lower():
+                        await track_gemini_usage_from_response(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
+                    logger.info("✅ Usage info extracted from pydantic-ai result: %s", usage_info)
                 else:
-                    logger.warning("📋 No usage-related attributes found. Available public attributes: %s", [attr for attr in dir(result) if not attr.startswith('_')][:10])
-                    # Try to access the model directly for usage information
-                    try:
-                        # Check if pydantic-ai model has access to the last response
-                        if hasattr(openai_model, '_last_response') and openai_model._last_response:
-                            last_response = openai_model._last_response
-                            if hasattr(last_response, 'usage'):
-                                logger.info("🔍 Found usage in model's last response: %s", last_response.usage)
-                                await track_openai_usage_from_response(last_response.usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
-                                return
-                        # Try accessing the underlying client
-                        if hasattr(openai_model, '_client') and openai_model._client:
-                            # The client might have a last response or we can check recent responses
-                            logger.debug("OpenAI model has _client attribute")
-                    except Exception as e:
-                        logger.debug("Could not access model's last response: %s", e)
+                    logger.warning("⚠️ RunUsage returned zero tokens - check if model supports usage tracking")
+            else:
+                logger.warning("⚠️ Result object does not have usage() method")
+                # Log available methods for debugging
+                available_methods = [attr for attr in dir(result) if not attr.startswith('_') and callable(getattr(result, attr))]
+                logger.info("📋 Available callable methods on result: %s", available_methods[:10])
+
         except Exception as e:
-            logger.error("❌ Failed to extract usage info: %s", e)
+            logger.error("❌ Failed to extract usage info from pydantic-ai: %s", e)
+            # Log more details for debugging
+            logger.info("Result object type: %s", type(result))
+            logger.info("Result object attributes: %s", [attr for attr in dir(result) if not attr.startswith('_')][:15])
 
         # Detailed tracing logs for each major step — helps identify which step failed
         logger.info("Chat handling progress: building response completed")
@@ -1723,32 +1713,36 @@ Only return the JSON array, nothing else."""
                 "I have another question"
             ]
         
-        # Extract usage information
+        # Extract usage information using pydantic-ai's built-in usage() method
         usage_info = None
         try:
-            # Try to get usage from pydantic-ai result object
-            usage_obj = None
-            if hasattr(result, 'usage') and result.usage:
-                usage_obj = result.usage
-            # Try to access underlying model response if available
-            elif hasattr(result, '_model_response') and hasattr(result._model_response, 'usage'):
-                usage_obj = result._model_response.usage
-            elif hasattr(result, '_last_model_response') and hasattr(result._last_model_response, 'usage'):
-                usage_obj = result._last_model_response.usage
-            # Try to access the model's last response
-            elif hasattr(result, '_last_response') and hasattr(result._last_response, 'usage'):
-                usage_obj = result._last_response.usage
+            # Use pydantic-ai's built-in usage() method
+            if hasattr(result, 'usage') and callable(result.usage):
+                run_usage = result.usage()
+                logger.info("📊 Pydantic-ai RunUsage for suggested messages: %s", run_usage)
 
-            if usage_obj:
+                # Extract token counts from RunUsage object
                 usage_info = {
-                    "input_tokens": getattr(usage_obj, 'input_tokens', 0) or getattr(usage_obj, 'prompt_tokens', 0),
-                    "output_tokens": getattr(usage_obj, 'output_tokens', 0) or getattr(usage_obj, 'completion_tokens', 0),
+                    "input_tokens": getattr(run_usage, 'input_tokens', 0),
+                    "output_tokens": getattr(run_usage, 'output_tokens', 0),
+                    "total_tokens": getattr(run_usage, 'total_tokens', 0),
                 }
+
                 # Track token usage for suggested messages generation
-                await track_openai_usage_from_response(usage_obj, str(request.session_id), None, 'suggested_messages', MODEL_NAME)
-                logger.info("✅ Usage info extracted from agent result: %s", usage_info)
+                if usage_info["input_tokens"] > 0 or usage_info["output_tokens"] > 0:
+                    # For OpenAI, use the openai tracking function
+                    if 'gpt' in MODEL_NAME.lower():
+                        await track_openai_usage_from_response(run_usage, str(request.session_id), None, 'suggested_messages', MODEL_NAME)
+                    # For Gemini, use the gemini tracking function
+                    elif 'gemini' in MODEL_NAME.lower():
+                        await track_gemini_usage_from_response(run_usage, str(request.session_id), None, 'suggested_messages', MODEL_NAME)
+                    logger.info("✅ Usage info extracted from suggested messages agent result: %s", usage_info)
+                else:
+                    logger.warning("⚠️ Suggested messages RunUsage returned zero tokens")
+            else:
+                logger.warning("⚠️ Suggested messages result object does not have usage() method")
         except Exception as e:
-            logger.error("❌ Failed to extract usage info: %s", e)
+            logger.error("❌ Failed to extract usage info from suggested messages: %s", e)
         
         return SuggestedMessagesResponse(
             suggested_messages=suggested_messages,
