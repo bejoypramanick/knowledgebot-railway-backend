@@ -44,7 +44,7 @@ async def get_gemini_usage() -> dict:
                     SELECT used, available, limit_value
                     FROM token_usage_cache
                     WHERE provider = 'gemini'
-                    ORDER BY updated_at DESC
+                    ORDER BY last_updated DESC
                     LIMIT 1
                     """
                 )
@@ -105,7 +105,7 @@ async def get_openai_usage() -> dict:
                     SELECT used, available, limit_value
                     FROM token_usage_cache
                     WHERE provider = 'openai'
-                    ORDER BY updated_at DESC
+                    ORDER BY last_updated DESC
                     LIMIT 1
                     """
                 )

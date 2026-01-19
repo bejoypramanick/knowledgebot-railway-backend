@@ -21,9 +21,12 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Service identity constant
+SERVICE_IDENTITY = "API_GATEWAY_V1"
+
 # Log port and environment basic state
 logger.info("🔍 --- API Gateway Startup Diagnostics ---")
-logger.info("🆔 SERVICE_IDENTITY: API_GATEWAY_V1")
+logger.info(f"🆔 SERVICE_IDENTITY: {SERVICE_IDENTITY}")
 logger.info(f"🐍 Python: {sys.version}")
 logger.info(f"📂 Current Dir: {os.getcwd()}")
 logger.info(f"🌐 API_GATEWAY_PORT: {os.getenv('API_GATEWAY_PORT')}")
