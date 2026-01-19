@@ -686,8 +686,49 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         logger.info("📂 Listing Gemini files...")
         # List all files in Gemini FileSearch
         # Convert generator to list
-        all_files = list(genai_client.files.list())
-        logger.info(f"📂 Found {len(all_files)} total files in Gemini FileSearch")
+        try:
+            all_files = list(genai_client.files.list())
+            logger.info(f"📂 Found {len(all_files)} total files in Gemini FileSearch")
+        except Exception as list_error:
+            logger.error(f"❌ Failed to list Gemini files: {list_error}")
+            all_files = []
+
+        # Debug: Show file details for ALL files (even non-ACTIVE ones)
+        if all_files:
+            logger.info(f"📂 Showing details for all {len(all_files)} files:")
+            for i, f in enumerate(all_files):
+                state = getattr(f, 'state', None)
+                state_name = state.name if hasattr(state, 'name') else str(state)
+                logger.info(f"📄 File {i+1}: name='{f.name}', display_name='{getattr(f, 'display_name', 'N/A')}', state='{state_name}', mime_type='{getattr(f, 'mime_type', 'N/A')}'")
+        else:
+            logger.warning("⚠️ No files found in Gemini FileSearch - this prevents RAG usage tracking")
+            logger.info("💡 This could mean: API rate limiting, files not uploaded, or authentication issues")
+
+        # Filter for ACTIVE files only
+        active_files = [f for f in all_files if getattr(f, 'state', None) and getattr(f.state, 'name', None) == "ACTIVE"]
+        logger.info(f"📂 After filtering for ACTIVE files: {len(active_files)} active out of {len(all_files)} total")
+
+            # Since user is on paid tier and files should exist, let's try a direct approach
+            # Try to get files from database as backup
+            try:
+                db = await get_railway_db()
+                if db:
+                    db_files = await db.fetch("""
+                        SELECT gemini_file_name, original_filename, display_name, mime_type, file_size_bytes
+                        FROM file_uploads
+                        WHERE gemini_file_name IS NOT NULL
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                    """)
+                    if db_files:
+                        logger.info(f"📊 Found {len(db_files)} files in database that should be in Gemini:")
+                        for db_file in db_files:
+                            logger.info(f"  • DB: {db_file['gemini_file_name']} -> {db_file['original_filename']}")
+                        logger.warning("🔄 Files exist in DB but not found in Gemini API - possible sync issue")
+                    else:
+                        logger.info("📊 No files found in database either")
+            except Exception as db_error:
+                logger.error(f"Could not check database for files: {db_error}")
         
         if not all_files:
             logger.warning("No files found in FileSearch store")
