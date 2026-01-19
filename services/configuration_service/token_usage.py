@@ -253,13 +253,10 @@ async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_ca
                 # Format the results
                 detailed_usage = []
                 for row in rows:
-                    detailed_usage.append({
+                    usage_entry = {
                         "id": str(row['id']),
                         "provider": row['provider'],
                         "model": row['model'],
-                        "prompt_tokens": row['prompt_tokens'],
-                        "completion_tokens": row['completion_tokens'],
-                        "total_tokens": row['total_tokens'],
                         "api_call_type": row['api_call_type'],
                         "created_at": row['created_at'].isoformat() if row['created_at'] else None,
                         "session_info": {
@@ -267,7 +264,29 @@ async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_ca
                             "customer_email": row['customer_email']
                         } if row['customer_name'] or row['customer_email'] else None,
                         "message_preview": row['message_preview'][:100] + "..." if row['message_preview'] and len(row['message_preview']) > 100 else row['message_preview']
-                    })
+                    }
+
+                    # Add provider-specific token fields
+                    if row['provider'] == 'openai':
+                        usage_entry.update({
+                            "input_tokens": row['prompt_tokens'] or 0,
+                            "output_tokens": row['completion_tokens'] or 0,
+                            "total_tokens": row['total_tokens'] or 0,
+                            "cache_read_tokens": row.get('cache_read_tokens', 0) or 0,
+                            "cache_write_tokens": row.get('cache_write_tokens', 0) or 0,
+                            "input_audio_tokens": row.get('input_audio_tokens', 0) or 0,
+                            "cache_audio_read_tokens": row.get('cache_audio_read_tokens', 0) or 0,
+                        })
+                    elif row['provider'] == 'gemini':
+                        usage_entry.update({
+                            "promptTokenCount": row['prompt_tokens'] or 0,
+                            "candidatesTokenCount": row['completion_tokens'] or 0,
+                            "totalTokenCount": row['total_tokens'] or 0,
+                            "cache_read_tokens": row.get('cache_read_tokens', 0) or 0,
+                            "cache_write_tokens": row.get('cache_write_tokens', 0) or 0,
+                        })
+
+                    detailed_usage.append(usage_entry)
 
                 return {
                     "detailed_usage": detailed_usage,

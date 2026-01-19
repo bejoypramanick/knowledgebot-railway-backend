@@ -41,10 +41,51 @@ async def track_openai_usage(input_tokens: int, output_tokens: int, session_id: 
         api_call_type: Type of API call ('chat', 'sentiment', 'summary', etc.)
         model: Specific model used (optional)
     """
-    if input_tokens <= 0 and output_tokens <= 0:
+    await track_openai_usage_detailed(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=0,
+        cache_write_tokens=0,
+        input_audio_tokens=0,
+        cache_audio_read_tokens=0,
+        session_id=session_id,
+        message_id=message_id,
+        api_call_type=api_call_type,
+        model=model
+    )
+
+
+async def track_openai_usage_detailed(
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+    input_audio_tokens: int = 0,
+    cache_audio_read_tokens: int = 0,
+    session_id: str = None,
+    message_id: str = None,
+    api_call_type: str = 'chat',
+    model: str = None
+):
+    """
+    Track detailed OpenAI token usage with cache and audio token breakdown.
+
+    Args:
+        input_tokens: Number of input/prompt tokens
+        output_tokens: Number of output/completion tokens
+        cache_read_tokens: Tokens read from cache
+        cache_write_tokens: Tokens written to cache
+        input_audio_tokens: Audio input tokens
+        cache_audio_read_tokens: Audio tokens read from cache
+        session_id: UUID of the chat session (optional)
+        message_id: UUID of the chat message (optional)
+        api_call_type: Type of API call ('chat', 'sentiment', 'summary', etc.)
+        model: Specific model used (optional)
+    """
+    if input_tokens <= 0 and output_tokens <= 0 and cache_read_tokens <= 0 and cache_write_tokens <= 0:
         return  # Skip if no tokens used
 
-    total_tokens = input_tokens + output_tokens
+    total_tokens = input_tokens + output_tokens + cache_read_tokens + cache_write_tokens
 
     try:
         db = await get_db_connection()
@@ -54,7 +95,7 @@ async def track_openai_usage(input_tokens: int, output_tokens: int, session_id: 
                 await conn.execute(
                     """
                     INSERT INTO llm_providers (provider_name, token_used, token_limit, is_active)
-                    VALUES ('deepseek', $1, 150000, true)
+                    VALUES ('openai', $1, 150000, true)
                     ON CONFLICT (provider_name) DO UPDATE
                     SET token_used = COALESCE(llm_providers.token_used, 0) + $1,
                         token_limit = COALESCE(llm_providers.token_limit, 150000),
@@ -65,7 +106,7 @@ async def track_openai_usage(input_tokens: int, output_tokens: int, session_id: 
 
                 # Get current usage from llm_providers for calculation
                 current_usage = await conn.fetchval(
-                    "SELECT COALESCE(token_used, 0) FROM llm_providers WHERE provider_name = 'deepseek'"
+                    "SELECT COALESCE(token_used, 0) FROM llm_providers WHERE provider_name = 'openai'"
                 ) or 0
 
                 limit_value = 150000
@@ -89,17 +130,22 @@ async def track_openai_usage(input_tokens: int, output_tokens: int, session_id: 
                 if session_id or message_id:
                     await conn.execute(
                         """
-                        INSERT INTO token_usage_log (session_id, message_id, provider, model, prompt_tokens, completion_tokens, total_tokens, api_call_type, created_at)
-                        VALUES ($1, $2, 'openai', $3, $4, $5, $6, $7, NOW())
+                        INSERT INTO token_usage_log (
+                            session_id, message_id, provider, model, prompt_tokens, completion_tokens,
+                            total_tokens, cache_read_tokens, cache_write_tokens, input_audio_tokens,
+                            cache_audio_read_tokens, api_call_type, created_at
+                        )
+                        VALUES ($1, $2, 'openai', $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
                         """,
-                        session_id, message_id, model, input_tokens, output_tokens, total_tokens, api_call_type
+                        session_id, message_id, model, input_tokens, output_tokens, total_tokens,
+                        cache_read_tokens, cache_write_tokens, input_audio_tokens, cache_audio_read_tokens, api_call_type
                     )
 
-                logger.info(f"✅ Tracked OpenAI usage: {total_tokens} tokens (input: {input_tokens}, output: {output_tokens}), total used: {current_usage}, session: {session_id}")
+                logger.info(f"✅ Tracked OpenAI detailed usage: {total_tokens} tokens (input: {input_tokens}, output: {output_tokens}, cache_read: {cache_read_tokens}, cache_write: {cache_write_tokens}), total used: {current_usage}, session: {session_id}")
         else:
             logger.warning("Database not available for token tracking")
     except Exception as e:
-        logger.error(f"Error tracking OpenAI token usage: {e}", exc_info=True)
+        logger.error(f"Error tracking OpenAI detailed token usage: {e}", exc_info=True)
 
 
 async def track_gemini_usage(prompt_tokens: int, candidates_tokens: int, session_id: str = None, message_id: str = None, api_call_type: str = 'rag', model: str = 'gemini-2.5-flash-lite'):
@@ -114,10 +160,45 @@ async def track_gemini_usage(prompt_tokens: int, candidates_tokens: int, session
         api_call_type: Type of API call ('rag', 'search', etc.)
         model: Specific model used (default: gemini-2.5-flash-lite)
     """
-    if prompt_tokens <= 0 and candidates_tokens <= 0:
+    await track_gemini_usage_detailed(
+        prompt_tokens=prompt_tokens,
+        candidates_tokens=candidates_tokens,
+        cache_read_tokens=0,
+        cache_write_tokens=0,
+        session_id=session_id,
+        message_id=message_id,
+        api_call_type=api_call_type,
+        model=model
+    )
+
+
+async def track_gemini_usage_detailed(
+    prompt_tokens: int,
+    candidates_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+    session_id: str = None,
+    message_id: str = None,
+    api_call_type: str = 'rag',
+    model: str = 'gemini-2.5-flash-lite'
+):
+    """
+    Track detailed Gemini token usage with cache token breakdown.
+
+    Args:
+        prompt_tokens: Number of prompt tokens
+        candidates_tokens: Number of candidate/output tokens
+        cache_read_tokens: Tokens read from cache
+        cache_write_tokens: Tokens written to cache
+        session_id: UUID of the chat session (optional)
+        message_id: UUID of the chat message (optional)
+        api_call_type: Type of API call ('rag', 'search', etc.)
+        model: Specific model used (default: gemini-2.5-flash-lite)
+    """
+    if prompt_tokens <= 0 and candidates_tokens <= 0 and cache_read_tokens <= 0 and cache_write_tokens <= 0:
         return  # Skip if no tokens used
 
-    total_tokens = prompt_tokens + candidates_tokens
+    total_tokens = prompt_tokens + candidates_tokens + cache_read_tokens + cache_write_tokens
 
     try:
         db = await get_db_connection()
@@ -162,17 +243,21 @@ async def track_gemini_usage(prompt_tokens: int, candidates_tokens: int, session
                 if session_id or message_id:
                     await conn.execute(
                         """
-                        INSERT INTO token_usage_log (session_id, message_id, provider, model, prompt_tokens, completion_tokens, total_tokens, api_call_type, created_at)
-                        VALUES ($1, $2, 'gemini', $3, $4, $5, $6, $7, NOW())
+                        INSERT INTO token_usage_log (
+                            session_id, message_id, provider, model, prompt_tokens, completion_tokens,
+                            total_tokens, cache_read_tokens, cache_write_tokens, api_call_type, created_at
+                        )
+                        VALUES ($1, $2, 'gemini', $3, $4, $5, $6, $7, $8, $9, NOW())
                         """,
-                        session_id, message_id, model, prompt_tokens, candidates_tokens, total_tokens, api_call_type
+                        session_id, message_id, model, prompt_tokens, candidates_tokens, total_tokens,
+                        cache_read_tokens, cache_write_tokens, api_call_type
                     )
 
-                logger.info(f"✅ Tracked Gemini usage: {total_tokens} tokens (prompt: {prompt_tokens}, candidates: {candidates_tokens}), total used: {current_usage}, session: {session_id}")
+                logger.info(f"✅ Tracked Gemini detailed usage: {total_tokens} tokens (prompt: {prompt_tokens}, candidates: {candidates_tokens}, cache_read: {cache_read_tokens}, cache_write: {cache_write_tokens}), total used: {current_usage}, session: {session_id}")
         else:
             logger.warning("Database not available for token tracking")
     except Exception as e:
-        logger.error(f"Error tracking Gemini token usage: {e}", exc_info=True)
+        logger.error(f"Error tracking Gemini detailed token usage: {e}", exc_info=True)
 
 
 async def track_openai_usage_from_response(usage_obj, session_id: str = None, message_id: str = None, api_call_type: str = 'chat', model: str = None):
@@ -180,7 +265,7 @@ async def track_openai_usage_from_response(usage_obj, session_id: str = None, me
     Track OpenAI token usage from API response usage object.
 
     Args:
-        usage_obj: OpenAI usage object with prompt_tokens, completion_tokens, total_tokens
+        usage_obj: OpenAI usage object with detailed token breakdown
         session_id: UUID of the chat session (optional)
         message_id: UUID of the chat message (optional)
         api_call_type: Type of API call ('chat', 'sentiment', 'summary', etc.)
@@ -193,26 +278,42 @@ async def track_openai_usage_from_response(usage_obj, session_id: str = None, me
         return
 
     try:
-        input_tokens = getattr(usage_obj, 'prompt_tokens', 0) or getattr(usage_obj, 'input_tokens', 0) or 0
-        output_tokens = getattr(usage_obj, 'completion_tokens', 0) or getattr(usage_obj, 'output_tokens', 0) or 0
+        # Extract detailed token breakdown from RunUsage object (from pydantic-ai)
+        input_tokens = getattr(usage_obj, 'input_tokens', 0) or getattr(usage_obj, 'prompt_tokens', 0) or 0
+        output_tokens = getattr(usage_obj, 'output_tokens', 0) or getattr(usage_obj, 'completion_tokens', 0) or 0
+        cache_read_tokens = getattr(usage_obj, 'cache_read_tokens', 0) or 0
+        cache_write_tokens = getattr(usage_obj, 'cache_write_tokens', 0) or 0
+        input_audio_tokens = getattr(usage_obj, 'input_audio_tokens', 0) or 0
+        cache_audio_read_tokens = getattr(usage_obj, 'cache_audio_read_tokens', 0) or 0
 
-        logger.info(f"📊 OpenAI usage extracted - input: {input_tokens}, output: {output_tokens}, total: {input_tokens + output_tokens}")
+        logger.info(f"📊 OpenAI detailed usage - input: {input_tokens}, output: {output_tokens}, cache_read: {cache_read_tokens}, cache_write: {cache_write_tokens}, audio: {input_audio_tokens}")
 
-        if input_tokens > 0 or output_tokens > 0:
-            await track_openai_usage(input_tokens, output_tokens, session_id, message_id, api_call_type, model)
-            logger.info("✅ OpenAI token tracking completed successfully")
+        if input_tokens > 0 or output_tokens > 0 or cache_read_tokens > 0 or cache_write_tokens > 0:
+            await track_openai_usage_detailed(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                input_audio_tokens=input_audio_tokens,
+                cache_audio_read_tokens=cache_audio_read_tokens,
+                session_id=session_id,
+                message_id=message_id,
+                api_call_type=api_call_type,
+                model=model
+            )
+            logger.info("✅ OpenAI detailed token tracking completed successfully")
         else:
             logger.warning("⚠️ No token usage to track (zero tokens)")
     except Exception as e:
         logger.error(f"❌ Error extracting OpenAI usage from response: {e}", exc_info=True)
 
 
-async def track_gemini_usage_from_response(usage_metadata, session_id: str = None, message_id: str = None, api_call_type: str = 'rag', model: str = 'gemini-2.5-flash-lite'):
+async def track_gemini_usage_from_response(usage_obj, session_id: str = None, message_id: str = None, api_call_type: str = 'rag', model: str = 'gemini-2.5-flash-lite'):
     """
-    Track Gemini token usage from API response usage_metadata.
+    Track Gemini token usage from API response usage object.
 
     Args:
-        usage_metadata: Gemini usage_metadata object with prompt_token_count, candidates_token_count, total_token_count
+        usage_obj: Gemini usage object with detailed token breakdown
         session_id: UUID of the chat session (optional)
         message_id: UUID of the chat message (optional)
         api_call_type: Type of API call ('rag', 'search', etc.)
@@ -220,19 +321,32 @@ async def track_gemini_usage_from_response(usage_metadata, session_id: str = Non
     """
     logger.info(f"🔍 Token tracking called for Gemini - session: {session_id}, message: {message_id}, type: {api_call_type}, model: {model}")
 
-    if not usage_metadata:
-        logger.warning("⚠️ Gemini usage_metadata is None or empty")
+    if not usage_obj:
+        logger.warning("⚠️ Gemini usage object is None or empty")
         return
 
     try:
-        prompt_tokens = getattr(usage_metadata, 'prompt_token_count', 0) or 0
-        candidates_tokens = getattr(usage_metadata, 'candidates_token_count', 0) or 0
+        # Extract detailed token breakdown from RunUsage object (from pydantic-ai)
+        # Gemini typically uses different field names than OpenAI
+        prompt_tokens = getattr(usage_obj, 'input_tokens', 0) or getattr(usage_obj, 'prompt_tokens', 0) or getattr(usage_obj, 'prompt_token_count', 0) or 0
+        candidates_tokens = getattr(usage_obj, 'output_tokens', 0) or getattr(usage_obj, 'completion_tokens', 0) or getattr(usage_obj, 'candidates_token_count', 0) or 0
+        cache_read_tokens = getattr(usage_obj, 'cache_read_tokens', 0) or 0
+        cache_write_tokens = getattr(usage_obj, 'cache_write_tokens', 0) or 0
 
-        logger.info(f"📊 Gemini usage extracted - prompt: {prompt_tokens}, candidates: {candidates_tokens}, total: {prompt_tokens + candidates_tokens}")
+        logger.info(f"📊 Gemini detailed usage - prompt: {prompt_tokens}, candidates: {candidates_tokens}, cache_read: {cache_read_tokens}, cache_write: {cache_write_tokens}")
 
-        if prompt_tokens > 0 or candidates_tokens > 0:
-            await track_gemini_usage(prompt_tokens, candidates_tokens, session_id, message_id, api_call_type, model)
-            logger.info("✅ Gemini token tracking completed successfully")
+        if prompt_tokens > 0 or candidates_tokens > 0 or cache_read_tokens > 0 or cache_write_tokens > 0:
+            await track_gemini_usage_detailed(
+                prompt_tokens=prompt_tokens,
+                candidates_tokens=candidates_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                session_id=session_id,
+                message_id=message_id,
+                api_call_type=api_call_type,
+                model=model
+            )
+            logger.info("✅ Gemini detailed token tracking completed successfully")
         else:
             logger.warning("⚠️ No token usage to track (zero tokens)")
     except Exception as e:
