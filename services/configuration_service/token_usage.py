@@ -31,9 +31,12 @@ async def get_db_connection():
     logger.info(f"🔍 Database URL available: {database_url is not None}")
     if database_url:
         logger.info("🔄 Initializing database connection...")
-        await init_railway_db(database_url)
-        logger.info(f"✅ Database initialized: railway_db={railway_db is not None}")
-        return railway_db
+        db_instance = await init_railway_db(database_url)
+        logger.info(f"✅ Database initialized: db_instance={db_instance is not None}, railway_db={railway_db is not None}")
+        # Use the returned instance, but also ensure global variable is set
+        if db_instance and not railway_db:
+            railway_db = db_instance
+        return db_instance or railway_db
 
     logger.warning("❌ No database connection available")
     return None
@@ -95,6 +98,8 @@ async def get_gemini_usage() -> dict:
         }
     except Exception as e:
         logger.error(f"❌ Exception in get_gemini_usage: {e}", exc_info=True)
+        import traceback
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         return {
             "used": 0,
             "available": 20000,
@@ -165,6 +170,8 @@ async def get_openai_usage() -> dict:
         }
     except Exception as e:
         logger.error(f"❌ Exception in get_openai_usage: {e}", exc_info=True)
+        import traceback
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         return {
             "used": 0,
             "available": 150000,
