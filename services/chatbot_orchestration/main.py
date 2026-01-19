@@ -186,10 +186,7 @@ def get_openai_model():
     global openai_model
     if openai_model is None and OPENAI_API_KEY:
         try:
-            # Configure OpenAI client to include usage information
-            import openai
-            client = openai.OpenAI(api_key=OPENAI_API_KEY)
-            openai_model = OpenAIModel(MODEL_NAME, client=client)
+            openai_model = OpenAIModel(MODEL_NAME, api_key=OPENAI_API_KEY)
             logger.info("✅ OpenAI model initialized")
         except Exception as e:
             logger.error(f"❌ Failed to initialize OpenAI model: {e}")
