@@ -45,54 +45,43 @@ async def get_db_connection():
 
 
 async def get_gemini_usage() -> dict:
-    """Get Gemini API token usage from cache or llm_providers table."""
+    """Get Gemini API token usage by calculating totals from token_usage_log table."""
     logger.info("🔍 get_gemini_usage called")
     try:
         db = await get_db_connection()
         if db and hasattr(db, '_pool') and db._pool is not None:
             logger.info("✅ Database connection available for Gemini usage")
             async with db.acquire() as conn:
-                # First try token_usage_cache table
-                query = """
-                    SELECT used, available, limit_value
-                    FROM token_usage_cache
-                    WHERE provider = 'gemini'
-                    ORDER BY last_updated DESC
-                    LIMIT 1
-                    """
-                logger.info(f"🔍 Executing query on token_usage_cache: {query.strip()}")
-                cached = await conn.fetchrow(query)
-                if cached:
-                    logger.info(f"Found Gemini usage in cache: used={cached['used']}, available={cached['available']}, limit={cached['limit_value']}")
-                    return {
-                        "used": cached['used'] or 0,
-                        "available": cached['available'] or 20000,
-                        "limit": cached['limit_value'] or 20000
-                    }
-
-                # Fallback to llm_providers table
+                # Calculate total used tokens from log table
                 query = """
                     SELECT
-                        COALESCE(token_used, 0) as used,
-                        COALESCE(token_limit, 20000) as limit_value
+                        COALESCE(SUM(total_tokens), 0) as total_used
+                    FROM token_usage_log
+                    WHERE provider = 'gemini'
+                """
+                logger.info(f"🔍 Calculating Gemini usage from token_usage_log: {query.strip()}")
+                result = await conn.fetchrow(query)
+                used = result['total_used'] or 0
+
+                # Get limit from llm_providers table
+                limit_query = """
+                    SELECT COALESCE(token_limit, 20000) as limit_value
                     FROM llm_providers
                     WHERE provider_name = 'gemini' AND is_active = true
-                    """
-                logger.info(f"🔍 Executing query on llm_providers: {query.strip()}")
-                config = await conn.fetchrow(query)
-                if config:
-                    used = config['used']
-                    limit = config['limit_value']
-                    available = limit - used
-                    logger.info(f"Found Gemini usage in llm_providers: used={used}, available={available}, limit={limit}")
-                    return {
-                        "used": used,
-                        "available": available,
-                        "limit": limit
-                    }
+                """
+                limit_result = await conn.fetchrow(limit_query)
+                limit = limit_result['limit_value'] if limit_result else 20000
+                available = max(0, limit - used)
+
+                logger.info(f"✅ Gemini usage calculated: used={used}, available={available}, limit={limit}")
+                return {
+                    "used": used,
+                    "available": available,
+                    "limit": limit
+                }
 
         # Default values if no data found
-        logger.warning("No Gemini usage data found, returning defaults")
+        logger.warning("No database connection available, returning defaults")
         return {
             "used": 0,
             "available": 20000,
@@ -102,69 +91,47 @@ async def get_gemini_usage() -> dict:
         logger.error(f"❌ Exception in get_gemini_usage: {e}", exc_info=True)
         import traceback
         logger.error(f"❌ Full traceback: {traceback.format_exc()}")
-        return {
-            "used": 0,
-            "available": 20000,
-            "limit": 20000
-        }
-    except Exception as e:
-        logger.error(f"Error fetching Gemini usage: {e}", exc_info=True)
-        return {
-            "used": 0,
-            "available": 20000,
-            "limit": 20000
-        }
+        raise HTTPException(status_code=500, detail=f"Error fetching Gemini usage: {str(e)}")
 
 
 async def get_openai_usage() -> dict:
-    """Get OpenAI API token usage from cache or llm_providers table."""
+    """Get OpenAI API token usage by calculating totals from token_usage_log table."""
     logger.info("🔍 get_openai_usage called")
     try:
         db = await get_db_connection()
         if db and hasattr(db, '_pool') and db._pool is not None:
             logger.info("✅ Database connection available for OpenAI usage")
             async with db.acquire() as conn:
-                # First try token_usage_cache table
-                query = """
-                    SELECT used, available, limit_value
-                    FROM token_usage_cache
-                    WHERE provider = 'openai'
-                    ORDER BY last_updated DESC
-                    LIMIT 1
-                    """
-                logger.info(f"🔍 Executing query on token_usage_cache: {query.strip()}")
-                cached = await conn.fetchrow(query)
-                if cached:
-                    logger.info(f"Found OpenAI usage in cache: used={cached['used']}, available={cached['available']}, limit={cached['limit_value']}")
-                    return {
-                        "used": cached['used'] or 0,
-                        "available": cached['available'] or 150000,
-                        "limit": cached['limit_value'] or 150000
-                    }
-
-                # Fallback to llm_providers table (using deepseek provider for backward compatibility)
+                # Calculate total used tokens from log table
                 query = """
                     SELECT
-                        COALESCE(token_used, 0) as used,
-                        COALESCE(token_limit, 150000) as limit_value
+                        COALESCE(SUM(total_tokens), 0) as total_used
+                    FROM token_usage_log
+                    WHERE provider = 'openai'
+                """
+                logger.info(f"🔍 Calculating OpenAI usage from token_usage_log: {query.strip()}")
+                result = await conn.fetchrow(query)
+                used = result['total_used'] or 0
+
+                # Get limit from llm_providers table (using deepseek for backward compatibility)
+                limit_query = """
+                    SELECT COALESCE(token_limit, 150000) as limit_value
                     FROM llm_providers
                     WHERE provider_name = 'deepseek' AND is_active = true
-                    """
-                logger.info(f"🔍 Executing query on llm_providers: {query.strip()}")
-                config = await conn.fetchrow(query)
-                if config:
-                    used = config['used']
-                    limit = config['limit_value']
-                    available = limit - used
-                    logger.info(f"Found OpenAI usage in llm_providers: used={used}, available={available}, limit={limit}")
-                    return {
-                        "used": used,
-                        "available": available,
-                        "limit": limit
-                    }
+                """
+                limit_result = await conn.fetchrow(limit_query)
+                limit = limit_result['limit_value'] if limit_result else 150000
+                available = max(0, limit - used)
+
+                logger.info(f"✅ OpenAI usage calculated: used={used}, available={available}, limit={limit}")
+                return {
+                    "used": used,
+                    "available": available,
+                    "limit": limit
+                }
 
         # Default values if no data found
-        logger.warning("No OpenAI usage data found, returning defaults")
+        logger.warning("No database connection available, returning defaults")
         return {
             "used": 0,
             "available": 150000,
@@ -174,18 +141,7 @@ async def get_openai_usage() -> dict:
         logger.error(f"❌ Exception in get_openai_usage: {e}", exc_info=True)
         import traceback
         logger.error(f"❌ Full traceback: {traceback.format_exc()}")
-        return {
-            "used": 0,
-            "available": 150000,
-            "limit": 150000
-        }
-    except Exception as e:
-        logger.error(f"Error fetching OpenAI usage: {e}", exc_info=True)
-        return {
-            "used": 0,
-            "available": 150000,
-            "limit": 150000
-        }
+        raise HTTPException(status_code=500, detail=f"Error fetching OpenAI usage: {str(e)}")
 
 
 async def initialize_token_usage_if_needed():
@@ -239,68 +195,6 @@ async def get_token_usage():
     except Exception as e:
         logger.error(f"Error fetching token usage: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching token usage: {str(e)}")
-
-
-@router.post("/token-usage/sync-cache")
-async def sync_token_usage_cache():
-    """Sync token_usage_cache table with actual totals from token_usage_log table."""
-    try:
-        db = await get_db_connection()
-        if db and hasattr(db, '_pool') and db._pool is not None:
-            async with db.acquire() as conn:
-                # Sync OpenAI cache
-                openai_query = """
-                    SELECT
-                        SUM(total_tokens) as total_used,
-                        MAX(total_tokens) as latest_total
-                    FROM token_usage_log
-                    WHERE provider = 'openai'
-                """
-                openai_result = await conn.fetchrow(openai_query)
-                if openai_result and openai_result['total_used']:
-                    # Update cache with actual total
-                    await conn.execute("""
-                        INSERT INTO token_usage_cache (provider, used, available, limit_value, last_updated)
-                        VALUES ('openai', $1, GREATEST(0, 150000 - $1), 150000, NOW())
-                        ON CONFLICT (provider) DO UPDATE
-                        SET used = $1,
-                            available = GREATEST(0, 150000 - $1),
-                            last_updated = NOW()
-                    """, openai_result['total_used'])
-                    logger.info(f"✅ Synced OpenAI cache: {openai_result['total_used']} total tokens")
-
-                # Sync Gemini cache
-                gemini_query = """
-                    SELECT
-                        SUM(total_tokens) as total_used,
-                        MAX(total_tokens) as latest_total
-                    FROM token_usage_log
-                    WHERE provider = 'gemini'
-                """
-                gemini_result = await conn.fetchrow(gemini_query)
-                if gemini_result and gemini_result['total_used']:
-                    # Update cache with actual total
-                    await conn.execute("""
-                        INSERT INTO token_usage_cache (provider, used, available, limit_value, last_updated)
-                        VALUES ('gemini', $1, GREATEST(0, 20000 - $1), 20000, NOW())
-                        ON CONFLICT (provider) DO UPDATE
-                        SET used = $1,
-                            available = GREATEST(0, 20000 - $1),
-                            last_updated = NOW()
-                    """, gemini_result['total_used'])
-                    logger.info(f"✅ Synced Gemini cache: {gemini_result['total_used']} total tokens")
-
-                return {
-                    "success": True,
-                    "message": "Token usage cache synchronized with log data",
-                    "openai_synced": openai_result['total_used'] if openai_result else 0,
-                    "gemini_synced": gemini_result['total_used'] if gemini_result else 0
-                }
-
-        return {"success": False, "error": "Database not available"}
-    except Exception as e:
-        logger.error(f"❌ Error syncing token usage cache: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
 
 
 @router.get("/token-usage/detailed", response_model=dict)
