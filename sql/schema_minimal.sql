@@ -428,21 +428,6 @@ CREATE INDEX idx_chat_feedback_created_at ON chat_feedback(created_at);
 -- TOKEN USAGE TABLES
 -- ============================================================================
 
--- Token Usage Cache table
-CREATE TABLE token_usage_cache (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    provider_name VARCHAR(100) NOT NULL,
-    model_name VARCHAR(100),
-    tokens_used INTEGER NOT NULL DEFAULT 0,
-    request_count INTEGER NOT NULL DEFAULT 1,
-    last_updated TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(provider_name, model_name)
-);
-
-CREATE INDEX idx_token_usage_cache_provider ON token_usage_cache(provider_name);
-CREATE INDEX idx_token_usage_cache_last_updated ON token_usage_cache(last_updated);
-
 -- ============================================================================
 -- INITIAL DATA
 -- ============================================================================
@@ -511,7 +496,6 @@ ALTER TABLE api_usage OWNER TO postgres;
 ALTER TABLE metrics OWNER TO postgres;
 ALTER TABLE notifications OWNER TO postgres;
 ALTER TABLE email_oauth_credentials OWNER TO postgres;
-ALTER TABLE token_usage_cache OWNER TO postgres;
 
 -- ============================================================================
 -- COMMENTS
@@ -538,4 +522,3 @@ COMMENT ON TABLE api_usage IS 'API usage tracking and analytics';
 COMMENT ON TABLE metrics IS 'System metrics and performance data';
 COMMENT ON TABLE notifications IS 'User notifications and alerts';
 COMMENT ON TABLE email_oauth_credentials IS 'Email service OAuth credentials';
-COMMENT ON TABLE token_usage_cache IS 'Cached token usage statistics for LLM providers';

@@ -538,19 +538,6 @@ COMMENT ON TABLE email_oauth_credentials IS 'Email service OAuth credentials (si
 -- ============================================================================
 -- CACHE AND TEMPORARY TABLES
 -- ============================================================================
-
--- Token usage cache
-CREATE TABLE token_usage_cache (
-    provider VARCHAR(50) PRIMARY KEY,
-    used BIGINT NOT NULL,
-    available BIGINT NOT NULL,
-    limit_value BIGINT NOT NULL,
-    last_updated TIMESTAMP DEFAULT NOW()
-);
-
-COMMENT ON TABLE token_usage_cache IS 'Cached token usage for quick lookups';
-
--- ============================================================================
 -- TOKEN USAGE LOG - Detailed per-request tracking
 -- ============================================================================
 
@@ -702,7 +689,6 @@ ALTER TABLE api_usage OWNER TO postgres;
 ALTER TABLE metrics OWNER TO postgres;
 ALTER TABLE notifications OWNER TO postgres;
 ALTER TABLE email_oauth_credentials OWNER TO postgres;
-ALTER TABLE token_usage_cache OWNER TO postgres;
 ALTER VIEW user_roles OWNER TO postgres;
 ALTER FUNCTION get_user_role(VARCHAR) OWNER TO postgres;
 ALTER FUNCTION update_updated_at_column() OWNER TO postgres;

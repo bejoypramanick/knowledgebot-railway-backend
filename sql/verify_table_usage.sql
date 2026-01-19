@@ -22,7 +22,7 @@ SELECT
 -- admins, human_agents, user_unique_ids, configuration_metadata,
 -- notification_settings, security_settings, llm_providers,
 -- persona_configurations, widget_configuration, widget_suggested_messages,
--- widget_scripts, chat_sessions, chat_messages, chat_feedback, token_usage_cache
+-- widget_scripts, chat_sessions, chat_messages, chat_feedback
 
 -- Tables that can be DROPPED (not referenced in current codebase):
 SELECT
