@@ -198,10 +198,6 @@ async def get_performance_metrics():
                         'total_feedback_7d': 0, 'positive_feedback_7d': 0, 'overall_score': 4.0, 'daily_scores': []
                     }
 
-                    logger.debug(f"Performance metrics: satisfaction_data = {satisfaction_data}")
-                    logger.debug(f"Performance metrics: daily_scores type = {type(satisfaction_data.get('daily_scores'))}")
-                    logger.debug(f"Performance metrics: daily_scores value = {satisfaction_data.get('daily_scores')}")
-
                     total_feedback = satisfaction_data['total_feedback_7d']
                     satisfaction_score = satisfaction_data['overall_score']
 
