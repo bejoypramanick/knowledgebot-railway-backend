@@ -354,9 +354,12 @@ neon_db: Optional[Database] = None
 async def init_railway_db(connection_url: str):
     """Initialize Railway PostgreSQL database connection with serverless optimization."""
     global railway_db
-    
+
+    logger.info(f"🔍 init_railway_db called with URL available: {connection_url is not None}")
+
     # If railway_db already exists and has a healthy pool, reuse it
     if railway_db is not None:
+        logger.info(f"🔍 railway_db exists: {railway_db is not None}, has_pool: {hasattr(railway_db, '_pool')}, pool_not_none: {railway_db._pool is not None if hasattr(railway_db, '_pool') else False}")
         if hasattr(railway_db, '_pool') and railway_db._pool is not None:
             # Test pool health before reusing
             try:
@@ -372,21 +375,31 @@ async def init_railway_db(connection_url: str):
                     await railway_db.disconnect()
                 except:
                     pass  # Ignore errors during cleanup
-        
+
         # If it exists but has no pool, try to connect it
         if hasattr(railway_db, 'connection_url') and railway_db.connection_url == connection_url:
             logger.info("🔄 Railway database instance exists but pool is missing, attempting to connect...")
             try:
                 await railway_db.connect(min_size=5, max_size=20)  # Production-optimized
+                logger.info(f"✅ Connected existing instance, railway_db._pool: {railway_db._pool is not None if railway_db else None}")
                 return railway_db
             except Exception as e:
                 logger.warning(f"⚠️ Failed to connect existing instance: {e}")
-    
+                import traceback
+                logger.warning(f"⚠️ Full traceback: {traceback.format_exc()}")
+
     # Create new database instance with serverless-optimized settings
     logger.info("🆕 Creating new Railway database connection pool (serverless optimized)")
-    railway_db = Database(connection_url=connection_url)
-    await railway_db.connect(min_size=5, max_size=20)  # Production-optimized
-    return railway_db
+    try:
+        railway_db = Database(connection_url=connection_url)
+        await railway_db.connect(min_size=5, max_size=20)  # Production-optimized
+        logger.info(f"✅ New database instance created, railway_db._pool: {railway_db._pool is not None if railway_db else None}")
+        return railway_db
+    except Exception as e:
+        logger.error(f"❌ Failed to create new database instance: {e}")
+        import traceback
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+        raise
 
 
 async def init_neon_db(connection_url: str):
