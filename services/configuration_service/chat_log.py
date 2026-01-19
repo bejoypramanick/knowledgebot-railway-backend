@@ -1598,6 +1598,11 @@ async def update_chat_session(
                 'success': True,
                 'message': 'Session updated successfully'
             }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating chat session: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/chat-sessions/{session_id}/end-customer", response_model=dict)
