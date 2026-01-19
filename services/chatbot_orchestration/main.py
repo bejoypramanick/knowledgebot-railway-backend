@@ -1417,7 +1417,7 @@ async def chat(request: ChatRequest):
                         RETURNING id
                         """,
                         session_db_id,
-                        "assistant",
+                        "bot",
                         response_data.answer,
                         "rag" in response_data.data_sources_used,
                         "postgres" in response_data.data_sources_used,

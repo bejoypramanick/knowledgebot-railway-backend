@@ -875,8 +875,8 @@ async def get_assigned_chat_sessions(
                 
                 messages = []
                 for msg in messages_data:
-                    # Map role to sender: 'user' -> 'user', 'assistant' -> 'bot', 'agent' -> 'agent'
-                    sender = 'bot' if msg['role'] == 'assistant' else msg['role']
+                    # Map role to sender: 'user' -> 'user', 'bot' -> 'bot', 'agent' -> 'agent'
+                    sender = msg['role']  # Database roles now match API sender values
                     messages.append(ChatMessageResponse(
                         id=str(msg['id']),
                         text=msg['content'],
@@ -1132,7 +1132,7 @@ async def get_session_messages(
             
             messages = []
             for msg in messages_data:
-                sender = 'bot' if msg['role'] == 'assistant' else msg['role']
+                sender = msg['role']  # Database roles now match API sender values
                 messages.append({
                     "id": str(msg['id']),
                     "text": msg['content'],
@@ -1535,7 +1535,7 @@ async def update_chat_session(
                             # Prepare messages for sentiment analysis
                             messages_for_analysis = [
                                 {
-                                    'sender': 'bot' if msg['role'] == 'assistant' else msg['role'],
+                                    'sender': msg['role'],  # Database roles now match API sender values
                                     'text': msg['content']
                                 }
                                 for msg in messages_data

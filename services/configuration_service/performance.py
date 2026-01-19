@@ -114,7 +114,7 @@ async def get_performance_metrics():
                             SELECT COUNT(DISTINCT cm.session_id)
                             FROM chat_messages cm
                             INNER JOIN chat_sessions cs ON cm.session_id = cs.id
-                            WHERE cm.role = 'assistant'
+                            WHERE cm.role = 'bot'
                         """) or 0
                 except Exception as e:
                     logger.error(f"Performance metrics: Error in deflection query: {e}")
