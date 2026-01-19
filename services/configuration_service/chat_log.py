@@ -1596,6 +1596,70 @@ async def update_chat_session(
                 'success': True,
                 'message': 'Session updated successfully'
             }
+
+
+@router.post("/chat-sessions/{session_id}/end-customer", response_model=dict)
+async def end_customer_session(
+    session_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    End a chat session from the customer side.
+    This marks the session as closed and ended by the customer.
+    """
+    try:
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
+            user_email = current_user.get('email')
+            if not user_email:
+                raise HTTPException(status_code=400, detail="User email is required")
+
+            # Get session database ID
+            session_db_id = await conn.fetchval(
+                "SELECT id FROM chat_sessions WHERE session_id = $1",
+                session_id
+            )
+
+            if not session_db_id:
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            # Update session to closed status
+            await conn.execute(
+                """
+                UPDATE chat_sessions
+                SET status = 'closed', updated_at = CURRENT_TIMESTAMP
+                WHERE id = $1
+                """,
+                session_db_id
+            )
+
+            logger.info(f"Customer {user_email} ended session {session_id}")
+
+            # Broadcast session ended message
+            session_ended_message = {
+                "type": "session_ended",
+                "session_id": session_id,
+                "text": "Session has been ended by the customer.",
+                "ended_by": "customer",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+            try:
+                await connection_manager.broadcast_to_session(session_ended_message, session_id)
+                logger.info(f"Broadcasted session ended message to session {session_id}: ended by customer")
+            except Exception as e:
+                logger.error(f"Error broadcasting session ended message: {e}")
+
+            return {
+                'success': True,
+                'message': 'Session ended successfully'
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error ending customer session: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
             
     except HTTPException:
         raise
