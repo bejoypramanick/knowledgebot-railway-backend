@@ -1540,7 +1540,8 @@ async def update_chat_session(
                                 }
                                 for msg in messages_data
                             ]
-                            sentiment_result = await analyze_and_store_sentiment(session_id, messages_for_analysis, conn)
+                            try:
+                                sentiment_result = await analyze_and_store_sentiment(session_id, messages_for_analysis, conn)
                             if sentiment_result:
                                 logger.info(f"Successfully analyzed and stored sentiment '{sentiment_result}' for closed session {session_id}")
                             else:
@@ -1556,8 +1557,8 @@ async def update_chat_session(
                                     logger.warning(f"Conversation summarization returned None for closed session {session_id}")
                             except Exception as e:
                                 logger.warning(f"Could not generate conversation summary for closed session {session_id}: {e}")
-                except Exception as e:
-                    logger.warning(f"Could not analyze sentiment for closed session {session_id}: {e}")
+                            except Exception as e:
+                                logger.warning(f"Could not analyze sentiment for closed session {session_id}: {e}")
             
             # If session is being closed, broadcast a message to all connected clients
             if status == 'closed' and assigned_agent == '':
