@@ -93,6 +93,11 @@ Your response should be just the single word, nothing else."""
                 max_tokens=10
             )
 
+            # Log the full OpenAI response for debugging token usage
+            logger.info(f"🔍 OpenAI Sentiment Response Details: usage={getattr(response, 'usage', 'NO_USAGE')}, choices={len(getattr(response, 'choices', []))}")
+            if hasattr(response, 'usage') and response.usage:
+                logger.info(f"📊 OpenAI Sentiment Usage: {response.usage}")
+
             # Track token usage for sentiment analysis
             if hasattr(response, 'usage') and response.usage:
                 await track_openai_usage_from_response(response.usage, None, None, 'sentiment_analysis', 'gpt-4o-mini')
@@ -219,6 +224,11 @@ Summary:"""
             max_tokens=300,
             temperature=0.3
         )
+
+        # Log the full OpenAI response for debugging token usage
+        logger.info(f"🔍 OpenAI Summary Response Details: usage={getattr(response, 'usage', 'NO_USAGE')}, choices={len(getattr(response, 'choices', []))}")
+        if hasattr(response, 'usage') and response.usage:
+            logger.info(f"📊 OpenAI Summary Usage: {response.usage}")
 
         # Track token usage for conversation summary
         if hasattr(response, 'usage') and response.usage:

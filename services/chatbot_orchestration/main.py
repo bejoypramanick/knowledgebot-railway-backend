@@ -889,6 +889,11 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 contents=contents
             )
 
+            # Log the full Gemini response for debugging token usage
+            logger.info(f"🔍 Gemini RAG Response Details: usage_metadata={getattr(response, 'usage_metadata', 'NO_USAGE_METADATA')}")
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                logger.info(f"📊 Gemini RAG Usage Metadata: {response.usage_metadata}")
+
             # Track Gemini token usage from response (correlated with session)
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 await track_gemini_usage_from_response(response.usage_metadata, session_id, None, 'rag')
