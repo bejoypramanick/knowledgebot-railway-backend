@@ -30,15 +30,15 @@ async def init_database_schema(database_url: str):
     """Initialize database schema if tables don't exist"""
     try:
         conn = await asyncpg.connect(database_url)
-        
-        # Check if widget_configuration table exists
+
+        # Check if widget_configuration table exists (main schema indicator)
         widget_exists = await conn.fetchval(
             "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'widget_configuration')"
         )
-        
+
         if not widget_exists:
             logger.info("📊 Database tables not found, initializing schema...")
-            
+
             # Read and execute schema
             schema_path = Path(__file__).parent.parent.parent / "sql" / "schema_3nf.sql"
             if schema_path.exists():
@@ -49,9 +49,51 @@ async def init_database_schema(database_url: str):
                 logger.warning(f"⚠️ Schema file not found: {schema_path}")
         else:
             logger.info("✅ Database tables already exist")
-            
+
+        # Check for token_usage_log table (added later) and create if missing
+        token_log_exists = await conn.fetchval(
+            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'token_usage_log')"
+        )
+
+        if not token_log_exists:
+            logger.info("📊 token_usage_log table not found, creating...")
+
+            # Read and execute token usage log migration
+            migration_path = Path(__file__).parent.parent.parent.parent / "add_token_usage_log_migration.sql"
+            if migration_path.exists():
+                migration_sql = migration_path.read_text()
+                await conn.execute(migration_sql)
+                logger.info("✅ token_usage_log table created successfully")
+            else:
+                logger.warning(f"⚠️ Token usage migration file not found: {migration_path}")
+
+                # Create table directly if migration file not found
+                await conn.execute("""
+                    CREATE TABLE IF NOT EXISTS token_usage_log (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        session_id UUID REFERENCES chat_sessions(id) ON DELETE CASCADE,
+                        message_id UUID REFERENCES chat_messages(id) ON DELETE CASCADE,
+                        provider VARCHAR(50) NOT NULL,
+                        model VARCHAR(100),
+                        prompt_tokens INTEGER DEFAULT 0,
+                        completion_tokens INTEGER DEFAULT 0,
+                        total_tokens INTEGER DEFAULT 0,
+                        cost_cents INTEGER DEFAULT 0,
+                        api_call_type VARCHAR(50),
+                        request_metadata JSONB,
+                        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_token_usage_log_session ON token_usage_log(session_id);
+                    CREATE INDEX IF NOT EXISTS idx_token_usage_log_provider ON token_usage_log(provider);
+                    CREATE INDEX IF NOT EXISTS idx_token_usage_log_created_at ON token_usage_log(created_at DESC);
+                    COMMENT ON TABLE token_usage_log IS 'Detailed token usage log for correlating usage with specific API calls';
+                """)
+                logger.info("✅ token_usage_log table created directly")
+        else:
+            logger.info("✅ token_usage_log table already exists")
+
         await conn.close()
-        
+
     except Exception as e:
         logger.error(f"❌ Database schema initialization error: {e}")
         raise

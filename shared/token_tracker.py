@@ -95,7 +95,7 @@ async def track_openai_usage(input_tokens: int, output_tokens: int, session_id: 
                         session_id, message_id, model, input_tokens, output_tokens, total_tokens, api_call_type
                     )
 
-                logger.debug(f"Tracked OpenAI usage: {total_tokens} tokens (input: {input_tokens}, output: {output_tokens}), total used: {current_usage}, session: {session_id}")
+                logger.info(f"✅ Tracked OpenAI usage: {total_tokens} tokens (input: {input_tokens}, output: {output_tokens}), total used: {current_usage}, session: {session_id}")
         else:
             logger.warning("Database not available for token tracking")
     except Exception as e:
@@ -168,7 +168,7 @@ async def track_gemini_usage(prompt_tokens: int, candidates_tokens: int, session
                         session_id, message_id, model, prompt_tokens, candidates_tokens, total_tokens, api_call_type
                     )
 
-                logger.debug(f"Tracked Gemini usage: {total_tokens} tokens (prompt: {prompt_tokens}, candidates: {candidates_tokens}), total used: {current_usage}, session: {session_id}")
+                logger.info(f"✅ Tracked Gemini usage: {total_tokens} tokens (prompt: {prompt_tokens}, candidates: {candidates_tokens}), total used: {current_usage}, session: {session_id}")
         else:
             logger.warning("Database not available for token tracking")
     except Exception as e:
@@ -186,17 +186,25 @@ async def track_openai_usage_from_response(usage_obj, session_id: str = None, me
         api_call_type: Type of API call ('chat', 'sentiment', 'summary', etc.)
         model: Specific model used (optional)
     """
+    logger.info(f"🔍 Token tracking called for OpenAI - session: {session_id}, message: {message_id}, type: {api_call_type}, model: {model}")
+
     if not usage_obj:
+        logger.warning("⚠️ OpenAI usage object is None or empty")
         return
 
     try:
         input_tokens = getattr(usage_obj, 'prompt_tokens', 0) or getattr(usage_obj, 'input_tokens', 0) or 0
         output_tokens = getattr(usage_obj, 'completion_tokens', 0) or getattr(usage_obj, 'output_tokens', 0) or 0
 
+        logger.info(f"📊 OpenAI usage extracted - input: {input_tokens}, output: {output_tokens}, total: {input_tokens + output_tokens}")
+
         if input_tokens > 0 or output_tokens > 0:
             await track_openai_usage(input_tokens, output_tokens, session_id, message_id, api_call_type, model)
+            logger.info("✅ OpenAI token tracking completed successfully")
+        else:
+            logger.warning("⚠️ No token usage to track (zero tokens)")
     except Exception as e:
-        logger.error(f"Error extracting OpenAI usage from response: {e}", exc_info=True)
+        logger.error(f"❌ Error extracting OpenAI usage from response: {e}", exc_info=True)
 
 
 async def track_gemini_usage_from_response(usage_metadata, session_id: str = None, message_id: str = None, api_call_type: str = 'rag', model: str = 'gemini-2.5-flash-lite'):
@@ -210,15 +218,23 @@ async def track_gemini_usage_from_response(usage_metadata, session_id: str = Non
         api_call_type: Type of API call ('rag', 'search', etc.)
         model: Specific model used (default: gemini-2.5-flash-lite)
     """
+    logger.info(f"🔍 Token tracking called for Gemini - session: {session_id}, message: {message_id}, type: {api_call_type}, model: {model}")
+
     if not usage_metadata:
+        logger.warning("⚠️ Gemini usage_metadata is None or empty")
         return
 
     try:
         prompt_tokens = getattr(usage_metadata, 'prompt_token_count', 0) or 0
         candidates_tokens = getattr(usage_metadata, 'candidates_token_count', 0) or 0
 
+        logger.info(f"📊 Gemini usage extracted - prompt: {prompt_tokens}, candidates: {candidates_tokens}, total: {prompt_tokens + candidates_tokens}")
+
         if prompt_tokens > 0 or candidates_tokens > 0:
             await track_gemini_usage(prompt_tokens, candidates_tokens, session_id, message_id, api_call_type, model)
+            logger.info("✅ Gemini token tracking completed successfully")
+        else:
+            logger.warning("⚠️ No token usage to track (zero tokens)")
     except Exception as e:
-        logger.error(f"Error extracting Gemini usage from response: {e}", exc_info=True)
+        logger.error(f"❌ Error extracting Gemini usage from response: {e}", exc_info=True)
 
