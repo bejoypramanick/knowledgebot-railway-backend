@@ -355,33 +355,49 @@ async def get_user_roles(
         from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
 
-            # Check admin and human_agent tables to determine all roles for the user
-            logger.info(f"📊 Checking admin and human_agent tables for email: {current_user.get('email')}")
+            user_email = current_user.get('email')
+            logger.info(f"📊 Checking admin and human_agent tables for email: {user_email}")
+
+            # Check what tables the user exists in
+            admin_exists = await conn.fetchval(
+                "SELECT COUNT(*) FROM admins WHERE email = $1",
+                user_email
+            )
+            agent_exists = await conn.fetchval(
+                "SELECT COUNT(*) FROM human_agents WHERE email = $1",
+                user_email
+            )
+
+            logger.info(f"🔍 User {user_email} exists in tables - admins: {admin_exists}, human_agents: {agent_exists}")
 
             roles = ['user']  # Everyone has user role as base
 
             # Check admin table
             admin_check = await conn.fetchrow(
                 "SELECT status FROM admins WHERE email = $1 AND status = 'confirmed'",
-                current_user.get('email')
+                user_email
             )
 
             if admin_check:
                 roles.append('admin')
-                logger.info(f"👑 Admin role confirmed for {current_user.get('email')}")
+                logger.info(f"👑 Admin role confirmed for {user_email} (status: {admin_check['status']})")
+            else:
+                logger.info(f"❌ Admin check failed for {user_email}")
 
             # Check human_agent table
             agent_check = await conn.fetchrow(
                 "SELECT status FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
-                current_user.get('email')
+                user_email
             )
 
             if agent_check:
                 roles.append('human_agent')
-                logger.info(f"🤖 Human agent role confirmed for {current_user.get('email')}")
+                logger.info(f"🤖 Human agent role confirmed for {user_email} (status: {agent_check['status']})")
+            else:
+                logger.info(f"❌ Human agent check failed for {user_email}")
 
-            logger.info(f"📋 Final roles for {current_user.get('email')}: {roles}")
-            logger.info(f"👤 User {current_user.get('email')} has {len(roles)} total roles: {', '.join(roles)}")
+            logger.info(f"📋 Final roles for {user_email}: {roles}")
+            logger.info(f"👤 User {user_email} has {len(roles)} total roles: {', '.join(roles)}")
             return roles
 
             # Default to user role
