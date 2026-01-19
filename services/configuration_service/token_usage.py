@@ -241,6 +241,68 @@ async def get_token_usage():
         raise HTTPException(status_code=500, detail=f"Error fetching token usage: {str(e)}")
 
 
+@router.post("/token-usage/sync-cache")
+async def sync_token_usage_cache():
+    """Sync token_usage_cache table with actual totals from token_usage_log table."""
+    try:
+        db = await get_db_connection()
+        if db and hasattr(db, '_pool') and db._pool is not None:
+            async with db.acquire() as conn:
+                # Sync OpenAI cache
+                openai_query = """
+                    SELECT
+                        SUM(total_tokens) as total_used,
+                        MAX(total_tokens) as latest_total
+                    FROM token_usage_log
+                    WHERE provider = 'openai'
+                """
+                openai_result = await conn.fetchrow(openai_query)
+                if openai_result and openai_result['total_used']:
+                    # Update cache with actual total
+                    await conn.execute("""
+                        INSERT INTO token_usage_cache (provider, used, available, limit_value, last_updated)
+                        VALUES ('openai', $1, GREATEST(0, 150000 - $1), 150000, NOW())
+                        ON CONFLICT (provider) DO UPDATE
+                        SET used = $1,
+                            available = GREATEST(0, 150000 - $1),
+                            last_updated = NOW()
+                    """, openai_result['total_used'])
+                    logger.info(f"✅ Synced OpenAI cache: {openai_result['total_used']} total tokens")
+
+                # Sync Gemini cache
+                gemini_query = """
+                    SELECT
+                        SUM(total_tokens) as total_used,
+                        MAX(total_tokens) as latest_total
+                    FROM token_usage_log
+                    WHERE provider = 'gemini'
+                """
+                gemini_result = await conn.fetchrow(gemini_query)
+                if gemini_result and gemini_result['total_used']:
+                    # Update cache with actual total
+                    await conn.execute("""
+                        INSERT INTO token_usage_cache (provider, used, available, limit_value, last_updated)
+                        VALUES ('gemini', $1, GREATEST(0, 20000 - $1), 20000, NOW())
+                        ON CONFLICT (provider) DO UPDATE
+                        SET used = $1,
+                            available = GREATEST(0, 20000 - $1),
+                            last_updated = NOW()
+                    """, gemini_result['total_used'])
+                    logger.info(f"✅ Synced Gemini cache: {gemini_result['total_used']} total tokens")
+
+                return {
+                    "success": True,
+                    "message": "Token usage cache synchronized with log data",
+                    "openai_synced": openai_result['total_used'] if openai_result else 0,
+                    "gemini_synced": gemini_result['total_used'] if gemini_result else 0
+                }
+
+        return {"success": False, "error": "Database not available"}
+    except Exception as e:
+        logger.error(f"❌ Error syncing token usage cache: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
 @router.get("/token-usage/detailed", response_model=dict)
 async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_call_type: str = None):
     """Get detailed token usage log with correlations to specific requests."""
