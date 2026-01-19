@@ -92,35 +92,6 @@ async def init_database_schema(database_url: str):
         else:
             logger.info("✅ token_usage_log table already exists")
 
-        # Check if detailed token fields migration is needed
-        detailed_fields_exist = await conn.fetchval(
-            "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'token_usage_log' AND column_name = 'cache_read_tokens')"
-        )
-
-        if not detailed_fields_exist:
-            logger.info("📊 Detailed token fields not found, running migration...")
-
-            # Read and execute detailed token fields migration
-            migration_path = Path(__file__).parent.parent.parent.parent / "add_detailed_token_fields_migration.sql"
-            if migration_path.exists():
-                migration_sql = migration_path.read_text()
-                await conn.execute(migration_sql)
-                logger.info("✅ Detailed token fields migration completed successfully")
-            else:
-                logger.warning(f"⚠️ Detailed token fields migration file not found: {migration_path}")
-
-                # Add columns directly if migration file not found
-                await conn.execute("""
-                    ALTER TABLE token_usage_log
-                    ADD COLUMN IF NOT EXISTS cache_read_tokens INTEGER DEFAULT 0,
-                    ADD COLUMN IF NOT EXISTS cache_write_tokens INTEGER DEFAULT 0,
-                    ADD COLUMN IF NOT EXISTS input_audio_tokens INTEGER DEFAULT 0,
-                    ADD COLUMN IF NOT EXISTS cache_audio_read_tokens INTEGER DEFAULT 0;
-                """)
-                logger.info("✅ Detailed token fields added directly")
-        else:
-            logger.info("✅ Detailed token fields already exist")
-
         await conn.close()
 
     except Exception as e:
