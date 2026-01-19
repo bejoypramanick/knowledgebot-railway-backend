@@ -18,10 +18,6 @@ CREATE TABLE admins (
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
     confirmation_token VARCHAR(255) UNIQUE,
     auto_generated_password VARCHAR(255),
-    display_name VARCHAR(255),
-    photo_url TEXT,
-    last_login TIMESTAMPTZ,
-    preferences JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     created_by_email VARCHAR(255),
@@ -39,10 +35,6 @@ CREATE TABLE human_agents (
     status VARCHAR(50) NOT NULL DEFAULT 'pending',
     confirmation_token VARCHAR(255) UNIQUE,
     auto_generated_password VARCHAR(255),
-    display_name VARCHAR(255),
-    photo_url TEXT,
-    last_login TIMESTAMPTZ,
-    preferences JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     created_by_email VARCHAR(255),
@@ -525,8 +517,8 @@ ALTER TABLE token_usage_cache OWNER TO postgres;
 -- COMMENTS
 -- ============================================================================
 
-COMMENT ON TABLE admins IS 'Admin users with elevated permissions and profile information';
-COMMENT ON TABLE human_agents IS 'Human agent users for customer support with profile information';
+COMMENT ON TABLE admins IS 'Admin users with elevated permissions (profile data from Firebase)';
+COMMENT ON TABLE human_agents IS 'Human agent users for customer support (profile data from Firebase)';
 COMMENT ON TABLE user_unique_ids IS 'Unique ID mappings for users across different roles';
 COMMENT ON TABLE configuration_metadata IS 'Global configuration settings and metadata';
 COMMENT ON TABLE notification_settings IS 'System-wide notification preferences';

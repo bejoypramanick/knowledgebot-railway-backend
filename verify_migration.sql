@@ -1,20 +1,18 @@
--- Verify that the database migration added the required columns
+-- Verify that the database has required indexes
 
--- Check admins table columns
-SELECT 'Admins table columns:' as check_type;
-SELECT column_name, data_type, is_nullable, column_default
+-- Check admins table structure (should NOT have profile columns)
+SELECT 'Admins table core columns:' as check_type;
+SELECT column_name, data_type, is_nullable
 FROM information_schema.columns
 WHERE table_name = 'admins'
-AND column_name IN ('display_name', 'photo_url', 'last_login', 'preferences', 'created_at', 'updated_at')
-ORDER BY column_name;
+ORDER BY ordinal_position;
 
--- Check human_agents table columns
-SELECT 'Human Agents table columns:' as check_type;
-SELECT column_name, data_type, is_nullable, column_default
+-- Check human_agents table structure (should NOT have profile columns)
+SELECT 'Human Agents table core columns:' as check_type;
+SELECT column_name, data_type, is_nullable
 FROM information_schema.columns
 WHERE table_name = 'human_agents'
-AND column_name IN ('display_name', 'photo_url', 'last_login', 'preferences', 'created_at', 'updated_at')
-ORDER BY column_name;
+ORDER BY ordinal_position;
 
 -- Check if indexes were created
 SELECT 'Indexes created:' as check_type;

@@ -1,40 +1,30 @@
--- Migration: Add user profile fields to admins and human_agents tables
--- This eliminates the need for the separate user_profiles table
-
--- Add profile columns to admins table
-ALTER TABLE admins
-ADD COLUMN IF NOT EXISTS display_name TEXT,
-ADD COLUMN IF NOT EXISTS photo_url TEXT,
-ADD COLUMN IF NOT EXISTS last_login TIMESTAMP WITH TIME ZONE,
-ADD COLUMN IF NOT EXISTS preferences JSONB DEFAULT '{}',
-ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-
--- Add profile columns to human_agents table
-ALTER TABLE human_agents
-ADD COLUMN IF NOT EXISTS display_name TEXT,
-ADD COLUMN IF NOT EXISTS photo_url TEXT,
-ADD COLUMN IF NOT EXISTS last_login TIMESTAMP WITH TIME ZONE,
-ADD COLUMN IF NOT EXISTS preferences JSONB DEFAULT '{}',
-ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+-- ============================================================================
+-- DATABASE MIGRATION: User Profile Simplification
+-- ============================================================================
+-- This migration ensures required indexes exist on admins and human_agents tables.
+-- No additional columns are needed since:
+-- - display_name, photo_url come from Firebase authentication at runtime
+-- - No user-specific preferences (all changes are global)
+-- - created_at, updated_at already exist in tables
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_admins_email_status ON admins(email, status);
 CREATE INDEX IF NOT EXISTS idx_human_agents_email_status ON human_agents(email, status);
 
--- Optional: Migrate existing data from user_profiles (run this only once)
--- INSERT INTO admins (email, display_name, photo_url, last_login, preferences, created_at)
--- SELECT email, display_name, photo_url, last_login, preferences, created_at
--- FROM user_profiles
--- WHERE role = 'admin' AND email IN (SELECT email FROM admins WHERE status = 'confirmed')
--- ON CONFLICT (email) DO NOTHING;
+-- ============================================================================
+-- VERIFICATION QUERIES (Run after migration)
+-- ============================================================================
 
--- INSERT INTO human_agents (email, display_name, photo_url, last_login, preferences, created_at)
--- SELECT email, display_name, photo_url, last_login, preferences, created_at
--- FROM user_profiles
--- WHERE role = 'human_agent' AND email IN (SELECT email FROM human_agents WHERE status IN ('confirmed', 'pending'))
--- ON CONFLICT (email) DO NOTHING;
+-- Check that indexes were created:
+-- SELECT indexname, tablename FROM pg_indexes
+-- WHERE tablename IN ('admins', 'human_agents')
+-- AND indexname LIKE '%email%status%';
 
--- After verifying the migration works, you can drop the user_profiles table:
--- DROP TABLE IF EXISTS user_profiles;
+-- Verify table structure (should NOT have profile columns):
+-- SELECT column_name FROM information_schema.columns
+-- WHERE table_name IN ('admins', 'human_agents')
+-- ORDER BY table_name, ordinal_position;
+
+-- Test profile endpoint works:
+-- SELECT email FROM admins WHERE status = 'confirmed' LIMIT 1;
+-- SELECT email FROM human_agents WHERE status IN ('confirmed', 'pending') LIMIT 1;
