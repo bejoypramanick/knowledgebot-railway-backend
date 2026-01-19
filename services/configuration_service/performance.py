@@ -304,7 +304,11 @@ async def get_performance_metrics():
                         })
 
                 logger.info("Performance metrics: Successfully calculated all metrics with parallel queries")
-                return {
+                logger.info(f"Performance metrics: total_interactions={total_interactions}, total_sessions={total_sessions}, active_sessions={active_sessions}")
+                logger.info(f"Performance metrics: interactions_over_time count={len(interactions_data)}")
+                logger.info(f"Performance metrics: satisfaction_over_time count={len(satisfaction_over_time)}")
+
+                result = {
                     "total_interactions": total_interactions,
                     "interactions_growth": interactions_growth,
                     "average_engagement_minutes": avg_engagement_minutes,
@@ -318,6 +322,9 @@ async def get_performance_metrics():
                     "total_sessions": total_sessions,
                     "active_sessions": active_sessions
                 }
+
+                logger.info(f"Performance metrics: Final result keys: {list(result.keys())}")
+                return result
             except Exception as query_error:
                 logger.error(f"Performance metrics: Database query error: {query_error}", exc_info=True)
                 logger.error(f"Performance metrics: Query error type: {type(query_error).__name__}")
