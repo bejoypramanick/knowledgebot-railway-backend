@@ -1559,7 +1559,9 @@ async def update_chat_session(
                                     logger.warning(f"Could not generate conversation summary for closed session {session_id}: {e}")
                             except Exception as e:
                                 logger.warning(f"Could not analyze sentiment for closed session {session_id}: {e}")
-            
+                except Exception as e:
+                    logger.warning(f"Could not check or analyze sentiment for closed session {session_id}: {e}")
+
             # If session is being closed, broadcast a message to all connected clients
             if status == 'closed' and assigned_agent == '':
                 # Determine if the user ending the session is an agent or customer
