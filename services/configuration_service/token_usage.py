@@ -20,23 +20,32 @@ router = APIRouter(prefix="/api/v1/admin", tags=["token-usage"])
 
 async def get_db_connection():
     """Get database connection, initializing if needed."""
+    logger.info(f"🔍 Checking database connection: railway_db={railway_db is not None}, has_pool={hasattr(railway_db, '_pool') if railway_db else False}, pool_not_none={railway_db._pool is not None if railway_db and hasattr(railway_db, '_pool') else False}")
+
     if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
+        logger.info("✅ Using existing database connection")
         return railway_db
-    
+
     # Initialize database if not already initialized
     database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+    logger.info(f"🔍 Database URL available: {database_url is not None}")
     if database_url:
+        logger.info("🔄 Initializing database connection...")
         await init_railway_db(database_url)
+        logger.info(f"✅ Database initialized: railway_db={railway_db is not None}")
         return railway_db
-    
+
+    logger.warning("❌ No database connection available")
     return None
 
 
 async def get_gemini_usage() -> dict:
     """Get Gemini API token usage from cache or llm_providers table."""
+    logger.info("🔍 get_gemini_usage called")
     try:
         db = await get_db_connection()
         if db and hasattr(db, '_pool') and db._pool is not None:
+            logger.info("✅ Database connection available for Gemini usage")
             async with db.acquire() as conn:
                 # First try token_usage_cache table
                 query = """
@@ -85,6 +94,13 @@ async def get_gemini_usage() -> dict:
             "limit": 20000
         }
     except Exception as e:
+        logger.error(f"❌ Exception in get_gemini_usage: {e}", exc_info=True)
+        return {
+            "used": 0,
+            "available": 20000,
+            "limit": 20000
+        }
+    except Exception as e:
         logger.error(f"Error fetching Gemini usage: {e}", exc_info=True)
         return {
             "used": 0,
@@ -95,9 +111,11 @@ async def get_gemini_usage() -> dict:
 
 async def get_openai_usage() -> dict:
     """Get OpenAI API token usage from cache or llm_providers table."""
+    logger.info("🔍 get_openai_usage called")
     try:
         db = await get_db_connection()
         if db and hasattr(db, '_pool') and db._pool is not None:
+            logger.info("✅ Database connection available for OpenAI usage")
             async with db.acquire() as conn:
                 # First try token_usage_cache table
                 query = """
@@ -140,6 +158,13 @@ async def get_openai_usage() -> dict:
 
         # Default values if no data found
         logger.warning("No OpenAI usage data found, returning defaults")
+        return {
+            "used": 0,
+            "available": 150000,
+            "limit": 150000
+        }
+    except Exception as e:
+        logger.error(f"❌ Exception in get_openai_usage: {e}", exc_info=True)
         return {
             "used": 0,
             "available": 150000,
@@ -189,6 +214,7 @@ async def initialize_token_usage_if_needed():
 @router.get("/token-usage", response_model=dict)
 async def get_token_usage():
     """Get token usage for Gemini and OpenAI."""
+    logger.info("🔍 get_token_usage endpoint called")
     try:
         # Initialize token usage if needed
         await initialize_token_usage_if_needed()
@@ -196,6 +222,7 @@ async def get_token_usage():
         gemini_usage = await get_gemini_usage()
         openai_usage = await get_openai_usage()
 
+        logger.info(f"✅ Token usage retrieved: gemini={gemini_usage}, openai={openai_usage}")
         return {
             "gemini": gemini_usage,
             "openai": openai_usage
