@@ -1351,17 +1351,8 @@ async def chat(request: ChatRequest):
                     "tool_calls": getattr(run_usage, 'tool_calls', 0),
                 }
 
-                # Track token usage in database with session and message correlation
-                if usage_info["input_tokens"] > 0 or usage_info["output_tokens"] > 0:
-                    # For OpenAI, use the openai tracking function
-                    if 'gpt' in MODEL_NAME.lower():
-                        await track_openai_usage_from_response(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
-                    # For Gemini, use the gemini tracking function
-                    elif 'gemini' in MODEL_NAME.lower():
-                        await track_gemini_usage_from_response(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
-                    logger.info("✅ Usage info extracted from pydantic-ai result: %s", usage_info)
-                else:
-                    logger.warning("⚠️ RunUsage returned zero tokens - check if model supports usage tracking")
+                # Token tracking will be done after database persistence (when session_db_id and assistant_message_id are available)
+                logger.info("✅ Usage info extracted from pydantic-ai result: %s", usage_info)
             else:
                 logger.warning("⚠️ Result object does not have usage() method")
                 # Log available methods for debugging
@@ -1482,7 +1473,22 @@ async def chat(request: ChatRequest):
 
             except Exception as e:
                 logger.exception("DB persistence: unexpected error while saving chat messages: %s", e)
-        
+
+            # Now that we have session_db_id and assistant_message_id, track token usage
+            if usage_info and (usage_info["input_tokens"] > 0 or usage_info["output_tokens"] > 0):
+                try:
+                    # For OpenAI, use the openai tracking function
+                    if 'gpt' in MODEL_NAME.lower():
+                        await track_openai_usage_from_response(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
+                    # For Gemini, use the gemini tracking function
+                    elif 'gemini' in MODEL_NAME.lower():
+                        await track_gemini_usage_from_response(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
+                    logger.info("✅ Token usage tracked in database for session %s", session_db_id)
+                except Exception as e:
+                    logger.error("❌ Failed to track token usage in database: %s", e)
+            else:
+                logger.warning("⚠️ Skipping token tracking - no usage data or zero tokens")
+
         # Update session history
         session["messages"].append({
             "role": "user",
