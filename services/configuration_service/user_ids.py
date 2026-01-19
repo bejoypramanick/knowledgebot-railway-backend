@@ -372,8 +372,10 @@ async def get_user_roles(
                 logger.warning(f"⚠️ user_profiles table does not exist! Returning default roles for uid: {uid}")
                 return ['user']
 
-            # Check admin and human_agent tables to determine role (same logic as token verification)
+            # Check admin and human_agent tables to determine all roles for the user
             logger.info(f"📊 Checking admin and human_agent tables for email: {current_user.get('email')}")
+
+            roles = ['user']  # Everyone has user role as base
 
             # Check admin table
             admin_check = await conn.fetchrow(
@@ -382,9 +384,8 @@ async def get_user_roles(
             )
 
             if admin_check:
-                roles = ['admin', 'human_agent', 'user']
-                logger.info(f"👑 Admin found for {current_user.get('email')} - returning roles: {roles}")
-                return roles
+                roles.append('admin')
+                logger.info(f"👑 Admin role confirmed for {current_user.get('email')}")
 
             # Check human_agent table
             agent_check = await conn.fetchrow(
@@ -393,9 +394,11 @@ async def get_user_roles(
             )
 
             if agent_check:
-                roles = ['human_agent', 'user']
-                logger.info(f"🤖 Human agent found for {current_user.get('email')} - returning roles: {roles}")
-                return roles
+                roles.append('human_agent')
+                logger.info(f"🤖 Human agent role confirmed for {current_user.get('email')}")
+
+            logger.info(f"📋 Final roles for {current_user.get('email')}: {roles}")
+            return roles
 
             # Default to user role
             roles = ['user']
