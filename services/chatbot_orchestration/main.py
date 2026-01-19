@@ -1730,7 +1730,7 @@ Only return the JSON array, nothing else."""
                     "output_tokens": getattr(usage_obj, 'output_tokens', 0) or getattr(usage_obj, 'completion_tokens', 0),
                 }
                 # Track token usage for suggested messages generation
-                await track_openai_usage_from_response(usage_obj, request.session_id, None, 'suggested_messages', MODEL_NAME)
+                await track_openai_usage_from_response(usage_obj, str(request.session_id), None, 'suggested_messages', MODEL_NAME)
                 logger.info("✅ Usage info extracted from agent result: %s", usage_info)
         except Exception as e:
             logger.error("❌ Failed to extract usage info: %s", e)
