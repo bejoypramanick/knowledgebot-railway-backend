@@ -186,7 +186,10 @@ def get_openai_model():
     global openai_model
     if openai_model is None and OPENAI_API_KEY:
         try:
-            openai_model = OpenAIModel(MODEL_NAME, api_key=OPENAI_API_KEY)
+            # Configure OpenAI client to include usage information
+            import openai
+            client = openai.OpenAI(api_key=OPENAI_API_KEY)
+            openai_model = OpenAIModel(MODEL_NAME, client=client)
             logger.info("✅ OpenAI model initialized")
         except Exception as e:
             logger.error(f"❌ Failed to initialize OpenAI model: {e}")
@@ -1164,7 +1167,7 @@ def create_session_dependency(session_id: str) -> ChatSessionDeps:
 # Initialize base agent with all tools
 def create_agent(file_context: Optional[List[SearchResult]] = None, custom_system_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> Optional[Agent]:
     """Create a Pydantic AI agent with intelligent data source routing."""
-    
+
     # Check if model is available
     if openai_model is None:
         logger.error("Cannot create agent - OpenAI API key not configured")
@@ -1172,18 +1175,18 @@ def create_agent(file_context: Optional[List[SearchResult]] = None, custom_syste
 
     # Build list of available tools
     tools = [search_knowledge_base]
-    
+
     # Add human agent connection tool (requires session_id from deps)
     tools.append(request_human_agent_connection)
-    
+
     # Add PostgreSQL tool if available
     if railway_db:
         tools.append(query_railway_postgres)
-    
+
     # Add Neon DB tool if available
     if neon_db:
         tools.append(query_neon_db)
-    
+
     # Add internet search tool if available
     if tavily_client:
         tools.append(search_internet)
@@ -1207,7 +1210,7 @@ def create_agent(file_context: Optional[List[SearchResult]] = None, custom_syste
         tools=tools,
         deps_type=ChatSessionDeps,
     )
-    
+
     return agent
 
 
@@ -1366,6 +1369,21 @@ async def chat(request: ChatRequest):
                     logger.info("📋 Available usage-related attributes: %s", available_attrs)
                 else:
                     logger.warning("📋 No usage-related attributes found. Available public attributes: %s", [attr for attr in dir(result) if not attr.startswith('_')][:10])
+                    # Try to access the model directly for usage information
+                    try:
+                        # Check if pydantic-ai model has access to the last response
+                        if hasattr(openai_model, '_last_response') and openai_model._last_response:
+                            last_response = openai_model._last_response
+                            if hasattr(last_response, 'usage'):
+                                logger.info("🔍 Found usage in model's last response: %s", last_response.usage)
+                                await track_openai_usage_from_response(last_response.usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
+                                return
+                        # Try accessing the underlying client
+                        if hasattr(openai_model, '_client') and openai_model._client:
+                            # The client might have a last response or we can check recent responses
+                            logger.debug("OpenAI model has _client attribute")
+                    except Exception as e:
+                        logger.debug("Could not access model's last response: %s", e)
         except Exception as e:
             logger.error("❌ Failed to extract usage info: %s", e)
 
