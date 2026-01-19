@@ -171,22 +171,23 @@ async def get_performance_metrics():
                             overall.total_feedback_7d,
                             overall.positive_feedback_7d,
                             overall.overall_score,
-                            COALESCE(
-                                json_agg(
-                                    json_build_object(
-                                        'day', TO_CHAR(d.feedback_date, 'Dy'),
-                                        'score', COALESCE(
-                                            CASE
-                                                WHEN d.total_feedback > 0
-                                                THEN ROUND((d.positive_feedback::numeric / d.total_feedback) * 5, 1)
-                                                ELSE overall.overall_score
-                                            END,
-                                            overall.overall_score
-                                        )
-                                    ) ORDER BY d.feedback_date
-                                ),
-                                '[]'::json
-                            ) as daily_scores
+                            CASE
+                                WHEN COUNT(d.feedback_date) > 0 THEN
+                                    json_agg(
+                                        json_build_object(
+                                            'day', TO_CHAR(d.feedback_date, 'Dy'),
+                                            'score', COALESCE(
+                                                CASE
+                                                    WHEN d.total_feedback > 0
+                                                    THEN ROUND((d.positive_feedback::numeric / d.total_feedback) * 5, 1)
+                                                    ELSE overall.overall_score
+                                                END,
+                                                overall.overall_score
+                                            )
+                                        ) ORDER BY d.feedback_date
+                                    )
+                                ELSE '[]'::json
+                            END as daily_scores
                         FROM overall_stats overall
                         LEFT JOIN daily_feedback d ON true
                         GROUP BY overall.total_feedback_7d, overall.positive_feedback_7d, overall.overall_score
@@ -197,11 +198,15 @@ async def get_performance_metrics():
                         'total_feedback_7d': 0, 'positive_feedback_7d': 0, 'overall_score': 4.0, 'daily_scores': []
                     }
 
+                    logger.debug(f"Performance metrics: satisfaction_data = {satisfaction_data}")
+                    logger.debug(f"Performance metrics: daily_scores type = {type(satisfaction_data.get('daily_scores'))}")
+                    logger.debug(f"Performance metrics: daily_scores value = {satisfaction_data.get('daily_scores')}")
+
                     total_feedback = satisfaction_data['total_feedback_7d']
                     satisfaction_score = satisfaction_data['overall_score']
 
                     # Ensure daily_scores is properly parsed as array
-                    daily_scores = satisfaction_data['daily_scores']
+                    daily_scores = satisfaction_data.get('daily_scores', [])
                     if isinstance(daily_scores, str):
                         import json
                         try:
@@ -212,10 +217,13 @@ async def get_performance_metrics():
                     else:
                         satisfaction_over_time = daily_scores or []
 
-                    # Ensure it's an array
+                    # Ensure it's an array and filter out invalid entries
                     if not isinstance(satisfaction_over_time, list):
                         logger.warning(f"Performance metrics: daily_scores is not an array: {type(satisfaction_over_time)}")
                         satisfaction_over_time = []
+
+                    # Filter out None and non-dict values
+                    satisfaction_over_time = [item for item in satisfaction_over_time if isinstance(item, dict) and item is not None]
 
                 except Exception as satisfaction_error:
                     logger.error(f"Performance metrics: Error in satisfaction query: {satisfaction_error}", exc_info=True)
@@ -229,15 +237,18 @@ async def get_performance_metrics():
                     logger.warning(f"Performance metrics: satisfaction_over_time is not a list: {type(satisfaction_over_time)}")
                     satisfaction_over_time = []
 
+                # Filter out None values and ensure we only work with valid dictionaries
+                satisfaction_over_time = [item for item in satisfaction_over_time if isinstance(item, dict) and item is not None]
+
                 # Ensure we have 7 days of data, fill missing days
                 if len(satisfaction_over_time) < 7:
-                    existing_days = {item.get('day', '')[:3] for item in satisfaction_over_time if isinstance(item, dict)}  # First 3 chars (Mon, Tue, etc.)
+                    existing_days = {item.get('day', '')[:3] for item in satisfaction_over_time if item.get('day')}  # First 3 chars (Mon, Tue, etc.)
                     day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
                     complete_satisfaction = []
                     for day_name in day_names[-7:]:  # Last 7 days
                         if day_name in existing_days:
                             # Find existing entry
-                            existing = next((item for item in satisfaction_over_time if isinstance(item, dict) and item.get('day', '').startswith(day_name)), None)
+                            existing = next((item for item in satisfaction_over_time if item.get('day', '').startswith(day_name)), None)
                             if existing:
                                 complete_satisfaction.append(existing)
                         else:
