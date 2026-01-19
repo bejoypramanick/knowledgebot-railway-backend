@@ -176,27 +176,6 @@ async def initialize_token_usage_if_needed():
         logger.error(f"Error initializing token usage: {e}", exc_info=True)
 
 
-@router.get("/token-usage", response_model=dict)
-async def get_token_usage():
-    """Get token usage for Gemini and OpenAI."""
-    logger.info("🔍 get_token_usage endpoint called")
-    try:
-        # Initialize token usage if needed
-        await initialize_token_usage_if_needed()
-
-        gemini_usage = await get_gemini_usage()
-        openai_usage = await get_openai_usage()
-
-        logger.info(f"✅ Token usage retrieved: gemini={gemini_usage}, openai={openai_usage}")
-        return {
-            "gemini": gemini_usage,
-            "openai": openai_usage
-        }
-    except Exception as e:
-        logger.error(f"Error fetching token usage: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error fetching token usage: {str(e)}")
-
-
 @router.get("/token-usage/detailed", response_model=dict)
 async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_call_type: str = None):
     """Get detailed token usage log with correlations to specific requests."""
