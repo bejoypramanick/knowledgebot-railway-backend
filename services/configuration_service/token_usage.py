@@ -249,25 +249,51 @@ async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_ca
         if db and hasattr(db, '_pool') and db._pool is not None:
             async with db.acquire() as conn:
                 # Build query with optional filters
-                query = """
-                    SELECT
-                        tul.id,
-                        tul.provider,
-                        tul.model,
-                        tul.prompt_tokens,
-                        tul.completion_tokens,
-                        tul.total_tokens,
-                        tul.api_call_type,
-                        tul.created_at,
-                        u.name as customer_name,
-                        u.email as customer_email,
-                        cm.content as message_preview
-                    FROM token_usage_log tul
-                    LEFT JOIN chat_sessions cs ON tul.session_id = cs.id
-                    LEFT JOIN users u ON cs.user_id = u.id
-                    LEFT JOIN chat_messages cm ON tul.message_id = cm.id AND cm.role = 'user'
-                    WHERE 1=1
-                """
+                # Check if users table exists before joining
+                users_table_exists = await conn.fetchval(
+                    "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'users')"
+                )
+
+                if users_table_exists:
+                    query = """
+                        SELECT
+                            tul.id,
+                            tul.provider,
+                            tul.model,
+                            tul.prompt_tokens,
+                            tul.completion_tokens,
+                            tul.total_tokens,
+                            tul.api_call_type,
+                            tul.created_at,
+                            u.name as customer_name,
+                            u.email as customer_email,
+                            cm.content as message_preview
+                        FROM token_usage_log tul
+                        LEFT JOIN chat_sessions cs ON tul.session_id = cs.id
+                        LEFT JOIN users u ON cs.user_id = u.id
+                        LEFT JOIN chat_messages cm ON tul.message_id = cm.id AND cm.role = 'user'
+                        WHERE 1=1
+                    """
+                else:
+                    logger.warning("⚠️ Users table not found, returning token usage without customer information")
+                    query = """
+                        SELECT
+                            tul.id,
+                            tul.provider,
+                            tul.model,
+                            tul.prompt_tokens,
+                            tul.completion_tokens,
+                            tul.total_tokens,
+                            tul.api_call_type,
+                            tul.created_at,
+                            NULL as customer_name,
+                            NULL as customer_email,
+                            cm.content as message_preview
+                        FROM token_usage_log tul
+                        LEFT JOIN chat_sessions cs ON tul.session_id = cs.id
+                        LEFT JOIN chat_messages cm ON tul.message_id = cm.id AND cm.role = 'user'
+                        WHERE 1=1
+                    """
 
                 params = []
                 param_count = 0
