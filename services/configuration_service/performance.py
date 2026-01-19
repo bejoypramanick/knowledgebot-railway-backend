@@ -199,7 +199,23 @@ async def get_performance_metrics():
 
                     total_feedback = satisfaction_data['total_feedback_7d']
                     satisfaction_score = satisfaction_data['overall_score']
-                    satisfaction_over_time = satisfaction_data['daily_scores'] or []
+
+                    # Ensure daily_scores is properly parsed as array
+                    daily_scores = satisfaction_data['daily_scores']
+                    if isinstance(daily_scores, str):
+                        import json
+                        try:
+                            satisfaction_over_time = json.loads(daily_scores)
+                        except (json.JSONDecodeError, TypeError):
+                            logger.warning(f"Performance metrics: Failed to parse daily_scores JSON: {daily_scores}")
+                            satisfaction_over_time = []
+                    else:
+                        satisfaction_over_time = daily_scores or []
+
+                    # Ensure it's an array
+                    if not isinstance(satisfaction_over_time, list):
+                        logger.warning(f"Performance metrics: daily_scores is not an array: {type(satisfaction_over_time)}")
+                        satisfaction_over_time = []
 
                 except Exception as satisfaction_error:
                     logger.error(f"Performance metrics: Error in satisfaction query: {satisfaction_error}", exc_info=True)
@@ -208,15 +224,20 @@ async def get_performance_metrics():
                     satisfaction_score = 4.0
                     satisfaction_over_time = []
 
+                # Ensure satisfaction_over_time is an array of objects with correct structure
+                if not isinstance(satisfaction_over_time, list):
+                    logger.warning(f"Performance metrics: satisfaction_over_time is not a list: {type(satisfaction_over_time)}")
+                    satisfaction_over_time = []
+
                 # Ensure we have 7 days of data, fill missing days
                 if len(satisfaction_over_time) < 7:
-                    existing_days = {item['day'][:3] for item in satisfaction_over_time}  # First 3 chars (Mon, Tue, etc.)
+                    existing_days = {item.get('day', '')[:3] for item in satisfaction_over_time if isinstance(item, dict)}  # First 3 chars (Mon, Tue, etc.)
                     day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
                     complete_satisfaction = []
                     for day_name in day_names[-7:]:  # Last 7 days
                         if day_name in existing_days:
                             # Find existing entry
-                            existing = next((item for item in satisfaction_over_time if item['day'].startswith(day_name)), None)
+                            existing = next((item for item in satisfaction_over_time if isinstance(item, dict) and item.get('day', '').startswith(day_name)), None)
                             if existing:
                                 complete_satisfaction.append(existing)
                         else:
@@ -288,11 +309,11 @@ async def get_performance_metrics():
                 # Format interactions data
                 logger.debug("Performance metrics: Formatting interactions data")
                 interactions_data = []
-                if interactions_over_time:
+                if interactions_over_time and isinstance(interactions_over_time, list):
                     for row in interactions_over_time:
                         interactions_data.append({
                             "month": row['month'],
-                            "interactions": row['interactions']
+                            "interactions": int(row['interactions']) if row['interactions'] else 0
                         })
                 else:
                     # Default empty data
@@ -302,6 +323,11 @@ async def get_performance_metrics():
                             "month": month,
                             "interactions": 0
                         })
+
+                # Ensure interactions_data is always a list
+                if not isinstance(interactions_data, list):
+                    logger.warning(f"Performance metrics: interactions_data is not a list: {type(interactions_data)}")
+                    interactions_data = []
 
                 logger.info("Performance metrics: Successfully calculated all metrics with parallel queries")
                 return {
