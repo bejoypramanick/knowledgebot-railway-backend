@@ -352,3 +352,176 @@ async def track_gemini_usage_from_response(usage_obj, session_id: str = None, me
     except Exception as e:
         logger.error(f"❌ Error extracting Gemini usage from response: {e}", exc_info=True)
 
+
+async def track_openai_usage_with_db(run_usage, session_id: str = None, message_id: str = None, api_call_type: str = 'rag', model: str = 'gpt-4o', db_connection=None):
+    """
+    Track OpenAI token usage using an existing database connection.
+    This version accepts a database connection parameter instead of getting its own.
+
+    Args:
+        run_usage: Pydantic-ai RunUsage object
+        session_id: UUID of the chat session (optional)
+        message_id: UUID of the chat message (optional)
+        api_call_type: Type of API call ('chat', 'sentiment', 'summary', etc.)
+        model: Specific model used
+        db_connection: Existing database connection to use
+    """
+    try:
+        # Extract token counts from RunUsage object
+        input_tokens = getattr(run_usage, 'input_tokens', 0)
+        output_tokens = getattr(run_usage, 'output_tokens', 0)
+        cache_read_tokens = getattr(run_usage, 'details', {}).get('accepted_prediction_tokens', 0)
+        cache_write_tokens = getattr(run_usage, 'details', {}).get('rejected_prediction_tokens', 0)
+        input_audio_tokens = getattr(run_usage, 'details', {}).get('audio_tokens', 0)
+        cache_audio_read_tokens = getattr(run_usage, 'details', {}).get('reasoning_tokens', 0)
+
+        if input_tokens <= 0 and output_tokens <= 0 and cache_read_tokens <= 0 and cache_write_tokens <= 0:
+            logger.warning("⚠️ No token usage to track (zero tokens)")
+            return
+
+        total_tokens = input_tokens + output_tokens + cache_read_tokens + cache_write_tokens
+
+        # Use the provided database connection
+        if db_connection:
+            async with db_connection.acquire() as conn:
+                # First, update llm_providers table
+                await conn.execute(
+                    """
+                    INSERT INTO llm_providers (provider_name, token_used, token_limit, is_active)
+                    VALUES ('openai', $1, 150000, true)
+                    ON CONFLICT (provider_name) DO UPDATE
+                    SET token_used = COALESCE(llm_providers.token_used, 0) + $1,
+                        token_limit = COALESCE(llm_providers.token_limit, 150000),
+                        is_active = true
+                    """,
+                    total_tokens
+                )
+
+                # Get current usage from llm_providers for calculation
+                current_usage = await conn.fetchval(
+                    "SELECT COALESCE(token_used, 0) FROM llm_providers WHERE provider_name = 'openai'"
+                ) or 0
+
+                limit_value = 150000
+                available = limit_value - current_usage
+
+                # Update token_usage_cache table
+                await conn.execute(
+                    """
+                    INSERT INTO token_usage_cache (provider, used, available, limit_value, last_updated)
+                    VALUES ('openai', $1, $2, $3, NOW())
+                    ON CONFLICT (provider) DO UPDATE
+                    SET used = $1,
+                        available = $2,
+                        limit_value = $3,
+                        last_updated = NOW()
+                    """,
+                    current_usage, available, limit_value
+                )
+
+                # Log detailed usage in token_usage_log table
+                if session_id or message_id:
+                    await conn.execute(
+                        """
+                        INSERT INTO token_usage_log (
+                            session_id, message_id, provider, model, prompt_tokens, completion_tokens,
+                            total_tokens, cache_read_tokens, cache_write_tokens, input_audio_tokens,
+                            cache_audio_read_tokens, api_call_type, created_at
+                        )
+                        VALUES ($1, $2, 'openai', $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+                        """,
+                        session_id, message_id, model, input_tokens, output_tokens, total_tokens,
+                        cache_read_tokens, cache_write_tokens, input_audio_tokens, cache_audio_read_tokens, api_call_type
+                    )
+
+                logger.info(f"✅ Tracked OpenAI detailed usage with provided DB: {total_tokens} tokens (input: {input_tokens}, output: {output_tokens}, cache_read: {cache_read_tokens}, cache_write: {cache_write_tokens}), total used: {current_usage}, session: {session_id}")
+        else:
+            logger.warning("No database connection provided for token tracking")
+    except Exception as e:
+        logger.error(f"❌ Error tracking OpenAI detailed token usage with provided DB: {e}", exc_info=True)
+
+
+async def track_gemini_usage_with_db(run_usage, session_id: str = None, message_id: str = None, api_call_type: str = 'rag', model: str = 'gemini-2.5-flash-lite', db_connection=None):
+    """
+    Track Gemini token usage using an existing database connection.
+    This version accepts a database connection parameter instead of getting its own.
+
+    Args:
+        run_usage: Pydantic-ai RunUsage object
+        session_id: UUID of the chat session (optional)
+        message_id: UUID of the chat message (optional)
+        api_call_type: Type of API call ('chat', 'sentiment', 'summary', etc.)
+        model: Specific model used
+        db_connection: Existing database connection to use
+    """
+    try:
+        # Extract token counts from RunUsage object for Gemini
+        prompt_tokens = getattr(run_usage, 'input_tokens', 0)
+        candidates_tokens = getattr(run_usage, 'output_tokens', 0)
+        cache_read_tokens = getattr(run_usage, 'details', {}).get('accepted_prediction_tokens', 0)
+        cache_write_tokens = getattr(run_usage, 'details', {}).get('rejected_prediction_tokens', 0)
+
+        if prompt_tokens <= 0 and candidates_tokens <= 0 and cache_read_tokens <= 0 and cache_write_tokens <= 0:
+            logger.warning("⚠️ No token usage to track (zero tokens)")
+            return
+
+        total_tokens = prompt_tokens + candidates_tokens + cache_read_tokens + cache_write_tokens
+
+        # Use the provided database connection
+        if db_connection:
+            async with db_connection.acquire() as conn:
+                # First, update llm_providers table
+                await conn.execute(
+                    """
+                    INSERT INTO llm_providers (provider_name, token_used, token_limit, is_active)
+                    VALUES ('gemini', $1, 20000, true)
+                    ON CONFLICT (provider_name) DO UPDATE
+                    SET token_used = COALESCE(llm_providers.token_used, 0) + $1,
+                        token_limit = COALESCE(llm_providers.token_limit, 20000),
+                        is_active = true
+                    """,
+                    total_tokens
+                )
+
+                # Get current usage from llm_providers for calculation
+                current_usage = await conn.fetchval(
+                    "SELECT COALESCE(token_used, 0) FROM llm_providers WHERE provider_name = 'gemini'"
+                ) or 0
+
+                limit_value = 20000
+                available = limit_value - current_usage
+
+                # Update token_usage_cache table
+                await conn.execute(
+                    """
+                    INSERT INTO token_usage_cache (provider, used, available, limit_value, last_updated)
+                    VALUES ('gemini', $1, $2, $3, NOW())
+                    ON CONFLICT (provider) DO UPDATE
+                    SET used = $1,
+                        available = $2,
+                        limit_value = $3,
+                        last_updated = NOW()
+                    """,
+                    current_usage, available, limit_value
+                )
+
+                # Log detailed usage in token_usage_log table
+                if session_id or message_id:
+                    await conn.execute(
+                        """
+                        INSERT INTO token_usage_log (
+                            session_id, message_id, provider, model, prompt_tokens, completion_tokens,
+                            total_tokens, cache_read_tokens, cache_write_tokens, api_call_type, created_at
+                        )
+                        VALUES ($1, $2, 'gemini', $3, $4, $5, $6, $7, $8, $9, NOW())
+                        """,
+                        session_id, message_id, model, prompt_tokens, candidates_tokens, total_tokens,
+                        cache_read_tokens, cache_write_tokens, api_call_type
+                    )
+
+                logger.info(f"✅ Tracked Gemini detailed usage with provided DB: {total_tokens} tokens (prompt: {prompt_tokens}, candidates: {candidates_tokens}, cache_read: {cache_read_tokens}, cache_write: {cache_write_tokens}), total used: {current_usage}, session: {session_id}")
+        else:
+            logger.warning("No database connection provided for token tracking")
+    except Exception as e:
+        logger.error(f"❌ Error tracking Gemini detailed token usage with provided DB: {e}", exc_info=True)
+

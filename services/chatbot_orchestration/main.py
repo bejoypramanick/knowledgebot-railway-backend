@@ -44,7 +44,7 @@ except ImportError as e:
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.config import settings
 from shared.db import init_railway_db, init_neon_db, railway_db, neon_db
-from shared.token_tracker import track_openai_usage_from_response, track_gemini_usage_from_response
+from shared.token_tracker import track_openai_usage_from_response, track_gemini_usage_from_response, track_openai_usage_with_db, track_gemini_usage_with_db
 
 # Lazy database initialization for serverless optimization
 async def get_railway_db():
@@ -1477,12 +1477,12 @@ async def chat(request: ChatRequest):
             # Now that we have session_db_id and assistant_message_id, track token usage
             if usage_info and (usage_info["input_tokens"] > 0 or usage_info["output_tokens"] > 0):
                 try:
-                    # For OpenAI, use the openai tracking function
+                    # For OpenAI, use the openai tracking function with the existing database connection
                     if 'gpt' in MODEL_NAME.lower():
-                        await track_openai_usage_from_response(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
-                    # For Gemini, use the gemini tracking function
+                        await track_openai_usage_with_db(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME, db)
+                    # For Gemini, use the gemini tracking function with the existing database connection
                     elif 'gemini' in MODEL_NAME.lower():
-                        await track_gemini_usage_from_response(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
+                        await track_gemini_usage_with_db(run_usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME, db)
                     logger.info("✅ Token usage tracked in database for session %s", session_db_id)
                 except Exception as e:
                     logger.error("❌ Failed to track token usage in database: %s", e)
