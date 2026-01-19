@@ -1343,7 +1343,7 @@ async def chat(request: ChatRequest):
                     "output_tokens": getattr(result.usage, 'output_tokens', 0),
                 }
                 # Track token usage in database with session and message correlation
-                await track_openai_usage_from_response(result.usage, str(session_db_id), str(assistant_message_id), 'chat')
+                await track_openai_usage_from_response(result.usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
             logger.debug("Usage info extracted: %s", usage_info)
         except Exception as e:
             logger.debug("Failed to extract usage info: %s", e)
@@ -1477,7 +1477,7 @@ async def chat(request: ChatRequest):
                 "output_tokens": getattr(result.usage, 'output_tokens', 0),
             }
             # Track token usage in database with session and message correlation
-            await track_openai_usage_from_response(result.usage, str(session_db_id), str(assistant_message_id), 'chat')
+            await track_openai_usage_from_response(result.usage, str(session_db_id), str(assistant_message_id), 'chat', MODEL_NAME)
         
         return ChatSessionResponse(
             session_id=session_id,
@@ -1678,7 +1678,7 @@ Only return the JSON array, nothing else."""
                 "output_tokens": getattr(result.usage, 'output_tokens', 0),
             }
             # Track token usage for suggested messages generation
-            await track_openai_usage_from_response(result.usage, request.session_id, None, 'suggested_messages')
+            await track_openai_usage_from_response(result.usage, request.session_id, None, 'suggested_messages', MODEL_NAME)
         
         return SuggestedMessagesResponse(
             suggested_messages=suggested_messages,
