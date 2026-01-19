@@ -50,63 +50,82 @@ async def get_performance_metrics():
             logger.info("Performance metrics: Database connection acquired successfully")
 
             try:
-                # OPTIMIZATION: Run independent queries in parallel using asyncio.gather
-                logger.debug("Performance metrics: Starting parallel queries for basic metrics")
+                # Run queries sequentially to avoid connection conflicts in serverless environment
+                logger.debug("Performance metrics: Starting sequential queries for basic metrics")
 
-                # Group 1: Basic counts and engagement (4 queries in parallel)
-                basic_results = await asyncio.gather(
+                # Group 1: Basic counts and engagement (run sequentially)
+                basic_results = []
+                try:
                     # Total Interactions
-                    conn.fetchval("SELECT COUNT(*) FROM chat_messages WHERE role = 'user'"),
+                    total_interactions = await conn.fetchval("SELECT COUNT(*) FROM chat_messages WHERE role = 'user'")
+                    basic_results.append(total_interactions or 0)
+                except Exception as e:
+                    logger.error(f"Performance metrics: Error in total interactions query: {e}")
+                    basic_results.append(0)
+
+                try:
                     # Total Sessions
-                    conn.fetchval("SELECT COUNT(*) FROM chat_sessions"),
+                    total_sessions_val = await conn.fetchval("SELECT COUNT(*) FROM chat_sessions")
+                    basic_results.append(total_sessions_val or 0)
+                except Exception as e:
+                    logger.error(f"Performance metrics: Error in total sessions query: {e}")
+                    basic_results.append(0)
+
+                try:
                     # Active Sessions (last 24 hours)
-                    conn.fetchval("""
+                    active_sessions_val = await conn.fetchval("""
                         SELECT COUNT(*) FROM chat_sessions
                         WHERE last_activity_at >= NOW() - INTERVAL '24 hours'
-                    """),
+                    """)
+                    basic_results.append(active_sessions_val or 0)
+                except Exception as e:
+                    logger.error(f"Performance metrics: Error in active sessions query: {e}")
+                    basic_results.append(0)
+
+                try:
                     # Average Engagement Time
-                    conn.fetchval("""
+                    avg_engagement_val = await conn.fetchval("""
                         SELECT AVG(EXTRACT(EPOCH FROM (last_activity_at - created_at)) / 60)
                         FROM chat_sessions
                         WHERE last_activity_at IS NOT NULL AND created_at IS NOT NULL
-                    """),
-                    return_exceptions=True
-                )
+                    """)
+                    basic_results.append(avg_engagement_val or 0)
+                except Exception as e:
+                    logger.error(f"Performance metrics: Error in engagement query: {e}")
+                    basic_results.append(0)
 
-                # Handle any exceptions from parallel queries
-                for i, result in enumerate(basic_results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Performance metrics: Error in basic query {i}: {result}")
-                        basic_results[i] = 0
-
-                total_interactions = basic_results[0] or 0
-                total_sessions = basic_results[1] or 0
-                active_sessions = basic_results[2] or 0
-                avg_engagement = basic_results[3] or 0
+                # Results are already handled above, no exceptions to process
+                total_interactions = basic_results[0]
+                total_sessions = basic_results[1]
+                active_sessions = basic_results[2]
+                avg_engagement = basic_results[3]
                 avg_engagement_minutes = int(avg_engagement) if avg_engagement else 0
 
                 logger.debug(f"Performance metrics: Basic metrics - interactions={total_interactions}, sessions={total_sessions}, active={active_sessions}, engagement={avg_engagement_minutes}min")
 
-                # Group 2: Complex calculations (deflection + interactions over time in parallel)
-                logger.debug("Performance metrics: Starting parallel queries for complex metrics")
+                # Group 2: Complex calculations (run sequentially)
+                logger.debug("Performance metrics: Starting sequential queries for complex metrics")
 
-                # Deflection Rate calculation (only if total_sessions > 0)
-                async def get_deflection_count():
+                # Deflection Rate calculation
+                sessions_with_messages = 0
+                try:
                     if total_sessions > 0:
-                        return await conn.fetchval("""
+                        sessions_with_messages = await conn.fetchval("""
                             SELECT COUNT(DISTINCT cm.session_id)
                             FROM chat_messages cm
                             INNER JOIN chat_sessions cs ON cm.session_id = cs.id
                             WHERE cm.role = 'assistant'
-                        """)
-                    else:
-                        return 0
+                        """) or 0
+                except Exception as e:
+                    logger.error(f"Performance metrics: Error in deflection query: {e}")
+                    sessions_with_messages = 0
 
-                complex_results = await asyncio.gather(
-                    get_deflection_count(),
+                deflection_rate = int((sessions_with_messages / total_sessions) * 100) if total_sessions > 0 else 0
 
-                    # Interactions over time (last 6 months)
-                    conn.fetch("""
+                # Interactions over time (last 6 months)
+                interactions_over_time = []
+                try:
+                    interactions_result = await conn.fetch("""
                         SELECT
                             TO_CHAR(created_at, 'Mon') as month,
                             COUNT(*) as interactions
@@ -115,22 +134,11 @@ async def get_performance_metrics():
                         AND created_at >= NOW() - INTERVAL '6 months'
                         GROUP BY TO_CHAR(created_at, 'Mon'), DATE_TRUNC('month', created_at)
                         ORDER BY DATE_TRUNC('month', created_at)
-                    """),
-                    return_exceptions=True
-                )
-
-                # Handle exceptions and None values
-                for i, result in enumerate(complex_results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Performance metrics: Error in complex query {i}: {result}")
-                        complex_results[i] = 0 if i == 0 else []
-                    elif result is None and i == 0:  # Handle None for deflection query when total_sessions == 0
-                        complex_results[i] = 0
-
-                # Calculate deflection rate
-                sessions_with_messages = complex_results[0] or 0
-                deflection_rate = int((sessions_with_messages / total_sessions) * 100) if total_sessions > 0 else 0
-                interactions_over_time = complex_results[1] or []
+                    """)
+                    interactions_over_time = interactions_result or []
+                except Exception as e:
+                    logger.error(f"Performance metrics: Error in interactions over time query: {e}")
+                    interactions_over_time = []
 
                 logger.debug(f"Performance metrics: Deflection rate = {deflection_rate}%, interactions_over_time rows = {len(interactions_over_time)}")
 
@@ -151,22 +159,28 @@ async def get_performance_metrics():
                         overall_stats AS (
                             SELECT
                                 COALESCE(SUM(total_feedback), 0) as total_feedback_7d,
-                                COALESCE(SUM(positive_feedback), 0) as positive_feedback_7d
+                                COALESCE(SUM(positive_feedback), 0) as positive_feedback_7d,
+                                CASE
+                                    WHEN COALESCE(SUM(total_feedback), 0) > 0
+                                    THEN ROUND((COALESCE(SUM(positive_feedback), 0)::numeric / COALESCE(SUM(total_feedback), 0)) * 5, 1)
+                                    ELSE 4.0
+                                END as overall_score
                             FROM daily_feedback
                         )
                         SELECT
                             overall.total_feedback_7d,
                             overall.positive_feedback_7d,
-                            COALESCE(
-                                ROUND((overall.positive_feedback_7d::numeric / NULLIF(overall.total_feedback_7d, 0)) * 5, 1),
-                                4.0
-                            ) as overall_score,
+                            overall.overall_score,
                             COALESCE(
                                 json_agg(
                                     json_build_object(
                                         'day', TO_CHAR(d.feedback_date, 'Dy'),
                                         'score', COALESCE(
-                                            ROUND((d.positive_feedback::numeric / NULLIF(d.total_feedback, 0)) * 5, 1),
+                                            CASE
+                                                WHEN d.total_feedback > 0
+                                                THEN ROUND((d.positive_feedback::numeric / d.total_feedback) * 5, 1)
+                                                ELSE overall.overall_score
+                                            END,
                                             overall.overall_score
                                         )
                                     ) ORDER BY d.feedback_date
@@ -212,41 +226,45 @@ async def get_performance_metrics():
 
                 logger.debug(f"Performance metrics: Satisfaction score = {satisfaction_score}, daily scores = {len(satisfaction_over_time)}")
 
-                # OPTIMIZATION: Parallel growth calculations (4 queries in parallel)
-                logger.debug("Performance metrics: Calculating growth metrics in parallel")
+                # Sequential growth calculations to avoid connection conflicts
+                logger.debug("Performance metrics: Calculating growth metrics sequentially")
 
-                growth_results = await asyncio.gather(
-                    # Recent vs previous interactions
-                    conn.fetchval("SELECT COUNT(*) FROM chat_messages WHERE role = 'user' AND created_at >= NOW() - INTERVAL '30 days'"),
-                    conn.fetchval("SELECT COUNT(*) FROM chat_messages WHERE role = 'user' AND created_at >= NOW() - INTERVAL '60 days' AND created_at < NOW() - INTERVAL '30 days'"),
+                # Recent vs previous interactions
+                recent_interactions = 0
+                try:
+                    recent_interactions = await conn.fetchval("SELECT COUNT(*) FROM chat_messages WHERE role = 'user' AND created_at >= NOW() - INTERVAL '30 days'") or 0
+                except Exception as e:
+                    logger.error(f"Performance metrics: Error in recent interactions query: {e}")
 
-                    # Recent vs previous engagement
-                    conn.fetchval("""
+                previous_interactions = 0
+                try:
+                    previous_interactions = await conn.fetchval("SELECT COUNT(*) FROM chat_messages WHERE role = 'user' AND created_at >= NOW() - INTERVAL '60 days' AND created_at < NOW() - INTERVAL '30 days'") or 0
+                except Exception as e:
+                    logger.error(f"Performance metrics: Error in previous interactions query: {e}")
+
+                # Recent vs previous engagement
+                recent_engagement = 0
+                try:
+                    recent_engagement = await conn.fetchval("""
                         SELECT AVG(EXTRACT(EPOCH FROM (last_activity_at - created_at)) / 60)
                         FROM chat_sessions
                         WHERE last_activity_at >= NOW() - INTERVAL '30 days'
                         AND last_activity_at IS NOT NULL AND created_at IS NOT NULL
-                    """),
-                    conn.fetchval("""
+                    """) or 0
+                except Exception as e:
+                    logger.error(f"Performance metrics: Error in recent engagement query: {e}")
+
+                previous_engagement = 0
+                try:
+                    previous_engagement = await conn.fetchval("""
                         SELECT AVG(EXTRACT(EPOCH FROM (last_activity_at - created_at)) / 60)
                         FROM chat_sessions
                         WHERE last_activity_at >= NOW() - INTERVAL '60 days'
                         AND last_activity_at < NOW() - INTERVAL '30 days'
                         AND last_activity_at IS NOT NULL AND created_at IS NOT NULL
-                    """),
-                    return_exceptions=True
-                )
-
-                # Handle exceptions
-                for i, result in enumerate(growth_results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Performance metrics: Error in growth query {i}: {result}")
-                        growth_results[i] = 0
-
-                recent_interactions = growth_results[0] or 0
-                previous_interactions = growth_results[1] or 0
-                recent_engagement = growth_results[2] or 0
-                previous_engagement = growth_results[3] or 0
+                    """) or 0
+                except Exception as e:
+                    logger.error(f"Performance metrics: Error in previous engagement query: {e}")
 
                 # Calculate growth percentages
                 interactions_growth = 0
