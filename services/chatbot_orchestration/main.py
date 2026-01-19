@@ -884,33 +884,73 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 
             # Generate content using the new API with files attached
             contents = [*files_to_search, retrieval_prompt]
+            logger.info(f"🚀 Making Gemini API call with {len(files_to_search)} files and prompt length {len(retrieval_prompt)}")
             response = genai_client.models.generate_content(
                 model='gemini-2.5-flash-lite',
                 contents=contents
             )
+            logger.info(f"✅ Gemini API call completed, response type: {type(response)}")
 
-            # Track Gemini token usage from response
+            # Track Gemini token usage from response - Paid tier should provide usage data
             logger.info(f"🔍 Gemini RAG Response Details: usage_metadata={getattr(response, 'usage_metadata', 'NO_USAGE_METADATA')}")
-            # Check multiple possible field names for Gemini usage
+
+            # Gemini API v1 uses different field structure - let's check all possibilities
             usage_data = None
+
+            # Check direct usage_metadata (newer API)
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
                 usage_data = response.usage_metadata
                 logger.info(f"📊 Gemini RAG Usage Metadata (usage_metadata): {usage_data}")
+
+            # Check usage field (direct)
             elif hasattr(response, 'usage') and response.usage:
                 usage_data = response.usage
                 logger.info(f"📊 Gemini RAG Usage (usage): {usage_data}")
+
+            # Check metadata.usage (nested)
             elif hasattr(response, 'metadata') and response.metadata and hasattr(response.metadata, 'usage'):
                 usage_data = response.metadata.usage
                 logger.info(f"📊 Gemini RAG Usage (metadata.usage): {usage_data}")
 
+            # Check if response has candidates with usage
+            elif hasattr(response, 'candidates') and response.candidates:
+                for candidate in response.candidates:
+                    if hasattr(candidate, 'usage_metadata') and candidate.usage_metadata:
+                        usage_data = candidate.usage_metadata
+                        logger.info(f"📊 Gemini RAG Usage (candidate.usage_metadata): {usage_data}")
+                        break
+
             if usage_data:
-                await track_gemini_usage_from_response(usage_data, api_call_type='rag')
+                logger.info(f"✅ Found Gemini usage data, attempting to track: {type(usage_data)}")
+                try:
+                    await track_gemini_usage_from_response(usage_data, api_call_type='rag')
+                    logger.info("✅ Gemini usage tracking completed successfully")
+                except Exception as tracking_error:
+                    logger.error(f"❌ Failed to track Gemini usage: {tracking_error}")
+                    import traceback
+                    logger.error(f"Usage tracking traceback: {traceback.format_exc()}")
             else:
-                logger.warning(f"⚠️ Gemini RAG response missing usage data. Response attributes: {[attr for attr in dir(response) if not attr.startswith('_')]}")
-                # Try to log any usage-related attributes
-                for attr in dir(response):
-                    if 'usage' in attr.lower() or 'token' in attr.lower():
-                        logger.info(f"Found potential usage attr: {attr} = {getattr(response, attr, 'NOT_FOUND')}")
+                logger.warning(f"⚠️ Gemini RAG response missing usage data (PAID TIER SHOULD HAVE THIS)")
+                logger.info(f"Response type: {type(response)}")
+                logger.info(f"Response dir: {[attr for attr in dir(response) if not attr.startswith('_')][:10]}")
+
+                # Log the full response for debugging (be careful with sensitive data)
+                try:
+                    response_dict = {}
+                    for attr in dir(response):
+                        if not attr.startswith('_'):
+                            try:
+                                value = getattr(response, attr)
+                                # Don't log large objects or sensitive data
+                                if not callable(value) and not hasattr(value, '__len__'):
+                                    response_dict[attr] = value
+                                elif hasattr(value, '__len__') and len(value) < 100:
+                                    response_dict[attr] = str(value)[:200]
+                            except:
+                                response_dict[attr] = "ERROR_ACCESSING"
+                    logger.info(f"Gemini response structure: {response_dict}")
+                except Exception as e:
+                    logger.error(f"Could not log response structure: {e}")
 
             # Parse the response to extract actual file names and clean content
             raw_response_text = response.text

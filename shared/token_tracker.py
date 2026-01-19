@@ -162,6 +162,7 @@ async def track_gemini_usage(prompt_tokens: int, candidates_tokens: int, session
 async def track_gemini_usage_detailed(
     prompt_tokens: int,
     candidates_tokens: int,
+    total_tokens: int = 0,
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
     session_id: str = None,
@@ -182,10 +183,12 @@ async def track_gemini_usage_detailed(
         api_call_type: Type of API call ('rag', 'search', etc.)
         model: Specific model used (default: gemini-2.5-flash-lite)
     """
-    if prompt_tokens <= 0 and candidates_tokens <= 0 and cache_read_tokens <= 0 and cache_write_tokens <= 0:
-        return  # Skip if no tokens used
+    # Use provided total_tokens if available, otherwise calculate from components
+    if total_tokens <= 0:
+        total_tokens = prompt_tokens + candidates_tokens + cache_read_tokens + cache_write_tokens
 
-    total_tokens = prompt_tokens + candidates_tokens + cache_read_tokens + cache_write_tokens
+    if total_tokens <= 0:
+        return  # Skip if no tokens used
 
     try:
         db = await get_db_connection()
@@ -300,19 +303,42 @@ async def track_gemini_usage_from_response(usage_obj, session_id: str = None, me
         return
 
     try:
-        # Extract detailed token breakdown from RunUsage object (from pydantic-ai)
-        # Gemini typically uses different field names than OpenAI
-        prompt_tokens = getattr(usage_obj, 'input_tokens', 0) or getattr(usage_obj, 'prompt_tokens', 0) or getattr(usage_obj, 'prompt_token_count', 0) or 0
-        candidates_tokens = getattr(usage_obj, 'output_tokens', 0) or getattr(usage_obj, 'completion_tokens', 0) or getattr(usage_obj, 'candidates_token_count', 0) or 0
+        # Extract detailed token breakdown from Gemini usage_metadata object
+        # Gemini API uses camelCase field names, try both camelCase and snake_case
+        prompt_tokens = (
+            getattr(usage_obj, 'promptTokenCount', 0) or  # camelCase (Gemini API)
+            getattr(usage_obj, 'prompt_token_count', 0) or # snake_case
+            getattr(usage_obj, 'input_tokens', 0) or       # pydantic-ai format
+            getattr(usage_obj, 'prompt_tokens', 0) or      # OpenAI format
+            0
+        )
+
+        candidates_tokens = (
+            getattr(usage_obj, 'candidatesTokenCount', 0) or # camelCase (Gemini API)
+            getattr(usage_obj, 'candidates_token_count', 0) or # snake_case
+            getattr(usage_obj, 'output_tokens', 0) or         # pydantic-ai format
+            getattr(usage_obj, 'completion_tokens', 0) or     # OpenAI format
+            0
+        )
+
+        total_tokens = (
+            getattr(usage_obj, 'totalTokenCount', 0) or     # camelCase (Gemini API)
+            getattr(usage_obj, 'total_token_count', 0) or   # snake_case
+            getattr(usage_obj, 'total_tokens', 0) or        # pydantic-ai format
+            (prompt_tokens + candidates_tokens)             # fallback calculation
+        )
+
         cache_read_tokens = getattr(usage_obj, 'cache_read_tokens', 0) or 0
         cache_write_tokens = getattr(usage_obj, 'cache_write_tokens', 0) or 0
 
-        logger.info(f"📊 Gemini detailed usage - prompt: {prompt_tokens}, candidates: {candidates_tokens}, cache_read: {cache_read_tokens}, cache_write: {cache_write_tokens}")
+        logger.info(f"📊 Gemini usage extracted - prompt: {prompt_tokens}, candidates: {candidates_tokens}, total: {total_tokens}")
+        logger.debug(f"📊 Full usage object: {usage_obj}")
 
-        if prompt_tokens > 0 or candidates_tokens > 0 or cache_read_tokens > 0 or cache_write_tokens > 0:
+        if prompt_tokens > 0 or candidates_tokens > 0 or total_tokens > 0 or cache_read_tokens > 0 or cache_write_tokens > 0:
             await track_gemini_usage_detailed(
                 prompt_tokens=prompt_tokens,
                 candidates_tokens=candidates_tokens,
+                total_tokens=total_tokens,
                 cache_read_tokens=cache_read_tokens,
                 cache_write_tokens=cache_write_tokens,
                 session_id=session_id,
