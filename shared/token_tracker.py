@@ -113,8 +113,7 @@ async def track_openai_usage_detailed(
                 available = limit_value - current_usage
 
                 # Update token_usage_cache table
-                await conn.execute(
-                    """
+                cache_query = """
                     INSERT INTO token_usage_cache (provider, used, available, limit_value, last_updated)
                     VALUES ('openai', $1, $2, $3, NOW())
                     ON CONFLICT (provider) DO UPDATE
@@ -122,21 +121,22 @@ async def track_openai_usage_detailed(
                         available = $2,
                         limit_value = $3,
                         last_updated = NOW()
-                    """,
-                    current_usage, available, limit_value
-                )
+                    """
+                logger.info(f"🔍 Executing INSERT on token_usage_cache (track_openai_usage_detailed): {cache_query.strip()} | Params: [{current_usage}, {available}, {limit_value}]")
+                await conn.execute(cache_query, current_usage, available, limit_value)
 
                 # Log detailed usage in token_usage_log table
                 if session_id or message_id:
-                    await conn.execute(
-                        """
+                    log_query = """
                         INSERT INTO token_usage_log (
                             session_id, message_id, provider, model, prompt_tokens, completion_tokens,
                             total_tokens, cache_read_tokens, cache_write_tokens, input_audio_tokens,
                             cache_audio_read_tokens, api_call_type, created_at
                         )
                         VALUES ($1, $2, 'openai', $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-                        """,
+                        """
+                    logger.info(f"🔍 Executing INSERT on token_usage_log (track_openai_usage_detailed): {log_query.strip()} | Params: [{session_id}, {message_id}, 'openai', {model}, {input_tokens}, {output_tokens}, {total_tokens}, {cache_read_tokens}, {cache_write_tokens}, {input_audio_tokens}, {cache_audio_read_tokens}, '{api_call_type}']")
+                    await conn.execute(log_query,
                         session_id, message_id, model, input_tokens, output_tokens, total_tokens,
                         cache_read_tokens, cache_write_tokens, input_audio_tokens, cache_audio_read_tokens, api_call_type
                     )
@@ -226,8 +226,7 @@ async def track_gemini_usage_detailed(
                 available = limit_value - current_usage
 
                 # Update token_usage_cache table
-                await conn.execute(
-                    """
+                cache_query = """
                     INSERT INTO token_usage_cache (provider, used, available, limit_value, last_updated)
                     VALUES ('gemini', $1, $2, $3, NOW())
                     ON CONFLICT (provider) DO UPDATE
@@ -235,20 +234,21 @@ async def track_gemini_usage_detailed(
                         available = $2,
                         limit_value = $3,
                         last_updated = NOW()
-                    """,
-                    current_usage, available, limit_value
-                )
+                    """
+                logger.info(f"🔍 Executing INSERT on token_usage_cache (track_gemini_usage_detailed): {cache_query.strip()} | Params: [{current_usage}, {available}, {limit_value}]")
+                await conn.execute(cache_query, current_usage, available, limit_value)
 
                 # Log detailed usage in token_usage_log table
                 if session_id or message_id:
-                    await conn.execute(
-                        """
+                    log_query = """
                         INSERT INTO token_usage_log (
                             session_id, message_id, provider, model, prompt_tokens, completion_tokens,
                             total_tokens, cache_read_tokens, cache_write_tokens, api_call_type, created_at
                         )
                         VALUES ($1, $2, 'gemini', $3, $4, $5, $6, $7, $8, $9, NOW())
-                        """,
+                        """
+                    logger.info(f"🔍 Executing INSERT on token_usage_log (track_gemini_usage_detailed): {log_query.strip()} | Params: [{session_id}, {message_id}, 'gemini', '{model}', {prompt_tokens}, {candidates_tokens}, {total_tokens}, {cache_read_tokens}, {cache_write_tokens}, '{api_call_type}']")
+                    await conn.execute(log_query,
                         session_id, message_id, model, prompt_tokens, candidates_tokens, total_tokens,
                         cache_read_tokens, cache_write_tokens, api_call_type
                     )
@@ -406,8 +406,7 @@ async def track_openai_usage_with_db(run_usage, session_id: str = None, message_
                 available = limit_value - current_usage
 
                 # Update token_usage_cache table
-                await conn.execute(
-                    """
+                cache_query = """
                     INSERT INTO token_usage_cache (provider, used, available, limit_value, last_updated)
                     VALUES ('openai', $1, $2, $3, NOW())
                     ON CONFLICT (provider) DO UPDATE
@@ -415,21 +414,22 @@ async def track_openai_usage_with_db(run_usage, session_id: str = None, message_
                         available = $2,
                         limit_value = $3,
                         last_updated = NOW()
-                    """,
-                    current_usage, available, limit_value
-                )
+                    """
+                logger.info(f"🔍 Executing INSERT on token_usage_cache (track_openai_usage_with_db): {cache_query.strip()} | Params: [{current_usage}, {available}, {limit_value}]")
+                await conn.execute(cache_query, current_usage, available, limit_value)
 
                 # Log detailed usage in token_usage_log table
                 if session_id or message_id:
-                    await conn.execute(
-                        """
+                    log_query = """
                         INSERT INTO token_usage_log (
                             session_id, message_id, provider, model, prompt_tokens, completion_tokens,
                             total_tokens, cache_read_tokens, cache_write_tokens, input_audio_tokens,
                             cache_audio_read_tokens, api_call_type, created_at
                         )
                         VALUES ($1, $2, 'openai', $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
-                        """,
+                        """
+                    logger.info(f"🔍 Executing INSERT on token_usage_log (track_openai_usage_with_db): {log_query.strip()} | Params: [{session_id}, {message_id}, 'openai', {model}, {input_tokens}, {output_tokens}, {total_tokens}, {cache_read_tokens}, {cache_write_tokens}, {input_audio_tokens}, {cache_audio_read_tokens}, '{api_call_type}']")
+                    await conn.execute(log_query,
                         session_id, message_id, model, input_tokens, output_tokens, total_tokens,
                         cache_read_tokens, cache_write_tokens, input_audio_tokens, cache_audio_read_tokens, api_call_type
                     )
@@ -492,8 +492,7 @@ async def track_gemini_usage_with_db(run_usage, session_id: str = None, message_
                 available = limit_value - current_usage
 
                 # Update token_usage_cache table
-                await conn.execute(
-                    """
+                cache_query = """
                     INSERT INTO token_usage_cache (provider, used, available, limit_value, last_updated)
                     VALUES ('gemini', $1, $2, $3, NOW())
                     ON CONFLICT (provider) DO UPDATE
@@ -501,20 +500,21 @@ async def track_gemini_usage_with_db(run_usage, session_id: str = None, message_
                         available = $2,
                         limit_value = $3,
                         last_updated = NOW()
-                    """,
-                    current_usage, available, limit_value
-                )
+                    """
+                logger.info(f"🔍 Executing INSERT on token_usage_cache (track_gemini_usage_with_db): {cache_query.strip()} | Params: [{current_usage}, {available}, {limit_value}]")
+                await conn.execute(cache_query, current_usage, available, limit_value)
 
                 # Log detailed usage in token_usage_log table
                 if session_id or message_id:
-                    await conn.execute(
-                        """
+                    log_query = """
                         INSERT INTO token_usage_log (
                             session_id, message_id, provider, model, prompt_tokens, completion_tokens,
                             total_tokens, cache_read_tokens, cache_write_tokens, api_call_type, created_at
                         )
                         VALUES ($1, $2, 'gemini', $3, $4, $5, $6, $7, $8, $9, NOW())
-                        """,
+                        """
+                    logger.info(f"🔍 Executing INSERT on token_usage_log (track_gemini_usage_with_db): {log_query.strip()} | Params: [{session_id}, {message_id}, 'gemini', '{model}', {prompt_tokens}, {candidates_tokens}, {total_tokens}, {cache_read_tokens}, {cache_write_tokens}, '{api_call_type}']")
+                    await conn.execute(log_query,
                         session_id, message_id, model, prompt_tokens, candidates_tokens, total_tokens,
                         cache_read_tokens, cache_write_tokens, api_call_type
                     )

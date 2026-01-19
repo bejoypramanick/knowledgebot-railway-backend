@@ -39,15 +39,15 @@ async def get_gemini_usage() -> dict:
         if db and hasattr(db, '_pool') and db._pool is not None:
             async with db.acquire() as conn:
                 # First try token_usage_cache table
-                cached = await conn.fetchrow(
-                    """
+                query = """
                     SELECT used, available, limit_value
                     FROM token_usage_cache
                     WHERE provider = 'gemini'
                     ORDER BY last_updated DESC
                     LIMIT 1
                     """
-                )
+                logger.info(f"🔍 Executing query on token_usage_cache: {query.strip()}")
+                cached = await conn.fetchrow(query)
                 if cached:
                     logger.info(f"Found Gemini usage in cache: used={cached['used']}, available={cached['available']}, limit={cached['limit_value']}")
                     return {
@@ -57,15 +57,15 @@ async def get_gemini_usage() -> dict:
                     }
 
                 # Fallback to llm_providers table
-                config = await conn.fetchrow(
-                    """
+                query = """
                     SELECT
                         COALESCE(token_used, 0) as used,
                         COALESCE(token_limit, 20000) as limit_value
                     FROM llm_providers
                     WHERE provider_name = 'gemini' AND is_active = true
                     """
-                )
+                logger.info(f"🔍 Executing query on llm_providers: {query.strip()}")
+                config = await conn.fetchrow(query)
                 if config:
                     used = config['used']
                     limit = config['limit_value']
@@ -100,15 +100,15 @@ async def get_openai_usage() -> dict:
         if db and hasattr(db, '_pool') and db._pool is not None:
             async with db.acquire() as conn:
                 # First try token_usage_cache table
-                cached = await conn.fetchrow(
-                    """
+                query = """
                     SELECT used, available, limit_value
                     FROM token_usage_cache
                     WHERE provider = 'openai'
                     ORDER BY last_updated DESC
                     LIMIT 1
                     """
-                )
+                logger.info(f"🔍 Executing query on token_usage_cache: {query.strip()}")
+                cached = await conn.fetchrow(query)
                 if cached:
                     logger.info(f"Found OpenAI usage in cache: used={cached['used']}, available={cached['available']}, limit={cached['limit_value']}")
                     return {
@@ -118,15 +118,15 @@ async def get_openai_usage() -> dict:
                     }
 
                 # Fallback to llm_providers table (using deepseek provider for backward compatibility)
-                config = await conn.fetchrow(
-                    """
+                query = """
                     SELECT
                         COALESCE(token_used, 0) as used,
                         COALESCE(token_limit, 150000) as limit_value
                     FROM llm_providers
                     WHERE provider_name = 'deepseek' AND is_active = true
                     """
-                )
+                logger.info(f"🔍 Executing query on llm_providers: {query.strip()}")
+                config = await conn.fetchrow(query)
                 if config:
                     used = config['used']
                     limit = config['limit_value']
@@ -248,6 +248,7 @@ async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_ca
                 query += f" ORDER BY tul.created_at DESC LIMIT ${param_count + 1}"
                 params.append(limit)
 
+                logger.info(f"🔍 Executing detailed token usage query: {query.strip()} | Params: {params}")
                 rows = await conn.fetch(query, *params)
 
                 # Format the results
