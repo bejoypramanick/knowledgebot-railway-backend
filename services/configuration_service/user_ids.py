@@ -220,6 +220,29 @@ async def get_user_profile(
         # Use get_db_connection to ensure database is initialized
         from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
+            # Check if table exists first
+            table_exists = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'user_profiles'
+                )
+                """
+            )
+
+            if not table_exists:
+                logger.warning(f"User profiles table does not exist. Creating basic profile for user {uid}")
+                # Create basic profile for new user without table
+                return UserProfileResponse(
+                    uid=uid,
+                    email=current_user.get('email'),
+                    display_name=current_user.get('name'),
+                    photo_url=current_user.get('picture'),
+                    role='user',
+                    created_at=datetime.now(),
+                    preferences={}
+                )
+
             # Get user profile from database
             profile = await conn.fetchrow(
                 """
@@ -254,13 +277,19 @@ async def get_user_profile(
 
             # Parse preferences - handle both dict and string cases
             preferences = profile['preferences']
+            logger.debug(f"Raw preferences for user {uid}: {preferences} (type: {type(preferences)})")
+
             if isinstance(preferences, str):
                 try:
                     preferences = json.loads(preferences)
-                except (json.JSONDecodeError, TypeError):
+                    logger.debug(f"Parsed preferences from string: {preferences}")
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse preferences string '{preferences}': {e}")
                     preferences = {}
             elif preferences is None:
                 preferences = {}
+
+            logger.debug(f"Final preferences object: {preferences}")
 
             return UserProfileResponse(
                 uid=profile['uid'],
