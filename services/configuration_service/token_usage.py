@@ -20,13 +20,13 @@ router = APIRouter(prefix="/api/v1/admin", tags=["token-usage"])
 
 async def get_db_connection():
     """Get database connection, initializing if needed."""
-    # Capture global railway_db state for logging before any potential assignment
-    global_railway_db = railway_db
-    logger.info(f"🔍 Checking database connection: railway_db={global_railway_db is not None}, has_pool={hasattr(global_railway_db, '_pool') if global_railway_db else False}, pool_not_none={global_railway_db._pool is not None if global_railway_db and hasattr(global_railway_db, '_pool') else False}")
+    global railway_db  # Explicitly declare railway_db as global
 
-    if global_railway_db is not None and hasattr(global_railway_db, '_pool') and global_railway_db._pool is not None:
+    logger.info(f"🔍 Checking database connection: railway_db={railway_db is not None}, has_pool={hasattr(railway_db, '_pool') if railway_db else False}, pool_not_none={railway_db._pool is not None if railway_db and hasattr(railway_db, '_pool') else False}")
+
+    if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
         logger.info("✅ Using existing database connection")
-        return global_railway_db
+        return railway_db
 
     # Initialize database if not already initialized
     database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
