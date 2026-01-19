@@ -297,6 +297,7 @@ async def track_gemini_usage_from_response(usage_obj, session_id: str = None, me
         model: Specific model used (default: gemini-2.5-flash-lite)
     """
     logger.info(f"🔍 Token tracking called for Gemini - session: {session_id}, message: {message_id}, type: {api_call_type}, model: {model}")
+    logger.debug(f"🔍 Usage object type: {type(usage_obj)}, value: {usage_obj}")
 
     if not usage_obj:
         logger.warning("⚠️ Gemini usage object is None or empty")

@@ -668,8 +668,10 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
     This tool searches through uploaded documents and scraped content to find
     information relevant to the user's query.
     """
+    logger.info(f"🔍 search_knowledge_base called with query: {query[:100]}...")
     genai_client = get_genai_client()
     if not genai_client:
+        logger.warning("❌ Gemini API client not configured")
         return [SearchResult(
             file_name="System_Error",
             content="Gemini API client not configured - cannot search knowledge base",
@@ -681,9 +683,11 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         )]
 
     try:
+        logger.info("📂 Listing Gemini files...")
         # List all files in Gemini FileSearch
         # Convert generator to list
         all_files = list(genai_client.files.list())
+        logger.info(f"📂 Found {len(all_files)} total files in Gemini FileSearch")
         
         if not all_files:
             logger.warning("No files found in FileSearch store")
@@ -885,11 +889,16 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             # Generate content using the new API with files attached
             contents = [*files_to_search, retrieval_prompt]
             logger.info(f"🚀 Making Gemini API call with {len(files_to_search)} files and prompt length {len(retrieval_prompt)}")
-            response = genai_client.models.generate_content(
-                model='gemini-2.5-flash-lite',
-                contents=contents
-            )
-            logger.info(f"✅ Gemini API call completed, response type: {type(response)}")
+
+            try:
+                response = genai_client.models.generate_content(
+                    model='gemini-2.5-flash-lite',
+                    contents=contents
+                )
+                logger.info(f"✅ Gemini API call completed, response type: {type(response)}")
+            except Exception as api_error:
+                logger.error(f"❌ Gemini API call failed: {api_error}")
+                return []
 
             # Track Gemini token usage from response - Paid tier should provide usage data
             logger.info(f"🔍 Gemini RAG Response Details: usage_metadata={getattr(response, 'usage_metadata', 'NO_USAGE_METADATA')}")
@@ -1296,7 +1305,9 @@ async def chat(request: ChatRequest):
         # Perform RAG search if enabled (pre-fetch context)
         file_context = []
         if request.use_rag:
+            logger.info(f"🔍 Starting RAG search for message: {request.message[:100]}...")
             file_context = await search_knowledge_base(request.message)
+            logger.info(f"📄 RAG search completed, found {len(file_context)} results")
         
         # Create or get session
         if session_id not in sessions:
@@ -1472,7 +1483,7 @@ async def chat(request: ChatRequest):
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                         """,
                         session_db_id,
-                        "assistant",
+                        "bot",
                         response_data.answer,
                         "rag" in response_data.data_sources_used,
                         "postgres" in response_data.data_sources_used,
