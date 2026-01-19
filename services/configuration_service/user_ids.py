@@ -231,24 +231,44 @@ async def get_user_profile(
             )
 
             if not profile:
-                # Create basic profile for new user
+                # Determine correct role by checking admin/human_agent tables
+                user_role = 'user'  # Default
+
+                # Check admin table
+                admin_check = await conn.fetchrow(
+                    "SELECT status FROM admins WHERE email = $1 AND status = 'confirmed'",
+                    current_user.get('email')
+                )
+                if admin_check:
+                    user_role = 'admin'
+
+                # Check human_agent table (only if not admin)
+                if user_role == 'user':
+                    agent_check = await conn.fetchrow(
+                        "SELECT status FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                        current_user.get('email')
+                    )
+                    if agent_check:
+                        user_role = 'human_agent'
+
+                # Create profile with correct role
                 await conn.execute(
                     """
                     INSERT INTO user_profiles (uid, email, role, created_at)
                     VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
                     ON CONFLICT (uid) DO NOTHING
                     """,
-                    uid, current_user.get('email'), 'user'
+                    uid, current_user.get('email'), user_role
                 )
 
-                # Return basic profile
-                logger.info(f"🆕 No profile found for uid {uid}, returning basic profile with role='user'")
+                # Return profile with correct role
+                logger.info(f"🆕 No profile found for uid {uid}, created profile with role='{user_role}'")
                 return UserProfileResponse(
                     uid=uid,
                     email=current_user.get('email'),
                     display_name=current_user.get('name'),
                     photo_url=current_user.get('picture'),
-                    role='user',
+                    role=user_role,
                     created_at=datetime.now(),
                     preferences={}
                 )
@@ -352,29 +372,35 @@ async def get_user_roles(
                 logger.warning(f"⚠️ user_profiles table does not exist! Returning default roles for uid: {uid}")
                 return ['user']
 
-            # Get user role from profile
-            logger.info(f"📊 Querying user_profiles table for uid: {uid}")
-            role_result = await conn.fetchval(
-                "SELECT role FROM user_profiles WHERE uid = $1",
-                uid
+            # Check admin and human_agent tables to determine role (same logic as token verification)
+            logger.info(f"📊 Checking admin and human_agent tables for email: {current_user.get('email')}")
+
+            # Check admin table
+            admin_check = await conn.fetchrow(
+                "SELECT status FROM admins WHERE email = $1 AND status = 'confirmed'",
+                current_user.get('email')
             )
 
-            user_role = role_result or 'user'
-            logger.info(f"🎭 Database role for uid {uid}: '{role_result}' -> normalized to: '{user_role}'")
-
-            # Return available roles based on current role
-            if user_role == 'admin':
+            if admin_check:
                 roles = ['admin', 'human_agent', 'user']
-                logger.info(f"👑 Admin user {uid} - returning roles: {roles}")
+                logger.info(f"👑 Admin found for {current_user.get('email')} - returning roles: {roles}")
                 return roles
-            elif user_role == 'human_agent':
+
+            # Check human_agent table
+            agent_check = await conn.fetchrow(
+                "SELECT status FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                current_user.get('email')
+            )
+
+            if agent_check:
                 roles = ['human_agent', 'user']
-                logger.info(f"🤖 Human agent user {uid} - returning roles: {roles}")
+                logger.info(f"🤖 Human agent found for {current_user.get('email')} - returning roles: {roles}")
                 return roles
-            else:
-                roles = ['user']
-                logger.info(f"👤 Regular user {uid} - returning roles: {roles}")
-                return roles
+
+            # Default to user role
+            roles = ['user']
+            logger.info(f"👤 No elevated roles found for {current_user.get('email')} - returning roles: {roles}")
+            return roles
 
     except Exception as e:
         logger.error(f"Error getting user roles: {e}")
