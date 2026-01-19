@@ -1587,8 +1587,9 @@ async def update_chat_session(
                 }
                 
                 try:
+                    # Broadcast only to participants of this specific session (customer + assigned agent)
                     await connection_manager.broadcast_to_session(session_ended_message, session_id)
-                    logger.info(f"Broadcasted session ended message to session {session_id}: ended by {ended_by}")
+                    logger.info(f"Broadcasted session ended message to session {session_id} participants: ended by {ended_by}")
                 except Exception as e:
                     logger.error(f"Error broadcasting session ended message: {e}")
             
@@ -1645,8 +1646,9 @@ async def end_customer_session(
             }
 
             try:
+                # Broadcast only to participants of this specific session (customer + assigned agent)
                 await connection_manager.broadcast_to_session(session_ended_message, session_id)
-                logger.info(f"Broadcasted session ended message to session {session_id}: ended by customer")
+                logger.info(f"Broadcasted session ended message to session {session_id} participants: ended by customer")
             except Exception as e:
                 logger.error(f"Error broadcasting session ended message: {e}")
 
@@ -1826,7 +1828,7 @@ async def end_customer_session(
             }
             
             await connection_manager.broadcast_to_session(session_ended_message, session_id)
-            logger.info(f"Broadcasted session ended message to session {session_id}: ended by customer")
+            logger.info(f"Broadcasted session ended message to session {session_id} participants: ended by customer")
             
             return {
                 "success": True,
