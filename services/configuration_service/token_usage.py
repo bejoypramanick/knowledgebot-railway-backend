@@ -259,11 +259,12 @@ async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_ca
                         tul.total_tokens,
                         tul.api_call_type,
                         tul.created_at,
-                        cs.customer_name,
-                        cs.customer_email,
+                        u.name as customer_name,
+                        u.email as customer_email,
                         cm.content as message_preview
                     FROM token_usage_log tul
                     LEFT JOIN chat_sessions cs ON tul.session_id = cs.id
+                    LEFT JOIN users u ON cs.user_id = u.id
                     LEFT JOIN chat_messages cm ON tul.message_id = cm.id AND cm.role = 'user'
                     WHERE 1=1
                 """
