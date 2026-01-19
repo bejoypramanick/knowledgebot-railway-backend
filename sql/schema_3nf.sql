@@ -13,16 +13,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- UTILITY FUNCTIONS
 -- ============================================================================
 
--- Function to automatically update updated_at timestamp
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = CURRENT_TIMESTAMP;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-COMMENT ON FUNCTION update_updated_at_column() IS 'Trigger function to automatically update updated_at timestamp';
+-- REMOVED: update_updated_at_column() function - no longer using triggers
 
 -- ============================================================================
 -- CORE USER TABLES
@@ -42,9 +33,7 @@ CREATE TABLE users (
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_is_active ON users(is_active);
 
-CREATE TRIGGER update_users_updated_at 
-    BEFORE UPDATE ON users 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- REMOVED: CREATE TRIGGER update_users_updated_at
 
 COMMENT ON TABLE users IS 'Base user information for all system users';
 
@@ -113,6 +102,28 @@ CREATE INDEX idx_user_unique_ids_unique_id ON user_unique_ids(unique_id);
 
 COMMENT ON TABLE user_unique_ids IS 'Unique display IDs for users across different roles';
 
+-- User profiles (extended user information)
+CREATE TABLE user_profiles (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    uid VARCHAR(255) NOT NULL UNIQUE,  -- Firebase UID
+    email VARCHAR(255),
+    display_name VARCHAR(255),
+    photo_url TEXT,
+    role VARCHAR(50) DEFAULT 'user',
+    preferences JSONB DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMPTZ,
+    CONSTRAINT user_profiles_role_check CHECK (role IN ('user', 'agent', 'admin')),
+    CONSTRAINT user_profiles_email_check CHECK (email IS NULL OR email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
+);
+
+CREATE INDEX idx_user_profiles_uid ON user_profiles(uid);
+CREATE INDEX idx_user_profiles_email ON user_profiles(email);
+CREATE INDEX idx_user_profiles_role ON user_profiles(role);
+
+COMMENT ON TABLE user_profiles IS 'Extended user profile information for authenticated users';
+
 -- ============================================================================
 -- CONFIGURATION TABLES (Normalized by concern)
 -- ============================================================================
@@ -129,9 +140,7 @@ CREATE TABLE configuration_metadata (
     CONSTRAINT valid_default_role CHECK (default_user_role IN ('user', 'admin', 'human_agent'))
 );
 
-CREATE TRIGGER update_configuration_metadata_updated_at 
-    BEFORE UPDATE ON configuration_metadata 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- REMOVED: CREATE TRIGGER update_configuration_metadata_updated_at
 
 COMMENT ON TABLE configuration_metadata IS 'Global configuration settings (single row)';
 COMMENT ON COLUMN configuration_metadata.hil_enabled IS 'Human-in-the-Loop enabled flag';
@@ -148,9 +157,7 @@ CREATE TABLE notification_settings (
 
 CREATE INDEX idx_notification_settings_name ON notification_settings(setting_name);
 
-CREATE TRIGGER update_notification_settings_updated_at 
-    BEFORE UPDATE ON notification_settings 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- REMOVED: CREATE TRIGGER update_notification_settings_updated_at
 
 COMMENT ON TABLE notification_settings IS 'Notification configuration settings';
 
@@ -168,9 +175,7 @@ CREATE TABLE security_settings (
 
 CREATE INDEX idx_security_settings_name ON security_settings(setting_name);
 
-CREATE TRIGGER update_security_settings_updated_at 
-    BEFORE UPDATE ON security_settings 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- REMOVED: CREATE TRIGGER update_security_settings_updated_at
 
 COMMENT ON TABLE security_settings IS 'Security configuration settings';
 
@@ -188,9 +193,7 @@ CREATE TABLE llm_providers (
 CREATE INDEX idx_llm_providers_name ON llm_providers(provider_name);
 CREATE INDEX idx_llm_providers_active ON llm_providers(is_active);
 
-CREATE TRIGGER update_llm_providers_updated_at 
-    BEFORE UPDATE ON llm_providers 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- REMOVED: CREATE TRIGGER update_llm_providers_updated_at
 
 COMMENT ON TABLE llm_providers IS 'LLM provider configurations and token usage';
 
@@ -207,9 +210,7 @@ CREATE TABLE persona_configurations (
 CREATE INDEX idx_persona_configurations_name ON persona_configurations(persona_name);
 CREATE INDEX idx_persona_configurations_active ON persona_configurations(is_active);
 
-CREATE TRIGGER update_persona_configurations_updated_at 
-    BEFORE UPDATE ON persona_configurations 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- REMOVED: CREATE TRIGGER update_persona_configurations_updated_at
 
 COMMENT ON TABLE persona_configurations IS 'AI persona configurations with system prompts';
 
@@ -239,9 +240,7 @@ CREATE TABLE widget_configuration (
 
 CREATE INDEX idx_widget_config_updated_at ON widget_configuration(updated_at);
 
-CREATE TRIGGER update_widget_config_updated_at 
-    BEFORE UPDATE ON widget_configuration 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- REMOVED: CREATE TRIGGER update_widget_config_updated_at
 
 COMMENT ON TABLE widget_configuration IS 'Widget display and behavior configuration';
 
@@ -307,9 +306,7 @@ CREATE INDEX idx_chat_sessions_sentiment ON chat_sessions(sentiment);
 CREATE INDEX idx_chat_sessions_is_active ON chat_sessions(is_active);
 CREATE INDEX idx_chat_sessions_last_activity ON chat_sessions(last_activity_at DESC);
 
-CREATE TRIGGER update_chat_sessions_updated_at 
-    BEFORE UPDATE ON chat_sessions 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- REMOVED: CREATE TRIGGER update_chat_sessions_updated_at
 
 COMMENT ON TABLE chat_sessions IS 'Chat session tracking';
 COMMENT ON COLUMN chat_sessions.sentiment IS 'Overall sentiment analyzed by LLM';
@@ -413,9 +410,7 @@ CREATE INDEX idx_file_uploads_gemini_state ON file_uploads(gemini_state);
 CREATE INDEX idx_file_uploads_r2_key ON file_uploads(cloudflare_r2_key);
 CREATE INDEX idx_file_uploads_uploaded_at ON file_uploads(uploaded_at DESC);
 
-CREATE TRIGGER update_file_uploads_updated_at 
-    BEFORE UPDATE ON file_uploads 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- REMOVED: CREATE TRIGGER update_file_uploads_updated_at
 
 COMMENT ON TABLE file_uploads IS 'Uploaded files with cloud storage references';
 
@@ -449,9 +444,7 @@ CREATE INDEX idx_scraped_websites_gemini_file_name ON scraped_websites(gemini_fi
 CREATE INDEX idx_scraped_websites_gemini_state ON scraped_websites(gemini_state);
 CREATE INDEX idx_scraped_websites_scraped_at ON scraped_websites(scraped_at DESC);
 
-CREATE TRIGGER update_scraped_websites_updated_at 
-    BEFORE UPDATE ON scraped_websites 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+-- REMOVED: CREATE TRIGGER update_scraped_websites_updated_at
 
 COMMENT ON TABLE scraped_websites IS 'Scraped website content for knowledge base';
 

@@ -1,10 +1,10 @@
 """
-User Unique IDs Endpoints
-Handles generation and retrieval of unique IDs for users, agents, and admins.
+User Management Endpoints
+Handles user profiles, roles, and unique IDs for users, agents, and admins.
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import logging
 import sys
 from pathlib import Path
@@ -20,7 +20,7 @@ from shared.auth_middleware import get_current_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/users", tags=["user-ids"])
+router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
 
 class UniqueIdRequest(BaseModel):
@@ -33,6 +33,32 @@ class UniqueIdResponse(BaseModel):
     email: Optional[str] = None
     role: str
     created: bool  # True if newly created, False if existing
+
+
+class UserProfileRequest(BaseModel):
+    display_name: Optional[str] = None
+    photo_url: Optional[str] = None
+    preferences: Optional[dict] = None
+
+
+class UserProfileResponse(BaseModel):
+    uid: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    photo_url: Optional[str] = None
+    role: str
+    created_at: Optional[datetime] = None
+    last_login: Optional[datetime] = None
+    preferences: Optional[dict] = None
+
+
+class SwitchRoleRequest(BaseModel):
+    role: str  # 'customer', 'agent', or 'admin'
+
+
+class SwitchRoleResponse(BaseModel):
+    success: bool
+    message: str
 
 
 def generate_unique_id(role: str) -> str:
@@ -178,4 +204,182 @@ async def get_unique_id(
         raise
     except Exception as e:
         logger.error(f"Error getting unique ID: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/profile", response_model=UserProfileResponse)
+async def get_user_profile(
+    uid: str = Query(..., description="User UID"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get user profile information.
+    """
+    try:
+        # Use get_db_connection to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
+            # Get user profile from database
+            profile = await conn.fetchrow(
+                """
+                SELECT uid, email, display_name, photo_url, role, created_at, last_login, preferences
+                FROM user_profiles
+                WHERE uid = $1
+                """,
+                uid
+            )
+
+            if not profile:
+                # Create basic profile for new user
+                await conn.execute(
+                    """
+                    INSERT INTO user_profiles (uid, email, role, created_at)
+                    VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                    ON CONFLICT (uid) DO NOTHING
+                    """,
+                    uid, current_user.get('email'), 'user'
+                )
+
+                # Return basic profile
+                return UserProfileResponse(
+                    uid=uid,
+                    email=current_user.get('email'),
+                    display_name=current_user.get('name'),
+                    photo_url=current_user.get('picture'),
+                    role='user',
+                    created_at=datetime.now(),
+                    preferences={}
+                )
+
+            return UserProfileResponse(
+                uid=profile['uid'],
+                email=profile['email'],
+                display_name=profile['display_name'],
+                photo_url=profile['photo_url'],
+                role=profile['role'] or 'user',
+                created_at=profile['created_at'],
+                last_login=profile['last_login'],
+                preferences=profile['preferences'] or {}
+            )
+
+    except Exception as e:
+        logger.error(f"Error getting user profile: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.put("/profile", response_model=UserProfileResponse)
+async def update_user_profile(
+    uid: str = Query(..., description="User UID"),
+    request: UserProfileRequest = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update user profile information.
+    """
+    try:
+        # Use get_db_connection to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
+            # Update user profile
+            await conn.execute(
+                """
+                INSERT INTO user_profiles (uid, email, display_name, photo_url, preferences, updated_at)
+                VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+                ON CONFLICT (uid) DO UPDATE SET
+                    display_name = EXCLUDED.display_name,
+                    photo_url = EXCLUDED.photo_url,
+                    preferences = EXCLUDED.preferences,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                uid,
+                current_user.get('email'),
+                request.display_name if request else None,
+                request.photo_url if request else None,
+                request.preferences if request else {}
+            )
+
+            # Return updated profile
+            return await get_user_profile(uid, current_user)
+
+    except Exception as e:
+        logger.error(f"Error updating user profile: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get("/roles", response_model=List[str])
+async def get_user_roles(
+    uid: str = Query(..., description="User UID"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get available roles for a user.
+    This is a simplified implementation that returns basic roles.
+    In a real implementation, this would check user permissions.
+    """
+    try:
+        # Use get_db_connection to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
+            # Get user role from profile
+            role_result = await conn.fetchval(
+                "SELECT role FROM user_profiles WHERE uid = $1",
+                uid
+            )
+
+            user_role = role_result or 'user'
+
+            # Return available roles based on current role
+            if user_role == 'admin':
+                return ['admin', 'human_agent', 'user']
+            elif user_role == 'human_agent':
+                return ['human_agent', 'user']
+            else:
+                return ['user']
+
+    except Exception as e:
+        logger.error(f"Error getting user roles: {e}")
+        # Return default roles on error
+        return ['user']
+
+
+@router.post("/switch-role", response_model=SwitchRoleResponse)
+async def switch_user_role(
+    uid: str = Query(..., description="User UID"),
+    request: SwitchRoleRequest = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Switch user role.
+    """
+    try:
+        role = request.role.lower() if request else 'user'
+        if role not in ['customer', 'agent', 'admin']:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be 'customer', 'agent', or 'admin'")
+
+        # Map 'customer' to 'user' for consistency
+        if role == 'customer':
+            role = 'user'
+
+        # Use get_db_connection to ensure database is initialized
+        from services.configuration_service.main import get_db_connection
+        async with get_db_connection() as conn:
+            # Update user role
+            await conn.execute(
+                """
+                UPDATE user_profiles
+                SET role = $2, updated_at = CURRENT_TIMESTAMP
+                WHERE uid = $1
+                """,
+                uid, role
+            )
+
+            return SwitchRoleResponse(
+                success=True,
+                message=f"Role switched to {role}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error switching user role: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
