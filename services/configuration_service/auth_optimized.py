@@ -56,6 +56,26 @@ async def execute_database_operations_with_retry(email: str) -> tuple:
     db_start_time = time.time()
 
     async with DatabaseConnection() as conn:
+        # DEBUG: Check admin table status for this user
+        admin_check = await conn.fetchrow(
+            "SELECT email, status FROM admins WHERE email = $1",
+            email
+        )
+        if admin_check:
+            logger.info(f"👑 Admin table entry found for {email}: status='{admin_check['status']}'")
+        else:
+            logger.info(f"❌ No admin table entry found for {email}")
+
+        # DEBUG: Check human_agents table status for this user
+        agent_check = await conn.fetchrow(
+            "SELECT email, status FROM human_agents WHERE email = $1",
+            email
+        )
+        if agent_check:
+            logger.info(f"🤖 Human agent table entry found for {email}: status='{agent_check['status']}'")
+        else:
+            logger.info(f"❌ No human agent table entry found for {email}")
+
         # OPTIMIZED: Single query with UNION instead of multiple queries
         role_query = """
             SELECT role FROM (
@@ -74,7 +94,8 @@ async def execute_database_operations_with_retry(email: str) -> tuple:
         db_roles = [row['role'] for row in roles_result]
         logger.info(f"📊 Database roles found for {email}: {db_roles}")
         if not db_roles:
-            logger.info(f"❌ No roles found in database for {email} - user will default to 'user' role")
+            logger.info(f"❌ No CONFIRMED roles found in database for {email} - user will default to 'user' role")
+            logger.info(f"💡 To grant admin access, ensure {email} has status='confirmed' in admins table")
 
         return roles_result, db_time
 
