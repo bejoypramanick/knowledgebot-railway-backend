@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.config import settings
+from shared.token_tracker import track_openai_usage_from_response
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,11 @@ Your response should be just the single word, nothing else."""
                 temperature=0.3,
                 max_tokens=10
             )
+
+            # Track token usage for sentiment analysis
+            if hasattr(response, 'usage') and response.usage:
+                await track_openai_usage_from_response(response.usage, None, None, 'sentiment_analysis', 'gpt-4o-mini')
+
             response_text = response.choices[0].message.content.strip().lower()
             logger.info(f"OpenAI sentiment response: {response_text}")
             
@@ -213,6 +219,10 @@ Summary:"""
             max_tokens=300,
             temperature=0.3
         )
+
+        # Track token usage for conversation summary
+        if hasattr(response, 'usage') and response.usage:
+            await track_openai_usage_from_response(response.usage, session_id, None, 'conversation_summary', 'gpt-3.5-turbo')
 
         summary = response.choices[0].message.content.strip()
         logger.info(f"Generated conversation summary: {len(summary)} characters")

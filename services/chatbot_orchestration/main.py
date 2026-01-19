@@ -889,9 +889,9 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 contents=contents
             )
 
-            # Track Gemini token usage from response
+            # Track Gemini token usage from response (correlated with session)
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                await track_gemini_usage_from_response(response.usage_metadata)
+                await track_gemini_usage_from_response(response.usage_metadata, session_id, None, 'rag')
 
             # Parse the response to extract actual file names and clean content
             raw_response_text = response.text
@@ -1337,8 +1337,8 @@ async def chat(request: ChatRequest):
                     "input_tokens": getattr(result.usage, 'input_tokens', 0),
                     "output_tokens": getattr(result.usage, 'output_tokens', 0),
                 }
-                # Track token usage in database
-                await track_openai_usage_from_response(result.usage)
+                # Track token usage in database with session and message correlation
+                await track_openai_usage_from_response(result.usage, str(session_db_id), str(assistant_message_id), 'chat')
             logger.debug("Usage info extracted: %s", usage_info)
         except Exception as e:
             logger.debug("Failed to extract usage info: %s", e)
@@ -1385,12 +1385,14 @@ async def chat(request: ChatRequest):
                     logger.info("DB persistence: existing chat_sessions id=%s will be used", session_db_id)
 
                 # Save user message
+                user_message_id = None
                 try:
                     logger.info("DB persistence: inserting user message for session_db_id=%s", session_db_id)
-                    await db.execute(
+                    user_message_id = await db.fetchval(
                         """
                         INSERT INTO chat_messages (session_id, role, content, used_rag, used_postgres, used_neon_db, used_internet_search)
                         VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        RETURNING id
                         """,
                         session_db_id,
                         "user",
@@ -1400,17 +1402,19 @@ async def chat(request: ChatRequest):
                         "neon_db" in response_data.data_sources_used,
                         "internet" in response_data.data_sources_used
                     )
-                    logger.info("DB persistence: user message inserted for session_db_id=%s", session_db_id)
+                    logger.info("DB persistence: user message inserted with id=%s for session_db_id=%s", user_message_id, session_db_id)
                 except Exception as e:
                     logger.exception("DB persistence: failed to insert user message for session_db_id=%s: %s", session_db_id, e)
 
                 # Save assistant message
+                assistant_message_id = None
                 try:
                     logger.info("DB persistence: inserting assistant message for session_db_id=%s", session_db_id)
-                    await db.execute(
+                    assistant_message_id = await db.fetchval(
                         """
                         INSERT INTO chat_messages (session_id, role, content, used_rag, used_postgres, used_neon_db, used_internet_search, confidence_score, sources, usage_info)
                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        RETURNING id
                         """,
                         session_db_id,
                         "assistant",
@@ -1423,7 +1427,7 @@ async def chat(request: ChatRequest):
                         json.dumps([{"file_name": s.file_name, "relevance_score": s.relevance_score} for s in response_data.sources]),
                         json.dumps(usage_info) if usage_info else None
                     )
-                    logger.info("DB persistence: assistant message inserted for session_db_id=%s", session_db_id)
+                    logger.info("DB persistence: assistant message inserted with id=%s for session_db_id=%s", assistant_message_id, session_db_id)
                 except Exception as e:
                     logger.exception("DB persistence: failed to insert assistant message for session_db_id=%s: %s", session_db_id, e)
 
@@ -1467,8 +1471,8 @@ async def chat(request: ChatRequest):
                 "input_tokens": getattr(result.usage, 'input_tokens', 0),
                 "output_tokens": getattr(result.usage, 'output_tokens', 0),
             }
-            # Track token usage in database
-            await track_openai_usage_from_response(result.usage)
+            # Track token usage in database with session and message correlation
+            await track_openai_usage_from_response(result.usage, str(session_db_id), str(assistant_message_id), 'chat')
         
         return ChatSessionResponse(
             session_id=session_id,
@@ -1668,8 +1672,8 @@ Only return the JSON array, nothing else."""
                 "input_tokens": getattr(result.usage, 'input_tokens', 0),
                 "output_tokens": getattr(result.usage, 'output_tokens', 0),
             }
-            # Track token usage
-            await track_openai_usage_from_response(result.usage)
+            # Track token usage for suggested messages generation
+            await track_openai_usage_from_response(result.usage, request.session_id, None, 'suggested_messages')
         
         return SuggestedMessagesResponse(
             suggested_messages=suggested_messages,

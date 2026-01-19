@@ -192,10 +192,10 @@ async def get_token_usage():
     try:
         # Initialize token usage if needed
         await initialize_token_usage_if_needed()
-        
+
         gemini_usage = await get_gemini_usage()
         openai_usage = await get_openai_usage()
-        
+
         return {
             "gemini": gemini_usage,
             "openai": openai_usage
@@ -203,4 +203,92 @@ async def get_token_usage():
     except Exception as e:
         logger.error(f"Error fetching token usage: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching token usage: {str(e)}")
+
+
+@router.get("/token-usage/detailed", response_model=dict)
+async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_call_type: str = None):
+    """Get detailed token usage log with correlations to specific requests."""
+    try:
+        db = await get_db_connection()
+        if db and hasattr(db, '_pool') and db._pool is not None:
+            async with db.acquire() as conn:
+                # Build query with optional filters
+                query = """
+                    SELECT
+                        tul.id,
+                        tul.provider,
+                        tul.model,
+                        tul.prompt_tokens,
+                        tul.completion_tokens,
+                        tul.total_tokens,
+                        tul.api_call_type,
+                        tul.created_at,
+                        cs.customer_name,
+                        cs.customer_email,
+                        cm.content as message_preview
+                    FROM token_usage_log tul
+                    LEFT JOIN chat_sessions cs ON tul.session_id = cs.id
+                    LEFT JOIN chat_messages cm ON tul.message_id = cm.id AND cm.role = 'user'
+                    WHERE 1=1
+                """
+
+                params = []
+                param_count = 0
+
+                if provider:
+                    param_count += 1
+                    query += f" AND tul.provider = ${param_count}"
+                    params.append(provider)
+
+                if api_call_type:
+                    param_count += 1
+                    query += f" AND tul.api_call_type = ${param_count}"
+                    params.append(api_call_type)
+
+                query += f" ORDER BY tul.created_at DESC LIMIT ${param_count + 1}"
+                params.append(limit)
+
+                rows = await conn.fetch(query, *params)
+
+                # Format the results
+                detailed_usage = []
+                for row in rows:
+                    detailed_usage.append({
+                        "id": str(row['id']),
+                        "provider": row['provider'],
+                        "model": row['model'],
+                        "prompt_tokens": row['prompt_tokens'],
+                        "completion_tokens": row['completion_tokens'],
+                        "total_tokens": row['total_tokens'],
+                        "api_call_type": row['api_call_type'],
+                        "created_at": row['created_at'].isoformat() if row['created_at'] else None,
+                        "session_info": {
+                            "customer_name": row['customer_name'],
+                            "customer_email": row['customer_email']
+                        } if row['customer_name'] or row['customer_email'] else None,
+                        "message_preview": row['message_preview'][:100] + "..." if row['message_preview'] and len(row['message_preview']) > 100 else row['message_preview']
+                    })
+
+                return {
+                    "detailed_usage": detailed_usage,
+                    "total_count": len(detailed_usage),
+                    "filters_applied": {
+                        "provider": provider,
+                        "api_call_type": api_call_type,
+                        "limit": limit
+                    }
+                }
+        else:
+            return {
+                "detailed_usage": [],
+                "total_count": 0,
+                "error": "Database not available"
+            }
+    except Exception as e:
+        logger.error(f"Error fetching detailed token usage: {e}", exc_info=True)
+        return {
+            "detailed_usage": [],
+            "total_count": 0,
+            "error": str(e)
+        }
 
