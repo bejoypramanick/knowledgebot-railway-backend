@@ -896,7 +896,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 
             # Track Gemini token usage from response (correlated with session)
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                await track_gemini_usage_from_response(response.usage_metadata, session_id, None, 'rag')
+                await track_gemini_usage_from_response(response.usage_metadata, session_id, None, 'rag', 'gemini-2.5-flash-lite')
 
             # Parse the response to extract actual file names and clean content
             raw_response_text = response.text
