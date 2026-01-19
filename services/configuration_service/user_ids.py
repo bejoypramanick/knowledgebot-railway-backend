@@ -12,6 +12,7 @@ from datetime import datetime
 import uuid
 import random
 import string
+import json
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -251,6 +252,16 @@ async def get_user_profile(
                     preferences={}
                 )
 
+            # Parse preferences - handle both dict and string cases
+            preferences = profile['preferences']
+            if isinstance(preferences, str):
+                try:
+                    preferences = json.loads(preferences)
+                except (json.JSONDecodeError, TypeError):
+                    preferences = {}
+            elif preferences is None:
+                preferences = {}
+
             return UserProfileResponse(
                 uid=profile['uid'],
                 email=profile['email'],
@@ -259,7 +270,7 @@ async def get_user_profile(
                 role=profile['role'] or 'user',
                 created_at=profile['created_at'],
                 last_login=profile['last_login'],
-                preferences=profile['preferences'] or {}
+                preferences=preferences
             )
 
     except Exception as e:
