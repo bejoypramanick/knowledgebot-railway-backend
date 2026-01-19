@@ -90,14 +90,20 @@ async def get_performance_metrics():
                 # Group 2: Complex calculations (deflection + interactions over time in parallel)
                 logger.debug("Performance metrics: Starting parallel queries for complex metrics")
 
+                # Deflection Rate calculation (only if total_sessions > 0)
+                async def get_deflection_count():
+                    if total_sessions > 0:
+                        return await conn.fetchval("""
+                            SELECT COUNT(DISTINCT cm.session_id)
+                            FROM chat_messages cm
+                            INNER JOIN chat_sessions cs ON cm.session_id = cs.id
+                            WHERE cm.role = 'assistant'
+                        """)
+                    else:
+                        return 0
+
                 complex_results = await asyncio.gather(
-                    # Deflection Rate calculation (only if total_sessions > 0)
-                    conn.fetchval("""
-                        SELECT COUNT(DISTINCT cm.session_id)
-                        FROM chat_messages cm
-                        INNER JOIN chat_sessions cs ON cm.session_id = cs.id
-                        WHERE cm.role = 'assistant'
-                    """) if total_sessions > 0 else asyncio.coroutine(lambda: 0)(),
+                    get_deflection_count(),
 
                     # Interactions over time (last 6 months)
                     conn.fetch("""
@@ -113,11 +119,13 @@ async def get_performance_metrics():
                     return_exceptions=True
                 )
 
-                # Handle exceptions
+                # Handle exceptions and None values
                 for i, result in enumerate(complex_results):
                     if isinstance(result, Exception):
                         logger.error(f"Performance metrics: Error in complex query {i}: {result}")
                         complex_results[i] = 0 if i == 0 else []
+                    elif result is None and i == 0:  # Handle None for deflection query when total_sessions == 0
+                        complex_results[i] = 0
 
                 # Calculate deflection rate
                 sessions_with_messages = complex_results[0] or 0
