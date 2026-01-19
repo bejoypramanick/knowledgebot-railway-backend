@@ -214,88 +214,91 @@ async def get_user_profile(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get user profile information.
+    Get user profile information from admins/human_agents tables.
+    No longer uses user_profiles table.
     """
     try:
         # Use get_db_connection to ensure database is initialized
         from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
-            # Get user profile from database
-            profile = await conn.fetchrow(
+
+            # First check if user is an admin
+            admin_profile = await conn.fetchrow(
                 """
-                SELECT uid, email, display_name, photo_url, role, created_at, last_login, preferences
-                FROM user_profiles
-                WHERE uid = $1
+                SELECT email, display_name, photo_url, role, created_at, last_login, preferences
+                FROM admins
+                WHERE email = $1 AND status = 'confirmed'
                 """,
-                uid
+                current_user.get('email')
             )
 
-            if not profile:
-                # Determine correct role by checking admin/human_agent tables
-                user_role = 'user'  # Default
+            if admin_profile:
+                # Parse preferences - handle both dict and string cases
+                preferences = admin_profile['preferences']
+                if isinstance(preferences, str):
+                    try:
+                        preferences = json.loads(preferences)
+                    except (json.JSONDecodeError, TypeError):
+                        preferences = {}
+                elif preferences is None:
+                    preferences = {}
 
-                # Check admin table
-                admin_check = await conn.fetchrow(
-                    "SELECT status FROM admins WHERE email = $1 AND status = 'confirmed'",
-                    current_user.get('email')
-                )
-                if admin_check:
-                    user_role = 'admin'
-
-                # Check human_agent table (only if not admin)
-                if user_role == 'user':
-                    agent_check = await conn.fetchrow(
-                        "SELECT status FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
-                        current_user.get('email')
-                    )
-                    if agent_check:
-                        user_role = 'human_agent'
-
-                # Create profile with correct role
-                await conn.execute(
-                    """
-                    INSERT INTO user_profiles (uid, email, role, created_at)
-                    VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
-                    ON CONFLICT (uid) DO NOTHING
-                    """,
-                    uid, current_user.get('email'), user_role
-                )
-
-                # Return profile with correct role
-                logger.info(f"🆕 No profile found for uid {uid}, created profile with role='{user_role}'")
+                logger.info(f"👑 Returning admin profile for uid {uid}: email='{admin_profile['email']}'")
                 return UserProfileResponse(
                     uid=uid,
-                    email=current_user.get('email'),
-                    display_name=current_user.get('name'),
-                    photo_url=current_user.get('picture'),
-                    role=user_role,
-                    created_at=datetime.now(),
-                    preferences={}
+                    email=admin_profile['email'],
+                    display_name=admin_profile['display_name'] or current_user.get('name'),
+                    photo_url=admin_profile['photo_url'] or current_user.get('picture'),
+                    role=admin_profile['role'] or 'admin',
+                    created_at=admin_profile['created_at'] or datetime.now(),
+                    last_login=admin_profile['last_login'],
+                    preferences=preferences
                 )
 
-            # Parse preferences - handle both dict and string cases
-            preferences = profile['preferences']
-            if isinstance(preferences, str):
-                try:
-                    preferences = json.loads(preferences)
-                except (json.JSONDecodeError, TypeError):
-                    preferences = {}
-            elif preferences is None:
-                preferences = {}
-
-            profile_response = UserProfileResponse(
-                uid=profile['uid'],
-                email=profile['email'],
-                display_name=profile['display_name'],
-                photo_url=profile['photo_url'],
-                role=profile['role'] or 'user',
-                created_at=profile['created_at'],
-                last_login=profile['last_login'],
-                preferences=preferences
+            # Check if user is a human agent
+            agent_profile = await conn.fetchrow(
+                """
+                SELECT email, display_name, photo_url, role, created_at, last_login, preferences
+                FROM human_agents
+                WHERE email = $1 AND status IN ('confirmed', 'pending')
+                """,
+                current_user.get('email')
             )
 
-            logger.info(f"📄 Returning user profile for uid {uid}: role='{profile_response.role}', email='{profile_response.email}'")
-            return profile_response
+            if agent_profile:
+                # Parse preferences - handle both dict and string cases
+                preferences = agent_profile['preferences']
+                if isinstance(preferences, str):
+                    try:
+                        preferences = json.loads(preferences)
+                    except (json.JSONDecodeError, TypeError):
+                        preferences = {}
+                elif preferences is None:
+                    preferences = {}
+
+                logger.info(f"🤖 Returning human agent profile for uid {uid}: email='{agent_profile['email']}'")
+                return UserProfileResponse(
+                    uid=uid,
+                    email=agent_profile['email'],
+                    display_name=agent_profile['display_name'] or current_user.get('name'),
+                    photo_url=agent_profile['photo_url'] or current_user.get('picture'),
+                    role=agent_profile['role'] or 'human_agent',
+                    created_at=agent_profile['created_at'] or datetime.now(),
+                    last_login=agent_profile['last_login'],
+                    preferences=preferences
+                )
+
+            # Regular user - return basic profile from Firebase
+            logger.info(f"👤 Returning basic user profile for uid {uid} (no elevated roles)")
+            return UserProfileResponse(
+                uid=uid,
+                email=current_user.get('email'),
+                display_name=current_user.get('name'),
+                photo_url=current_user.get('picture'),
+                role='user',
+                created_at=datetime.now(),
+                preferences={}
+            )
 
     except Exception as e:
         logger.error(f"Error getting user profile: {e}")
@@ -309,33 +312,70 @@ async def update_user_profile(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Update user profile information.
+    Update user profile information in admins/human_agents tables.
     """
     try:
         # Use get_db_connection to ensure database is initialized
         from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
-            # Update user profile
-            await conn.execute(
-                """
-                INSERT INTO user_profiles (uid, email, display_name, photo_url, preferences, updated_at)
-                VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-                ON CONFLICT (uid) DO UPDATE SET
-                    display_name = EXCLUDED.display_name,
-                    photo_url = EXCLUDED.photo_url,
-                    preferences = EXCLUDED.preferences,
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                uid,
-                current_user.get('email'),
-                request.display_name if request else None,
-                request.photo_url if request else None,
-                request.preferences if request else {}
+
+            # Check if user is admin and update their profile
+            admin_exists = await conn.fetchval(
+                "SELECT 1 FROM admins WHERE email = $1 AND status = 'confirmed'",
+                current_user.get('email')
             )
 
-            # Return updated profile
-            return await get_user_profile(uid, current_user)
+            if admin_exists:
+                await conn.execute(
+                    """
+                    UPDATE admins
+                    SET display_name = COALESCE($2, display_name),
+                        photo_url = COALESCE($3, photo_url),
+                        preferences = COALESCE($4, preferences),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE email = $1 AND status = 'confirmed'
+                    """,
+                    current_user.get('email'),
+                    request.display_name if request else None,
+                    request.photo_url if request else None,
+                    request.preferences if request else None
+                )
+                logger.info(f"👑 Updated admin profile for {current_user.get('email')}")
+                return await get_user_profile(uid, current_user)
 
+            # Check if user is human agent and update their profile
+            agent_exists = await conn.fetchval(
+                "SELECT 1 FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                current_user.get('email')
+            )
+
+            if agent_exists:
+                await conn.execute(
+                    """
+                    UPDATE human_agents
+                    SET display_name = COALESCE($2, display_name),
+                        photo_url = COALESCE($3, photo_url),
+                        preferences = COALESCE($4, preferences),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE email = $1 AND status IN ('confirmed', 'pending')
+                    """,
+                    current_user.get('email'),
+                    request.display_name if request else None,
+                    request.photo_url if request else None,
+                    request.preferences if request else None
+                )
+                logger.info(f"🤖 Updated human agent profile for {current_user.get('email')}")
+                return await get_user_profile(uid, current_user)
+
+            # Regular user - no profile to update
+            logger.info(f"👤 Cannot update profile for regular user {current_user.get('email')} (no elevated role)")
+            raise HTTPException(
+                status_code=403,
+                detail="Profile updates are only available for admins and human agents"
+            )
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error updating user profile: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
@@ -358,19 +398,6 @@ async def get_user_roles(
         # Use get_db_connection to ensure database is initialized
         from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
-            # Check if user_profiles table exists
-            table_exists = await conn.fetchval(
-                """
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables
-                    WHERE table_name = 'user_profiles'
-                )
-                """
-            )
-
-            if not table_exists:
-                logger.warning(f"⚠️ user_profiles table does not exist! Returning default roles for uid: {uid}")
-                return ['user']
 
             # Check admin and human_agent tables to determine all roles for the user
             logger.info(f"📊 Checking admin and human_agent tables for email: {current_user.get('email')}")
@@ -418,7 +445,8 @@ async def switch_user_role(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Switch user role.
+    Switch user role - this is mainly for UI state management.
+    Actual role permissions are determined by admins/human_agents table membership.
     """
     try:
         role = request.role.lower() if request else 'user'
@@ -429,23 +457,16 @@ async def switch_user_role(
         if role == 'customer':
             role = 'user'
 
-        # Use get_db_connection to ensure database is initialized
-        from services.configuration_service.main import get_db_connection
-        async with get_db_connection() as conn:
-            # Update user role
-            await conn.execute(
-                """
-                UPDATE user_profiles
-                SET role = $2, updated_at = CURRENT_TIMESTAMP
-                WHERE uid = $1
-                """,
-                uid, role
-            )
+        logger.info(f"🔄 Role switch requested for {current_user.get('email')} to '{role}'")
 
-            return SwitchRoleResponse(
-                success=True,
-                message=f"Role switched to {role}"
-            )
+        # Note: In the new architecture, roles are determined by table membership,
+        # not by a stored role field. This endpoint mainly serves the frontend
+        # state management and validation.
+
+        return SwitchRoleResponse(
+            success=True,
+            message=f"Role switched to {role}. Note: Actual permissions are determined by your admin/human agent status."
+        )
 
     except HTTPException:
         raise
