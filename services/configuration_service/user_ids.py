@@ -242,6 +242,7 @@ async def get_user_profile(
                 )
 
                 # Return basic profile
+                logger.info(f"🆕 No profile found for uid {uid}, returning basic profile with role='user'")
                 return UserProfileResponse(
                     uid=uid,
                     email=current_user.get('email'),
@@ -262,7 +263,7 @@ async def get_user_profile(
             elif preferences is None:
                 preferences = {}
 
-            return UserProfileResponse(
+            profile_response = UserProfileResponse(
                 uid=profile['uid'],
                 email=profile['email'],
                 display_name=profile['display_name'],
@@ -272,6 +273,9 @@ async def get_user_profile(
                 last_login=profile['last_login'],
                 preferences=preferences
             )
+
+            logger.info(f"📄 Returning user profile for uid {uid}: role='{profile_response.role}', email='{profile_response.email}'")
+            return profile_response
 
     except Exception as e:
         logger.error(f"Error getting user profile: {e}")
@@ -327,25 +331,50 @@ async def get_user_roles(
     This is a simplified implementation that returns basic roles.
     In a real implementation, this would check user permissions.
     """
+    logger.info(f"🔍 get_user_roles called with uid: {uid}")
+    logger.info(f"👤 Current user from auth: {current_user}")
+
     try:
         # Use get_db_connection to ensure database is initialized
         from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
+            # Check if user_profiles table exists
+            table_exists = await conn.fetchval(
+                """
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_name = 'user_profiles'
+                )
+                """
+            )
+
+            if not table_exists:
+                logger.warning(f"⚠️ user_profiles table does not exist! Returning default roles for uid: {uid}")
+                return ['user']
+
             # Get user role from profile
+            logger.info(f"📊 Querying user_profiles table for uid: {uid}")
             role_result = await conn.fetchval(
                 "SELECT role FROM user_profiles WHERE uid = $1",
                 uid
             )
 
             user_role = role_result or 'user'
+            logger.info(f"🎭 Database role for uid {uid}: '{role_result}' -> normalized to: '{user_role}'")
 
             # Return available roles based on current role
             if user_role == 'admin':
-                return ['admin', 'human_agent', 'user']
+                roles = ['admin', 'human_agent', 'user']
+                logger.info(f"👑 Admin user {uid} - returning roles: {roles}")
+                return roles
             elif user_role == 'human_agent':
-                return ['human_agent', 'user']
+                roles = ['human_agent', 'user']
+                logger.info(f"🤖 Human agent user {uid} - returning roles: {roles}")
+                return roles
             else:
-                return ['user']
+                roles = ['user']
+                logger.info(f"👤 Regular user {uid} - returning roles: {roles}")
+                return roles
 
     except Exception as e:
         logger.error(f"Error getting user roles: {e}")

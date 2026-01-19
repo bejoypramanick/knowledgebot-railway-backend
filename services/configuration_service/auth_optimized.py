@@ -70,6 +70,12 @@ async def execute_database_operations_with_retry(email: str) -> tuple:
         roles_result = await execute_role_query_with_retry(conn, role_query, email)
         db_time = time.time() - db_start_time
 
+        # Log what roles were found in database
+        db_roles = [row['role'] for row in roles_result]
+        logger.info(f"📊 Database roles found for {email}: {db_roles}")
+        if not db_roles:
+            logger.info(f"❌ No roles found in database for {email} - user will default to 'user' role")
+
         return roles_result, db_time
 
 @router.post("/verify-token", response_model=TokenVerificationResponse)
@@ -110,8 +116,15 @@ async def verify_token_optimized(request_data: Dict[str, Any]):
         # Step 2: Get user from Firestore
         uid = decoded_token.get('uid')
         email = decoded_token.get('email')
+        logger.info(f"🔐 Token verification for email: {email}, uid: {uid}")
+
         user_data = get_user_from_firestore(uid)
-        
+
+        if user_data:
+            logger.info(f"📋 Firestore user data found: role='{user_data.get('role')}', roles={user_data.get('roles', [])}")
+        else:
+            logger.info(f"📋 No Firestore user data found - using Firebase Auth defaults")
+
         # Step 3: If user doesn't exist in Firestore, return Firebase Auth data
         if not user_data:
             user_data = {
@@ -124,6 +137,7 @@ async def verify_token_optimized(request_data: Dict[str, Any]):
                 'is_admin': False,
                 'is_human_agent': False
             }
+            logger.info(f"📋 Using default Firebase Auth data: role='user', roles=['user']")
         
         # Step 4: OPTIMIZED - Single database query for all roles
         user_roles = user_data.get('roles', [])
@@ -168,10 +182,19 @@ async def verify_token_optimized(request_data: Dict[str, Any]):
         user_data['roles'] = user_roles
         user_data['is_admin'] = is_admin
         user_data['is_human_agent'] = is_human_agent
-        
+
+        # Detailed logging for debugging authorization issues
+        logger.info(f"🎯 FINAL ROLE DETERMINATION for {email}:")
+        logger.info(f"   - Primary role: '{primary_role}'")
+        logger.info(f"   - All roles: {user_roles}")
+        logger.info(f"   - Is admin: {is_admin}")
+        logger.info(f"   - Is human agent: {is_human_agent}")
+        logger.info(f"   - User data role field: '{user_data.get('role')}'")
+        logger.info(f"   - Frontend will see: primary_role='{primary_role}', roles={user_roles}")
+
         total_time = time.time() - start_time
         logger.info(f"verify-token completed in {total_time:.3f}s for email: {email}")
-        
+
         return TokenVerificationResponse(
             valid=True,
             user=user_data
