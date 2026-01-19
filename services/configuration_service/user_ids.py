@@ -358,18 +358,6 @@ async def get_user_roles(
             user_email = current_user.get('email')
             logger.info(f"📊 Checking admin and human_agent tables for email: {user_email}")
 
-            # Check what tables the user exists in
-            admin_exists = await conn.fetchval(
-                "SELECT COUNT(*) FROM admins WHERE email = $1",
-                user_email
-            )
-            agent_exists = await conn.fetchval(
-                "SELECT COUNT(*) FROM human_agents WHERE email = $1",
-                user_email
-            )
-
-            logger.info(f"🔍 User {user_email} exists in tables - admins: {admin_exists}, human_agents: {agent_exists}")
-
             roles = []  # Start with empty list - only add roles user actually has
 
             # Check admin table
@@ -380,9 +368,7 @@ async def get_user_roles(
 
             if admin_check:
                 roles.append('admin')
-                logger.info(f"👑 Admin role confirmed for {user_email} (status: {admin_check['status']})")
-            else:
-                logger.info(f"❌ Admin check failed for {user_email}")
+                logger.info(f"👑 Admin role confirmed for {user_email}")
 
             # Check human_agent table
             agent_check = await conn.fetchrow(
@@ -392,9 +378,7 @@ async def get_user_roles(
 
             if agent_check:
                 roles.append('human_agent')
-                logger.info(f"🤖 Human agent role confirmed for {user_email} (status: {agent_check['status']})")
-            else:
-                logger.info(f"❌ Human agent check failed for {user_email}")
+                logger.info(f"🤖 Human agent role confirmed for {user_email}")
 
             # If user has no roles, deny access
             if not roles:
@@ -402,7 +386,6 @@ async def get_user_roles(
                 raise HTTPException(status_code=403, detail="Access denied: No valid roles found")
 
             logger.info(f"📋 Final roles for {user_email}: {roles}")
-            logger.info(f"👤 User {user_email} has {len(roles)} total roles: {', '.join(roles)}")
             return roles
 
             # Default to user role
