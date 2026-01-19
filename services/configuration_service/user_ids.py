@@ -223,7 +223,10 @@ async def get_user_profile(
         from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
 
-            # First check if user is an admin
+            # Check both tables to determine the user's role
+            # Priority: admin > human_agent > user
+
+            # Check admin table
             admin_exists = await conn.fetchrow(
                 """
                 SELECT email, created_at
@@ -233,19 +236,7 @@ async def get_user_profile(
                 current_user.get('email')
             )
 
-            if admin_exists:
-                logger.info(f"👑 Returning admin profile for uid {uid}: email='{admin_exists['email']}'")
-                return UserProfileResponse(
-                    uid=uid,
-                    email=admin_exists['email'],
-                    display_name=current_user.get('name'),  # From Firebase
-                    photo_url=current_user.get('picture'),  # From Firebase
-                    role='admin',
-                    created_at=admin_exists['created_at'],
-                    preferences={}  # No user-specific preferences
-                )
-
-            # Check if user is a human agent
+            # Check human_agent table
             agent_exists = await conn.fetchrow(
                 """
                 SELECT email, created_at
@@ -255,27 +246,36 @@ async def get_user_profile(
                 current_user.get('email')
             )
 
-            if agent_exists:
-                logger.info(f"🤖 Returning human agent profile for uid {uid}: email='{agent_exists['email']}'")
-                return UserProfileResponse(
-                    uid=uid,
-                    email=agent_exists['email'],
-                    display_name=current_user.get('name'),  # From Firebase
-                    photo_url=current_user.get('picture'),  # From Firebase
-                    role='human_agent',
-                    created_at=agent_exists['created_at'],
-                    preferences={}  # No user-specific preferences
-                )
+            # Determine role based on table membership
+            # Admin takes precedence over human_agent
+            if admin_exists:
+                role = 'admin'
+                created_at = admin_exists['created_at']
+                email = admin_exists['email']
+                logger.info(f"👑 User {current_user.get('email')} is an admin (created: {created_at})")
+            elif agent_exists:
+                role = 'human_agent'
+                created_at = agent_exists['created_at']
+                email = agent_exists['email']
+                logger.info(f"🤖 User {current_user.get('email')} is a human agent (created: {created_at})")
+            else:
+                role = 'user'
+                created_at = datetime.now()
+                email = current_user.get('email')
+                logger.info(f"👤 User {current_user.get('email')} is a regular user (no elevated roles)")
 
-            # Regular user - return basic profile from Firebase
-            logger.info(f"👤 Returning basic user profile for uid {uid} (no elevated roles)")
+            # Note: If user is in both tables, admin role takes precedence
+            # The roles endpoint will still return all available roles for switching
+            if admin_exists and agent_exists:
+                logger.info(f"📋 User {current_user.get('email')} has both admin and human_agent roles - returning admin as primary role")
+
             return UserProfileResponse(
                 uid=uid,
-                email=current_user.get('email'),
+                email=email,
                 display_name=current_user.get('name'),  # From Firebase
                 photo_url=current_user.get('picture'),  # From Firebase
-                role='user',
-                created_at=datetime.now(),
+                role=role,
+                created_at=created_at,
                 preferences={}  # No user-specific preferences
             )
 
@@ -381,6 +381,7 @@ async def get_user_roles(
                 logger.info(f"🤖 Human agent role confirmed for {current_user.get('email')}")
 
             logger.info(f"📋 Final roles for {current_user.get('email')}: {roles}")
+            logger.info(f"👤 User {current_user.get('email')} has {len(roles)} total roles: {', '.join(roles)}")
             return roles
 
             # Default to user role
