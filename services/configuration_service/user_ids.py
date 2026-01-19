@@ -370,7 +370,7 @@ async def get_user_roles(
 
             logger.info(f"🔍 User {user_email} exists in tables - admins: {admin_exists}, human_agents: {agent_exists}")
 
-            roles = ['user']  # Everyone has user role as base
+            roles = []  # Start with empty list - only add roles user actually has
 
             # Check admin table
             admin_check = await conn.fetchrow(
@@ -395,6 +395,11 @@ async def get_user_roles(
                 logger.info(f"🤖 Human agent role confirmed for {user_email} (status: {agent_check['status']})")
             else:
                 logger.info(f"❌ Human agent check failed for {user_email}")
+
+            # If user has no roles, deny access
+            if not roles:
+                logger.warning(f"🚫 User {user_email} has no valid roles - access denied")
+                raise HTTPException(status_code=403, detail="Access denied: No valid roles found")
 
             logger.info(f"📋 Final roles for {user_email}: {roles}")
             logger.info(f"👤 User {user_email} has {len(roles)} total roles: {', '.join(roles)}")
