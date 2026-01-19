@@ -1662,12 +1662,6 @@ async def end_customer_session(
     except Exception as e:
         logger.error(f"Error ending customer session: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating chat session: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error updating session: {str(e)}")
 
 
 @public_chat_router.post("/{session_id}/request-human-agent", response_model=dict)
