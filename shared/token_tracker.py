@@ -89,8 +89,10 @@ async def track_gemini_usage_detailed(
         return  # Skip if no tokens used
 
     try:
+        logger.info("🔄 Starting token tracking for session: %s, message: %s, total_tokens: %s", session_id, message_id, total_tokens)
         db = await get_db_connection()
         if db and hasattr(db, '_pool') and db._pool is not None:
+            logger.info("✅ Database connection available for token tracking")
             async with db.acquire() as conn:
                 # First, update llm_providers table
                 await conn.execute(
@@ -114,6 +116,7 @@ async def track_gemini_usage_detailed(
                 available = limit_value - current_usage
 
                 # Log detailed usage in token_usage_log table
+                logger.info(f"🔍 Checking session_id/message_id for insert: session_id={session_id}, message_id={message_id}")
                 if session_id or message_id:
                     log_query = """
                         INSERT INTO token_usage_log (
@@ -127,6 +130,9 @@ async def track_gemini_usage_detailed(
                         session_id, message_id, model, prompt_tokens, candidates_tokens, total_tokens,
                         cache_read_tokens, cache_write_tokens, api_call_type
                     )
+                    logger.info("✅ Database INSERT executed successfully")
+                else:
+                    logger.warning("⚠️ Skipping token_usage_log insert: neither session_id nor message_id provided")
 
                 logger.info(f"✅ Tracked Gemini detailed usage: {total_tokens} tokens (prompt: {prompt_tokens}, candidates: {candidates_tokens}, cache_read: {cache_read_tokens}, cache_write: {cache_write_tokens}), total used: {current_usage}, session: {session_id}")
         else:
@@ -259,6 +265,7 @@ async def track_gemini_usage_with_db(run_usage, session_id: str = None, message_
                 available = limit_value - current_usage
 
                 # Log detailed usage in token_usage_log table
+                logger.info(f"🔍 Checking session_id/message_id for insert: session_id={session_id}, message_id={message_id}")
                 if session_id or message_id:
                     log_query = """
                         INSERT INTO token_usage_log (

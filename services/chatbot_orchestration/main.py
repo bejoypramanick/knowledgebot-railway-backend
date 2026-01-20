@@ -1429,15 +1429,21 @@ async def chat(request: ChatRequest):
         usage_info = None
         try:
             if hasattr(result, 'usage') and result.usage:
+                logger.info("🔍 Found usage object: %s", result.usage)
                 usage_info = {
                     "input_tokens": getattr(result.usage, 'input_tokens', 0),
                     "output_tokens": getattr(result.usage, 'output_tokens', 0),
                 }
+                logger.info("📊 Extracted usage info: %s", usage_info)
                 # Track token usage in database
                 await track_gemini_usage_from_response(result.usage, session_id=session_id, api_call_type='chat')
-            logger.debug("Usage info extracted: %s", usage_info)
+                logger.info("✅ Token tracking called for session: %s", session_id)
+            else:
+                logger.warning("⚠️ No usage object found in result")
         except Exception as e:
-            logger.debug("Failed to extract usage info: %s", e)
+            logger.error("❌ Failed to extract usage info: %s", e)
+            import traceback
+            logger.error("❌ Usage tracking traceback: %s", traceback.format_exc())
 
         # Detailed tracing logs for each major step — helps identify which step failed
         logger.info("Chat handling progress: building response completed")
