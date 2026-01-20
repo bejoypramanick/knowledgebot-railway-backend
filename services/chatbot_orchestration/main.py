@@ -43,7 +43,7 @@ except ImportError as e:
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.config import settings
 from shared.db import init_railway_db, init_neon_db, railway_db, neon_db
-from shared.token_tracker import track_openai_usage_from_response, track_gemini_usage_from_response
+from shared.token_tracker import track_gemini_usage_from_response
 
 # Lazy database initialization for serverless optimization
 async def get_railway_db():
