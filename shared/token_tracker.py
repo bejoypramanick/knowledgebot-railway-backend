@@ -16,16 +16,12 @@ logger = logging.getLogger(__name__)
 
 
 async def get_db_connection():
-    """Get database connection, initializing if needed."""
+    """Get database connection - relies on main app to have initialized it."""
     if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
+        logger.info("✅ Using existing database connection from main app")
         return railway_db
-    
-    # Initialize database if not already initialized
-    database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
-    if database_url:
-        await init_railway_db(database_url)
-        return railway_db
-    
+
+    logger.warning("⚠️ Database not initialized by main app yet, token tracking unavailable")
     return None
 
 

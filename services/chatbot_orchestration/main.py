@@ -183,6 +183,18 @@ TEMPERATURE = float(os.getenv("CHATBOT_TEMPERATURE", str(settings.chatbot_temper
 MAX_TOKENS = int(os.getenv("CHATBOT_MAX_TOKENS", str(settings.chatbot_max_tokens)))
 logger.info(f"🤖 Model config: {MODEL_NAME}, temp={TEMPERATURE}, max_tokens={MAX_TOKENS}")
 
+# Ensure database is initialized early for token tracking
+if settings.railway_postgres_url:
+    try:
+        logger.info("🔄 Initializing Railway PostgreSQL database for token tracking...")
+        from shared.db import init_railway_db
+        await init_railway_db(settings.railway_postgres_url)
+        logger.info("✅ Railway PostgreSQL database initialized for token tracking")
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize database for token tracking: {e}")
+else:
+    logger.warning("⚠️ Railway PostgreSQL URL not configured - token tracking will not work")
+
 # Initialize Tavily for internet search (optional)
 tavily_client = None
 if settings.tavily_api_key and settings.enable_internet_search:
