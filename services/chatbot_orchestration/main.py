@@ -699,7 +699,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             db = await get_railway_db()
             if db:
                 db_files = await db.fetch("""
-                    SELECT gemini_file_name, original_filename, display_name, mime_type, file_size_bytes
+                    SELECT gemini_file_name, original_filename, display_name, mime_type, size_bytes
                     FROM file_uploads
                     WHERE gemini_file_name IS NOT NULL
                     ORDER BY created_at DESC
@@ -708,7 +708,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 if db_files:
                     logger.info(f"📊 Found {len(db_files)} files in database that should be in Gemini:")
                     for db_file in db_files:
-                        logger.info(f"  • DB: {db_file['gemini_file_name']} -> {db_file['original_filename']}")
+                        logger.info(f"  • DB: {db_file['gemini_file_name']} -> {db_file['original_filename']} ({db_file['size_bytes']} bytes)")
                     logger.warning("🔄 Files exist in DB but not found in Gemini API - possible sync issue")
                 else:
                     logger.info("📊 No files found in database either")
