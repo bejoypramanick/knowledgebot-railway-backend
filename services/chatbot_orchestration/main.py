@@ -693,9 +693,9 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         active_files = [f for f in all_files if getattr(f, 'state', None) and getattr(f.state, 'name', None) == "ACTIVE"]
         logger.info(f"📂 After filtering for ACTIVE files: {len(active_files)} active out of {len(all_files)} total")
 
-            # Since user is on paid tier and files should exist, let's try a direct approach
-            # Try to get files from database as backup
-            try:
+        # Since user is on paid tier and files should exist, let's try a direct approach
+        # Try to get files from database as backup
+        try:
                 db = await get_railway_db()
                 if db:
                     db_files = await db.fetch("""
