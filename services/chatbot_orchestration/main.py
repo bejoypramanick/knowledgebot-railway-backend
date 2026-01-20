@@ -958,7 +958,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             if usage_data:
                 logger.info(f"✅ Found Gemini usage data, attempting to track: {type(usage_data)}")
                 try:
-                    await track_gemini_usage_from_response(usage_data, api_call_type='rag')
+                    await track_gemini_usage_from_response(usage_data, session_id=session_id, api_call_type='rag')
                     logger.info("✅ Gemini usage tracking completed successfully")
                 except Exception as tracking_error:
                     logger.error(f"❌ Failed to track Gemini usage: {tracking_error}")
@@ -1434,7 +1434,7 @@ async def chat(request: ChatRequest):
                     "output_tokens": getattr(result.usage, 'output_tokens', 0),
                 }
                 # Track token usage in database
-                await track_gemini_usage_from_response(result.usage)
+                await track_gemini_usage_from_response(result.usage, session_id=session_id, api_call_type='chat')
             logger.debug("Usage info extracted: %s", usage_info)
         except Exception as e:
             logger.debug("Failed to extract usage info: %s", e)
@@ -1765,7 +1765,7 @@ Only return the JSON array, nothing else."""
                 "output_tokens": getattr(result.usage, 'output_tokens', 0),
             }
             # Track token usage
-            await track_gemini_usage_from_response(result.usage)
+            await track_gemini_usage_from_response(result.usage, session_id=request.session_id, api_call_type='suggested_messages')
         
         return SuggestedMessagesResponse(
             suggested_messages=suggested_messages,
