@@ -696,24 +696,24 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         # Since user is on paid tier and files should exist, let's try a direct approach
         # Try to get files from database as backup
         try:
-                db = await get_railway_db()
-                if db:
-                    db_files = await db.fetch("""
-                        SELECT gemini_file_name, original_filename, display_name, mime_type, file_size_bytes
-                        FROM file_uploads
-                        WHERE gemini_file_name IS NOT NULL
-                        ORDER BY created_at DESC
-                        LIMIT 5
-                    """)
-                    if db_files:
-                        logger.info(f"📊 Found {len(db_files)} files in database that should be in Gemini:")
-                        for db_file in db_files:
-                            logger.info(f"  • DB: {db_file['gemini_file_name']} -> {db_file['original_filename']}")
-                        logger.warning("🔄 Files exist in DB but not found in Gemini API - possible sync issue")
-                    else:
-                        logger.info("📊 No files found in database either")
-            except Exception as db_error:
-                logger.error(f"Could not check database for files: {db_error}")
+            db = await get_railway_db()
+            if db:
+                db_files = await db.fetch("""
+                    SELECT gemini_file_name, original_filename, display_name, mime_type, file_size_bytes
+                    FROM file_uploads
+                    WHERE gemini_file_name IS NOT NULL
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                """)
+                if db_files:
+                    logger.info(f"📊 Found {len(db_files)} files in database that should be in Gemini:")
+                    for db_file in db_files:
+                        logger.info(f"  • DB: {db_file['gemini_file_name']} -> {db_file['original_filename']}")
+                    logger.warning("🔄 Files exist in DB but not found in Gemini API - possible sync issue")
+                else:
+                    logger.info("📊 No files found in database either")
+        except Exception as db_error:
+            logger.error(f"Could not check database for files: {db_error}")
         
         if not all_files:
             logger.warning("No files found in FileSearch store")
