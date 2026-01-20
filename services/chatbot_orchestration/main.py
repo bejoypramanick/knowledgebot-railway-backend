@@ -1428,8 +1428,24 @@ async def chat(request: ChatRequest):
         # Extract usage information from agent result (ensure defined before DB persistence)
         usage_info = None
         try:
-            if hasattr(result, 'usage') and result.usage:
-                logger.info("🔍 Found usage object: %s", result.usage)
+            if hasattr(result, 'usage') and callable(result.usage):
+                # Call the usage method to get the actual usage data
+                usage_data = result.usage()
+                logger.info("🔍 Found usage method, called it: %s", usage_data)
+                if usage_data:
+                    usage_info = {
+                        "input_tokens": getattr(usage_data, 'input_tokens', 0),
+                        "output_tokens": getattr(usage_data, 'output_tokens', 0),
+                    }
+                    logger.info("📊 Extracted usage info: %s", usage_info)
+                    # Track token usage in database
+                    await track_gemini_usage_from_response(usage_data, session_id=session_id, api_call_type='chat')
+                    logger.info("✅ Token tracking called for session: %s", session_id)
+                else:
+                    logger.warning("⚠️ Usage method returned None or empty data")
+            elif hasattr(result, 'usage') and result.usage:
+                # Fallback: if it's not callable, treat as direct property
+                logger.info("🔍 Found usage object (property): %s", result.usage)
                 usage_info = {
                     "input_tokens": getattr(result.usage, 'input_tokens', 0),
                     "output_tokens": getattr(result.usage, 'output_tokens', 0),
@@ -1439,7 +1455,7 @@ async def chat(request: ChatRequest):
                 await track_gemini_usage_from_response(result.usage, session_id=session_id, api_call_type='chat')
                 logger.info("✅ Token tracking called for session: %s", session_id)
             else:
-                logger.warning("⚠️ No usage object found in result")
+                logger.warning("⚠️ No usage object/method found in result")
         except Exception as e:
             logger.error("❌ Failed to extract usage info: %s", e)
             import traceback
@@ -1564,7 +1580,18 @@ async def chat(request: ChatRequest):
         
         # Extract usage information
         usage_info = None
-        if hasattr(result, 'usage') and result.usage:
+        if hasattr(result, 'usage') and callable(result.usage):
+            # Call the usage method to get the actual usage data
+            usage_data = result.usage()
+            if usage_data:
+                usage_info = {
+                    "input_tokens": getattr(usage_data, 'input_tokens', 0),
+                    "output_tokens": getattr(usage_data, 'output_tokens', 0),
+                }
+                # Track token usage in database
+                await track_gemini_usage_from_response(usage_data, session_id=session_id, api_call_type='chat')
+        elif hasattr(result, 'usage') and result.usage:
+            # Fallback: if it's not callable, treat as direct property
             usage_info = {
                 "input_tokens": getattr(result.usage, 'input_tokens', 0),
                 "output_tokens": getattr(result.usage, 'output_tokens', 0),
@@ -1765,7 +1792,18 @@ Only return the JSON array, nothing else."""
         
         # Extract usage information
         usage_info = None
-        if hasattr(result, 'usage') and result.usage:
+        if hasattr(result, 'usage') and callable(result.usage):
+            # Call the usage method to get the actual usage data
+            usage_data = result.usage()
+            if usage_data:
+                usage_info = {
+                    "input_tokens": getattr(usage_data, 'input_tokens', 0),
+                    "output_tokens": getattr(usage_data, 'output_tokens', 0),
+                }
+                # Track token usage
+                await track_gemini_usage_from_response(usage_data, session_id=request.session_id, api_call_type='suggested_messages')
+        elif hasattr(result, 'usage') and result.usage:
+            # Fallback: if it's not callable, treat as direct property
             usage_info = {
                 "input_tokens": getattr(result.usage, 'input_tokens', 0),
                 "output_tokens": getattr(result.usage, 'output_tokens', 0),
