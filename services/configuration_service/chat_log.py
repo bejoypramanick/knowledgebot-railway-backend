@@ -144,7 +144,6 @@ class ChatSessionResponse(BaseModel):
     feedback: Optional[str] = None  # 'positive', 'negative', None (backward compatibility)
     customer_feedback: Optional[str] = None  # 'positive', 'negative', None
     agent_feedback: Optional[str] = None  # 'positive', 'negative', None
-    sentiment: Optional[str] = None  # 'positive', 'negative', 'neutral', None
     chat_type: str  # 'human-handoff' if assigned_agent exists, 'ai-chat' otherwise
     messages: List[ChatMessageResponse] = []
 
@@ -775,12 +774,10 @@ async def get_assigned_chat_sessions(
                         cs.id,
                         cs.session_id,
                         cs.archive_status,
-                        cs.conversation_summary,
                         COALESCE(cs.last_activity_at, cs.created_at, cs.updated_at, CURRENT_TIMESTAMP) as last_activity_at,
                         cs.created_at,
                         cs.metadata,
-                        cs.is_active,
-                        cs.sentiment
+                        cs.is_active
                     FROM chat_sessions cs
                     INNER JOIN session_assignments sa ON cs.id = sa.session_id
                     WHERE LOWER(sa.assignee_email) = LOWER($1)
@@ -814,12 +811,10 @@ async def get_assigned_chat_sessions(
                         cs.id,
                         cs.session_id,
                         cs.archive_status,
-                        cs.conversation_summary,
                         cs.last_activity_at,
                         cs.created_at,
                         cs.metadata,
                         cs.is_active,
-                        cs.sentiment,
                         sa.assignee_email as agent_email
                     FROM chat_sessions cs
                     LEFT JOIN session_assignments sa ON cs.id = sa.session_id
@@ -936,9 +931,6 @@ async def get_assigned_chat_sessions(
                     except Exception as e:
                         logger.error(f"Error updating expired session: {e}")
                 
-                # Get sentiment from database
-                sentiment = session_row.get('sentiment')
-
                 # Compute feedback on-the-fly from chat_feedback table
                 feedback_result = await conn.fetchrow(
                     """
@@ -964,19 +956,6 @@ async def get_assigned_chat_sessions(
                 customer_feedback = session_feedback
                 agent_feedback = session_feedback
                 
-                # If sentiment is not set and session is closed, analyze it
-                if not sentiment and status == 'closed' and len(messages) > 0:
-                    try:
-                        from services.configuration_service.sentiment_analysis import analyze_and_store_sentiment
-                        # Prepare messages for sentiment analysis
-                        messages_for_analysis = [
-                            {'sender': msg.sender, 'text': msg.text}
-                            for msg in messages
-                        ]
-                        sentiment = await analyze_and_store_sentiment(session_id, messages_for_analysis, conn)
-                    except Exception as e:
-                        logger.warning(f"Could not analyze sentiment for session {session_id}: {e}")
-                
                 # Determine chat type
                 chat_type = 'human-handoff' if assigned_agent else 'ai-chat'
                 
@@ -994,9 +973,7 @@ async def get_assigned_chat_sessions(
                     feedback=session_feedback,  # Backward compatibility
                     customer_feedback=customer_feedback,
                     agent_feedback=agent_feedback,
-                    sentiment=sentiment,
                     chat_type=chat_type,
-                    conversation_summary=session_row.get('conversation_summary'),
                     messages=messages
                 ))
             
@@ -1508,59 +1485,6 @@ async def update_chat_session(
             
             logger.info(f"Session {session_id} updated by {user_email}: status={status}, assigned_agent={assigned_agent}, feedback={feedback}, user_type={user_type}")
             
-            # If session is being closed, analyze sentiment if not already analyzed
-            if status == 'closed':
-                try:
-                    # Check if sentiment is already set
-                    current_sentiment = await conn.fetchval(
-                        "SELECT sentiment FROM chat_sessions WHERE id = $1",
-                        session_db_id
-                    )
-                    
-                    # If sentiment is not set, analyze it
-                    if not current_sentiment:
-                        # Get all messages for sentiment analysis
-                        messages_data = await conn.fetch(
-                            """
-                            SELECT role, content
-                            FROM chat_messages
-                            WHERE session_id = $1
-                            ORDER BY created_at ASC
-                            """,
-                            session_db_id
-                        )
-                        
-                        if messages_data:
-                            from services.configuration_service.sentiment_analysis import analyze_and_store_sentiment
-                            # Prepare messages for sentiment analysis
-                            messages_for_analysis = [
-                                {
-                                    'sender': msg['role'],  # Database roles now match API sender values
-                                    'text': msg['content']
-                                }
-                                for msg in messages_data
-                            ]
-                            try:
-                                sentiment_result = await analyze_and_store_sentiment(session_id, messages_for_analysis, conn)
-                                if sentiment_result:
-                                    logger.info(f"Successfully analyzed and stored sentiment '{sentiment_result}' for closed session {session_id}")
-                                else:
-                                    logger.warning(f"Sentiment analysis returned None for closed session {session_id}")
-
-                                # Generate and store conversation summary
-                                try:
-                                    from services.configuration_service.sentiment_analysis import generate_and_store_conversation_summary
-                                    summary_result = await generate_and_store_conversation_summary(session_id, messages_for_analysis, conn)
-                                    if summary_result:
-                                        logger.info(f"Successfully generated and stored conversation summary for closed session {session_id}")
-                                    else:
-                                        logger.warning(f"Conversation summarization returned None for closed session {session_id}")
-                                except Exception as e:
-                                    logger.warning(f"Could not generate conversation summary for closed session {session_id}: {e}")
-                            except Exception as e:
-                                logger.warning(f"Could not analyze sentiment for closed session {session_id}: {e}")
-                except Exception as e:
-                    logger.warning(f"Could not check or analyze sentiment for closed session {session_id}: {e}")
 
             # If session is being closed, broadcast a message to all connected clients
             if status == 'closed' and assigned_agent == '':
