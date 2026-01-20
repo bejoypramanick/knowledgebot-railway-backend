@@ -16,13 +16,21 @@ logger = logging.getLogger(__name__)
 
 
 async def get_db_connection():
-    """Get database connection - relies on main app to have initialized it."""
-    if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
-        logger.info("✅ Using existing database connection from main app")
-        return railway_db
-
-    logger.warning("⚠️ Database not initialized by main app yet, token tracking unavailable")
-    return None
+    """Get database connection - use main app's lazy initialization."""
+    # Import the main app's get_railway_db function
+    try:
+        from services.chatbot_orchestration.main import get_railway_db
+        logger.info("🔄 Calling main app's get_railway_db for token tracking...")
+        db = await get_railway_db()
+        if db:
+            logger.info("✅ Database connection obtained via main app")
+            return db
+        else:
+            logger.warning("⚠️ Main app returned None database connection")
+            return None
+    except Exception as e:
+        logger.error(f"❌ Failed to get database via main app: {e}")
+        return None
 
 
 
