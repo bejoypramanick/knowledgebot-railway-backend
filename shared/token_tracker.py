@@ -190,8 +190,10 @@ async def track_gemini_usage_from_response(usage_obj, session_id: str = None, me
         cache_read_tokens = getattr(usage_obj, 'cache_read_tokens', 0) or 0
         cache_write_tokens = getattr(usage_obj, 'cache_write_tokens', 0) or 0
 
-        logger.info(f"📊 Gemini usage extracted - prompt: {prompt_tokens}, candidates: {candidates_tokens}, total: {total_tokens}")
-        logger.debug(f"📊 Full usage object: {usage_obj}")
+    logger.info(f"📊 Gemini usage extracted - prompt: {prompt_tokens}, candidates: {candidates_tokens}, total: {total_tokens}")
+    logger.info(f"📊 Full usage object: {usage_obj}")
+    logger.info(f"📊 Usage object type: {type(usage_obj)}")
+    logger.info(f"📊 Usage object attributes: {dir(usage_obj) if hasattr(usage_obj, '__dict__') else 'No __dict__'}")
 
         if prompt_tokens > 0 or candidates_tokens > 0 or total_tokens > 0 or cache_read_tokens > 0 or cache_write_tokens > 0:
             await track_gemini_usage_detailed(
