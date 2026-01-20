@@ -28,11 +28,10 @@ try:
     from contextlib import asynccontextmanager
     from pydantic_ai import Agent, RunContext
     from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
-    from pydantic_ai.models.openai import OpenAIModel
-    import asyncio
-    import json
-    import re
-    from pathlib import Path
+import asyncio
+import json
+import re
+from pathlib import Path
     logger.info("✅ Core modules imported successfully")
 except ImportError as e:
     logger.critical(f"💥 IMPORT ERROR: Could not load required module: {e}")
@@ -111,8 +110,6 @@ setup_global_exception_logging("chatbot_orchestration")
 # Log status of required environment variables
 if not settings.gemini_api_key:
     logger.error("❌ GEMINI_API_KEY is not configured - chat features will be unavailable")
-if not settings.openai_api_key:
-    logger.error("❌ OPENAI_API_KEY is not configured - chatbot service will fail to operate")
 
 # Lifespan context manager for startup and shutdown events
 @asynccontextmanager
@@ -163,11 +160,10 @@ app.add_middleware(
 
 # Initialize AI components (lazy initialization to avoid startup failures)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or settings.openai_api_key
 
 # Global clients - initialized lazily
 genai_client = None
-openai_model = None
+gemini_model = None
 
 def get_genai_client():
     """Lazy initialization of Gemini client."""
@@ -181,17 +177,6 @@ def get_genai_client():
             genai_client = None
     return genai_client
 
-def get_openai_model():
-    """Lazy initialization of OpenAI model."""
-    global openai_model
-    if openai_model is None and OPENAI_API_KEY:
-        try:
-            openai_model = OpenAIModel(MODEL_NAME, api_key=OPENAI_API_KEY)
-            logger.info("✅ OpenAI model initialized")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize OpenAI model: {e}")
-            openai_model = None
-    return openai_model
 
 MODEL_NAME = os.getenv("CHATBOT_MODEL", settings.chatbot_model)
 TEMPERATURE = float(os.getenv("CHATBOT_TEMPERATURE", str(settings.chatbot_temperature)))
@@ -283,20 +268,20 @@ class SuggestedMessagesResponse(BaseModel):
 
 
 # Pydantic AI Agent Setup
-# OpenAI model reads API key from OPENAI_API_KEY environment variable automatically
-openai_model = None
+# Gemini model reads API key from GEMINI_API_KEY environment variable automatically
+gemini_model = None
 
-if OPENAI_API_KEY:
-    # Just pass the model name - API key is read from environment
+if GEMINI_API_KEY:
     try:
-        openai_model = OpenAIModel(MODEL_NAME)
-        logger.info("✅ OpenAI model initialized")
+        from pydantic_ai.models.gemini import GeminiModel
+        gemini_model = GeminiModel(MODEL_NAME)
+        logger.info("✅ Gemini model initialized")
     except Exception as e:
-        openai_model = None
-        logger.error(f"❌ Failed to initialize OpenAIModel: {e}")
-        logger.error("OpenAI model will be unavailable; chat endpoints may return 503 or degraded responses")
+        gemini_model = None
+        logger.error(f"❌ Failed to initialize GeminiModel: {e}")
+        logger.error("Gemini model will be unavailable; chat endpoints may return 503 or degraded responses")
 else:
-    logger.warning("OpenAI model not initialized - OPENAI_API_KEY is missing")
+    logger.warning("Gemini model not initialized - GEMINI_API_KEY is missing")
 
 
 # Tool for querying Railway PostgreSQL (file metadata, user data)
@@ -1223,7 +1208,7 @@ AVAILABLE DATA SOURCES AND WHEN TO USE THEM:
 ROUTING STRATEGY & PRIORITY:
 You MUST follow this strictly to find the best answer:
 1. **Gemini RAG (search_knowledge_base)**: ALWAYS try this first for any question about documents, files, or specific content.
-2. **Your Own Knowledge (GPT-4)**: If RAG doesn't have it, use your internal training data.
+2. **Your Own Knowledge (Gemini)**: If RAG doesn't have it, use your internal training data.
 3. **Railway Database (query_railway_postgres)**: If the user asks about the system itself, file metadata, or metrics.
 4. **Neon DB (query_neon_db)**: If the user asks about business data, sales, inventory, or customers.
 5. **Internet (search_internet)**: Use ONLY if no other source has the answer AND the internet search tool is enabled.
@@ -1268,10 +1253,10 @@ def create_session_dependency(session_id: str) -> ChatSessionDeps:
 # Initialize base agent with all tools
 def create_agent(file_context: Optional[List[SearchResult]] = None, custom_system_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> Optional[Agent]:
     """Create a Pydantic AI agent with intelligent data source routing."""
-    
+
     # Check if model is available
-    if openai_model is None:
-        logger.error("Cannot create agent - OpenAI API key not configured")
+    if gemini_model is None:
+        logger.error("Cannot create agent - Gemini API key not configured")
         return None
 
     # Build list of available tools
@@ -1306,7 +1291,7 @@ def create_agent(file_context: Optional[List[SearchResult]] = None, custom_syste
     # Note: Temperature adjustment would need to be done at model initialization
     # For now, we'll use the default model and adjust via system prompt
     agent = Agent(
-        openai_model,
+        gemini_model,
         system_prompt=get_system_prompt(file_context, custom_system_prompt, response_policy),
         tools=tools,
         deps_type=ChatSessionDeps,
@@ -1449,7 +1434,7 @@ async def chat(request: ChatRequest):
                     "output_tokens": getattr(result.usage, 'output_tokens', 0),
                 }
                 # Track token usage in database
-                await track_openai_usage_from_response(result.usage)
+                await track_gemini_usage_from_response(result.usage)
             logger.debug("Usage info extracted: %s", usage_info)
         except Exception as e:
             logger.debug("Failed to extract usage info: %s", e)
@@ -1717,16 +1702,16 @@ Generate suggested messages as a JSON array of strings. Example format: ["Questi
 
 Only return the JSON array, nothing else."""
 
-        # Use OpenAI to generate suggestions
-        if not openai_model:
+        # Use Gemini to generate suggestions
+        if not gemini_model:
             raise HTTPException(
                 status_code=503,
-                detail="OpenAI model not available - cannot generate suggested messages"
+                detail="Gemini model not available - cannot generate suggested messages"
             )
-        
+
         # Create a simple agent for generating suggestions
         suggestion_agent = Agent(
-            model=openai_model,
+            model=gemini_model,
             system_prompt="You are a helpful assistant that generates relevant follow-up questions based on conversation context. Always return a JSON array of 3-5 short suggested messages."
         )
         
@@ -1780,7 +1765,7 @@ Only return the JSON array, nothing else."""
                 "output_tokens": getattr(result.usage, 'output_tokens', 0),
             }
             # Track token usage
-            await track_openai_usage_from_response(result.usage)
+            await track_gemini_usage_from_response(result.usage)
         
         return SuggestedMessagesResponse(
             suggested_messages=suggested_messages,

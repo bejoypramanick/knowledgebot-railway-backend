@@ -94,54 +94,6 @@ async def get_gemini_usage() -> dict:
         raise HTTPException(status_code=500, detail=f"Error fetching Gemini usage: {str(e)}")
 
 
-async def get_openai_usage() -> dict:
-    """Get OpenAI API token usage by calculating totals from token_usage_log table."""
-    logger.info("🔍 get_openai_usage called")
-    try:
-        db = await get_db_connection()
-        if db and hasattr(db, '_pool') and db._pool is not None:
-            logger.info("✅ Database connection available for OpenAI usage")
-            async with db.acquire() as conn:
-                # Calculate total used tokens from log table
-                query = """
-                    SELECT
-                        COALESCE(SUM(total_tokens), 0) as total_used
-                    FROM token_usage_log
-                    WHERE provider = 'openai'
-                """
-                logger.info(f"🔍 Calculating OpenAI usage from token_usage_log: {query.strip()}")
-                result = await conn.fetchrow(query)
-                used = result['total_used'] or 0
-
-                # Get limit from llm_providers table (using deepseek for backward compatibility)
-                limit_query = """
-                    SELECT COALESCE(token_limit, 150000) as limit_value
-                    FROM llm_providers
-                    WHERE provider_name = 'deepseek' AND is_active = true
-                """
-                limit_result = await conn.fetchrow(limit_query)
-                limit = limit_result['limit_value'] if limit_result else 150000
-                available = max(0, limit - used)
-
-                logger.info(f"✅ OpenAI usage calculated: used={used}, available={available}, limit={limit}")
-                return {
-                    "used": used,
-                    "available": available,
-                    "limit": limit
-                }
-
-        # Default values if no data found
-        logger.warning("No database connection available, returning defaults")
-        return {
-            "used": 0,
-            "available": 150000,
-            "limit": 150000
-        }
-    except Exception as e:
-        logger.error(f"❌ Exception in get_openai_usage: {e}", exc_info=True)
-        import traceback
-        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Error fetching OpenAI usage: {str(e)}")
 
 
 async def initialize_token_usage_if_needed():
@@ -161,16 +113,6 @@ async def initialize_token_usage_if_needed():
                     """
                 )
 
-                # Initialize DeepSeek provider (used for OpenAI compatibility)
-                await conn.execute(
-                    """
-                    INSERT INTO llm_providers (provider_name, token_limit, token_used, is_active)
-                    VALUES ('deepseek', 150000, 0, true)
-                    ON CONFLICT (provider_name) DO UPDATE SET
-                        token_limit = COALESCE(llm_providers.token_limit, 150000),
-                        is_active = true
-                    """
-                )
                 logger.info("Ensured token usage limits are initialized in llm_providers table")
     except Exception as e:
         logger.error(f"Error initializing token usage: {e}", exc_info=True)
@@ -242,17 +184,7 @@ async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_ca
                     }
 
                     # Add provider-specific token fields
-                    if row['provider'] == 'openai':
-                        usage_entry.update({
-                            "input_tokens": row['prompt_tokens'] or 0,
-                            "output_tokens": row['completion_tokens'] or 0,
-                            "total_tokens": row['total_tokens'] or 0,
-                            "cache_read_tokens": row.get('cache_read_tokens', 0) or 0,
-                            "cache_write_tokens": row.get('cache_write_tokens', 0) or 0,
-                            "input_audio_tokens": row.get('input_audio_tokens', 0) or 0,
-                            "cache_audio_read_tokens": row.get('cache_audio_read_tokens', 0) or 0,
-                        })
-                    elif row['provider'] == 'gemini':
+                    if row['provider'] == 'gemini':
                         usage_entry.update({
                             "promptTokenCount": row['prompt_tokens'] or 0,
                             "candidatesTokenCount": row['completion_tokens'] or 0,

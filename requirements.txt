@@ -9,8 +9,6 @@ python-dotenv>=1.2.0
 # Pydantic AI (for Chatbot Orchestration)
 pydantic-ai>=1.32.0
 
-# OpenAI (for LLM in Chatbot Orchestration)
-openai>=2.11.0
 
 # Google Gemini (for FileSearch)
 google-genai>=0.8.0
