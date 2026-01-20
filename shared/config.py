@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     api_gateway_host: str = "0.0.0.0"
     
     # Chatbot Configuration
-    chatbot_model: str = "gpt-4o"
+    chatbot_model: str = "gemini-2.0-flash-exp"
     chatbot_temperature: float = 0.7
     chatbot_max_tokens: int = 2000
     
