@@ -28,10 +28,10 @@ try:
     from contextlib import asynccontextmanager
     from pydantic_ai import Agent, RunContext
     from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
-import asyncio
-import json
-import re
-from pathlib import Path
+    import asyncio
+    import json
+    import re
+    from pathlib import Path
     logger.info("✅ Core modules imported successfully")
 except ImportError as e:
     logger.critical(f"💥 IMPORT ERROR: Could not load required module: {e}")
