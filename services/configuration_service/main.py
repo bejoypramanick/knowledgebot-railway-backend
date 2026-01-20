@@ -552,19 +552,12 @@ async def get_chatbot_config():
 
             # Build LLM tokens dict
             llm_tokens = {
-                "gemini": {"used": 0, "available": 20000, "limit": 20000},
-                "openai": {"used": 0, "available": 0, "limit": 0}
+                "gemini": {"used": 0, "available": 20000, "limit": 20000}
             }
             for row in llm_rows:
                 provider = row['provider_name']
                 if provider == 'gemini':
                     llm_tokens['gemini'] = {
-                        "used": row['token_used'] or 0,
-                        "available": (row['token_limit'] or 0) - (row['token_used'] or 0),
-                        "limit": row['token_limit'] or 0
-                    }
-                elif provider == 'deepseek':
-                    llm_tokens['openai'] = {
                         "used": row['token_used'] or 0,
                         "available": (row['token_limit'] or 0) - (row['token_used'] or 0),
                         "limit": row['token_limit'] or 0

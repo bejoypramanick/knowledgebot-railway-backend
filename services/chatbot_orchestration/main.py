@@ -1360,7 +1360,7 @@ async def chat(request: ChatRequest):
         if agent is None:
             raise HTTPException(
                 status_code=503,
-                detail="Chatbot service not configured - OpenAI API key required"
+                detail="Chatbot service not configured - Gemini API key required"
             )
         
         # Build chat history from session
@@ -1564,7 +1564,7 @@ async def chat(request: ChatRequest):
                 "output_tokens": getattr(result.usage, 'output_tokens', 0),
             }
             # Track token usage in database
-            await track_openai_usage_from_response(result.usage)
+            await track_gemini_usage_from_response(result.usage, session_id=session_id, api_call_type='chat')
         
         return ChatSessionResponse(
             session_id=session_id,
