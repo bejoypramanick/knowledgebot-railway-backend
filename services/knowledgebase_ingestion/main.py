@@ -1279,8 +1279,13 @@ async def delete_file(file_id: str):
             deletion_results["postgres"]["error"] = str(e)
             logger.warning(f"⚠️ Failed to delete from database: {e}")
 
-    # Determine overall success (at least one deletion succeeded)
-    overall_success = any(result["success"] for result in deletion_results.values())
+    # Determine overall success
+    if table_name == 'gemini_only':
+        # For Gemini-only files, success is based only on Gemini deletion
+        overall_success = deletion_results["gemini"]["success"]
+    else:
+        # For database-backed files, at least one deletion should succeed
+        overall_success = any(result["success"] for result in deletion_results.values())
     
     # Build response message
     success_parts = []
