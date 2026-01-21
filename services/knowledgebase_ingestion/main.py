@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 # ============================================================================
 # VALIDATION CONSTANTS
 # ============================================================================
-MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024  # 1MB
+MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
 ALLOWED_FILE_EXTENSIONS = {
     # Documents
     'pdf', 'docx', 'txt',
@@ -456,8 +456,8 @@ async def get_upload_constraints():
     """
     return {
         "max_file_size_bytes": MAX_FILE_SIZE_BYTES,
-        "max_file_size_mb": 1,
-        "max_file_size_display": "1 MB",
+        "max_file_size_mb": 5,
+        "max_file_size_display": "5 MB",
         "allowed_extensions": sorted(ALLOWED_FILE_EXTENSIONS),
         "allowed_mime_types": sorted(ALLOWED_MIME_TYPES),
         "supported_formats": {
