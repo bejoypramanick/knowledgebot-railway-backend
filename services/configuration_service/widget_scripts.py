@@ -28,6 +28,7 @@ class WidgetScriptConfig(BaseModel):
     displayName: str
     chatBubbleColor: str
     alignBubble: str
+    displayChatbot: bool = True
     chatIconUrl: Optional[str] = None
     profilePictureUrl: Optional[str] = None
     initialMessage: str
@@ -58,6 +59,7 @@ def generate_bubble_script(config: WidgetScriptConfig) -> str:
     // Configuration
     var config = {{
       baseUrl: '{config.baseUrl}',
+      displayChatbot: {str(config.displayChatbot).lower()},
       theme: '{config.theme}',
       primaryColor: '{config.primaryColor}',
       displayName: '{config.displayName}',
@@ -68,6 +70,8 @@ def generate_bubble_script(config: WidgetScriptConfig) -> str:
       initialMessage: {json.dumps(config.initialMessage)},
       autoShowDuration: {config.autoShowDuration}
     }};
+    
+    if (config.displayChatbot === false) return;
     
     // Load saved bubble position from localStorage
     var savedPosition = null;

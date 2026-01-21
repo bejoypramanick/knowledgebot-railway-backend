@@ -270,6 +270,7 @@ class ChatbotConfigRequest(BaseModel):
     admin_emails: Optional[List[Union[str, AdminAccount]]] = None
     human_agents: Optional[List[str]] = None
     hil_enabled: Optional[bool] = None
+    hil_disabled_message: Optional[str] = None
     notifications: Optional[NotificationsUpdate] = None
     security: Optional[SecurityUpdate] = None
     response_policy: Optional[int] = None
@@ -303,6 +304,7 @@ class WidgetConfigRequest(BaseModel):
     use_primary_for_header: Optional[bool] = None
     chat_bubble_color: Optional[str] = None
     align_bubble: Optional[str] = None
+    display_chatbot: Optional[bool] = None
     profile_picture_url: Optional[str] = None
     chat_icon_url: Optional[str] = None
     # NEW FIELDS - Add zoom and position fields with proper validation
@@ -456,7 +458,7 @@ async def get_chatbot_config():
             # Get configuration metadata
             metadata = await conn.fetchrow(
                 """
-                SELECT default_user_role, hil_enabled, response_policy
+                SELECT default_user_role, hil_enabled, response_policy, hil_disabled_message
                 FROM configuration_metadata
                 WHERE id = 1
                 """
@@ -576,6 +578,7 @@ async def get_chatbot_config():
                 "admin_password": "**********",
                 "human_agents": human_agents_list,
                 "hil_enabled": metadata['hil_enabled'] if metadata else True,
+                "hil_disabled_message": metadata['hil_disabled_message'] if metadata else "Human assistance is currently offline.",
                 "notifications": notifications,
                 "security": security,
                 "response_policy": metadata['response_policy'] if metadata else 30,
@@ -770,6 +773,11 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                 if config.response_policy is not None:
                     updates.append(f"response_policy = ${param_index}")
                     values.append(config.response_policy)
+                    param_index += 1
+
+                if config.hil_disabled_message is not None:
+                    updates.append(f"hil_disabled_message = ${param_index}")
+                    values.append(config.hil_disabled_message)
                     param_index += 1
 
                 if updates:
@@ -1066,6 +1074,7 @@ async def get_widget_config():
                     use_primary_for_header,
                     chat_bubble_color,
                     align_bubble,
+                    display_chatbot,
                     profile_picture_url,
                     chat_icon_url,
                     profile_zoom,
@@ -1104,6 +1113,7 @@ async def get_widget_config():
                     "use_primary_for_header": True,
                     "chat_bubble_color": "#3B81F6",
                     "align_bubble": "right",
+                    "display_chatbot": True,
                     "profile_picture_url": None,
                     "chat_icon_url": None,
                     "profile_zoom": 1.0,
@@ -1126,6 +1136,7 @@ async def get_widget_config():
                 "use_primary_for_header": row["use_primary_for_header"],
                 "chat_bubble_color": row["chat_bubble_color"],
                 "align_bubble": row["align_bubble"],
+                "display_chatbot": row["display_chatbot"] if row["display_chatbot"] is not None else True,
                 "profile_picture_url": row["profile_picture_url"],
                 "chat_icon_url": row["chat_icon_url"],
                 "profile_zoom": float(row["profile_zoom"]) if row["profile_zoom"] is not None else 1.0,
@@ -1163,6 +1174,7 @@ async def save_widget_config(config: WidgetConfigRequest):
                 "use_primary_for_header": "use_primary_for_header",
                 "chat_bubble_color": "chat_bubble_color",
                 "align_bubble": "align_bubble",
+                "display_chatbot": "display_chatbot",
                 "profile_picture_url": "profile_picture_url",
                 "chat_icon_url": "chat_icon_url",
                 # NEW FIELDS - Add zoom and position fields
