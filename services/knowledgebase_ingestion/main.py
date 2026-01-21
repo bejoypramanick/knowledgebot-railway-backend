@@ -1068,33 +1068,8 @@ async def list_files(
             logger.error(f"Error fetching from database: {e}")
             # Fall back to Gemini if database fails
     
-    # Optionally include Gemini files (if database returned nothing or requested)
-    if include_gemini and genai_client and len(file_list) == 0:
-        try:
-            gemini_files = genai_client.files.list()
-            for gf in gemini_files:
-                file_list.append({
-                    "key": gf.name,
-                    "id": gf.name,
-                    "name": gf.display_name,
-                    "original_name": gf.display_name,
-                    "display_name": gf.display_name,
-                    "file_type": gf.mime_type.split('/')[-1] if gf.mime_type else "unknown",
-                    "type": gf.mime_type.split('/')[-1] if gf.mime_type else "unknown",
-                    "mime_type": gf.mime_type,
-                    "size": gf.size_bytes or 0,
-                    "size_bytes": gf.size_bytes or 0,
-                    "gemini_file_name": gf.name,
-                    "status": gf.state.name if hasattr(gf, 'state') else "unknown",
-                    "source": "gemini",
-                    "created_at": gf.create_time.isoformat() if gf.create_time else None,
-                    "updated_at": gf.update_time.isoformat() if gf.update_time else None,
-                    "last_modified": gf.update_time.isoformat() if gf.update_time else None,
-                    "version": 1,  # Gemini-only files default to version 1
-                })
-            logger.info(f"Retrieved {len(file_list)} files from Gemini")
-        except Exception as e:
-            logger.error(f"Error listing Gemini files: {e}")
+    # NOTE: No longer including Gemini-only files in the file list
+    # Only database-backed files (from file_uploads and scraped_websites tables) are returned
     
     return {
         "files": file_list,
@@ -1176,7 +1151,7 @@ async def delete_file(file_id: str):
     If one fails, it continues with the other (no rollback).
 
     Args:
-        file_id: The database file ID (UUID)
+        file_id: The database file ID (UUID) or Gemini file name (for Gemini-only files)
 
     Returns:
         Dict with success status and details of what was deleted/failed
@@ -1187,29 +1162,40 @@ async def delete_file(file_id: str):
         from shared.utils import dependency_unavailable_error
         raise dependency_unavailable_error("gemini", "client not configured")
 
-    # Get file info from database first
-    if not db.railway_db:
-        raise HTTPException(status_code=500, detail="Database not available")
+    # Check if this is a Gemini-only file (file_id starts with "files/")
+    if file_id.startswith("files/"):
+        # This is a Gemini-only file, no database record exists
+        gemini_file_name = file_id
+        original_filename = "Gemini-only file"
+        table_name = "gemini_only"
+        logger.info(f"🗑️ Detected Gemini-only file: {gemini_file_name}")
+    else:
+        # This should be a database UUID, look it up
+        if not db.railway_db:
+            raise HTTPException(status_code=500, detail="Database not available")
 
-    # Try to find the file by database ID - track which table it came from
-    file_record = await db.railway_db.fetchrow(
-        "SELECT gemini_file_name, original_filename, 'file_uploads' as table_name FROM file_uploads WHERE id = $1",
-        file_id
-    )
-    table_name = 'file_uploads'
-
-    if not file_record:
-        # Try scraped_websites table as well
+        # Try to find the file by database ID - track which table it came from
         file_record = await db.railway_db.fetchrow(
-            "SELECT gemini_file_name, original_url as original_filename, 'scraped_websites' as table_name FROM scraped_websites WHERE id = $1",
+            "SELECT gemini_file_name, original_filename, 'file_uploads' as table_name FROM file_uploads WHERE id = $1",
             file_id
         )
-        if file_record:
-            table_name = 'scraped_websites'
+        table_name = 'file_uploads'
 
-    if not file_record or not file_record.get('gemini_file_name'):
-        logger.warning(f"File with ID {file_id} not found in database")
-        raise HTTPException(status_code=404, detail="File not found in database")
+        if not file_record:
+            # Try scraped_websites table as well
+            file_record = await db.railway_db.fetchrow(
+                "SELECT gemini_file_name, original_url as original_filename, 'scraped_websites' as table_name FROM scraped_websites WHERE id = $1",
+                file_id
+            )
+            if file_record:
+                table_name = 'scraped_websites'
+
+        if not file_record or not file_record.get('gemini_file_name'):
+            logger.warning(f"File with ID {file_id} not found in database")
+            raise HTTPException(status_code=404, detail="File not found in database")
+
+        gemini_file_name = file_record['gemini_file_name']
+        original_filename = file_record.get('original_filename', 'Unknown')
 
     gemini_file_name = file_record['gemini_file_name']
     original_filename = file_record.get('original_filename', 'Unknown')
@@ -1256,8 +1242,8 @@ async def delete_file(file_id: str):
             deletion_results["gemini"]["error"] = error_str
             logger.warning(f"⚠️ Failed to delete from Gemini FileSearch: {e} (continuing with database deletion)")
 
-    # Step 2: Delete from database (no rollback on failure)
-    if db.railway_db:
+    # Step 2: Delete from database (skip for Gemini-only files)
+    if db.railway_db and table_name != 'gemini_only':
         try:
             # Delete the file record by ID using the tracked table name
             if table_name == 'file_uploads':
