@@ -167,32 +167,7 @@ async def log_configuration_change(user_email: str, action: str, details: dict, 
     except Exception as e:
         logger.warning(f"Failed to log configuration change: {e}")
 
-# Business logic validation function
-def validate_configuration_consistency(config: ChatbotConfigRequest):
-    """Validate that configuration settings are consistent with business rules"""
-    errors = []
-
-    # If HIL is enabled, ensure there are human agents
-    if config.hil_enabled and (not config.human_agents or len(config.human_agents) == 0):
-        errors.append("Human-in-the-Loop is enabled but no human agents are configured")
-
-    # If HIL is disabled, warn about removing agents
-    if config.hil_enabled is False and config.human_agents and len(config.human_agents) > 0:
-        errors.append("Human-in-the-Loop is disabled but human agents are still configured")
-
-    # Validate admin email domains (optional business rule)
-    if config.admin_emails:
-        allowed_domains = ['company.com', 'trusted-domain.org']  # Configure as needed
-        for email in config.admin_emails:
-            if isinstance(email, str):
-                try:
-                    domain = email.split('@')[1].lower()
-                    if domain not in allowed_domains:
-                        errors.append(f"Admin email domain '{domain}' is not in allowed domains")
-                except IndexError:
-                    pass
-
-    return errors
+# Business logic validation function (moved after class definitions)
 
 # Log startup diagnostics
 logger.info("="*60)
@@ -430,6 +405,25 @@ class ValidatedEmail(str):
         if domain in suspicious_domains:
             raise ValueError('Please check email domain for typos')
 
+        # Check that domain doesn't end with a number (common pattern for temp emails)
+        domain_parts = domain.split('.')
+        primary_domain = domain_parts[0]
+        if primary_domain and primary_domain[-1].isdigit():
+            raise ValueError('Domain ending with numbers not allowed')
+
+        # Additional domain validation - check for suspicious patterns
+        import re
+        suspicious_patterns = [
+            r'^[a-z]+\d{2,}$',  # domain with numbers at end like gmail123
+            r'^temp',  # starts with temp
+            r'^test',  # starts with test
+            r'^spam',  # starts with spam
+        ]
+
+        for pattern in suspicious_patterns:
+            if re.search(pattern, primary_domain, re.IGNORECASE):
+                raise ValueError('Invalid domain pattern detected')
+
         return v
 
 class AdminAccount(BaseModel):
@@ -623,6 +617,34 @@ class WidgetConfigRequest(BaseModel):
 
     class Config:
         validate_assignment = True
+
+
+# Business logic validation function
+def validate_configuration_consistency(config: ChatbotConfigRequest):
+    """Validate that configuration settings are consistent with business rules"""
+    errors = []
+
+    # If HIL is enabled, ensure there are human agents
+    if config.hil_enabled and (not config.human_agents or len(config.human_agents) == 0):
+        errors.append("Human-in-the-Loop is enabled but no human agents are configured")
+
+    # If HIL is disabled, warn about removing agents
+    if config.hil_enabled is False and config.human_agents and len(config.human_agents) > 0:
+        errors.append("Human-in-the-Loop is disabled but human agents are still configured")
+
+    # Validate admin email domains (optional business rule)
+    if config.admin_emails:
+        allowed_domains = ['company.com', 'trusted-domain.org']  # Configure as needed
+        for email in config.admin_emails:
+            if isinstance(email, str):
+                try:
+                    domain = email.split('@')[1].lower()
+                    if domain not in allowed_domains:
+                        errors.append(f"Admin email domain '{domain}' is not in allowed domains")
+                except IndexError:
+                    pass
+
+    return errors
 
 
 @asynccontextmanager
@@ -920,65 +942,15 @@ async def save_chatbot_config(
             )
 
         async with get_db_connection() as conn:
-            # Handle admin emails (create Firebase accounts and add to admins table)
+            # Handle admin emails (add to admins table directly - Google auth only)
             if config.admin_emails is not None:
-                admin_emails_to_create = []
-
                 for admin_item in config.admin_emails:
                     # Handle both dict (AdminAccount) and str formats
                     if isinstance(admin_item, dict):
                         email = admin_item.get('email', '')
                         if email:
-                            admin_emails_to_create.append(email)
-                    elif hasattr(admin_item, 'email'):
-                        email = admin_item.email
-                        if email:
-                            admin_emails_to_create.append(email)
-                    elif isinstance(admin_item, str):
-                        admin_emails_to_create.append(admin_item)
-
-                # Create Firebase accounts for admins with auto-generated passwords
-                if admin_emails_to_create:
-                    try:
-                        from firebase_admin import auth
-                        from shared.firebase_auth import init_firebase_auth
-                        # No longer need confirmation tokens
-                        from shared.email_service import create_email_service
-                        import secrets
-
-                        init_firebase_auth()
-                        email_service = create_email_service(conn)
-
-                        for email in admin_emails_to_create:
                             try:
-                                # Check if admin already exists
-                                existing_admin = await conn.fetchrow(
-                                    "SELECT id FROM admins WHERE email = $1",
-                                    email
-                                )
-                                if existing_admin:
-                                    logger.info(f"Admin {email} already exists, skipping creation")
-                                    continue
-
-                                # Generate a secure random password
-                                generated_password = secrets.token_urlsafe(16)
-
-                                # Check if user already exists in Firebase
-                                try:
-                                    existing_user = auth.get_user_by_email(email)
-                                    # User exists, update password with generated one
-                                    auth.update_user(existing_user.uid, password=generated_password)
-                                    logger.info(f"Updated password for existing Firebase user: {email}")
-                                except auth.UserNotFoundError:
-                                    # User doesn't exist, create new user with generated password
-                                    user = auth.create_user(
-                                        email=email,
-                                        password=generated_password,
-                                        email_verified=False
-                                    )
-                                    logger.info(f"Created Firebase user: {email} (UID: {user.uid})")
-
-                                # Add to admins table directly (no status needed)
+                                # Add to admins table directly (no Firebase account needed for Google auth)
                                 await conn.execute(
                                     """
                                     INSERT INTO admins (email)
@@ -988,14 +960,39 @@ async def save_chatbot_config(
                                     """,
                                     email
                                 )
-                                logger.info(f"Admin {email} added directly")
-
+                                logger.info(f"Admin {email} added to database")
                             except Exception as e:
-                                logger.error(f"Error creating Firebase account for {email}: {e}", exc_info=True)
-                                # Continue with other admins even if one fails
-                    except Exception as e:
-                        logger.error(f"Error processing admin accounts: {e}", exc_info=True)
-                        # Don't fail the whole request if admin creation fails
+                                logger.error(f"Error adding admin {email}: {e}")
+                    elif hasattr(admin_item, 'email'):
+                        email = admin_item.email
+                        if email:
+                            try:
+                                await conn.execute(
+                                    """
+                                    INSERT INTO admins (email)
+                                    VALUES ($1)
+                                    ON CONFLICT (email)
+                                    DO NOTHING
+                                    """,
+                                    email
+                                )
+                                logger.info(f"Admin {email} added to database")
+                            except Exception as e:
+                                logger.error(f"Error adding admin {email}: {e}")
+                    elif isinstance(admin_item, str):
+                        try:
+                            await conn.execute(
+                                """
+                                INSERT INTO admins (email)
+                                VALUES ($1)
+                                ON CONFLICT (email)
+                                DO NOTHING
+                                """,
+                                admin_item
+                            )
+                            logger.info(f"Admin {admin_item} added to database")
+                        except Exception as e:
+                            logger.error(f"Error adding admin {admin_item}: {e}")
 
             # Handle human agents (add to human_agents table)
             if config.human_agents is not None:
@@ -1270,13 +1267,17 @@ async def save_chatbot_config(
             else:
                 logger.info("No human agents provided or list is empty, skipping email sending and deletion")
 
-            # Log the configuration change
-            await log_configuration_change(
-                user_email=current_user.get('email'),
-                action='chatbot_config_update',
-                details=config.dict(exclude_unset=True),
-                ip_address=request.client.host if request else None
-            )
+            # Log the configuration change (non-blocking)
+            try:
+                await log_configuration_change(
+                    user_email=current_user.get('email'),
+                    action='chatbot_config_update',
+                    details=config.dict(exclude_unset=True),
+                    ip_address=request.client.host if request else None
+                )
+            except Exception as e:
+                logger.warning(f"Failed to log configuration change: {e}")
+                # Don't fail the configuration save if logging fails
 
             return {"success": True, "message": "Configuration saved successfully"}
     except Exception as e:
@@ -1475,13 +1476,17 @@ async def save_widget_config(
 
                 await conn.execute(query, *values)
 
-            # Log the configuration change
-            await log_configuration_change(
-                user_email=current_user.get('email'),
-                action='widget_config_update',
-                details=config.dict(exclude_unset=True),
-                ip_address=request.client.host if request else None
-            )
+            # Log the configuration change (non-blocking)
+            try:
+                await log_configuration_change(
+                    user_email=current_user.get('email'),
+                    action='widget_config_update',
+                    details=config.dict(exclude_unset=True),
+                    ip_address=request.client.host if request else None
+                )
+            except Exception as e:
+                logger.warning(f"Failed to log widget configuration change: {e}")
+                # Don't fail the configuration save if logging fails
 
             return {"success": True, "message": "Widget configuration saved successfully"}
     except Exception as e:
