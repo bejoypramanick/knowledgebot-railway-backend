@@ -300,9 +300,9 @@ async def update_user_profile(
         from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
 
-            # Check if user is admin
+            # Check if user is admin (status removed)
             admin_exists = await conn.fetchval(
-                "SELECT 1 FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT 1 FROM admins WHERE email = $1",
                 current_user.get('email')
             )
 
@@ -312,9 +312,9 @@ async def update_user_profile(
                 logger.info(f"👑 Admin profile access validated for {current_user.get('email')}")
                 return await get_user_profile(uid, current_user)
 
-            # Check if user is human agent
+            # Check if user is human agent (status removed)
             agent_exists = await conn.fetchval(
-                "SELECT 1 FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                "SELECT 1 FROM human_agents WHERE email = $1",
                 current_user.get('email')
             )
 

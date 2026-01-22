@@ -502,11 +502,10 @@ async def get_chatbot_config():
                 """
             )
 
-            # Fetch human agents from the human_agents table
+            # Fetch human agents from the human_agents table (status removed)
             human_agents_rows = await conn.fetch(
                 """
                 SELECT email FROM human_agents
-                WHERE status IN ('confirmed', 'pending')
                 ORDER BY email
                 """
             )
@@ -886,28 +885,13 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                         
                         # Check if agent already exists
                         existing = await conn.fetchrow(
-                            "SELECT id, status, confirmation_token FROM human_agents WHERE email = $1",
+                            "SELECT id FROM human_agents WHERE email = $1",
                             email
                         )
-                        
+
                         if existing:
-                            logger.info(f"Agent {email} exists with status: {existing['status']}")
-                            if existing['status'] == 'confirmed':
-                                # Already confirmed, skip
-                                logger.info(f"Agent {email} already confirmed, skipping email")
-                                continue
-                            elif existing['status'] == 'pending':
-                                # Resend confirmation email with existing password
-                                token = existing['confirmation_token']
-                                # Get existing password
-                                existing_with_password = await conn.fetchrow(
-                                    "SELECT confirmation_token, auto_generated_password FROM human_agents WHERE email = $1",
-                                    email
-                                )
-                                password = existing_with_password.get('auto_generated_password') if existing_with_password else None
-                                # If no password exists, generate one and store it
-                                if not password:
-                                    from services.configuration_service.human_agents import generate_password
+                            logger.info(f"Agent {email} already exists, skipping creation")
+                            continue
                                     password = generate_password()
                                     await conn.execute(
                                         "UPDATE human_agents SET auto_generated_password = $1 WHERE email = $2",

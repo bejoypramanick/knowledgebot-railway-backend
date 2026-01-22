@@ -193,6 +193,7 @@ async def get_performance_metrics():
 
                 try:
                     satisfaction_results = await conn.fetch("""
+                        WITH monthly_feedback AS (
                             SELECT
                                 DATE_TRUNC('month', created_at) as month_date,
                                 COUNT(*) as total_feedback,
