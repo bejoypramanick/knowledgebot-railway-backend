@@ -892,51 +892,22 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                         if existing:
                             logger.info(f"Agent {email} already exists, skipping creation")
                             continue
-                                    password = generate_password()
-                                    await conn.execute(
-                                        "UPDATE human_agents SET auto_generated_password = $1 WHERE email = $2",
-                                        password, email
-                                    )
-                                confirmation_link = generate_confirmation_link(token)
-                                logger.info(f"Resending confirmation email to pending agent {email}")
-                                email_result = await email_service.send_confirmation_email(email, confirmation_link, password)
-                                logger.info(f"Email send result for {email}: {email_result}")
-                                if email_result:
-                                    agents_emailed.append(email)
-                                    logger.info(f"✅ Confirmation email resent to {email}")
-                                else:
-                                    logger.error(f"❌ Failed to resend confirmation email to {email}")
-                                continue
-                        
-                        # Create new agent with auto-generated password
+
+                        # Create new agent (no email/password needed)
                         logger.info(f"Creating new agent record for {email}")
-                        token = generate_confirmation_token()
-                        from services.configuration_service.human_agents import generate_password
-                        password = generate_password()
                         agent_id = await conn.fetchval(
                             """
-                            INSERT INTO human_agents (email, status, confirmation_token, auto_generated_password)
-                            VALUES ($1, 'pending', $2, $3)
+                            INSERT INTO human_agents (email)
+                            VALUES ($1)
                             RETURNING id::text
                             """,
-                            email, token, password
+                            email
                         )
-                        logger.info(f"New agent created with ID: {agent_id}, sending confirmation email to {email}")
-                        
-                        # Generate confirmation link and send confirmation email with password
-                        confirmation_link = generate_confirmation_link(token)
-                        email_result = await email_service.send_confirmation_email(email, confirmation_link, password)
-                        logger.info(f"Email send result for {email}: {email_result}")
-                        if email_result:
-                            agents_emailed.append(email)
-                            logger.info(f"✅ Confirmation email sent to {email}")
-                        else:
-                            logger.error(f"❌ Failed to send confirmation email to {email}")
-                    
-                    if agents_emailed:
-                        logger.info(f"✅ Successfully sent emails to {len(agents_emailed)} agent(s): {', '.join(agents_emailed)}")
-                    else:
-                        logger.warning(f"⚠️ No emails were sent. Processed {len(config.human_agents)} agent(s) but none received emails.")
+
+                        agents_created.append({
+                            "email": email
+                        })
+                        logger.info(f"✅ Human agent {email} added directly")
                 except Exception as e:
                     # Don't fail the entire save if email sending fails
                     logger.error(f"❌ Error sending human agent emails: {e}", exc_info=True)
