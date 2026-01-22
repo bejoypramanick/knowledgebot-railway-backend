@@ -46,3 +46,9 @@ firebase-admin>=6.0.0
 
 # WebSocket support for API Gateway
 websockets>=12.0
+
+# Enhanced email validation
+email-validator>=2.0.0
+
+# Input sanitization for security
+bleach>=6.0.0

@@ -3,11 +3,31 @@ Configuration Service - Handles chatbot and widget configuration management
 """
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, validator, Field
 from typing import List, Optional, Union
 import os
 import logging
 import sys
+import re
+from datetime import datetime
+try:
+    import bleach
+except ImportError:
+    # Fallback if bleach is not available
+    def clean(text, tags=[], attributes={}, strip=True):
+        return text.strip() if strip else text
+    bleach = type('bleach', (), {'clean': staticmethod(clean)})()
+try:
+    from email_validator import validate_email, EmailNotValidError
+except ImportError:
+    # Fallback if email_validator is not installed
+    def validate_email(email, check_deliverability=True):
+        # Basic email validation fallback
+        email_regex = r'^[^\s@]+@[^\s@]+\.[^\s@]+$'
+        if not re.match(email_regex, email):
+            raise ValueError('Invalid email format')
+        return {'email': email}
+    EmailNotValidError = ValueError
 import json
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -106,6 +126,73 @@ logging.basicConfig(
     force=True
 )
 logger = logging.getLogger(__name__)
+
+# Input sanitization function
+def sanitize_text_input(text: str, max_length: int = 1000) -> str:
+    """Sanitize user input to prevent XSS and other attacks"""
+    if not text:
+        return text
+
+    # Configure allowed tags and attributes
+    allowed_tags = []  # No HTML tags allowed for configuration text
+    allowed_attributes = {}
+
+    # Clean the text
+    sanitized = bleach.clean(
+        text,
+        tags=allowed_tags,
+        attributes=allowed_attributes,
+        strip=True
+    )
+
+    # Limit length
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length]
+
+    return sanitized.strip()
+
+# Audit logging function
+async def log_configuration_change(user_email: str, action: str, details: dict, ip_address: str = None):
+    """Log configuration changes for audit purposes"""
+    try:
+        async with get_db_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO configuration_audit_log
+                (user_email, action, details, ip_address, timestamp)
+                VALUES ($1, $2, $3, $4, $5)
+                """,
+                user_email, action, json.dumps(details), ip_address, datetime.utcnow()
+            )
+    except Exception as e:
+        logger.warning(f"Failed to log configuration change: {e}")
+
+# Business logic validation function
+def validate_configuration_consistency(config: ChatbotConfigRequest):
+    """Validate that configuration settings are consistent with business rules"""
+    errors = []
+
+    # If HIL is enabled, ensure there are human agents
+    if config.hil_enabled and (not config.human_agents or len(config.human_agents) == 0):
+        errors.append("Human-in-the-Loop is enabled but no human agents are configured")
+
+    # If HIL is disabled, warn about removing agents
+    if config.hil_enabled is False and config.human_agents and len(config.human_agents) > 0:
+        errors.append("Human-in-the-Loop is disabled but human agents are still configured")
+
+    # Validate admin email domains (optional business rule)
+    if config.admin_emails:
+        allowed_domains = ['company.com', 'trusted-domain.org']  # Configure as needed
+        for email in config.admin_emails:
+            if isinstance(email, str):
+                try:
+                    domain = email.split('@')[1].lower()
+                    if domain not in allowed_domains:
+                        errors.append(f"Admin email domain '{domain}' is not in allowed domains")
+                except IndexError:
+                    pass
+
+    return errors
 
 # Log startup diagnostics
 logger.info("="*60)
@@ -251,32 +338,180 @@ class NotificationsUpdate(BaseModel):
     feedback_requests_enabled: bool
 
 class SecurityUpdate(BaseModel):
-    response_timeout: int
+    response_timeout: int = Field(..., ge=15, le=300, description="Response timeout in seconds (15-300)")
     remove_pii: bool
     restrict_config: bool
+
+    @validator('response_timeout')
+    def validate_timeout(cls, v):
+        if v < 15 or v > 300:
+            raise ValueError('Response timeout must be between 15 and 300 seconds')
+        return v
 
 class DataManagementUpdate(BaseModel):
     backup_logs: bool
 
 class PersonaUpdate(BaseModel):
-    system_prompt: str
-    selected_persona: str
+    system_prompt: str = Field(..., min_length=10, max_length=5000)
+    selected_persona: str = Field(..., min_length=1, max_length=50)
+
+    @validator('system_prompt')
+    def validate_system_prompt(cls, v):
+        if not v or not v.strip():
+            raise ValueError('System prompt cannot be empty')
+
+        v = v.strip()
+
+        # Check for potentially harmful content
+        harmful_patterns = [
+            r'ignore.*previous.*instructions',
+            r'bypass.*security',
+            r'override.*restrictions',
+            r'jailbreak',
+            r'override.*safety',
+            r'forget.*training',
+            r'do.*not.*follow.*rules'
+        ]
+
+        for pattern in harmful_patterns:
+            if re.search(pattern, v, re.IGNORECASE):
+                raise ValueError('System prompt contains potentially harmful content')
+
+        # Check for excessive special characters
+        special_chars = re.findall(r'[!@#$%^&*()_+=\[\]{}|;:,.<>?]', v)
+        if len(special_chars) > len(v) * 0.3:  # More than 30% special chars
+            raise ValueError('System prompt contains too many special characters')
+
+        return v
+
+    @validator('selected_persona')
+    def validate_persona(cls, v):
+        valid_personas = [
+            'friendly-receptionist', 'knowledgeable-expert',
+            'fast-paced-solver', 'upselling-assistant', 'custom'
+        ]
+        if v not in valid_personas:
+            raise ValueError(f'Invalid persona. Must be one of: {", ".join(valid_personas)}')
+        return v
+
+class ValidatedEmail(str):
+    """Custom email validator with enhanced checks"""
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate_email
+
+    @classmethod
+    def validate_email(cls, v):
+        if not v or not isinstance(v, str):
+            raise ValueError('Email is required')
+
+        v = v.strip()
+
+        # Use email_validator for comprehensive email validation
+        try:
+            # This checks format, MX records, and more
+            validate_email(v, check_deliverability=True)
+        except EmailNotValidError as e:
+            raise ValueError(f'Invalid email: {str(e)}')
+
+        # Additional custom checks
+        domain = v.split('@')[1].lower()
+
+        # Block disposable email domains
+        disposable_domains = {
+            '10minutemail.com', 'temp-mail.org', 'guerrillamail.com',
+            'mailinator.com', 'throwaway.email', 'yopmail.com'
+        }
+        if domain in disposable_domains:
+            raise ValueError('Disposable email addresses not allowed')
+
+        # Block common typos
+        suspicious_domains = ['gmial.com', 'gmai.com', 'hotmai.com']
+        if domain in suspicious_domains:
+            raise ValueError('Please check email domain for typos')
+
+        return v
 
 class AdminAccount(BaseModel):
-    email: str
-    password: str
+    email: ValidatedEmail
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @validator('password')
+    def validate_password(cls, v):
+        if not v:
+            raise ValueError('Password is required')
+
+        # Check password strength
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters long')
+
+        # Must contain at least one uppercase, lowercase, and digit
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not re.search(r'\d', v):
+            raise ValueError('Password must contain at least one number')
+
+        return v
 
 class ChatbotConfigRequest(BaseModel):
-    admin_emails: Optional[List[Union[str, AdminAccount]]] = None
-    human_agents: Optional[List[str]] = None
+    admin_emails: Optional[List[Union[ValidatedEmail, AdminAccount]]] = Field(None, max_items=10)
+    human_agents: Optional[List[ValidatedEmail]] = Field(None, max_items=20)
     hil_enabled: Optional[bool] = None
-    hil_disabled_message: Optional[str] = None
+    hil_disabled_message: Optional[str] = Field(None, max_length=500)
     notifications: Optional[NotificationsUpdate] = None
     security: Optional[SecurityUpdate] = None
-    response_policy: Optional[int] = None
+    response_policy: Optional[int] = Field(None, ge=0, le=100)
     data_management: Optional[DataManagementUpdate] = None
     persona: Optional[PersonaUpdate] = None
     llm_tokens: Optional[dict] = None
+
+    @validator('admin_emails')
+    def validate_admin_emails(cls, v):
+        if v is not None:
+            if len(v) > 10:
+                raise ValueError('Maximum 10 admin emails allowed')
+
+            # Check for duplicates
+            emails = []
+            for item in v:
+                if isinstance(item, str):
+                    emails.append(item)
+                elif hasattr(item, 'email'):
+                    emails.append(item.email)
+
+            if len(emails) != len(set(emails)):
+                raise ValueError('Duplicate admin emails are not allowed')
+
+        return v
+
+    @validator('human_agents')
+    def validate_human_agents(cls, v):
+        if v is not None:
+            if len(v) > 20:
+                raise ValueError('Maximum 20 human agents allowed')
+
+            # Check for duplicates
+            if len(v) != len(set(v)):
+                raise ValueError('Duplicate human agent emails are not allowed')
+
+        return v
+
+    @validator('hil_disabled_message')
+    def validate_hil_message(cls, v):
+        if v and len(v.strip()) > 500:
+            raise ValueError('HIL disabled message must be less than 500 characters')
+        return v.strip() if v else v
+
+    class Config:
+        # Enable validation of assignment
+        validate_assignment = True
+        # Custom error messages
+        error_msg_templates = {
+            'value_error.const': 'Invalid value for field',
+            'value_error.missing': 'This field is required',
+        }
 
 # Position field validation model
 class PositionData(BaseModel):
@@ -294,27 +529,100 @@ class PositionData(BaseModel):
                 raise ValueError(f'{coord} value is too large')
 
 class WidgetConfigRequest(BaseModel):
-    display_name: Optional[str] = None
-    initial_message: Optional[str] = None
-    auto_show_duration: Optional[int] = None
-    suggested_messages: Optional[List[str]] = None
+    display_name: Optional[str] = Field(None, min_length=2, max_length=50)
+    initial_message: Optional[str] = Field(None, min_length=5, max_length=200)
+    auto_show_duration: Optional[int] = Field(None, ge=0, le=30)
+    suggested_messages: Optional[List[str]] = Field(None, max_items=5)
     keep_showing_suggested: Optional[bool] = None
-    theme: Optional[str] = None
-    primary_color: Optional[str] = None
+    theme: Optional[str] = Field(None, regex=r'^(light|dark)$')
+    primary_color: Optional[str] = Field(None, regex=r'^#[0-9A-Fa-f]{6}$')
     use_primary_for_header: Optional[bool] = None
-    chat_bubble_color: Optional[str] = None
-    align_bubble: Optional[str] = None
+    chat_bubble_color: Optional[str] = Field(None, regex=r'^#[0-9A-Fa-f]{6}$')
+    align_bubble: Optional[str] = Field(None, regex=r'^(left|right)$')
     display_chatbot: Optional[bool] = None
     profile_picture_url: Optional[str] = None
     chat_icon_url: Optional[str] = None
     # NEW FIELDS - Add zoom and position fields with proper validation
-    profile_zoom: Optional[float] = None
-    chat_icon_zoom: Optional[float] = None
+    profile_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
+    chat_icon_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
     profile_position: Optional[PositionData] = None
     chat_icon_position: Optional[PositionData] = None
     # NEW FIELDS - Add filename fields for displaying original filenames
-    profile_picture_filename: Optional[str] = None
-    chat_icon_filename: Optional[str] = None
+    profile_picture_filename: Optional[str] = Field(None, max_length=255)
+    chat_icon_filename: Optional[str] = Field(None, max_length=255)
+
+    @validator('display_name')
+    def validate_display_name(cls, v):
+        if v:
+            v = v.strip()
+            if len(v) < 2:
+                raise ValueError('Display name must be at least 2 characters')
+            if len(v) > 50:
+                raise ValueError('Display name must be less than 50 characters')
+
+            # Check for inappropriate content
+            inappropriate_words = ['spam', 'scam', 'fake', 'test', 'admin', 'root', 'system']
+            lower_name = v.lower()
+            for word in inappropriate_words:
+                if word in lower_name:
+                    raise ValueError('Display name contains inappropriate content')
+
+            # Check for excessive special characters
+            special_chars = re.findall(r'[!@#$%^&*()_+=\[\]{}|;:,.<>?]', v)
+            if len(special_chars) > len(v) * 0.4:  # More than 40% special chars
+                raise ValueError('Display name contains too many special characters')
+
+        return v
+
+    @validator('suggested_messages')
+    def validate_suggested_messages(cls, v):
+        if v:
+            for i, message in enumerate(v):
+                if message:
+                    message = message.strip()
+                    if len(message) > 100:
+                        raise ValueError(f'Suggested message {i+1} must be less than 100 characters')
+                    if len(message) < 1:
+                        raise ValueError(f'Suggested message {i+1} cannot be empty')
+                    v[i] = message
+
+        return v
+
+    @validator('profile_picture_url', 'chat_icon_url')
+    def validate_image_url(cls, v):
+        if v:
+            # Validate URL format
+            url_pattern = r'^https?://[^\s/$.?#].[^\s]*$'
+            if not re.match(url_pattern, v):
+                raise ValueError('Invalid image URL format')
+
+            # Check for allowed image extensions
+            allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+            if not any(v.lower().endswith(ext) for ext in allowed_extensions):
+                raise ValueError('Image URL must point to a valid image file')
+
+            # Check URL length
+            if len(v) > 2048:
+                raise ValueError('Image URL is too long')
+
+        return v
+
+    @validator('profile_picture_filename', 'chat_icon_filename')
+    def validate_filename(cls, v):
+        if v:
+            # Basic filename validation
+            if len(v) > 255:
+                raise ValueError('Filename is too long')
+
+            # Check for dangerous characters
+            dangerous_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+            if any(char in v for char in dangerous_chars):
+                raise ValueError('Filename contains invalid characters')
+
+        return v
+
+    class Config:
+        validate_assignment = True
 
 
 @asynccontextmanager
@@ -596,9 +904,21 @@ async def get_chatbot_config():
 
 
 @app.post("/api/v1/configuration/chatbot")
-async def save_chatbot_config(config: ChatbotConfigRequest):
+async def save_chatbot_config(
+    config: ChatbotConfigRequest,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None
+):
     """Save chatbot configuration"""
     try:
+        # Validate business logic
+        business_errors = validate_configuration_consistency(config)
+        if business_errors:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Business logic validation failed: {'; '.join(business_errors)}"
+            )
+
         async with get_db_connection() as conn:
             # Handle admin emails (create Firebase accounts and add to admins table)
             if config.admin_emails is not None:
@@ -949,7 +1269,15 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                     logger.error(f"❌ Error deleting removed human agents: {e}", exc_info=True)
             else:
                 logger.info("No human agents provided or list is empty, skipping email sending and deletion")
-            
+
+            # Log the configuration change
+            await log_configuration_change(
+                user_email=current_user.get('email'),
+                action='chatbot_config_update',
+                details=config.dict(exclude_unset=True),
+                ip_address=request.client.host if request else None
+            )
+
             return {"success": True, "message": "Configuration saved successfully"}
     except Exception as e:
         logger.error(f"Error saving chatbot configuration: {e}", exc_info=True)
@@ -1058,7 +1386,11 @@ async def get_widget_config():
 
 
 @app.post("/api/v1/configuration/widget")
-async def save_widget_config(config: WidgetConfigRequest):
+async def save_widget_config(
+    config: WidgetConfigRequest,
+    current_user: dict = Depends(get_current_user),
+    request: Request = None
+):
     """Save widget configuration"""
     try:
         async with get_db_connection() as conn:
@@ -1142,6 +1474,14 @@ async def save_widget_config(config: WidgetConfigRequest):
                     """
 
                 await conn.execute(query, *values)
+
+            # Log the configuration change
+            await log_configuration_change(
+                user_email=current_user.get('email'),
+                action='widget_config_update',
+                details=config.dict(exclude_unset=True),
+                ip_address=request.client.host if request else None
+            )
 
             return {"success": True, "message": "Widget configuration saved successfully"}
     except Exception as e:
