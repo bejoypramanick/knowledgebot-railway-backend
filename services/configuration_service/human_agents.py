@@ -76,60 +76,23 @@ async def add_human_agents(request: HumanAgentsRequest):
                 )
                 
                 if existing:
-                    if existing['status'] == 'confirmed':
-                        # Already confirmed, skip
-                        logger.info(f"Agent {email} already confirmed, skipping")
-                        continue
-                    elif existing['status'] == 'pending':
-                        # Resend confirmation email with existing password
-                        token = existing['confirmation_token']
-                        # Get existing password
-                        existing_with_password = await conn.fetchrow(
-                            "SELECT confirmation_token, auto_generated_password FROM human_agents WHERE email = $1",
-                            email
-                        )
-                        password = existing_with_password.get('auto_generated_password') if existing_with_password else None
-                        # If no password exists, generate one and store it
-                        if not password:
-                            password = generate_password()
-                            await conn.execute(
-                                "UPDATE human_agents SET auto_generated_password = $1 WHERE email = $2",
-                                password, email
-                            )
-                        confirmation_link = generate_confirmation_link(token)
-                        if await email_service.send_confirmation_email(email, confirmation_link, password):
-                            agents_created.append({
-                                "email": email,
-                                "status": "pending",
-                                "confirmation_token": token
-                            })
-                        continue
-                
-                # Create new agent with auto-generated password
-                token = generate_confirmation_token()
-                password = generate_password()
+                    logger.info(f"Agent {email} already exists, skipping")
+                    continue
+
+                # Create new agent (no email/password needed)
                 agent_id = await conn.fetchval(
                     """
-                    INSERT INTO human_agents (email, status, confirmation_token, auto_generated_password)
-                    VALUES ($1, 'pending', $2, $3)
+                    INSERT INTO human_agents (email)
+                    VALUES ($1)
                     RETURNING id::text
                     """,
-                    email, token, password
+                    email
                 )
-                
-                # Generate confirmation link
-                confirmation_link = generate_confirmation_link(token)
-                
-                # Send confirmation email with password
-                if await email_service.send_confirmation_email(email, confirmation_link, password):
-                    agents_created.append({
-                        "email": email,
-                        "status": "pending",
-                        "confirmation_token": token
-                    })
-                    logger.info(f"Confirmation email sent to {email}")
-                else:
-                    logger.warning(f"Failed to send confirmation email to {email}")
+
+                agents_created.append({
+                    "email": email
+                })
+                logger.info(f"Human agent {email} added directly")
             
             return {
                 "success": True,

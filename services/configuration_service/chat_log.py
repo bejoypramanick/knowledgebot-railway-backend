@@ -344,8 +344,7 @@ async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str
         # Get all confirmed human agents
         agents = await conn.fetch(
             """
-            SELECT email FROM human_agents 
-            WHERE status = 'confirmed'
+            SELECT email FROM human_agents
             ORDER BY email
             """
         )
@@ -381,8 +380,7 @@ async def assign_chat_with_load_balancing(session_id: str, conn) -> Optional[str
             # Fallback to admins
             admins = await conn.fetch(
                 """
-                SELECT email FROM admins 
-                WHERE status = 'confirmed'
+                SELECT email FROM admins
                 ORDER BY email
                 """
             )
@@ -446,11 +444,11 @@ async def get_online_agents(current_user: dict = Depends(get_current_user)):
         async with get_db_connection() as conn:
             # Check if current user is an admin or agent
             is_agent = await conn.fetchval(
-                "SELECT COUNT(*) FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                "SELECT COUNT(*) FROM human_agents WHERE email = $1",
                 user_email
             )
             is_admin = await conn.fetchval(
-                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT COUNT(*) FROM admins WHERE email = $1",
                 user_email
             )
 
@@ -1276,7 +1274,7 @@ async def assign_chat_session(
         async with get_db_connection() as conn:
             # Check if user is admin (for manual assignment)
             is_admin = await conn.fetchval(
-                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT COUNT(*) FROM admins WHERE email = $1",
                 user_email
             )
             
@@ -1319,11 +1317,11 @@ async def transfer_chat_session(
         async with get_db_connection() as conn:
             # Check if current user has permission (must be confirmed agent or admin)
             is_agent = await conn.fetchval(
-                "SELECT COUNT(*) FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                "SELECT COUNT(*) FROM human_agents WHERE email = $1",
                 user_email
             )
             is_admin = await conn.fetchval(
-                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT COUNT(*) FROM admins WHERE email = $1",
                 user_email
             )
             
@@ -1332,11 +1330,11 @@ async def transfer_chat_session(
                 
             # Check if target agent exists and is confirmed
             target_is_agent = await conn.fetchval(
-                "SELECT COUNT(*) FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                "SELECT COUNT(*) FROM human_agents WHERE email = $1",
                 target_agent_email
             )
             target_is_admin = await conn.fetchval(
-                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT COUNT(*) FROM admins WHERE email = $1",
                 target_agent_email
             )
             
@@ -1491,13 +1489,13 @@ async def update_chat_session(
                 # Determine if the user ending the session is an agent or customer
                 # Check if user is a human agent
                 is_agent = await conn.fetchval(
-                    "SELECT COUNT(*) FROM human_agents WHERE email = $1 AND status = 'confirmed'",
+                    "SELECT COUNT(*) FROM human_agents WHERE email = $1",
                     user_email
                 )
                 
                 # Check if user is an admin (admins can also end sessions)
                 is_admin = await conn.fetchval(
-                    "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                    "SELECT COUNT(*) FROM admins WHERE email = $1",
                     user_email
                 )
                 
@@ -1643,7 +1641,7 @@ async def request_human_agent(
             if not assigned_agent:
                 # Check if there are any confirmed agents at all
                 total_agents = await conn.fetchval(
-                    "SELECT COUNT(*) FROM human_agents WHERE status = 'confirmed'"
+                    "SELECT COUNT(*) FROM human_agents"
                 ) or 0
                 
                 if total_agents == 0:
@@ -1655,7 +1653,7 @@ async def request_human_agent(
                         SELECT COUNT(DISTINCT sa.assignee_email)
                         FROM session_assignments sa
                         WHERE sa.assigned_at > NOW() - INTERVAL '30 minutes'
-                        AND sa.assignee_email IN (SELECT email FROM human_agents WHERE status = 'confirmed')
+                        AND sa.assignee_email IN (SELECT email FROM human_agents)
                         """
                     ) or 0
                     
@@ -1798,7 +1796,7 @@ async def sse_agent_chat(session_id: str, request: Request, current_user: dict =
         if not assigned:
             # Check if user is admin
             is_admin = await conn.fetchval(
-                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT COUNT(*) FROM admins WHERE email = $1",
                 user_email
             )
             if not is_admin:
