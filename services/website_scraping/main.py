@@ -1,6 +1,7 @@
 """Website Scraping Service - Handles website scraping using Crawl4AI and Gemini FileSearch."""
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl, validator, Field
 from typing import Optional, Dict, Any, List
 from google import genai
@@ -8,6 +9,7 @@ from google.genai import types
 import os
 import logging
 import re
+import json
 from dotenv import load_dotenv
 import asyncio
 from crawl4ai import AsyncWebCrawler
@@ -200,6 +202,7 @@ def validate_patterns(patterns: Optional[List[str]]) -> tuple[bool, str]:
 
 class ScrapeRequest(BaseModel):
     url: str = Field(..., description="URL to scrape", min_length=1, max_length=MAX_URL_LENGTH)
+    session_id: Optional[str] = Field(None, description="Session ID for SSE progress tracking")
     max_depth: Optional[int] = Field(1, ge=0, le=MAX_DEPTH_LIMIT, description="Maximum crawl depth")
     max_pages: Optional[int] = Field(10, ge=1, le=MAX_PAGES_LIMIT, description="Maximum pages to scrape")
     include_patterns: Optional[List[str]] = Field(None, description="URL patterns to include")
@@ -239,24 +242,83 @@ async def health_check(request: Request):
     log_endpoint_request("website_scraping", "health", request)
     return {"status": "healthy", "service": "website_scraping"}
 
+# Store for active scraping sessions
+active_scraping_sessions: Dict[str, asyncio.Queue] = {}
+
+@app.get("/scrape-progress/{session_id}")
+async def scrape_progress(session_id: str):
+    """SSE endpoint for real-time scraping progress updates"""
+
+    async def event_generator():
+        queue = active_scraping_sessions.get(session_id)
+        if not queue:
+            yield f"data: {json.dumps({'error': 'Session not found'})}\n\n"
+            return
+
+        try:
+            while True:
+                # Wait for new data with timeout
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(data)}\n\n"
+
+                    # If this is a completion or error message, clean up
+                    if data.get('type') in ['completed', 'error']:
+                        if session_id in active_scraping_sessions:
+                            del active_scraping_sessions[session_id]
+                        break
+
+                except asyncio.TimeoutError:
+                    # Send heartbeat to keep connection alive
+                    yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
+
+        except Exception as e:
+            logger.error(f"SSE error for session {session_id}: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control",
+        }
+    )
+
 @app.post("/scrape", response_model=ScrapeResponse)
 async def scrape_website(request: ScrapeRequest):
     """
     Scrape a website and upload to Gemini FileSearch.
-    
+
     Args:
         request: ScrapeRequest with URL and options
-    
+
     Returns:
         ScrapeResponse with upload information
-    
+
     Raises:
         HTTPException 400: Validation errors (URL format, parameters)
         HTTPException 500: Scraping or processing failed
         HTTPException 503: Service dependencies unavailable
     """
     validation_warnings = []
-    
+
+    # Set up SSE queue if session_id provided
+    sse_queue = None
+    if request.session_id:
+        sse_queue = asyncio.Queue()
+        active_scraping_sessions[request.session_id] = sse_queue
+
+        # Send initial progress update
+        await sse_queue.put({
+            "type": "started",
+            "message": f"Started scraping {request.url}",
+            "url": request.url,
+            "timestamp": asyncio.get_event_loop().time()
+        })
+
     try:
         # Additional runtime validation (Pydantic handles most)
         logger.info(f"Received scrape request for URL: {request.url}")
@@ -321,19 +383,35 @@ async def scrape_website(request: ScrapeRequest):
         
         # Scrape the website using Crawl4AI
         logger.info(f"Scraping website: {request.url} (version {existing_version})")
-        
+
+        if sse_queue:
+            await sse_queue.put({
+                "type": "scraping_started",
+                "message": f"Initializing scraper for {request.url}",
+                "url": request.url,
+                "timestamp": asyncio.get_event_loop().time()
+            })
+
         # Configure browser
         browser_config = BrowserConfig(verbose=False, headless=True)
-        
+
         # Configure crawl options using CrawlerRunConfig
         run_config = CrawlerRunConfig()
-        
+
         # Note: crawl4ai 0.7.x API changes - single URL crawling via arun()
         # For multi-page crawling, we'll use deep crawling or arun_many in future
         # For MVP, we'll scrape single page
-        
+
         async with AsyncWebCrawler(config=browser_config) as crawler:
             # Execute crawl
+            if sse_queue:
+                await sse_queue.put({
+                    "type": "page_crawling",
+                    "message": f"Crawling page: {request.url}",
+                    "url": request.url,
+                    "timestamp": asyncio.get_event_loop().time()
+                })
+
             result = await crawler.arun(url=request.url, config=run_config)
             
             if not result.success:
@@ -403,6 +481,15 @@ async def scrape_website(request: ScrapeRequest):
                 
                 # Upload to Gemini FileSearch
                 logger.info(f"Uploading scraped content to Gemini FileSearch: {display_name_with_metadata}")
+
+                if sse_queue:
+                    await sse_queue.put({
+                        "type": "uploading",
+                        "message": f"Uploading content to Gemini FileSearch",
+                        "url": request.url,
+                        "timestamp": asyncio.get_event_loop().time()
+                    })
+
                 # Use `file=` (library expects file param) and add simple retry/backoff for rate limits
                 uploaded_file = None
                 for attempt in range(3):
@@ -478,6 +565,17 @@ async def scrape_website(request: ScrapeRequest):
                 except Exception as e:
                     logger.exception("Failed to persist scraped website metadata: %s", e)
 
+                # Send completion event via SSE
+                if sse_queue:
+                    await sse_queue.put({
+                        "type": "completed",
+                        "message": f"Successfully scraped and uploaded {request.url}",
+                        "url": request.url,
+                        "file_name": uploaded_file.name,
+                        "scraped_urls": scraped_urls,
+                        "timestamp": asyncio.get_event_loop().time()
+                    })
+
                 return ScrapeResponse(
                     success=True,
                     message=f"Website scraped and uploaded successfully",
@@ -496,6 +594,16 @@ async def scrape_website(request: ScrapeRequest):
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error scraping website: {error_msg}")
+
+        # Send error event via SSE
+        if sse_queue:
+            await sse_queue.put({
+                "type": "error",
+                "message": f"Failed to scrape {request.url}: {error_msg}",
+                "url": request.url,
+                "error": error_msg,
+                "timestamp": asyncio.get_event_loop().time()
+            })
 
         # Provide user-friendly error messages for common issues
         if "ERR_NAME_NOT_RESOLVED" in error_msg:
