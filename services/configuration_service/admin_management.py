@@ -180,7 +180,7 @@ async def remove_admin(email: str, current_user: dict = Depends(get_current_user
             
             # Check if admin exists
             admin = await conn.fetchrow(
-                "SELECT id, email, status FROM admins WHERE email = $1",
+                "SELECT id, email FROM admins WHERE email = $1",
                 email
             )
             

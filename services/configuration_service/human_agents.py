@@ -71,7 +71,7 @@ async def add_human_agents(request: HumanAgentsRequest):
             for email in request.emails:
                 # Check if agent already exists
                 existing = await conn.fetchrow(
-                    "SELECT id, status, confirmation_token FROM human_agents WHERE email = $1",
+                    "SELECT id FROM human_agents WHERE email = $1",
                     email
                 )
                 
@@ -117,7 +117,7 @@ async def remove_human_agent(email: str):
         async with railway_db.acquire() as conn:
             # Check if agent exists
             agent = await conn.fetchrow(
-                "SELECT id, email, status FROM human_agents WHERE email = $1",
+                "SELECT id, email FROM human_agents WHERE email = $1",
                 email
             )
             
