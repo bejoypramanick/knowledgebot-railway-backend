@@ -104,7 +104,7 @@ async def verify_token(request: TokenVerificationRequest):
                     
                     # Check if user is a human agent (recognize both confirmed and pending)
                     agent = await conn.fetchrow(
-                        "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                        "SELECT email FROM human_agents WHERE email = $1",
                         email
                     )
                     logger.info(f"🤖 Agent check result for {email}: {agent}")
@@ -190,7 +190,7 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
                     
                     # Check if user is a human agent (can be both admin and agent)
                     agent = await conn.fetchrow(
-                        "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                        "SELECT email FROM human_agents WHERE email = $1",
                         email
                     )
                     if agent:
@@ -286,7 +286,7 @@ async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)
                     
                     # Check if user is a human agent (recognize both confirmed and pending)
                     agent = await conn.fetchrow(
-                        "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                        "SELECT email FROM human_agents WHERE email = $1",
                         email
                     )
                     if agent:

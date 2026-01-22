@@ -360,9 +360,9 @@ async def get_user_roles(
 
             roles = []  # Start with empty list - only add roles user actually has
 
-            # Check admin table
+            # Check admin table (status removed)
             admin_check = await conn.fetchrow(
-                "SELECT status FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT id FROM admins WHERE email = $1",
                 user_email
             )
 
@@ -370,9 +370,9 @@ async def get_user_roles(
                 roles.append('admin')
                 logger.info(f"👑 Admin role confirmed for {user_email}")
 
-            # Check human_agent table
+            # Check human_agent table (status removed)
             agent_check = await conn.fetchrow(
-                "SELECT status FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                "SELECT id FROM human_agents WHERE email = $1",
                 user_email
             )
 

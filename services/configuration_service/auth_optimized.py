@@ -285,9 +285,9 @@ async def verify_token(request: TokenVerificationRequest):
             )
 
         async with railway_db.acquire() as conn:
-            # Check if user is an admin
+            # Check if user is an admin (status removed)
             admin = await conn.fetchrow(
-                "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT email FROM admins WHERE email = $1",
                 email
             )
             if admin:
@@ -296,9 +296,9 @@ async def verify_token(request: TokenVerificationRequest):
                 is_admin = True
                 primary_role = 'admin'  # Admin takes precedence
 
-            # Check if user is a human agent (recognize both confirmed and pending)
+            # Check if user is a human agent (status removed)
             agent = await conn.fetchrow(
-                "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                "SELECT email FROM human_agents WHERE email = $1",
                 email
             )
             if agent:
@@ -361,9 +361,9 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
             
             if railway_db and hasattr(railway_db, '_pool') and railway_db._pool is not None:
                 async with railway_db.acquire() as conn:
-                    # Check if user is an admin
+                    # Check if user is an admin (status removed)
                     admin = await conn.fetchrow(
-                        "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
+                        "SELECT email FROM admins WHERE email = $1",
                         email
                     )
                     if admin:
@@ -371,9 +371,9 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
                         is_admin = True
                         primary_role = 'admin'  # Admin takes precedence
                     
-                    # Check if user is a human agent (can be both admin and agent)
+                    # Check if user is a human agent (status removed)
                     agent = await conn.fetchrow(
-                        "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                        "SELECT email FROM human_agents WHERE email = $1",
                         email
                     )
                     if agent:

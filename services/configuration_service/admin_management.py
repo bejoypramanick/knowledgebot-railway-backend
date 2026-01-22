@@ -64,24 +64,13 @@ async def add_admins(request: AdminRequest, current_user: dict = Depends(get_cur
             for email in request.emails:
                 # Check if admin already exists
                 existing = await conn.fetchrow(
-                    "SELECT id, status, confirmation_token FROM admins WHERE email = $1",
+                    "SELECT id FROM admins WHERE email = $1",
                     email
                 )
-                
+
                 if existing:
-                    if existing['status'] == 'confirmed':
-                        logger.info(f"Admin {email} already confirmed, skipping")
-                        continue
-                    elif existing['status'] == 'pending':
-                        # Resend confirmation email
-                        token = existing['confirmation_token']
-                        if await email_service.send_admin_confirmation_email(email, token, user_email):
-                            admins_created.append({
-                                "email": email,
-                                "status": "pending",
-                                "confirmation_token": token
-                            })
-                        continue
+                    logger.info(f"Admin {email} already exists, skipping")
+                    continue
                 
                 # Create new admin
                 token = generate_confirmation_token()
@@ -243,9 +232,9 @@ async def get_user_role(email: str):
             if admin:
                 return {"role": "admin", "email": email}
             
-            # Check if user is a human agent (recognize both confirmed and pending)
+            # Check if user is a human agent (status removed)
             agent = await conn.fetchrow(
-                "SELECT email FROM human_agents WHERE email = $1 AND status IN ('confirmed', 'pending')",
+                "SELECT email FROM human_agents WHERE email = $1",
                 email
             )
             if agent:
