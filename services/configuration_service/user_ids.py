@@ -231,7 +231,7 @@ async def get_user_profile(
                 """
                 SELECT email, created_at
                 FROM admins
-                WHERE email = $1 AND status = 'confirmed'
+                WHERE email = $1
                 """,
                 current_user.get('email')
             )
@@ -241,7 +241,7 @@ async def get_user_profile(
                 """
                 SELECT email, created_at
                 FROM human_agents
-                WHERE email = $1 AND status IN ('confirmed', 'pending')
+                WHERE email = $1
                 """,
                 current_user.get('email')
             )

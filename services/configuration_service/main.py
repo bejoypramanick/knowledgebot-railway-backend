@@ -517,7 +517,6 @@ async def get_chatbot_config():
             admin_rows = await conn.fetch(
                 """
                 SELECT email FROM admins
-                WHERE status IN ('confirmed', 'pending')
                 ORDER BY email
                 """
             )
@@ -624,7 +623,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                     try:
                         from firebase_admin import auth
                         from shared.firebase_auth import init_firebase_auth
-                        from services.configuration_service.admin_management import generate_confirmation_token
+                        # No longer need confirmation tokens
                         from shared.email_service import create_email_service
                         import secrets
 
@@ -633,13 +632,13 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
 
                         for email in admin_emails_to_create:
                             try:
-                                # Check if admin already exists and is confirmed
+                                # Check if admin already exists
                                 existing_admin = await conn.fetchrow(
-                                    "SELECT status FROM admins WHERE email = $1",
+                                    "SELECT id FROM admins WHERE email = $1",
                                     email
                                 )
-                                if existing_admin and existing_admin['status'] == 'confirmed':
-                                    logger.info(f"Admin {email} is already confirmed, skipping reset to pending")
+                                if existing_admin:
+                                    logger.info(f"Admin {email} already exists, skipping creation")
                                     continue
 
                                 # Generate a secure random password
@@ -660,21 +659,17 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                                     )
                                     logger.info(f"Created Firebase user: {email} (UID: {user.uid})")
 
-                                # Add to admins table and send verification email with password
-                                token = generate_confirmation_token()
+                                # Add to admins table directly (no status needed)
                                 await conn.execute(
                                     """
-                                    INSERT INTO admins (email, status, confirmation_token, auto_generated_password)
-                                    VALUES ($1, 'pending', $2, $3)
+                                    INSERT INTO admins (email)
+                                    VALUES ($1)
                                     ON CONFLICT (email)
-                                    DO UPDATE SET confirmation_token = $2, status = 'pending', auto_generated_password = $3
+                                    DO NOTHING
                                     """,
-                                    email, token, generated_password
+                                    email
                                 )
-
-                                # Send verification email with generated password
-                                await email_service.send_admin_confirmation_email(email, token, "system", generated_password)
-                                logger.info(f"Verification email with password sent to admin: {email}")
+                                logger.info(f"Admin {email} added directly")
 
                             except Exception as e:
                                 logger.error(f"Error creating Firebase account for {email}: {e}", exc_info=True)
@@ -691,70 +686,23 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                         try:
                             # Check if human agent already exists
                             existing_agent = await conn.fetchrow(
-                                "SELECT status FROM human_agents WHERE email = $1",
+                                "SELECT id FROM human_agents WHERE email = $1",
                                 agent_email
                             )
                             if not existing_agent:
-                                # Create new human agent
-                                token = generate_confirmation_token()
-                                generated_password = secrets.token_urlsafe(16)
+                                # Create new human agent (no Firebase account needed)
 
-                                # Create Firebase user for agent
-                                try:
-                                    from firebase_admin import auth
-                                    from shared.firebase_auth import init_firebase_auth
-                                    init_firebase_auth()
-
-                                    # Check if user already exists
-                                    try:
-                                        existing_user = auth.get_user_by_email(agent_email)
-                                        logger.info(f"Firebase user already exists for agent: {agent_email} (UID: {existing_user.uid})")
-                                        # User exists, we'll update their password if they haven't confirmed yet
-                                        # This handles the case where agent creation was attempted but failed previously
-                                        if existing_user.email_verified:
-                                            logger.info(f"Agent {agent_email} is already verified, skipping password update")
-                                        else:
-                                            # Update password for unverified users (allows them to login with new temp password)
-                                            auth.update_user(existing_user.uid, password=generated_password)
-                                            logger.info(f"Updated password for existing Firebase user: {agent_email}")
-                                    except auth.UserNotFoundError:
-                                        # User doesn't exist, create new one
-                                        user = auth.create_user(
-                                            email=agent_email,
-                                            password=generated_password,
-                                            email_verified=False
-                                        )
-                                        logger.info(f"Created Firebase user for agent: {agent_email} (UID: {user.uid})")
-                                    except Exception as e:
-                                        if "EMAIL_EXISTS" in str(e):
-                                            logger.warning(f"Firebase user already exists for agent {agent_email}, continuing with agent setup")
-                                        else:
-                                            logger.error(f"Unexpected Firebase error for agent {agent_email}: {e}")
-                                            # Continue anyway - Firebase user existence is not critical for agent setup
-
-                                except Exception as e:
-                                    logger.error(f"Error managing Firebase account for agent {agent_email}: {e}")
-                                    # Continue with agent setup even if Firebase operations fail
-
-                                # Add to human_agents table
+                                # Add to human_agents table directly (no status needed)
                                 await conn.execute(
                                     """
-                                    INSERT INTO human_agents (email, status, confirmation_token, auto_generated_password)
-                                    VALUES ($1, 'pending', $2, $3)
+                                    INSERT INTO human_agents (email)
+                                    VALUES ($1)
                                     ON CONFLICT (email)
-                                    DO UPDATE SET confirmation_token = $2, status = 'pending', auto_generated_password = $3
+                                    DO NOTHING
                                     """,
-                                    agent_email, token, generated_password
+                                    agent_email
                                 )
-
-                                # Send confirmation email
-                                try:
-                                    from shared.email_service import create_email_service
-                                    email_service = create_email_service(conn)
-                                    await email_service.send_agent_confirmation_email(agent_email, token, "system", generated_password)
-                                    logger.info(f"Confirmation email sent to agent: {agent_email}")
-                                except Exception as e:
-                                    logger.error(f"Error sending confirmation email to agent {agent_email}: {e}")
+                                logger.info(f"Human agent {agent_email} added directly")
 
                         except Exception as e:
                             logger.error(f"Error processing human agent {agent_email}: {e}")
@@ -1015,7 +963,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest):
                 try:
                     # Get all current agents from the database
                     current_agents = await conn.fetch(
-                        "SELECT email FROM human_agents WHERE status IN ('confirmed', 'pending')"
+                        "SELECT email FROM human_agents"
                     )
                     
                     # Create a mapping of lowercase email to original email for comparison

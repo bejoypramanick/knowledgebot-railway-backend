@@ -263,7 +263,7 @@ async def assign_chat_to_agent(session_id: str, agent_email: str, conn) -> None:
         assignee_type = await conn.fetchval(
             """
             SELECT CASE 
-                WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1 AND status = 'confirmed') 
+                WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1) 
                 THEN 'admin'
                 ELSE 'agent'
             END
@@ -457,10 +457,10 @@ async def get_online_agents(current_user: dict = Depends(get_current_user)):
             if not is_agent and not is_admin:
                 raise HTTPException(status_code=403, detail="Access denied")
 
-            # Fetch all confirmed agents
-            agents = await conn.fetch("SELECT email FROM human_agents WHERE status = 'confirmed'")
-            # Fetch all confirmed admins
-            admins = await conn.fetch("SELECT email FROM admins WHERE status = 'confirmed'")
+            # Fetch all agents
+            agents = await conn.fetch("SELECT email FROM human_agents")
+            # Fetch all admins
+            admins = await conn.fetch("SELECT email FROM admins")
 
             online_users = []
 
@@ -524,7 +524,7 @@ async def agent_heartbeat(
             agent = await conn.fetchrow(
                 """
                 SELECT email FROM human_agents 
-                WHERE email = $1 AND status = 'confirmed'
+                WHERE email = $1
                 """,
                 user_email
             )
@@ -534,12 +534,12 @@ async def agent_heartbeat(
                 admin = await conn.fetchrow(
                     """
                     SELECT email FROM admins 
-                    WHERE email = $1 AND status = 'confirmed'
+                    WHERE email = $1
                     """,
                     user_email
                 )
                 if not admin:
-                    raise HTTPException(status_code=403, detail="User is not a confirmed human agent or admin")
+                    raise HTTPException(status_code=403, detail="User is not a human agent or admin")
             
             # Update last activity timestamp for this agent
             # We'll use the session_assignments table to track activity
@@ -571,7 +571,7 @@ async def agent_heartbeat(
             assignee_type = await conn.fetchval(
                 """
                 SELECT CASE 
-                    WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1 AND status = 'confirmed') 
+                    WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1) 
                     THEN 'admin'
                     ELSE 'agent'
                 END
@@ -705,7 +705,7 @@ async def get_assigned_chat_sessions(
                     assignee_type = await heartbeat_conn.fetchval(
                         """
                         SELECT CASE 
-                            WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1 AND status = 'confirmed') 
+                            WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1) 
                             THEN 'admin'
                             ELSE 'agent'
                         END
@@ -1021,8 +1021,8 @@ async def archive_chat_session(
             user_role = await conn.fetchval(
                 """
                 SELECT CASE
-                    WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1 AND status = 'confirmed') THEN 'admin'
-                    WHEN EXISTS (SELECT 1 FROM human_agents WHERE email = $1 AND status = 'confirmed') THEN 'human_agent'
+                    WHEN EXISTS (SELECT 1 FROM admins WHERE email = $1) THEN 'admin'
+                    WHEN EXISTS (SELECT 1 FROM human_agents WHERE email = $1) THEN 'human_agent'
                     ELSE 'user'
                 END
                 """,
@@ -1328,7 +1328,7 @@ async def transfer_chat_session(
             )
             
             if not is_agent and not is_admin:
-                raise HTTPException(status_code=403, detail="Only confirmed agents or admins can transfer chats")
+                raise HTTPException(status_code=403, detail="Only agents or admins can transfer chats")
                 
             # Check if target agent exists and is confirmed
             target_is_agent = await conn.fetchval(
@@ -1341,7 +1341,7 @@ async def transfer_chat_session(
             )
             
             if not target_is_agent and not target_is_admin:
-                raise HTTPException(status_code=400, detail="Target user is not a confirmed agent or admin")
+                raise HTTPException(status_code=400, detail="Target user is not an agent or admin")
                 
             # Perform the transfer
             await assign_chat_to_agent(session_id, target_agent_email, conn)

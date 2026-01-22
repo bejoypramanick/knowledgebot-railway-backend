@@ -41,48 +41,33 @@ COMMENT ON TABLE users IS 'Base user information for all system users';
 -- ROLE TABLES (Normalized - one table per role type)
 -- ============================================================================
 
--- Admins table
+-- Admins table (simplified - immediate activation, no confirmation)
 CREATE TABLE admins (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) NOT NULL UNIQUE,
-    status VARCHAR(50) NOT NULL DEFAULT 'pending',
-    confirmation_token VARCHAR(255) UNIQUE,
-    auto_generated_password VARCHAR(255),
     created_by_email VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
-    confirmed_at TIMESTAMP,
     removed_at TIMESTAMP,
-    CONSTRAINT valid_admin_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
-    CONSTRAINT valid_admin_status CHECK (status IN ('pending', 'confirmed', 'removed'))
+    CONSTRAINT valid_admin_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
 );
 
 CREATE INDEX idx_admins_email ON admins(email);
-CREATE INDEX idx_admins_status ON admins(status);
-CREATE INDEX idx_admins_token ON admins(confirmation_token);
 
-COMMENT ON TABLE admins IS 'Admin users with elevated privileges';
-COMMENT ON COLUMN admins.auto_generated_password IS 'Auto-generated password sent via email';
+COMMENT ON TABLE admins IS 'Admin users with immediate activation (no confirmation needed)';
 
--- Human agents table
+-- Human agents table (simplified - immediate activation, no confirmation)
 CREATE TABLE human_agents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) NOT NULL UNIQUE,
-    status VARCHAR(50) NOT NULL DEFAULT 'pending',
-    confirmation_token VARCHAR(255) UNIQUE,
     widget_link VARCHAR(500),
-    auto_generated_password VARCHAR(255),
     created_at TIMESTAMP DEFAULT NOW(),
-    confirmed_at TIMESTAMP,
     removed_at TIMESTAMP,
-    CONSTRAINT valid_agent_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'),
-    CONSTRAINT valid_agent_status CHECK (status IN ('pending', 'confirmed', 'removed'))
+    CONSTRAINT valid_agent_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
 );
 
 CREATE INDEX idx_human_agents_email ON human_agents(email);
-CREATE INDEX idx_human_agents_status ON human_agents(status);
-CREATE INDEX idx_human_agents_token ON human_agents(confirmation_token);
 
-COMMENT ON TABLE human_agents IS 'Human agents who handle customer support';
+COMMENT ON TABLE human_agents IS 'Human agents with immediate activation (no confirmation needed)';
 
 -- User unique IDs (for display purposes)
 CREATE TABLE user_unique_ids (

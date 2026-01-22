@@ -11,39 +11,27 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ROLE TABLES (Normalized - one table per role type)
 -- ============================================================================
 
--- Admins table
+-- Admins table (simplified - immediate activation, no confirmation)
 CREATE TABLE admins (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) NOT NULL UNIQUE,
-    status VARCHAR(50) NOT NULL DEFAULT 'pending',
-    confirmation_token VARCHAR(255) UNIQUE,
-    auto_generated_password VARCHAR(255),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     created_by_email VARCHAR(255),
     CONSTRAINT valid_admin_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
 );
 
 CREATE INDEX idx_admins_email ON admins(email);
-CREATE INDEX idx_admins_status ON admins(status);
-CREATE INDEX idx_admins_email_status ON admins(email, status);
 
--- Human Agents table
+-- Human Agents table (simplified - immediate activation, no confirmation)
 CREATE TABLE human_agents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email VARCHAR(255) NOT NULL UNIQUE,
-    status VARCHAR(50) NOT NULL DEFAULT 'pending',
-    confirmation_token VARCHAR(255) UNIQUE,
-    auto_generated_password VARCHAR(255),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     created_by_email VARCHAR(255),
     CONSTRAINT valid_agent_email CHECK (email ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
 );
 
 CREATE INDEX idx_human_agents_email ON human_agents(email);
-CREATE INDEX idx_human_agents_status ON human_agents(status);
-CREATE INDEX idx_human_agents_email_status ON human_agents(email, status);
 
 -- User Unique IDs table (for generating unique IDs)
 CREATE TABLE user_unique_ids (

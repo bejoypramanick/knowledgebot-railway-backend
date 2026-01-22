@@ -50,7 +50,7 @@ async def add_admins(request: AdminRequest, current_user: dict = Depends(get_cur
         # Check if current user is an admin
         async with railway_db.acquire() as conn:
             is_admin = await conn.fetchval(
-                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT COUNT(*) FROM admins WHERE email = $1",
                 user_email
             )
             
@@ -117,53 +117,7 @@ async def add_admins(request: AdminRequest, current_user: dict = Depends(get_cur
         raise HTTPException(status_code=500, detail=f"Error adding admins: {str(e)}")
 
 
-@router.post("/admins/confirm", response_model=dict)
-async def confirm_admin(request: ConfirmAdminRequest):
-    """Confirm admin account via token."""
-    try:
-        # Use the same database connection pattern as other endpoints
-        from services.configuration_service.main import get_db_connection
-        async with get_db_connection() as conn:
-            # Find admin by token
-            admin = await conn.fetchrow(
-                """
-                SELECT id, email, status FROM admins 
-                WHERE confirmation_token = $1 AND status = 'pending'
-                """,
-                request.token
-            )
-            
-            if not admin:
-                raise HTTPException(status_code=404, detail="Invalid or expired confirmation token")
-            
-            # Update admin status
-            await conn.execute(
-                """
-                UPDATE admins 
-                SET status = 'confirmed',
-                    confirmed_at = NOW()
-                WHERE id = $1
-                """,
-                admin['id']
-            )
-            
-            # Note: Admin emails are now managed through the admins table only
-            # No need to update chatbot_configuration - configuration endpoint reads from admins table
-            
-            logger.info(f"Admin {admin['email']} confirmed successfully")
-            
-            return {
-                "success": True,
-                "message": "Admin confirmed successfully",
-                "admin": {
-                    "email": admin['email']
-                }
-            }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error confirming admin: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error confirming admin: {str(e)}")
+# Admin confirmation endpoint removed - admins are now activated immediately
 
 
 @router.get("/admins", response_model=dict)
@@ -180,7 +134,7 @@ async def list_admins(current_user: dict = Depends(get_current_user)):
         
         async with railway_db.acquire() as conn:
             is_admin = await conn.fetchval(
-                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT COUNT(*) FROM admins WHERE email = $1",
                 user_email
             )
             
@@ -190,7 +144,7 @@ async def list_admins(current_user: dict = Depends(get_current_user)):
             # Get all admins
             admins = await conn.fetch(
                 """
-                SELECT email, status, created_at, confirmed_at, created_by_email
+                SELECT email, created_at, created_by_email
                 FROM admins
                 ORDER BY created_at DESC
                 """
@@ -201,9 +155,7 @@ async def list_admins(current_user: dict = Depends(get_current_user)):
                 "admins": [
                     {
                         "email": admin['email'],
-                        "status": admin['status'],
                         "created_at": admin['created_at'].isoformat() if admin['created_at'] else None,
-                        "confirmed_at": admin['confirmed_at'].isoformat() if admin['confirmed_at'] else None,
                         "created_by": admin['created_by_email']
                     }
                     for admin in admins
@@ -230,7 +182,7 @@ async def remove_admin(email: str, current_user: dict = Depends(get_current_user
         
         async with railway_db.acquire() as conn:
             is_admin = await conn.fetchval(
-                "SELECT COUNT(*) FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT COUNT(*) FROM admins WHERE email = $1",
                 user_email
             )
             
@@ -283,9 +235,9 @@ async def get_user_role(email: str):
     
     try:
         async with railway_db.acquire() as conn:
-            # Check if user is an admin
+            # Check if user is an admin (status removed)
             admin = await conn.fetchrow(
-                "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
+                "SELECT email FROM admins WHERE email = $1",
                 email
             )
             if admin:

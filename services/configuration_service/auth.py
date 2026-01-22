@@ -90,7 +90,7 @@ async def verify_token(request: TokenVerificationRequest):
                 async with railway_db.acquire() as conn:
                     # Check if user is an admin
                     admin = await conn.fetchrow(
-                        "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
+                        "SELECT email FROM admins WHERE email = $1",
                         email
                     )
                     logger.info(f"👤 Admin check result for {email}: {admin}")
@@ -180,7 +180,7 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
                 async with railway_db.acquire() as conn:
                     # Check if user is an admin
                     admin = await conn.fetchrow(
-                        "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
+                        "SELECT email FROM admins WHERE email = $1",
                         email
                     )
                     if admin:
@@ -277,7 +277,7 @@ async def get_current_user_info(user: Dict[str, Any] = Depends(get_current_user)
                 async with railway_db.acquire() as conn:
                     # Check if user is an admin
                     admin = await conn.fetchrow(
-                        "SELECT email FROM admins WHERE email = $1 AND status = 'confirmed'",
+                        "SELECT email FROM admins WHERE email = $1",
                         email
                     )
                     if admin:

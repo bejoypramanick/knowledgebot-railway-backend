@@ -141,77 +141,7 @@ async def add_human_agents(request: HumanAgentsRequest):
         raise HTTPException(status_code=500, detail=f"Error adding agents: {str(e)}")
 
 
-@router.post("/human-agents/confirm", response_model=dict)
-async def confirm_human_agent(request: ConfirmAgentRequest):
-    """Confirm human agent account and send widget link with password."""
-    try:
-        # Use the same database connection pattern as other endpoints
-        from services.configuration_service.main import get_db_connection
-        async with get_db_connection() as conn:
-            # Find agent by token
-            agent = await conn.fetchrow(
-                """
-                SELECT id, email, status FROM human_agents 
-                WHERE confirmation_token = $1 AND status = 'pending'
-                """,
-                request.token
-            )
-            
-            if not agent:
-                raise HTTPException(status_code=404, detail="Invalid or expired confirmation token")
-            
-            # Create email service and generate widget link
-            email_service = create_email_service(conn)
-            agent_id = str(agent['id'])
-            widget_link = generate_widget_link(agent_id, email_service)
-            
-            # Get existing password (already generated when agent was added)
-            agent_with_password = await conn.fetchrow(
-                "SELECT auto_generated_password FROM human_agents WHERE id = $1",
-                agent['id']
-            )
-            password = agent_with_password.get('auto_generated_password') if agent_with_password else None
-            
-            # If no password exists (legacy case), generate one
-            if not password:
-                password = generate_password()
-                await conn.execute(
-                    "UPDATE human_agents SET auto_generated_password = $1 WHERE id = $2",
-                    password, agent['id']
-                )
-            
-            # Update agent status
-            await conn.execute(
-                """
-                UPDATE human_agents 
-                SET status = 'confirmed',
-                    widget_link = $1,
-                    confirmed_at = NOW()
-                WHERE id = $2
-                """,
-                widget_link, agent['id']
-            )
-            
-            # Send confirmation success email
-            if await email_service.send_confirmation_success_email(agent['email'], widget_link, password):
-                logger.info(f"Confirmation success email sent to {agent['email']}")
-            else:
-                logger.warning(f"Failed to send confirmation success email to {agent['email']}")
-            
-            return {
-                "success": True,
-                "message": "Agent confirmed successfully",
-                "agent": {
-                    "email": agent['email'],
-                    "widget_link": widget_link,
-                    "password": password
-                }
-            }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error confirming agent: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error confirming agent: {str(e)}")
+# Human agent confirmation endpoint removed - agents are now activated immediately
 
 
 @router.delete("/human-agents/{email}", response_model=dict)
