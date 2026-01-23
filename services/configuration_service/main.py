@@ -1,7 +1,7 @@
 """
 Configuration Service - Handles chatbot and widget configuration management
 """
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, validator, Field
 from typing import List, Optional, Union
