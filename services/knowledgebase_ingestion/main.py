@@ -20,7 +20,7 @@ from contextlib import asynccontextmanager
 # VALIDATION CONSTANTS
 # ============================================================================
 MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024  # 5MB
-ALLOWED_FILE_EXTENSIONS = {
+ALLOWED_FILE_EXTENSIONS = [
     # Documents
     'pdf', 'docx', 'txt',
     # Spreadsheets
@@ -29,8 +29,8 @@ ALLOWED_FILE_EXTENSIONS = {
     'pptx',
     # Code
     'py', 'js', 'html', 'json', 'md',
-}
-ALLOWED_MIME_TYPES = {
+]
+ALLOWED_MIME_TYPES = [
     # Documents
     'application/pdf',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  # .docx
@@ -47,7 +47,7 @@ ALLOWED_MIME_TYPES = {
     'text/html',  # .html
     'application/json',  # .json
     'text/markdown',  # .md
-}
+]
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))

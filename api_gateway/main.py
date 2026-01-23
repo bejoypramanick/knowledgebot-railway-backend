@@ -821,8 +821,40 @@ async def knowledgebase_upload_constraints_endpoint(request: Request):
                 content=resp.json() if resp.headers.get('content-type', '').startswith('application/json') else resp.text
             )
     except Exception as e:
-        logger.error(f"Error routing upload constraints request: {e}")
-        raise HTTPException(status_code=500, detail=f"Knowledgebase service error: {str(e)}")
+        logger.warning(f"Knowledgebase service unavailable for constraints, returning fallback: {e}")
+        # Return fallback constraints when service is unavailable
+        fallback_constraints = {
+            "max_file_size_bytes": 5242880,  # 5MB
+            "max_file_size_mb": 5,
+            "max_file_size_display": "5 MB",
+            "allowed_extensions": ["pdf", "docx", "txt", "xlsx", "csv", "pptx", "py", "js", "html", "json", "md"],
+            "allowed_mime_types": [
+                "application/pdf",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "text/plain",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "text/csv",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "text/x-python",
+                "application/javascript",
+                "text/html",
+                "application/json",
+                "text/markdown"
+            ],
+            "supported_formats": {
+                "documents": ["PDF", "DOCX", "TXT"],
+                "spreadsheets": ["XLSX", "CSV"],
+                "presentations": ["PPTX"],
+                "code": ["PY", "JS", "HTML", "JSON", "MD"]
+            },
+            "supported_extensions": {
+                "documents": [".pdf", ".docx", ".txt"],
+                "spreadsheets": [".xlsx", ".csv"],
+                "presentations": [".pptx"],
+                "code": [".py", ".js", ".html", ".json", ".md"]
+            }
+        }
+        return JSONResponse(status_code=200, content=fallback_constraints)
 
 
 @app.get("/api/v1/knowledgebase/files")
