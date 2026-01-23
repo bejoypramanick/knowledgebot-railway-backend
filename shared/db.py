@@ -54,6 +54,15 @@ class DatabasePool:
 
             await self._create_pool()
 
+    @retry(
+        stop=stop_after_attempt(15),  # Try up to 15 times
+        wait=wait_exponential(multiplier=1, min=1, max=10),  # Exponential backoff: 1s, 2s, 4s, 8s, 10s...
+        retry=lambda retry_state: retry_state.outcome.failed and isinstance(retry_state.outcome.exception, (
+            ConnectionRefusedError, OSError, asyncpg.exceptions.ConnectionDoesNotExistError,
+            asyncpg.exceptions.InterfaceError
+        )),
+        before_sleep=lambda retry_state: logger.info(f"⏳ Pool creation failed (attempt {retry_state.attempt_number}/15), retrying in {retry_state.next_action.sleep} seconds...")
+    )
     async def _create_pool(self) -> None:
         """Create a new connection pool."""
         try:
@@ -226,6 +235,15 @@ class Database:
         self.connection_url = connection_url
         self._pool: Optional[asyncpg.Pool] = None
 
+    @retry(
+        stop=stop_after_attempt(15),  # Try up to 15 times
+        wait=wait_exponential(multiplier=1, min=1, max=10),  # Exponential backoff: 1s, 2s, 4s, 8s, 10s...
+        retry=lambda retry_state: retry_state.outcome.failed and isinstance(retry_state.outcome.exception, (
+            ConnectionRefusedError, OSError, asyncpg.exceptions.ConnectionDoesNotExistError,
+            asyncpg.exceptions.InterfaceError
+        )),
+        before_sleep=lambda retry_state: logger.info(f"⏳ Database pool creation failed (attempt {retry_state.attempt_number}/15), retrying in {retry_state.next_action.sleep} seconds...")
+    )
     async def connect(self, min_size: int = 5, max_size: int = 20, server_timeout: int = 60):
         """Create connection pool with enhanced error handling and Railway optimization."""
         try:
@@ -351,8 +369,17 @@ railway_db: Optional[Database] = None
 neon_db: Optional[Database] = None
 
 
+@retry(
+    stop=stop_after_attempt(15),  # Try up to 15 times
+    wait=wait_exponential(multiplier=1, min=1, max=10),  # Exponential backoff: 1s, 2s, 4s, 8s, 10s...
+    retry=lambda retry_state: retry_state.outcome.failed and isinstance(retry_state.outcome.exception, (
+        ConnectionRefusedError, OSError, asyncpg.exceptions.ConnectionDoesNotExistError,
+        asyncpg.exceptions.InterfaceError
+    )),
+    before_sleep=lambda retry_state: logger.info(f"⏳ Database connection failed (attempt {retry_state.attempt_number}/15), retrying in {retry_state.next_action.sleep} seconds...")
+)
 async def init_railway_db(connection_url: str):
-    """Initialize Railway PostgreSQL database connection with serverless optimization."""
+    """Initialize Railway PostgreSQL database connection with serverless optimization and retry logic."""
     global railway_db
 
     logger.info(f"🔍 init_railway_db called with URL available: {connection_url is not None}")
