@@ -671,6 +671,20 @@ async def delete_session_endpoint(session_id: str, request: Request):
         raise HTTPException(status_code=500, detail=f"Chat service error: {str(e)}")
 
 
+@app.options("/api/v1/knowledgebase/upload")
+async def knowledgebase_upload_options():
+    """Handle CORS preflight requests for file uploads."""
+    return JSONResponse(
+        status_code=200,
+        content={"message": "CORS preflight OK"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-User-Email",
+            "Access-Control-Allow-Credentials": "true"
+        }
+    )
+
 @app.post("/api/v1/knowledgebase/upload")
 async def knowledgebase_upload_endpoint(
     request: Request,
