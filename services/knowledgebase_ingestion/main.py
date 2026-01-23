@@ -485,39 +485,47 @@ def calculate_sha256(file_path: str) -> str:
 
 
 async def get_or_create_user(email: str) -> str:
-    """Get or create a user in the database and return user ID."""
-    if not db.railway_db:
+    """Get user identifier for tracking purposes.
+    
+    Since the system uses admins and human_agents tables instead of a users table,
+    we return the email as the user identifier for tracking/logging purposes.
+    Anyone can upload files regardless of their role in the system.
+    """
+    if not email:
+        logger.warning("No email provided for user identification")
         return None
-
+    
     try:
-        # Try to get existing user
-        user = await db.railway_db.fetchrow(
-            "SELECT id FROM users WHERE email = $1",
+        # Check if user exists in admins table
+        admin_user = await db.railway_db.fetchrow(
+            "SELECT email FROM admins WHERE email = $1",
             email
         )
-
-        if user:
-            return str(user['id'])
-
-        # Create new user
-        user_id = await db.railway_db.fetchval(
-            """
-            INSERT INTO users (email, name, is_active)
-            VALUES ($1, $2, $3)
-            RETURNING id
-            """,
-            email,
-            email.split('@')[0],  # Use email prefix as name
-            True
+        
+        if admin_user:
+            logger.debug(f"User {email} found in admins table")
+            return email  # Return email as user identifier
+        
+        # Check if user exists in human_agents table
+        agent_user = await db.railway_db.fetchrow(
+            "SELECT email FROM human_agents WHERE email = $1",
+            email
         )
-
+        
+        if agent_user:
+            logger.debug(f"User {email} found in human_agents table")
+            return email  # Return email as user identifier
+        
+        # User not in either table - still allow them to upload files
+        # Just return their email as the identifier
+        logger.debug(f"User {email} not found in admins/human_agents tables, using email as identifier")
+        return email
+    
     except Exception as e:
-        logger.error(f"Error getting/creating user with email {email}: {e}")
-        # Try to insert system user if not exists or return default system user ID
-        if settings.default_user_email and email != settings.default_user_email:
-             logger.warning(f"Falling back to default user: {settings.default_user_email}")
-             return await get_or_create_user(settings.default_user_email)
-        return None
+        logger.error(f"Error checking user tables for email {email}: {e}")
+        # Even on database error, return email as fallback for tracking
+        logger.warning(f"Database error - using email {email} as fallback user identifier")
+        return email
 
 
 async def _record_api_usage(
