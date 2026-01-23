@@ -40,7 +40,7 @@ from asyncpg import exceptions as asyncpg_exceptions
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.db import init_railway_db, close_databases, railway_db
 from shared.utils import validate_environment, wait_for_railway_network, service_status
-
+from shared.auth_middleware import get_current_user
 load_dotenv()
 
 # Lock for database initialization to prevent race conditions
