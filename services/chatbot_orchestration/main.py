@@ -107,6 +107,9 @@ except Exception:
 from shared.utils import setup_global_exception_logging, register_fastapi_exception_handlers, dependency_unavailable_error, log_system_metrics, log_endpoint_request
 setup_global_exception_logging("chatbot_orchestration")
 
+# Initialize AI components (lazy initialization to avoid startup failures)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+
 # Log status of required environment variables
 if not GEMINI_API_KEY:
     logger.critical("🚨 GEMINI_API_KEY environment variable is missing!")
@@ -164,7 +167,6 @@ app.add_middleware(
 )
 
 # Initialize AI components (lazy initialization to avoid startup failures)
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
 
 # Global clients - initialized lazily
 genai_client = None
