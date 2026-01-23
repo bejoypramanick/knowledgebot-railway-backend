@@ -14,7 +14,6 @@ import asyncio
 import json
 from datetime import datetime
 from pathlib import Path
-
 # Initialize import success flag
 IMPORT_SUCCESS = False
 
@@ -59,7 +58,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-    print("✅ All imports successful for chatbot_orchestration service")
     
 except ImportError as e:
     print(f"❌ Import failed: {e}")
