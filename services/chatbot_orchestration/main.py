@@ -1168,7 +1168,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 
 
 # System prompt with intelligent routing instructions
-def get_system_prompt(file_context: Optional[List[SearchResult]] = None, custom_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> str:
+def get_system_prompt(file_context: Optional[List[SearchResult]] = None, custom_prompt: Optional[str] = None, response_policy: Optional[int] = None, rag_had_results: bool = True) -> str:
     """Generate dynamic system prompt with intelligent data source routing."""
     base_prompt = """You are an intelligent knowledge assistant chatbot with access to multiple data sources.
 
@@ -1196,10 +1196,9 @@ AVAILABLE DATA SOURCES AND WHEN TO USE THEM:
    - NEVER expose PII - only return business data and anonymized statistics
 
 4. **search_internet** (Tavily - Internet Search):
-   - Use ONLY when information is not available in other sources
-   - Use for current events, real-time information, recent news
-   - Use for general knowledge questions not in the knowledge base
-   - Use as a last resort after checking other sources
+   - Available ONLY when RAG is not enabled, or when RAG is enabled but found results
+   - DISABLED when RAG is enabled but returned no results
+   - Use for current events, real-time information, or general knowledge when RAG doesn't apply
 
 5. **request_human_agent_connection** (Human Agent Support):
    - Use when the user explicitly asks to speak with a human, real person, or agent
@@ -1211,10 +1210,19 @@ AVAILABLE DATA SOURCES AND WHEN TO USE THEM:
 ROUTING STRATEGY & PRIORITY:
 You MUST follow this strictly to find the best answer:
 1. **Gemini RAG (search_knowledge_base)**: ALWAYS try this first for any question about documents, files, or specific content.
-2. **Your Own Knowledge (Gemini)**: If RAG doesn't have it, use your internal training data.
-3. **Railway Database (query_railway_postgres)**: If the user asks about the system itself, file metadata, or metrics.
-4. **Neon DB (query_neon_db)**: If the user asks about business data, sales, inventory, or customers.
-5. **Internet (search_internet)**: Use ONLY if no other source has the answer AND the internet search tool is enabled.
+2. **Railway Database (query_railway_postgres)**: If the user asks about the system itself, file metadata, or metrics.
+3. **Neon DB (query_neon_db)**: If the user asks about business data, sales, inventory, or customers.
+4. **Internet Search (search_internet)**: Only available when RAG is not enabled OR when RAG found results.
+
+CRITICAL RAG POLICY:
+- If Gemini RAG (search_knowledge_base) returns no relevant information or fails to find an answer, you MUST NOT:
+  * Use your own internal knowledge/training data to answer the question
+  * Search the internet for information (internet search tool will be unavailable)
+  * Make assumptions or provide speculative answers
+- Instead, you MUST respond with: "I could not find an answer to this question in the knowledge base."
+- This applies to ALL questions that should be answered by RAG - if RAG cannot find the answer, admit that you don't know rather than using other sources.
+
+RAG SEARCH STATUS: {f"FOUND {len(file_context) if file_context else 0} RESULTS - INTERNET SEARCH AVAILABLE" if rag_had_results else "NO RESULTS FOUND - DO NOT USE INTERNAL KNOWLEDGE OR INTERNET SEARCH"}
 
 When answering:
 1. Intelligently select the appropriate tool(s) based on this priority.
@@ -1254,7 +1262,7 @@ def create_session_dependency(session_id: str) -> ChatSessionDeps:
     return ChatSessionDeps(session_id=session_id)
 
 # Initialize base agent with all tools
-def create_agent(file_context: Optional[List[SearchResult]] = None, custom_system_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> Optional[Agent]:
+def create_agent(file_context: Optional[List[SearchResult]] = None, custom_system_prompt: Optional[str] = None, response_policy: Optional[int] = None, rag_had_results: bool = True, rag_enabled: bool = False) -> Optional[Agent]:
     """Create a Pydantic AI agent with intelligent data source routing."""
 
     # Check if model is available
@@ -1276,8 +1284,8 @@ def create_agent(file_context: Optional[List[SearchResult]] = None, custom_syste
     if neon_db:
         tools.append(query_neon_db)
     
-    # Add internet search tool if available
-    if tavily_client:
+    # Add internet search tool if available, but NOT when RAG is enabled and returned no results
+    if tavily_client and not (rag_enabled and not rag_had_results):
         tools.append(search_internet)
 
     # Calculate temperature based on response policy (lower for strict, higher for flexible)
@@ -1295,7 +1303,7 @@ def create_agent(file_context: Optional[List[SearchResult]] = None, custom_syste
     # For now, we'll use the default model and adjust via system prompt
     agent = Agent(
         gemini_model,
-        system_prompt=get_system_prompt(file_context, custom_system_prompt, response_policy),
+        system_prompt=get_system_prompt(file_context, custom_system_prompt, response_policy, rag_had_results),
         tools=tools,
         deps_type=ChatSessionDeps,
     )
@@ -1333,10 +1341,13 @@ async def chat(request: ChatRequest):
         
         # Perform RAG search if enabled (pre-fetch context)
         file_context = []
+        rag_had_results = False
+        rag_enabled = request.use_rag
         if request.use_rag:
             logger.info(f"🔍 Starting RAG search for message: {request.message[:100]}...")
             file_context = await search_knowledge_base(request.message)
-            logger.info(f"📄 RAG search completed, found {len(file_context)} results")
+            rag_had_results = len(file_context) > 0 and any(result.content and result.content.strip() for result in file_context)
+            logger.info(f"📄 RAG search completed, found {len(file_context)} results, has meaningful content: {rag_had_results}")
         
         # Create or get session
         if session_id not in sessions:
@@ -1350,9 +1361,11 @@ async def chat(request: ChatRequest):
         # Create agent with context (dynamic prompt injection)
         # Pass system_prompt and response_policy if provided
         agent = create_agent(
-            file_context, 
+            file_context,
             custom_system_prompt=request.system_prompt,
-            response_policy=request.response_policy
+            response_policy=request.response_policy,
+            rag_had_results=rag_had_results,
+            rag_enabled=rag_enabled
         )
         
         # Create dependency instance for this run
