@@ -825,19 +825,12 @@ async def upload_document(
         existing_file = await check_duplicate_file(sha256_hash, original_filename)
         if existing_file:
             match_type = existing_file.get("match_type", "unknown")
-            
+
             if match_type == "hash":
-                # Exact duplicate - same content
-                if not replace_existing:
-                    logger.info(f"Duplicate file detected (same content hash): {existing_file['original_filename']}", extra=log_context)
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail={
-                            "message": f"A file with identical content already exists: '{existing_file['original_filename']}'",
-                            "existing_file": existing_file,
-                            "suggestion": "Set replace_existing=true to replace the existing file"
-                        }
-                    )
+                # Exact duplicate - same content, different filename
+                # Allow this since user renamed the file - they might want multiple copies with different names
+                logger.info(f"File with same content exists under different name '{existing_file['original_filename']}', allowing upload with new name '{original_filename}'", extra=log_context)
+                # Continue with upload - don't raise error
             else:
                 # Same filename, different content
                 if not replace_existing:
@@ -845,9 +838,9 @@ async def upload_document(
                     raise HTTPException(
                         status_code=status.HTTP_409_CONFLICT,
                         detail={
-                            "message": f"A file named '{existing_file['original_filename']}' already exists with different content. This will replace the old content with new.",
+                            "message": f"A file named '{existing_file['original_filename']}' already exists with different content.",
                             "existing_file": existing_file,
-                            "suggestion": "Set replace_existing=true to replace the existing file"
+                            "suggestion": "Set replace_existing=true to replace the existing file, or rename your file"
                         }
                     )
             
