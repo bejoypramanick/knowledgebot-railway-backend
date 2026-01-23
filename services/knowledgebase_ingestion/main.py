@@ -549,7 +549,7 @@ async def _record_api_usage(
             INSERT INTO api_usage (
                 api_provider, api_endpoint, http_method,
                 request_size_bytes, response_size_bytes, status_code,
-                user_id, duration_ms, metadata
+                user_email, duration_ms, metadata
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             """,
@@ -658,7 +658,7 @@ async def _record_metadata(user_id: str, original_filename: str, file_display_na
         db_record_id = await db.railway_db.fetchval(
             """
             INSERT INTO file_uploads (
-                user_id, original_filename, display_name, file_extension,
+                user_email, original_filename, display_name, file_extension,
                 gemini_file_name, gemini_file_uri,
                 mime_type, size_bytes, sha256_hash,
                 gemini_upload_status, gemini_state,
@@ -688,7 +688,7 @@ async def _record_metadata(user_id: str, original_filename: str, file_display_na
         # Log metric
         await db.railway_db.execute(
             """
-            INSERT INTO metrics (metric_type, metric_name, value, unit, user_id, file_upload_id, metadata)
+            INSERT INTO metrics (metric_type, metric_name, value, unit, user_email, file_upload_id, metadata)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             """,
             'file_upload', 'file_size_bytes', file_size, 'bytes', 
