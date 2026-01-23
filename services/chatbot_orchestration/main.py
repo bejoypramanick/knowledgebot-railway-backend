@@ -108,8 +108,13 @@ from shared.utils import setup_global_exception_logging, register_fastapi_except
 setup_global_exception_logging("chatbot_orchestration")
 
 # Log status of required environment variables
-if not settings.gemini_api_key:
-    logger.error("❌ GEMINI_API_KEY is not configured - chat features will be unavailable")
+if not GEMINI_API_KEY:
+    logger.critical("🚨 GEMINI_API_KEY environment variable is missing!")
+    logger.critical("   This service cannot start without GEMINI_API_KEY")
+    logger.critical("   Set GEMINI_API_KEY in Railway environment variables")
+    # Don't exit - let the service start but return 503 for chat requests
+else:
+    logger.info("✅ GEMINI_API_KEY is configured")
 
 # Lifespan context manager for startup and shutdown events
 @asynccontextmanager
