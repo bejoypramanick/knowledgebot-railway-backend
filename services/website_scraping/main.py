@@ -184,10 +184,10 @@ def validate_patterns(patterns: Optional[List[str]]) -> tuple[bool, str]:
     """Validate include/exclude patterns."""
     if not patterns:
         return True, ""
-    
+
     if len(patterns) > 50:
         return False, "Maximum 50 patterns allowed"
-    
+
     for pattern in patterns:
         if len(pattern) > 500:
             return False, f"Pattern too long (max 500 chars): {pattern[:50]}..."
@@ -196,8 +196,49 @@ def validate_patterns(patterns: Optional[List[str]]) -> tuple[bool, str]:
         for d in dangerous:
             if d in pattern:
                 return False, f"Pattern contains potentially dangerous regex: {pattern[:50]}..."
-    
+
     return True, ""
+
+
+def extract_links_from_result(result, base_url: str) -> List[str]:
+    """Extract internal links from crawl result for further crawling."""
+    links = []
+
+    try:
+        parsed_base = urlparse(base_url)
+        base_domain = parsed_base.netloc
+
+        if hasattr(result, 'links') and result.links:
+            if isinstance(result.links, dict):
+                # Crawl4AI 0.7.x format
+                if 'internal' in result.links:
+                    internal_links = result.links['internal']
+                    if isinstance(internal_links, list):
+                        for link in internal_links:
+                            href = link.get('href', link) if isinstance(link, dict) else link
+                            if isinstance(href, str) and href.startswith(('http://', 'https://')):
+                                try:
+                                    parsed_link = urlparse(href)
+                                    # Only include links from same domain
+                                    if parsed_link.netloc == base_domain:
+                                        links.append(href)
+                                except:
+                                    continue
+            elif isinstance(result.links, list):
+                # Alternative format
+                for link in result.links:
+                    if isinstance(link, str) and link.startswith(('http://', 'https://')):
+                        try:
+                            parsed_link = urlparse(link)
+                            if parsed_link.netloc == base_domain:
+                                links.append(link)
+                        except:
+                            continue
+
+    except Exception as e:
+        logger.warning(f"Error extracting links from result: {e}")
+
+    return links[:10]  # Limit to prevent explosion
 
 
 class ScrapeRequest(BaseModel):
@@ -395,66 +436,128 @@ async def scrape_website(request: ScrapeRequest):
         # Configure browser
         browser_config = BrowserConfig(verbose=False, headless=True)
 
-        # Configure crawl options using CrawlerRunConfig
-        run_config = CrawlerRunConfig()
+        # Configure crawl options for multi-page crawling
+        run_config = CrawlerRunConfig(
+            max_pages_per_run=request.max_pages or 10,
+            max_depth=request.max_depth or 2,
+            wait_for=request.wait_for,
+            js_code=request.js_code,
+            screenshot=request.screenshot,
+            # Configure URL filtering if patterns provided
+            exclude_external_links=True,  # Stay within same domain
+            scan_full_page=False,  # Faster crawling
+        )
 
-        # Note: crawl4ai 0.7.x API changes - single URL crawling via arun()
-        # For multi-page crawling, we'll use deep crawling or arun_many in future
-        # For MVP, we'll scrape single page
+        # Add URL patterns if provided
+        if request.include_patterns or request.exclude_patterns:
+            # Note: Crawl4AI 0.7.x URL filtering needs to be configured differently
+            logger.info(f"URL patterns specified - include: {request.include_patterns}, exclude: {request.exclude_patterns}")
 
         async with AsyncWebCrawler(config=browser_config) as crawler:
-            # Execute crawl
+            # Execute multi-page crawl
             if sse_queue:
                 await sse_queue.put({
-                    "type": "page_crawling",
-                    "message": f"Crawling page: {request.url}",
+                    "type": "scraping_started",
+                    "message": f"Starting multi-page crawl of {request.url}",
                     "url": request.url,
+                    "max_pages": request.max_pages,
+                    "max_depth": request.max_depth,
                     "timestamp": asyncio.get_event_loop().time()
                 })
 
-            result = await crawler.arun(url=request.url, config=run_config)
-            
-            if not result.success:
+            # Implement multi-page crawling
+            all_results = []
+            crawled_urls = []
+            pages_crawled = 0
+
+            # Start with the main URL
+            urls_to_process = [request.url]
+
+            while urls_to_process and pages_crawled < (request.max_pages or 10):
+                current_url = urls_to_process.pop(0)
+
+                try:
+                    if sse_queue:
+                        await sse_queue.put({
+                            "type": "page_crawling",
+                            "message": f"Crawling page {pages_crawled + 1}/{request.max_pages or 10}: {current_url}",
+                            "url": current_url,
+                            "page_number": pages_crawled + 1,
+                            "timestamp": asyncio.get_event_loop().time()
+                        })
+
+                    # Crawl individual page
+                    result = await crawler.arun(url=current_url, config=run_config)
+                    pages_crawled += 1
+
+                    if result.success:
+                        all_results.append((current_url, result))
+                        crawled_urls.append(current_url)
+
+                        # Extract links for further crawling (if we haven't reached limits)
+                        if pages_crawled < (request.max_pages or 10):
+                            new_links = extract_links_from_result(result, request.url)
+                            for link in new_links:
+                                if link not in crawled_urls and link not in urls_to_process:
+                                    urls_to_process.append(link)
+                                    # Limit queue size to prevent explosion
+                                    if len(urls_to_process) >= (request.max_pages or 10) - pages_crawled:
+                                        break
+                    else:
+                        logger.warning(f"Failed to crawl {current_url}: {getattr(result, 'error_message', 'Unknown error')}")
+
+                except Exception as e:
+                    logger.error(f"Error crawling {current_url}: {e}")
+
+            # Check if we got any successful results
+            if not all_results:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Scraping failed: {result.error_message if hasattr(result, 'error_message') else 'Unknown error'}"
+                    detail="Failed to crawl any pages from the website"
                 )
             
-            # Extract content - use markdown property (0.7.x API)
+            # Combine content from all crawled pages
             scraped_content = ""
-            if hasattr(result, 'markdown'):
-                # markdown is a MarkdownOutput object with raw_markdown and fit_markdown
-                if hasattr(result.markdown, 'raw_markdown'):
-                    scraped_content = result.markdown.raw_markdown
-                elif hasattr(result.markdown, 'fit_markdown'):
-                    scraped_content = result.markdown.fit_markdown
-                else:
-                    scraped_content = str(result.markdown)
-            
-            if not scraped_content and hasattr(result, 'html'):
-                scraped_content = result.html
-            if not scraped_content and hasattr(result, 'cleaned_html'):
-                scraped_content = result.cleaned_html
-            
+            scraped_urls = []
+
+            for page_url, page_result in all_results:
+                page_content = ""
+
+                # Extract content from this page
+                if hasattr(page_result, 'markdown'):
+                    if hasattr(page_result.markdown, 'raw_markdown'):
+                        page_content = page_result.markdown.raw_markdown
+                    elif hasattr(page_result.markdown, 'fit_markdown'):
+                        page_content = page_result.markdown.fit_markdown
+                    else:
+                        page_content = str(page_result.markdown)
+
+                if not page_content and hasattr(page_result, 'html'):
+                    page_content = page_result.html
+                if not page_content and hasattr(page_result, 'cleaned_html'):
+                    page_content = page_result.cleaned_html
+
+                if page_content:
+                    # Add page header and content
+                    scraped_content += f"\n\n## Page: {page_url}\n\n{page_content}"
+                    scraped_urls.append(page_url)
+
+                    if sse_queue:
+                        await sse_queue.put({
+                            "type": "page_completed",
+                            "message": f"Extracted content from {page_url} ({len(page_content)} chars)",
+                            "url": page_url,
+                            "content_length": len(page_content),
+                            "timestamp": asyncio.get_event_loop().time()
+                        })
+
             if not scraped_content:
                 raise HTTPException(
                     status_code=500,
-                    detail="No content extracted from website"
+                    detail="No content extracted from any crawled pages"
                 )
-            
-            # Get scraped URLs
-            scraped_urls = [request.url]
-            if hasattr(result, 'links') and result.links:
-                # links is a dict with 'internal' and 'external' keys in 0.7.x
-                if isinstance(result.links, dict):
-                    if 'internal' in result.links:
-                        internal_links = result.links['internal']
-                        if isinstance(internal_links, list):
-                            # Extract href from link dicts
-                            urls = [link.get('href', link) if isinstance(link, dict) else link for link in internal_links[:request.max_pages or 10]]
-                            scraped_urls.extend(urls)
-                elif isinstance(result.links, list):
-                    scraped_urls.extend(result.links[:request.max_pages or 10])
+
+            logger.info(f"Successfully crawled {len(scraped_urls)} pages, total content length: {len(scraped_content)}")
             
             # Ensure Gemini client is available before attempting upload
             if not genai_client:

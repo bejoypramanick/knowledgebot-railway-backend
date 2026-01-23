@@ -453,7 +453,6 @@ class ChatbotConfigRequest(BaseModel):
     admin_emails: Optional[List[Union[ValidatedEmail, AdminAccount]]] = Field(None, max_items=10)
     human_agents: Optional[List[ValidatedEmail]] = Field(None, max_items=20)
     hil_enabled: Optional[bool] = None
-    hil_disabled_message: Optional[str] = Field(None, max_length=500)
     notifications: Optional[NotificationsUpdate] = None
     security: Optional[SecurityUpdate] = None
     response_policy: Optional[int] = Field(None, ge=0, le=100)
@@ -492,11 +491,6 @@ class ChatbotConfigRequest(BaseModel):
 
         return v
 
-    @validator('hil_disabled_message')
-    def validate_hil_message(cls, v):
-        if v and len(v.strip()) > 500:
-            raise ValueError('HIL disabled message must be less than 500 characters')
-        return v.strip() if v else v
 
     class Config:
         # Enable validation of assignment
@@ -528,11 +522,11 @@ class WidgetConfigRequest(BaseModel):
     auto_show_duration: Optional[int] = Field(None, ge=0, le=30)
     suggested_messages: Optional[List[str]] = Field(None, max_items=5)
     keep_showing_suggested: Optional[bool] = None
-    theme: Optional[str] = Field(None, regex=r'^(light|dark)$')
-    primary_color: Optional[str] = Field(None, regex=r'^#[0-9A-Fa-f]{6}$')
+    theme: Optional[str] = Field(None, pattern=r'^(light|dark)$')
+    primary_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
     use_primary_for_header: Optional[bool] = None
-    chat_bubble_color: Optional[str] = Field(None, regex=r'^#[0-9A-Fa-f]{6}$')
-    align_bubble: Optional[str] = Field(None, regex=r'^(left|right)$')
+    chat_bubble_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
+    align_bubble: Optional[str] = Field(None, pattern=r'^(left|right)$')
     display_chatbot: Optional[bool] = None
     profile_picture_url: Optional[str] = None
     chat_icon_url: Optional[str] = None
@@ -788,7 +782,7 @@ async def get_chatbot_config():
             # Get configuration metadata
             metadata = await conn.fetchrow(
                 """
-                SELECT default_user_role, hil_enabled, response_policy, hil_disabled_message
+                SELECT default_user_role, hil_enabled, response_policy
                 FROM configuration_metadata
                 WHERE id = 1
                 """
@@ -906,7 +900,6 @@ async def get_chatbot_config():
                 "admin_password": "**********",
                 "human_agents": human_agents_list,
                 "hil_enabled": metadata['hil_enabled'] if metadata else True,
-                "hil_disabled_message": metadata['hil_disabled_message'] if metadata else "Human assistance is currently offline.",
                 "notifications": notifications,
                 "security": security,
                 "response_policy": metadata['response_policy'] if metadata else 30,
@@ -1039,10 +1032,6 @@ async def save_chatbot_config(
                     values.append(config.response_policy)
                     param_index += 1
 
-                if config.hil_disabled_message is not None:
-                    updates.append(f"hil_disabled_message = ${param_index}")
-                    values.append(config.hil_disabled_message)
-                    param_index += 1
 
                 if updates:
                     query = f"""

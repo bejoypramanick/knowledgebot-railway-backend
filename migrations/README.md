@@ -11,40 +11,43 @@ Migrations are named with the format: `YYYYMMDD_description.sql`
 
 ## How to Run Migrations
 
-### Option 1: Using Railway CLI (Recommended for Production)
+### Manual Execution (Recommended)
 
-1. Install Railway CLI if not already installed:
-   ```bash
-   npm install -g @railway/cli
-   ```
+Run migrations manually using your preferred PostgreSQL client:
 
-2. Link to your Railway project:
-   ```bash
-   railway link
-   ```
-
-3. Connect to your database:
-   ```bash
-   railway connect postgres
-   ```
-
-4. Run the migration file:
-   ```bash
-   psql -f migrations/20250119_add_detailed_token_fields.sql
-   ```
-
-### Option 2: Using psql directly
-
-If you have direct database access:
-
+#### Option 1: Railway CLI
 ```bash
-psql -h your-db-host -U your-username -d your-database -f migrations/20250119_add_detailed_token_fields.sql
+# Connect to your Railway database
+railway connect postgres
+
+# Then run each migration file manually:
+psql -f migrations/20250119_add_detailed_token_fields.sql
+psql -f migrations/20250122_remove_unused_columns.sql
+psql -f migrations/fix_chat_sessions_archive_status.sql
+# ... etc
 ```
 
-### Option 3: Using any PostgreSQL client
+#### Option 2: Direct psql connection
+```bash
+psql -h your-db-host -U your-username -d your-database -f migrations/filename.sql
+```
 
+#### Option 3: Any PostgreSQL client
 1. Connect to your Railway PostgreSQL database
-2. Execute the contents of the migration file
+2. Execute the contents of each migration file manually
+3. Run migrations in chronological order (by filename date)
+
+### Important: Run Order
+Always run migrations in chronological order by their date prefix:
+1. `20250119_add_detailed_token_fields.sql`
+2. `20250122_remove_unused_columns.sql`
+3. `20250122_update_pending_to_confirmed.sql`
+4. `add_configuration_audit_log.sql`
+5. `add_display_chatbot_toggle.sql`
+6. `add_hil_disabled_message_column.sql`
+7. `add_token_usage_log_migration.sql`
+8. `migrate_assistant_to_bot_role.sql`
+9. `fix_chat_sessions_archive_status.sql` (run this last)
 
 ## Migration Files
 

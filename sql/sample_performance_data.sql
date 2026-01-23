@@ -2,42 +2,16 @@
 -- This script creates sample chat sessions and messages to populate performance metrics
 
 -- Insert sample chat sessions from the last 30 days
-INSERT INTO chat_sessions (id, session_id, user_id, customer_name, customer_email, status, sentiment, created_at, last_activity_at, is_active)
+INSERT INTO chat_sessions (id, session_id, user_id, sentiment, created_at, last_activity_at, is_active, archive_status)
 SELECT
     gen_random_uuid(),
     gen_random_uuid(),
     NULL, -- No user association for anonymous chats
-    CASE (random() * 10)::int
-        WHEN 0 THEN 'John Doe'
-        WHEN 1 THEN 'Jane Smith'
-        WHEN 2 THEN 'Bob Johnson'
-        WHEN 3 THEN 'Alice Brown'
-        WHEN 4 THEN 'Charlie Wilson'
-        WHEN 5 THEN 'Diana Davis'
-        WHEN 6 THEN 'Edward Miller'
-        WHEN 7 THEN 'Fiona Garcia'
-        WHEN 8 THEN 'George Martinez'
-        WHEN 9 THEN 'Helen Lopez'
-        ELSE 'Anonymous User'
-    END,
-    CASE (random() * 10)::int
-        WHEN 0 THEN 'john@example.com'
-        WHEN 1 THEN 'jane@example.com'
-        WHEN 2 THEN 'bob@example.com'
-        WHEN 3 THEN 'alice@example.com'
-        WHEN 4 THEN 'charlie@example.com'
-        WHEN 5 THEN 'diana@example.com'
-        WHEN 6 THEN 'edward@example.com'
-        WHEN 7 THEN 'fiona@example.com'
-        WHEN 8 THEN 'george@example.com'
-        WHEN 9 THEN 'helen@example.com'
-        ELSE 'anonymous@example.com'
-    END,
     CASE (random() * 3)::int
         WHEN 0 THEN 'active'
         WHEN 1 THEN 'closed'
         WHEN 2 THEN 'archived'
-        ELSE 'completed'
+        ELSE 'active'
     END,
     CASE (random() * 3)::int
         WHEN 0 THEN 'positive'

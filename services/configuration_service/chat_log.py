@@ -1558,7 +1558,7 @@ async def end_customer_session(
             await conn.execute(
                 """
                 UPDATE chat_sessions
-                SET status = 'closed', updated_at = CURRENT_TIMESTAMP
+                SET archive_status = 'closed', updated_at = CURRENT_TIMESTAMP
                 WHERE id = $1
                 """,
                 session_db_id
