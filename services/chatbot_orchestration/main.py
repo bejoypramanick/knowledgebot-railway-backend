@@ -1,5 +1,12 @@
 import os
 import sys
+import logging
+import time
+from typing import Optional, Dict, Any, List
+from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+import httpx
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -28,6 +35,30 @@ try:
     
     # Mark imports as successful
     IMPORT_SUCCESS = True
+    print("✅ All imports successful for chatbot_orchestration service")
+    
+except ImportError as e:
+    print(f"❌ Import failed: {e}")
+    IMPORT_SUCCESS = False
+except Exception as e:
+    print(f"❌ Unexpected error during imports: {e}")
+    IMPORT_SUCCESS = False
+
+# Create FastAPI app instance (must be available for decorators)
+app = FastAPI(
+    title="Chatbot Orchestration Service",
+    description="Orchestrates chatbot conversations with RAG and AI agents",
+    version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
     print("✅ All imports successful for chatbot_orchestration service")
     
 except ImportError as e:
@@ -142,25 +173,13 @@ if IMPORT_SUCCESS:
         logger.info("✅ Chatbot orchestration service shutdown complete")
 
     # Update the app with full configuration
-    app = FastAPI(
-        title="Chatbot Orchestration Service",
-        version="1.0.0",
-        lifespan=lifespan
-    )
+    # Update the existing app with full configuration
+    app.title = "Chatbot Orchestration Service"
+    app.version = "1.0.0"
+    app.lifespan = lifespan
 
     # Register FastAPI-level exception handlers to ensure stack traces are logged
     register_fastapi_exception_handlers(app, "chatbot_orchestration")
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-
-    # Initialize AI components (lazy initialization to avoid startup failures)
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
 
     # Global clients - initialized lazily
     genai_client = None
