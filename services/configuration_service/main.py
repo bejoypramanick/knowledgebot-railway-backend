@@ -1,12 +1,13 @@
 """
 Configuration Service - Handles chatbot and widget configuration management
 """
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, validator, Field
 from typing import List, Optional, Union
 import os
 import logging
+import tempfile
 import sys
 import re
 from datetime import datetime
@@ -41,10 +42,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.db import init_railway_db, close_databases, railway_db
 from shared.utils import validate_environment, wait_for_railway_network, service_status
 from shared.auth_middleware import get_current_user
+from shared.r2_storage import R2Storage
 load_dotenv()
 
 # Lock for database initialization to prevent race conditions
 _db_init_lock = asyncio.Lock()
+
+# R2 Storage instance
+r2_storage: Optional[R2Storage] = None
 
 async def init_database_schema(database_url: str):
     """Initialize database schema if tables don't exist"""
@@ -255,6 +260,28 @@ async def lifespan(app: FastAPI):
             app.state.database_url = None
             service_status.set_status("error")
             raise ValueError("Database URL not configured")
+
+        # Initialize R2 Storage
+        global r2_storage
+        r2_url = os.getenv("R2_CONNECTION_URL")
+        if not r2_url:
+            # Construct from individual vars if available
+            r2_key = os.getenv("CLOUDFLARE_R2_ACCESS_KEY_ID")
+            r2_secret = os.getenv("CLOUDFLARE_R2_SECRET_ACCESS_KEY")
+            r2_account = os.getenv("CLOUDFLARE_R2_ACCOUNT_ID")
+            r2_bucket = os.getenv("CLOUDFLARE_R2_BUCKET_NAME")
+            r2_public = os.getenv("CLOUDFLARE_R2_PUBLIC_URL")
+            if all([r2_key, r2_secret, r2_account, r2_bucket]):
+                r2_url = f"r2://{r2_key}:{r2_secret}@{r2_account}/{r2_bucket}"
+                if r2_public:
+                    r2_url += f"?public_url={r2_public}"
+        
+        if r2_url:
+            try:
+                r2_storage = R2Storage(r2_url)
+                logger.info("✅ R2 storage initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize R2 storage: {e}")
 
         # Initialize Firebase Auth and Firestore
         try:
@@ -530,14 +557,18 @@ class WidgetConfigRequest(BaseModel):
     display_chatbot: Optional[bool] = None
     profile_picture_url: Optional[str] = None
     chat_icon_url: Optional[str] = None
+    header_icon_url: Optional[str] = None
     # NEW FIELDS - Add zoom and position fields with proper validation
     profile_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
     chat_icon_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
+    header_icon_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
     profile_position: Optional[PositionData] = None
     chat_icon_position: Optional[PositionData] = None
+    header_icon_position: Optional[PositionData] = None
     # NEW FIELDS - Add filename fields for displaying original filenames
     profile_picture_filename: Optional[str] = Field(None, max_length=255)
     chat_icon_filename: Optional[str] = Field(None, max_length=255)
+    header_icon_filename: Optional[str] = Field(None, max_length=255)
 
     @validator('display_name')
     def validate_display_name(cls, v):
@@ -576,7 +607,7 @@ class WidgetConfigRequest(BaseModel):
 
         return v
 
-    @validator('profile_picture_url', 'chat_icon_url')
+    @validator('profile_picture_url', 'chat_icon_url', 'header_icon_url')
     def validate_image_url(cls, v):
         if v:
             # Validate URL format
@@ -595,7 +626,7 @@ class WidgetConfigRequest(BaseModel):
 
         return v
 
-    @validator('profile_picture_filename', 'chat_icon_filename')
+    @validator('profile_picture_filename', 'chat_icon_filename', 'header_icon_filename')
     def validate_filename(cls, v):
         if v:
             # Basic filename validation
@@ -1274,6 +1305,66 @@ async def save_chatbot_config(
         raise HTTPException(status_code=500, detail=f"Error saving configuration: {str(e)}")
 
 
+@app.post("/api/v1/widget/upload-image")
+async def upload_widget_image(
+    file: UploadFile = File(...),
+    type: str = Form(...),  # 'profile', 'chatIcon', or 'headerIcon'
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload widget related images (profile, chat icon, header icon) to R2 storage."""
+    if not r2_storage:
+        raise HTTPException(status_code=503, detail="R2 storage not configured")
+
+    if type not in ['profile', 'chatIcon', 'headerIcon']:
+        raise HTTPException(status_code=400, detail="Invalid image type. Must be 'profile', 'chatIcon', or 'headerIcon'")
+
+    # Validate file type
+    allowed_content_types = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+    if file.content_type not in allowed_content_types:
+        raise HTTPException(status_code=400, detail="Invalid file type. Only JPEG, PNG, WEBP, and GIF are allowed.")
+
+    # Validate file size (max 2MB)
+    MAX_SIZE = 2 * 1024 * 1024
+    content = await file.read()
+    if len(content) > MAX_SIZE:
+        raise HTTPException(status_code=400, detail="File too large. Maximum size is 2MB.")
+    
+    # Reset file cursor for further reading if needed (not needed for small files read into memory)
+    
+    try:
+        # Create a temp file to upload
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename or "")[1]) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        try:
+            # Upload to R2
+            prefix = f"widget/{type}"
+            result = await r2_storage.upload_file(
+                file_path=tmp_path,
+                content_type=file.content_type,
+                metadata={'original_filename': file.filename or "unknown", 'user': current_user.get('email', 'unknown')}
+            )
+            
+            if not result or not result.get('url'):
+                # Fallback path if public_url is not configured
+                # In a real system, we'd provide a proxy URL through our API
+                raise HTTPException(status_code=500, detail="Failed to generate public URL for uploaded file")
+
+            logger.info(f"Successfully uploaded {type} image: {result['url']}")
+            return {
+                "url": result['url'],
+                "filename": file.filename
+            }
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    except Exception as e:
+        logger.error(f"Error uploading image to R2: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
+
+
 # Widget Configuration Endpoints
 @app.get("/api/v1/configuration/widget")
 async def get_widget_config():
@@ -1298,12 +1389,16 @@ async def get_widget_config():
                     display_chatbot,
                     profile_picture_url,
                     chat_icon_url,
+                    header_icon_url,
                     profile_zoom,
                     chat_icon_zoom,
+                    header_icon_zoom,
                     profile_position,
                     chat_icon_position,
+                    header_icon_position,
                     profile_picture_filename,
                     chat_icon_filename,
+                    header_icon_filename,
                     updated_at
                 FROM widget_configuration
                 WHERE id = 1
@@ -1337,10 +1432,13 @@ async def get_widget_config():
                     "display_chatbot": True,
                     "profile_picture_url": None,
                     "chat_icon_url": None,
+                    "header_icon_url": None,
                     "profile_zoom": 1.0,
                     "chat_icon_zoom": 1.0,
+                    "header_icon_zoom": 1.0,
                     "profile_position": {"x": 0, "y": 0},
-                    "chat_icon_position": {"x": 0, "y": 0}
+                    "chat_icon_position": {"x": 0, "y": 0},
+                    "header_icon_position": {"x": 0, "y": 0}
                 }
                 response = JSONResponse(content=data)
                 response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
@@ -1360,12 +1458,16 @@ async def get_widget_config():
                 "display_chatbot": row["display_chatbot"] if row["display_chatbot"] is not None else True,
                 "profile_picture_url": row["profile_picture_url"],
                 "chat_icon_url": row["chat_icon_url"],
+                "header_icon_url": row["header_icon_url"],
                 "profile_zoom": float(row["profile_zoom"]) if row["profile_zoom"] is not None else 1.0,
                 "chat_icon_zoom": float(row["chat_icon_zoom"]) if row["chat_icon_zoom"] is not None else 1.0,
+                "header_icon_zoom": float(row["header_icon_zoom"]) if row["header_icon_zoom"] is not None else 1.0,
                 "profile_position": row["profile_position"] if row["profile_position"] is not None and isinstance(row["profile_position"], dict) else {"x": 0, "y": 0},
                 "chat_icon_position": row["chat_icon_position"] if row["chat_icon_position"] is not None and isinstance(row["chat_icon_position"], dict) else {"x": 0, "y": 0},
+                "header_icon_position": row["header_icon_position"] if row["header_icon_position"] is not None and isinstance(row["header_icon_position"], dict) else {"x": 0, "y": 0},
                 "profile_picture_filename": row.get("profile_picture_filename"),
-                "chat_icon_filename": row.get("chat_icon_filename")
+                "chat_icon_filename": row.get("chat_icon_filename"),
+                "header_icon_filename": row.get("header_icon_filename")
             }
             response = JSONResponse(content=data)
             response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
@@ -1402,14 +1504,18 @@ async def save_widget_config(
                 "display_chatbot": "display_chatbot",
                 "profile_picture_url": "profile_picture_url",
                 "chat_icon_url": "chat_icon_url",
+                "header_icon_url": "header_icon_url",
                 # NEW FIELDS - Add zoom and position fields
                 "profile_zoom": "profile_zoom",
                 "chat_icon_zoom": "chat_icon_zoom",
+                "header_icon_zoom": "header_icon_zoom",
                 "profile_position": "profile_position",
                 "chat_icon_position": "chat_icon_position",
+                "header_icon_position": "header_icon_position",
                 # NEW FIELDS - Add filename fields
                 "profile_picture_filename": "profile_picture_filename",
-                "chat_icon_filename": "chat_icon_filename"
+                "chat_icon_filename": "chat_icon_filename",
+                "header_icon_filename": "header_icon_filename"
             }
 
             for field, db_field in fields_map.items():
@@ -1417,7 +1523,7 @@ async def save_widget_config(
                 if value is not None:
                     # Position fields are now validated by Pydantic as PositionData objects
                     # Convert to JSON string for JSONB storage
-                    if field in ['profile_position', 'chat_icon_position']:
+                    if field in ['profile_position', 'chat_icon_position', 'header_icon_position']:
                         if hasattr(value, 'dict'):  # Pydantic model
                             value = json.dumps(value.dict())
                         elif isinstance(value, dict):
