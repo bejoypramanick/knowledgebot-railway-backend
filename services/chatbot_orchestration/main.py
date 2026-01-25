@@ -1203,6 +1203,9 @@ Always format your responses using proper HTML tags for better readability in th
 - Use <blockquote>text</blockquote> for quotes
 - Separate different sections with newlines for better spacing
 
+⚠️ CRITICAL: DO NOT wrap your responses in code blocks (```html or ```). 
+Output the HTML directly so it renders properly in the chat interface.
+
 Example format:
 <p>Here's what you need to know:</p>
 <ol>
