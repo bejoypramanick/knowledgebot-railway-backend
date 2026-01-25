@@ -557,18 +557,14 @@ class WidgetConfigRequest(BaseModel):
     display_chatbot: Optional[bool] = None
     profile_picture_url: Optional[str] = None
     chat_icon_url: Optional[str] = None
-    header_icon_url: Optional[str] = None
     # NEW FIELDS - Add zoom and position fields with proper validation
     profile_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
     chat_icon_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
-    header_icon_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
     profile_position: Optional[PositionData] = None
     chat_icon_position: Optional[PositionData] = None
-    header_icon_position: Optional[PositionData] = None
     # NEW FIELDS - Add filename fields for displaying original filenames
     profile_picture_filename: Optional[str] = Field(None, max_length=255)
     chat_icon_filename: Optional[str] = Field(None, max_length=255)
-    header_icon_filename: Optional[str] = Field(None, max_length=255)
 
     @validator('display_name')
     def validate_display_name(cls, v):
@@ -607,7 +603,7 @@ class WidgetConfigRequest(BaseModel):
 
         return v
 
-    @validator('profile_picture_url', 'chat_icon_url', 'header_icon_url')
+    @validator('profile_picture_url', 'chat_icon_url')
     def validate_image_url(cls, v):
         if v:
             # Validate URL format
@@ -626,7 +622,7 @@ class WidgetConfigRequest(BaseModel):
 
         return v
 
-    @validator('profile_picture_filename', 'chat_icon_filename', 'header_icon_filename')
+    @validator('profile_picture_filename', 'chat_icon_filename')
     def validate_filename(cls, v):
         if v:
             # Basic filename validation
@@ -1389,16 +1385,12 @@ async def get_widget_config():
                     display_chatbot,
                     profile_picture_url,
                     chat_icon_url,
-                    header_icon_url,
                     profile_zoom,
                     chat_icon_zoom,
-                    header_icon_zoom,
                     profile_position,
                     chat_icon_position,
-                    header_icon_position,
                     profile_picture_filename,
                     chat_icon_filename,
-                    header_icon_filename,
                     updated_at
                 FROM widget_configuration
                 WHERE id = 1
@@ -1432,13 +1424,10 @@ async def get_widget_config():
                     "display_chatbot": True,
                     "profile_picture_url": None,
                     "chat_icon_url": None,
-                    "header_icon_url": None,
                     "profile_zoom": 1.0,
                     "chat_icon_zoom": 1.0,
-                    "header_icon_zoom": 1.0,
                     "profile_position": {"x": 0, "y": 0},
-                    "chat_icon_position": {"x": 0, "y": 0},
-                    "header_icon_position": {"x": 0, "y": 0}
+                    "chat_icon_position": {"x": 0, "y": 0}
                 }
                 response = JSONResponse(content=data)
                 response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
@@ -1458,16 +1447,12 @@ async def get_widget_config():
                 "display_chatbot": row["display_chatbot"] if row["display_chatbot"] is not None else True,
                 "profile_picture_url": row["profile_picture_url"],
                 "chat_icon_url": row["chat_icon_url"],
-                "header_icon_url": row["header_icon_url"],
                 "profile_zoom": float(row["profile_zoom"]) if row["profile_zoom"] is not None else 1.0,
                 "chat_icon_zoom": float(row["chat_icon_zoom"]) if row["chat_icon_zoom"] is not None else 1.0,
-                "header_icon_zoom": float(row["header_icon_zoom"]) if row["header_icon_zoom"] is not None else 1.0,
                 "profile_position": row["profile_position"] if row["profile_position"] is not None and isinstance(row["profile_position"], dict) else {"x": 0, "y": 0},
                 "chat_icon_position": row["chat_icon_position"] if row["chat_icon_position"] is not None and isinstance(row["chat_icon_position"], dict) else {"x": 0, "y": 0},
-                "header_icon_position": row["header_icon_position"] if row["header_icon_position"] is not None and isinstance(row["header_icon_position"], dict) else {"x": 0, "y": 0},
                 "profile_picture_filename": row.get("profile_picture_filename"),
-                "chat_icon_filename": row.get("chat_icon_filename"),
-                "header_icon_filename": row.get("header_icon_filename")
+                "chat_icon_filename": row.get("chat_icon_filename")
             }
             response = JSONResponse(content=data)
             response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
@@ -1504,18 +1489,14 @@ async def save_widget_config(
                 "display_chatbot": "display_chatbot",
                 "profile_picture_url": "profile_picture_url",
                 "chat_icon_url": "chat_icon_url",
-                "header_icon_url": "header_icon_url",
                 # NEW FIELDS - Add zoom and position fields
                 "profile_zoom": "profile_zoom",
                 "chat_icon_zoom": "chat_icon_zoom",
-                "header_icon_zoom": "header_icon_zoom",
                 "profile_position": "profile_position",
                 "chat_icon_position": "chat_icon_position",
-                "header_icon_position": "header_icon_position",
                 # NEW FIELDS - Add filename fields
                 "profile_picture_filename": "profile_picture_filename",
-                "chat_icon_filename": "chat_icon_filename",
-                "header_icon_filename": "header_icon_filename"
+                "chat_icon_filename": "chat_icon_filename"
             }
 
             for field, db_field in fields_map.items():
@@ -1523,7 +1504,7 @@ async def save_widget_config(
                 if value is not None:
                     # Position fields are now validated by Pydantic as PositionData objects
                     # Convert to JSON string for JSONB storage
-                    if field in ['profile_position', 'chat_icon_position', 'header_icon_position']:
+                    if field in ['profile_position', 'chat_icon_position']:
                         if hasattr(value, 'dict'):  # Pydantic model
                             value = json.dumps(value.dict())
                         elif isinstance(value, dict):
