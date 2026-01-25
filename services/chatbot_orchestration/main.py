@@ -1191,21 +1191,29 @@ IMPORTANT FORMATTING INSTRUCTIONS:
 Always format your responses using proper HTML tags for better readability in the chat interface:
 
 - Use <ol><li>item</li></ol> for numbered lists and steps
-- Use <ul><li>item</li></ul> for bullet points and sub-items
+- Use <ul><li>item</li></ul> for bullet points and sub-items  
 - Use <strong>text</strong> for important keywords, emphasis, and key terms
+- Use <em>text</em> for italic emphasis and highlighting
+- Use <u>text</u> for underlined text (use sparingly)
 - Use <p>text</p> for paragraphs and separate sections
+- Use <a href="url">link text</a> for hyperlinks
+- Use <h1>text</h1>, <h2>text</h2>, <h3>text</h3> for headings
+- Use <code>text</code> for inline code
+- Use <pre><code>code block</code></pre> for code blocks
+- Use <blockquote>text</blockquote> for quotes
 - Separate different sections with newlines for better spacing
 
 Example format:
 <p>Here's what you need to know:</p>
 <ol>
-<li><strong>Step 1</strong>: First, do this important action</li>
+<li><strong>Step 1</strong>: First, do this <em>important</em> action</li>
 <li><strong>Step 2</strong>: Then proceed with this</li>
 </ol>
 <ul>
-<li>Additional important note</li>
+<li>Additional <u>important note</u></li>
 <li>Another key point to remember</li>
 </ul>
+<p>For more information, visit our <a href="https://example.com">documentation</a>.</p>
 
 AVAILABLE DATA SOURCES AND WHEN TO USE THEM:
 
@@ -1252,7 +1260,13 @@ CRITICAL RAG POLICY:
   * Use your own internal knowledge/training data to answer the question
   * Search the internet for information (internet search tool will be unavailable)
   * Make assumptions or provide speculative answers
-- Instead, you MUST respond with: "I could not find an answer to this question in the knowledge base."
+- Instead, you MUST respond with this exact HTML-formatted message:
+<p><strong>Sorry, I do not have this information in my training database.</strong></p>
+<p>Would you like to:</p>
+<ul>
+<li>Ask any other question?</li>
+<li>Talk to a <strong>human agent</strong>?</li>
+</ul>
 - This applies to ALL questions that should be answered by RAG - if RAG cannot find the answer, admit that you don't know rather than using other sources.
 
 RAG SEARCH STATUS: {f"FOUND {len(file_context) if file_context else 0} RESULTS - INTERNET SEARCH AVAILABLE" if rag_had_results else "NO RESULTS FOUND - DO NOT USE INTERNAL KNOWLEDGE OR INTERNET SEARCH"}
