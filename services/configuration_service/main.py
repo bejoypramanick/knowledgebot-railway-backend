@@ -1369,33 +1369,57 @@ async def get_widget_config():
 
     try:
         async with get_db_connection() as conn:
-            # Get main widget configuration
-            row = await conn.fetchrow(
-                """
-                SELECT
-                    display_name,
-                    initial_message,
-                    auto_show_duration,
-                    keep_showing_suggested,
-                    theme,
-                    primary_color,
-                    use_primary_for_header,
-                    chat_bubble_color,
-                    align_bubble,
-                    display_chatbot,
-                    profile_picture_url,
-                    chat_icon_url,
-                    profile_zoom,
-                    chat_icon_zoom,
-                    profile_position,
-                    chat_icon_position,
-                    profile_picture_filename,
-                    chat_icon_filename,
-                    updated_at
-                FROM widget_configuration
-                WHERE id = 1
-                """
-            )
+            # Get main widget configuration with defensive column selection
+            try:
+                row = await conn.fetchrow(
+                    """
+                    SELECT
+                        display_name,
+                        initial_message,
+                        auto_show_duration,
+                        keep_showing_suggested,
+                        theme,
+                        primary_color,
+                        use_primary_for_header,
+                        chat_bubble_color,
+                        align_bubble,
+                        display_chatbot,
+                        profile_picture_url,
+                        chat_icon_url,
+                        profile_zoom,
+                        chat_icon_zoom,
+                        profile_position,
+                        chat_icon_position,
+                        profile_picture_filename,
+                        chat_icon_filename,
+                        updated_at
+                    FROM widget_configuration
+                    WHERE id = 1
+                    """
+                )
+            except asyncpg.exceptions.UndefinedColumnError as e:
+                # If columns don't exist, try with more defensive query
+                logger.warning(f"Some columns missing, trying fallback query: {e}")
+                row = await conn.fetchrow(
+                    """
+                    SELECT
+                        display_name,
+                        initial_message,
+                        auto_show_duration,
+                        keep_showing_suggested,
+                        theme,
+                        primary_color,
+                        use_primary_for_header,
+                        chat_bubble_color,
+                        align_bubble,
+                        display_chatbot,
+                        profile_picture_url,
+                        chat_icon_url,
+                        updated_at
+                    FROM widget_configuration
+                    WHERE id = 1
+                    """
+                )
 
             # Get suggested messages from normalized table
             suggested_messages_rows = await conn.fetch(
@@ -1433,6 +1457,7 @@ async def get_widget_config():
                 response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
                 return response
 
+            # Build data object defensively based on available columns
             data = {
                 "display_name": row["display_name"],
                 "initial_message": row["initial_message"],
@@ -1447,13 +1472,34 @@ async def get_widget_config():
                 "display_chatbot": row["display_chatbot"] if row["display_chatbot"] is not None else True,
                 "profile_picture_url": row["profile_picture_url"],
                 "chat_icon_url": row["chat_icon_url"],
-                "profile_zoom": float(row["profile_zoom"]) if row["profile_zoom"] is not None else 1.0,
-                "chat_icon_zoom": float(row["chat_icon_zoom"]) if row["chat_icon_zoom"] is not None else 1.0,
-                "profile_position": row["profile_position"] if row["profile_position"] is not None and isinstance(row["profile_position"], dict) else {"x": 0, "y": 0},
-                "chat_icon_position": row["chat_icon_position"] if row["chat_icon_position"] is not None and isinstance(row["chat_icon_position"], dict) else {"x": 0, "y": 0},
-                "profile_picture_filename": row.get("profile_picture_filename"),
-                "chat_icon_filename": row.get("chat_icon_filename")
             }
+            
+            # Add optional fields if they exist in the row
+            if "profile_zoom" in row and row["profile_zoom"] is not None:
+                data["profile_zoom"] = float(row["profile_zoom"])
+            else:
+                data["profile_zoom"] = 1.0
+                
+            if "chat_icon_zoom" in row and row["chat_icon_zoom"] is not None:
+                data["chat_icon_zoom"] = float(row["chat_icon_zoom"])
+            else:
+                data["chat_icon_zoom"] = 1.0
+                
+            if "profile_position" in row and row["profile_position"] is not None and isinstance(row["profile_position"], dict):
+                data["profile_position"] = row["profile_position"]
+            else:
+                data["profile_position"] = {"x": 0, "y": 0}
+                
+            if "chat_icon_position" in row and row["chat_icon_position"] is not None and isinstance(row["chat_icon_position"], dict):
+                data["chat_icon_position"] = row["chat_icon_position"]
+            else:
+                data["chat_icon_position"] = {"x": 0, "y": 0}
+                
+            if "profile_picture_filename" in row:
+                data["profile_picture_filename"] = row.get("profile_picture_filename")
+                
+            if "chat_icon_filename" in row:
+                data["chat_icon_filename"] = row.get("chat_icon_filename")
             response = JSONResponse(content=data)
             response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
             return response
