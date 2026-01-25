@@ -932,6 +932,12 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                     contents=contents
                 )
                 logger.info(f"✅ Gemini API call completed, response type: {type(response)}")
+                
+                # Extract and log RAG metadata from the response
+                rag_metadata = extract_gemini_rag_metadata(response)
+                if rag_metadata:
+                    logger.info(f"📊 RAG metadata extracted and logged successfully")
+                    
             except Exception as api_error:
                 logger.error(f"❌ Gemini API call failed: {api_error}")
                 return []
@@ -1264,6 +1270,89 @@ When answering:
     return base_prompt
 
 
+def extract_gemini_rag_metadata(response) -> Dict[str, Any]:
+    """
+    Extract RAG metadata from Gemini API response.
+    
+    This function extracts grounding metadata including:
+    - search_queries: Internal queries Gemini generated
+    - grounding_chunks: Text snippets retrieved from knowledge base
+    - grounding_supports: Confidence scores and indices
+    - usage: Total token counts
+    
+    Args:
+        response: Gemini API response object
+        
+    Returns:
+        Dictionary containing RAG metadata or empty dict if not found
+    """
+    rag_metadata = {}
+    
+    try:
+        # Access the last message in result.new_messages()
+        if hasattr(response, 'new_messages') and callable(response.new_messages):
+            new_messages = response.new_messages()
+            if new_messages:
+                last_message = new_messages[-1]
+                
+                # Look for ModelResponse and check parts list
+                if hasattr(last_message, 'parts'):
+                    for part in last_message.parts:
+                        # Look for vendor_parts or provider_details with grounding_metadata
+                        if hasattr(part, 'vendor_parts'):
+                            for vendor_part in part.vendor_parts:
+                                if hasattr(vendor_part, 'grounding_metadata'):
+                                    grounding_data = vendor_part.grounding_metadata
+                                    rag_metadata.update({
+                                        'search_queries': grounding_data.get('search_queries', []),
+                                        'grounding_chunks': grounding_data.get('grounding_chunks', []),
+                                        'grounding_supports': grounding_data.get('grounding_supports', [])
+                                    })
+                        
+                        elif hasattr(part, 'provider_details'):
+                            if hasattr(part.provider_details, 'grounding_metadata'):
+                                grounding_data = part.provider_details.grounding_metadata
+                                rag_metadata.update({
+                                    'search_queries': grounding_data.get('search_queries', []),
+                                    'grounding_chunks': grounding_data.get('grounding_chunks', []),
+                                    'grounding_supports': grounding_data.get('grounding_supports', [])
+                                })
+        
+        # Extract usage information from result.usage()
+        if hasattr(response, 'usage') and callable(response.usage):
+            usage_data = response.usage()
+            rag_metadata['usage'] = {
+                'total_tokens': getattr(usage_data, 'total_tokens', 0),
+                'prompt_tokens': getattr(usage_data, 'prompt_tokens', 0),
+                'candidates_tokens': getattr(usage_data, 'candidates_tokens', 0)
+            }
+        elif hasattr(response, 'usage_metadata') and response.usage_metadata:
+            usage_data = response.usage_metadata
+            rag_metadata['usage'] = {
+                'total_tokens': getattr(usage_data, 'total_tokens', 0),
+                'prompt_tokens': getattr(usage_data, 'prompt_tokens', 0),
+                'candidates_tokens': getattr(usage_data, 'candidates_tokens', 0)
+            }
+        
+        # Log the extracted metadata
+        if rag_metadata:
+            logger.info(f"🔍 Gemini RAG Metadata Extracted:")
+            logger.info(f"  Search Queries: {len(rag_metadata.get('search_queries', []))}")
+            logger.info(f"  Grounding Chunks: {len(rag_metadata.get('grounding_chunks', []))}")
+            logger.info(f"  Grounding Supports: {len(rag_metadata.get('grounding_supports', []))}")
+            if 'usage' in rag_metadata:
+                logger.info(f"  Usage: {rag_metadata['usage']}")
+        else:
+            logger.info("🔍 No RAG metadata found in Gemini response")
+            
+    except Exception as e:
+        logger.error(f"❌ Error extracting Gemini RAG metadata: {e}")
+        import traceback
+        logger.error(f"RAG metadata extraction traceback: {traceback.format_exc()}")
+    
+    return rag_metadata
+
+
 def create_session_dependency(session_id: str) -> ChatSessionDeps:
     """Create session dependency instance."""
     return ChatSessionDeps(session_id=session_id)
@@ -1451,6 +1540,8 @@ async def chat(request: ChatRequest):
         # Extract usage information from agent result (ensure defined before DB persistence)
         usage_info = None
         usage_data_for_tracking = None
+        rag_metadata_info = None  # Store RAG metadata for database logging
+        
         try:
             if hasattr(result, 'usage') and callable(result.usage):
                 # Call the usage method to get the actual usage data
@@ -1475,6 +1566,18 @@ async def chat(request: ChatRequest):
                 logger.info("📊 Extracted usage info: %s", usage_info)
             else:
                 logger.warning("⚠️ No usage object/method found in result")
+                
+            # Try to extract RAG metadata from the agent result
+            try:
+                if hasattr(result, 'new_messages') and callable(result.new_messages):
+                    rag_metadata_info = extract_gemini_rag_metadata(result)
+                    if rag_metadata_info:
+                        logger.info("📊 RAG metadata extracted for database storage")
+                    else:
+                        logger.info("📊 No RAG metadata found in agent result")
+            except Exception as rag_error:
+                logger.error(f"❌ Failed to extract RAG metadata from agent result: {rag_error}")
+                
         except Exception as e:
             logger.error("❌ Failed to extract usage info: %s", e)
             import traceback
@@ -1544,6 +1647,13 @@ async def chat(request: ChatRequest):
                 # Save assistant message
                 try:
                     logger.info("DB persistence: inserting assistant message for session_db_id=%s", session_db_id)
+                    
+                    # Combine usage info and RAG metadata for storage
+                    combined_metadata = {
+                        "usage": usage_info,
+                        "rag_metadata": rag_metadata_info
+                    }
+                    
                     await db.execute(
                         """
                         INSERT INTO chat_messages (session_id, role, content, used_rag, used_postgres, used_neon_db, used_internet_search, confidence_score, sources, usage_info)
@@ -1558,9 +1668,18 @@ async def chat(request: ChatRequest):
                         "internet" in response_data.data_sources_used,
                         response_data.confidence,
                         json.dumps([{"file_name": s.file_name, "relevance_score": s.relevance_score} for s in response_data.sources]),
-                        json.dumps(usage_info) if usage_info else None
+                        json.dumps(combined_metadata) if combined_metadata else None
                     )
                     logger.info("DB persistence: assistant message inserted for session_db_id=%s", session_db_id)
+                    
+                    # Log RAG metadata separately for easier analysis
+                    if rag_metadata_info:
+                        logger.info(f"📊 RAG Metadata Stored in DB:")
+                        logger.info(f"  Session ID: {session_id}")
+                        logger.info(f"  Search Queries Count: {len(rag_metadata_info.get('search_queries', []))}")
+                        logger.info(f"  Grounding Chunks Count: {len(rag_metadata_info.get('grounding_chunks', []))}")
+                        logger.info(f"  Grounding Supports Count: {len(rag_metadata_info.get('grounding_supports', []))}")
+                        
                 except Exception as e:
                     logger.exception("DB persistence: failed to insert assistant message for session_db_id=%s: %s", session_db_id, e)
 
