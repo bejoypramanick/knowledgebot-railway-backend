@@ -1187,6 +1187,26 @@ def get_system_prompt(file_context: Optional[List[SearchResult]] = None, custom_
 
 Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers.
 
+IMPORTANT FORMATTING INSTRUCTIONS:
+Always format your responses using proper HTML tags for better readability in the chat interface:
+
+- Use <ol><li>item</li></ol> for numbered lists and steps
+- Use <ul><li>item</li></ul> for bullet points and sub-items
+- Use <strong>text</strong> for important keywords, emphasis, and key terms
+- Use <p>text</p> for paragraphs and separate sections
+- Separate different sections with newlines for better spacing
+
+Example format:
+<p>Here's what you need to know:</p>
+<ol>
+<li><strong>Step 1</strong>: First, do this important action</li>
+<li><strong>Step 2</strong>: Then proceed with this</li>
+</ol>
+<ul>
+<li>Additional important note</li>
+<li>Another key point to remember</li>
+</ul>
+
 AVAILABLE DATA SOURCES AND WHEN TO USE THEM:
 
 1. **search_knowledge_base** (RAG - Gemini FileSearch):
@@ -1244,6 +1264,7 @@ When answering:
 4. Provide accurate, helpful answers.
 5. Clearly indicate when information is not available.
 6. Mention which data source provided the information.
+7. ALWAYS format your responses using HTML tags: <ol> for numbered lists, <ul> for bullets, <strong> for emphasis, <p> for paragraphs.
 """
     
     # Add response policy instructions
