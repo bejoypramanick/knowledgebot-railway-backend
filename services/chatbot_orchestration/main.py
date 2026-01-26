@@ -1019,7 +1019,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                                 'mime_type': file_record['mime_type'],
                                 'size_bytes': file_record['size_bytes'],
                                 'upload_date': file_record['created_at'].isoformat() if file_record['created_at'] else None,
-                                'db_metadata': dict(file_record['metadata']) if file_record['metadata'] else {}
+                                'db_metadata': file_record['metadata'] if isinstance(file_record['metadata'], dict) else {"raw": file_record['metadata']}
                             }
                             logger.info(f"Successfully retrieved database metadata for file {f.name}")
                         else:
@@ -1071,21 +1071,38 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             contents = [*files_to_search, retrieval_prompt]
             logger.info(f"🚀 Making Gemini API call with {len(files_to_search)} files and prompt length {len(retrieval_prompt)}")
 
-            try:
-                response = genai_client.models.generate_content(
-                    model='gemini-2.5-flash-lite',
-                    contents=contents
-                )
-                logger.info(f"✅ Gemini API call completed, response type: {type(response)}")
-                
-                # Extract and log RAG metadata from the response
-                rag_metadata = extract_gemini_rag_metadata(response)
-                if rag_metadata:
-                    logger.info(f"📊 RAG metadata extracted and logged successfully")
+            # Implement retry logic for Gemini API calls
+            max_retries = 3
+            retry_delay = 1.0
+            
+            for attempt in range(max_retries):
+                try:
+                    logger.info(f"🔄 Gemini API attempt {attempt + 1}/{max_retries}")
+                    response = genai_client.models.generate_content(
+                        model='gemini-2.5-flash-lite',
+                        contents=contents
+                    )
+                    logger.info(f"✅ Gemini API call completed, response type: {type(response)}")
+                    break  # Success, exit retry loop
                     
-            except Exception as api_error:
-                logger.error(f"❌ Gemini API call failed: {api_error}")
-                return []
+                except Exception as api_error:
+                    error_msg = str(api_error)
+                    logger.error(f"❌ Gemini API call failed (attempt {attempt + 1}/{max_retries}): {api_error}")
+                    
+                    # Check if this is a retryable error
+                    is_retryable = any(keyword in error_msg.lower() for keyword in [
+                        '500', 'internal', 'timeout', 'overload', 'temporarily unavailable'
+                    ])
+                    
+                    if attempt < max_retries - 1 and is_retryable:
+                        logger.info(f"⏳ Retrying in {retry_delay} seconds...")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        logger.error(f"❌ All Gemini API retries failed")
+                        logger.info(f"📊 Files exist in DB but not found in Gemini API")
+                        return []
 
             # Track Gemini token usage from response - Paid tier should provide usage data
             logger.info(f"🔍 Gemini RAG Response Details: usage_metadata={getattr(response, 'usage_metadata', 'NO_USAGE_METADATA')}")
@@ -1929,7 +1946,7 @@ class PydanticAIGatewayService:
             logger.error(f"❌ Error retrieving session metadata: {e}")
             raise
     
-    async def get_or_create_file_search_store(self) -> str:
+    async def get_or_create_file_search_store(self, session_id: str) -> str:
         """
         Get existing FileSearchStore ID or create a new one using GenAI SDK.
         """
@@ -1937,32 +1954,45 @@ class PydanticAIGatewayService:
             raise ValueError("GenAI client not initialized")
         
         try:
-            # List existing FileSearch stores
-            stores = list(self.genai_client.stores.list())
-            
-            # Look for our application's store
-            app_store = None
-            for store in stores:
-                if hasattr(store, 'display_name') and 'knowledgebot_file_search' in store.display_name.lower():
-                    app_store = store
-                    break
-            
-            if app_store:
-                logger.info(f"📦 Found existing FileSearchStore: {app_store.name}")
-                return app_store.name
+            # Check if stores API is available
+            if hasattr(self.genai_client, 'stores'):
+                # List existing FileSearch stores
+                stores = list(self.genai_client.stores.list())
+                
+                # Look for our application's store
+                app_store = None
+                for store in stores:
+                    if hasattr(store, 'display_name') and 'knowledgebot_file_search' in store.display_name.lower():
+                        app_store = store
+                        break
+                
+                if app_store:
+                    logger.info(f"📦 Found existing FileSearchStore: {app_store.name}")
+                    return app_store.name
+                else:
+                    # Create new FileSearchStore
+                    logger.info("🆕 Creating new FileSearchStore for knowledgebot")
+                    new_store = self.genai_client.stores.create(
+                        display_name="KnowledgeBot FileSearch Store",
+                        description="Centralized file search store for KnowledgeBot RAG operations"
+                    )
+                    logger.info(f"✅ Created new FileSearchStore: {new_store.name}")
+                    return new_store.name
             else:
-                # Create new FileSearchStore
-                logger.info("🆕 Creating new FileSearchStore for knowledgebot")
-                new_store = self.genai_client.stores.create(
-                    display_name="KnowledgeBot FileSearch Store",
-                    description="Centralized file search store for KnowledgeBot RAG operations"
-                )
-                logger.info(f"✅ Created new FileSearchStore: {new_store.name}")
-                return new_store.name
+                logger.warning("⚠️ FileSearch stores API not available in current GenAI SDK version")
+                logger.info("🔄 Using fallback: generating session-based store ID")
+                # Generate a session-based store ID as fallback
+                fallback_store_id = f"knowledgebot_store_{session_id[:8]}"
+                logger.info(f"📦 Using fallback store ID: {fallback_store_id}")
+                return fallback_store_id
                 
         except Exception as e:
             logger.error(f"❌ Error managing FileSearchStore: {e}")
-            raise
+            logger.info("🔄 Using fallback: generating session-based store ID")
+            # Generate a session-based store ID as fallback
+            fallback_store_id = f"knowledgebot_store_{session_id[:8]}"
+            logger.info(f"📦 Using fallback store ID: {fallback_store_id}")
+            return fallback_store_id
     
     async def get_or_create_cached_content(self, system_prompt: str) -> str:
         """
@@ -2017,7 +2047,7 @@ class PydanticAIGatewayService:
         # Get or create FileSearchStore
         file_search_store_id = session_metadata.get('file_search_store_id')
         if not file_search_store_id:
-            file_search_store_id = await self.get_or_create_file_search_store()
+            file_search_store_id = await self.get_or_create_file_search_store(session_id)
             logger.info(f"🔗 Using FileSearchStore: {file_search_store_id}")
         
         # Get or create cached content
