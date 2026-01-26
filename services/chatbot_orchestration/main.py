@@ -1593,53 +1593,15 @@ async def chat_stream(request: ChatRequest):
                 # Send final response with sources
                 yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': file_context})}\n\n"
                 yield f"data: [DONE]\n\n"
+                stream_completed = True
                 
             except Exception as e:
                 logger.error(f"Error in streaming response: {e}")
                 
-                # Retry logic for streaming errors
-                max_retries = 2
-                for attempt in range(max_retries):
-                    try:
-                        logger.info(f"Retrying streaming response (attempt {attempt + 1}/{max_retries})")
-                        
-                        # Retry the entire response generation
-                        response = await agent_executor.ainvoke({
-                            "input": user_message,
-                            "chat_history": chat_history,
-                            "session_id": session_id,
-                            "use_rag": rag_enabled,
-                            "file_context": file_context
-                        })
-                        
-                        # Extract response text
-                        response_text = ""
-                        if hasattr(response, 'output') and response.output:
-                            response_text = response.output if isinstance(response.output, str) else str(response.output)
-                        elif hasattr(response, 'data'):
-                            response_text = str(response.data)
-                        elif hasattr(response, 'response') and response.response:
-                            response_text = response.response.text if hasattr(response.response, 'text') else str(response.response)
-                        
-                        # Stream the retried response
-                        words = response_text.split()
-                        for i, word in enumerate(words):
-                            chunk = word + (' ' if i < len(words) - 1 else '')
-                            yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                            await asyncio.sleep(0.1)
-                        
-                        # Send final response with sources
-                        yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': file_context})}\n\n"
-                        yield f"data: [DONE]\n\n"
-                        
-                        logger.info(f"Retry successful on attempt {attempt + 1}")
-                        break  # Success, exit retry loop
-                        
-                    except Exception as retry_error:
-                        logger.error(f"Retry attempt {attempt + 1} failed: {retry_error}")
-                        if attempt == max_retries - 1:  # Last attempt failed
-                            yield f"data: {json.dumps({'type': 'error', 'content': 'I encountered an error while processing your request. Please try again.'})}\n\n"
-                            yield f"data: [DONE]\n\n"
+                # Only send error if stream hasn't completed successfully
+                if not stream_completed:
+                    yield f"data: {json.dumps({'type': 'error', 'content': 'I encountered an error while processing your request. Please try again.'})}\n\n"
+                    yield f"data: [DONE]\n\n"
         
         return StreamingResponse(
             generate_response(),
