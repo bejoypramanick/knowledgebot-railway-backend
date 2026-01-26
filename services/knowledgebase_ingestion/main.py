@@ -1333,41 +1333,31 @@ async def delete_files_batch(
 
 @app.post("/upload/batch", response_model=BatchUploadResponse)
 async def upload_documents_batch(
-    request: Request,
-    max_parallel: int = Form(5)  # Max concurrent uploads
+    files: List[UploadFile] = File(...),
+    display_names: Optional[str] = Form(None),
+    max_parallel: int = Form(5),
+    replace_existing: bool = Form(False)
 ):
     """
     Upload multiple documents in parallel for improved performance.
     
     Args:
-        request: Request object to parse form data manually
+        files: List of files to upload
+        display_names: Optional comma-separated display names
         max_parallel: Maximum number of concurrent uploads (default: 5)
+        replace_existing: Whether to replace existing files (default: False)
     
     Returns:
         BatchUploadResponse with results for each file
     """
     start_time = time.perf_counter()
     
-    # Parse form data manually to handle files correctly
-    form_data = await request.form()
-    
-    # Extract files from form data
-    files = []
-    for i in range(len(form_data.getlist('files', []))):
-        file_key = f'files[{i}]'
-        if file_key in form_data:
-            files.append(form_data[file_key])
-    
-    # Extract other form data
-    display_names = form_data.get('display_names')
-    replace_existing = form_data.get('replace_existing', False)
-    
-    logger.info(f"📦 Batch upload - Parsed form data:")
+    logger.info(f"📦 Batch upload - Received files:")
     logger.info(f"📋 files count: {len(files)}")
     logger.info(f"📋 max_parallel: {max_parallel}")
     logger.info(f"📋 display_names: {display_names}")
     logger.info(f"📋 replace_existing: {replace_existing}")
-    logger.info(f"📋 All form fields: {list(form_data.keys())}")
+    logger.info(f"📋 File names: {[f.filename for f in files]}")
     
     if not genai_client:
         logger.critical("Batch upload failed: Gemini client not configured")

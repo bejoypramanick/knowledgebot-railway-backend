@@ -743,15 +743,16 @@ async def knowledgebase_upload_batch_endpoint(
         logger.info(f"📋 Max parallel: {max_parallel}")
         logger.info(f"🔄 Replace existing: {replace_existing}")
 
-        # Prepare multipart form data for forwarding
-        files_data = []
-        for i, file in enumerate(files):
-            file_content = await file.read()
-            files_data.append((
-                'files',  # Field name for multiple files
-                file_content,
-                file.content_type or 'application/octet-stream'
-            ))
+        # Prepare the files list for httpx
+        # Every file must be associated with a field name (e.g., "files")
+        httpx_files = []
+        
+        for file in files:
+            # We read the content into memory for forwarding
+            content = await file.read()
+            httpx_files.append(
+                ("files", (file.filename, content, file.content_type))
+            )
         
         # Prepare form data
         data = {}
@@ -762,15 +763,12 @@ async def knowledgebase_upload_batch_endpoint(
         if replace_existing:
             data['replace_existing'] = replace_existing
 
-        # Get request headers
+        # Get request headers (exclude content-type to let httpx generate boundary)
         request_headers = dict(request.headers)
         headers = {}
         for k, v in request_headers.items():
             if k.lower() not in ['content-type', 'content-length', 'host']:
                 headers[k] = v
-
-        headers.update({k: v for k, v in request_headers.items()
-                       if k.lower() not in ['content-type', 'content-length', 'host']})
 
         target_url = f"{KNOWLEDGEBASE_INGESTION_URL}/upload/batch"
         logger.info(f"📤 Forwarding batch upload to: {target_url}")
@@ -783,7 +781,7 @@ async def knowledgebase_upload_batch_endpoint(
         async with httpx.AsyncClient(timeout=300.0) as client:
             resp = await client.post(
                 target_url,
-                files=files_data,
+                files=httpx_files,  # Correctly formatted list of tuples
                 data=data,
                 headers=headers
             )
