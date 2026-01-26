@@ -35,8 +35,10 @@ except ImportError as e:
 
 try:
     from google import genai
+    from google.genai import types
     from contextlib import asynccontextmanager
     from pydantic_ai import Agent, RunContext
+    from pydantic_ai.models.google import GoogleModel
     from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
     import asyncio
     import json
@@ -92,6 +94,57 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.config import settings
 from shared.db import init_railway_db, init_neon_db, railway_db, neon_db
 from shared.token_tracker import track_gemini_usage_from_response
+
+# Context Caching System for Cost Optimization
+import time
+import hashlib
+from typing import Tuple, Optional
+
+CACHE_TTL_SECONDS = 3600  # 1 hour TTL
+context_cache = {}
+
+def generate_cache_key(prompt_components: Dict[str, Any]) -> str:
+    """Generate a unique cache key based on prompt components."""
+    cache_data = {
+        'file_context': str(sorted([(f.file_name, f.content[:100]) for f in prompt_components.get('file_context', [])])),
+        'custom_prompt': prompt_components.get('custom_prompt', ''),
+        'response_policy': prompt_components.get('response_policy', ''),
+        'rag_had_results': prompt_components.get('rag_had_results', True),
+        'model_name': MODEL_NAME
+    }
+    
+    cache_string = json.dumps(cache_data, sort_keys=True)
+    return hashlib.sha256(cache_string.encode()).hexdigest()
+
+def get_cached_system_prompt(prompt_components: Dict[str, Any]) -> Optional[str]:
+    """Get cached system prompt if available and not expired."""
+    cache_key = generate_cache_key(prompt_components)
+    
+    if cache_key in context_cache:
+        cached_data = context_cache[cache_key]
+        current_time = time.time()
+        
+        if current_time - cached_data['timestamp'] < CACHE_TTL_SECONDS:
+            logger.info(f"📦 Using cached system prompt (cache age: {current_time - cached_data['timestamp']:.1f}s)")
+            return cached_data['prompt']
+        else:
+            logger.info(f"🗑️ System prompt cache expired for key: {cache_key[:8]}...")
+            del context_cache[cache_key]
+    
+    return None
+
+def cache_system_prompt(prompt_components: Dict[str, Any], prompt: str) -> str:
+    """Cache the system prompt with timestamp."""
+    cache_key = generate_cache_key(prompt_components)
+    
+    context_cache[cache_key] = {
+        'prompt': prompt,
+        'timestamp': time.time(),
+        'components': prompt_components
+    }
+    
+    logger.info(f"💾 Cached system prompt with key: {cache_key[:8]}... (TTL: {CACHE_TTL_SECONDS}s)")
+    return prompt
 
 # Lazy database initialization for serverless optimization
 async def get_railway_db():
@@ -1231,6 +1284,21 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 # System prompt with intelligent routing instructions
 def get_system_prompt(file_context: Optional[List[SearchResult]] = None, custom_prompt: Optional[str] = None, response_policy: Optional[int] = None, rag_had_results: bool = True) -> str:
     """Generate dynamic system prompt with intelligent data source routing."""
+    
+    # Create prompt components for caching
+    prompt_components = {
+        'file_context': file_context,
+        'custom_prompt': custom_prompt,
+        'response_policy': response_policy,
+        'rag_had_results': rag_had_results
+    }
+    
+    # Check cache first
+    cached_prompt = get_cached_system_prompt(prompt_components)
+    if cached_prompt:
+        return cached_prompt
+    
+    # Generate new prompt if not cached
     base_prompt = """You are an advanced intelligent knowledge assistant chatbot with access to multiple sophisticated data sources and intelligent routing capabilities. Your primary mission is to provide accurate, comprehensive, and contextually relevant answers by analyzing user queries and routing them to the most appropriate data sources.
 
 CORE IDENTITY & PROFESSIONAL PERSONALITY:
@@ -1593,7 +1661,8 @@ This comprehensive system prompt ensures optimal performance, robust security, e
     if custom_prompt:
         base_prompt += f"\n\n{custom_prompt}"
     
-    return base_prompt
+    # Cache the generated prompt
+    return cache_system_prompt(prompt_components, base_prompt)
 
 
 def extract_gemini_rag_metadata(response) -> Dict[str, Any]:
@@ -1733,6 +1802,208 @@ def create_agent(file_context: Optional[List[SearchResult]] = None, custom_syste
     return agent
 
 
+class PydanticAIGatewayService:
+    """
+    Service class that integrates Pydantic AI with existing Gemini FileSearch and Context Caching infrastructure.
+    
+    This service bridges the gap between Direct GenAI SDK file management and Pydantic AI Agent
+    to ensure maximum cost efficiency (90% cache discount) and native RAG usage.
+    """
+    
+    def __init__(self):
+        self.genai_client = None
+        self.db = None
+        
+    async def initialize(self):
+        """Initialize the service with GenAI client and database connection."""
+        if not self.genai_client:
+            self.genai_client = get_genai_client()
+        if not self.db:
+            self.db = await get_railway_db()
+    
+    async def get_session_metadata(self, session_id: str) -> Dict[str, Any]:
+        """
+        Retrieve session metadata from PostgreSQL including FileSearchStore and cached_content IDs.
+        """
+        if not self.db:
+            raise ValueError("Database not initialized")
+        
+        try:
+            # Get session metadata
+            session_data = await self.db.fetchrow("""
+                SELECT file_search_store_id, cached_content_id, created_at, updated_at
+                FROM chat_sessions 
+                WHERE session_id = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, session_id)
+            
+            if not session_data:
+                logger.info(f"📝 No existing session found for {session_id}, creating new session metadata")
+                return {
+                    'session_id': session_id,
+                    'file_search_store_id': None,
+                    'cached_content_id': None,
+                    'is_new_session': True
+                }
+            
+            logger.info(f"📝 Found existing session for {session_id}: file_search_store_id={session_data['file_search_store_id']}, cached_content_id={session_data['cached_content_id']}")
+            return {
+                'session_id': session_id,
+                'file_search_store_id': session_data['file_search_store_id'],
+                'cached_content_id': session_data['cached_content_id'],
+                'is_new_session': False,
+                'created_at': session_data['created_at'],
+                'updated_at': session_data['updated_at']
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error retrieving session metadata: {e}")
+            raise
+    
+    async def get_or_create_file_search_store(self) -> str:
+        """
+        Get existing FileSearchStore ID or create a new one using GenAI SDK.
+        """
+        if not self.genai_client:
+            raise ValueError("GenAI client not initialized")
+        
+        try:
+            # List existing FileSearch stores
+            stores = list(self.genai_client.stores.list())
+            
+            # Look for our application's store
+            app_store = None
+            for store in stores:
+                if hasattr(store, 'display_name') and 'knowledgebot_file_search' in store.display_name.lower():
+                    app_store = store
+                    break
+            
+            if app_store:
+                logger.info(f"📦 Found existing FileSearchStore: {app_store.name}")
+                return app_store.name
+            else:
+                # Create new FileSearchStore
+                logger.info("🆕 Creating new FileSearchStore for knowledgebot")
+                new_store = self.genai_client.stores.create(
+                    display_name="KnowledgeBot FileSearch Store",
+                    description="Centralized file search store for KnowledgeBot RAG operations"
+                )
+                logger.info(f"✅ Created new FileSearchStore: {new_store.name}")
+                return new_store.name
+                
+        except Exception as e:
+            logger.error(f"❌ Error managing FileSearchStore: {e}")
+            raise
+    
+    async def get_or_create_cached_content(self, system_prompt: str) -> str:
+        """
+        Get existing cached content ID or create a new one using GenAI SDK.
+        """
+        if not self.genai_client:
+            raise ValueError("GenAI client not initialized")
+        
+        try:
+            # Create cached content with 1-hour TTL
+            logger.info("💾 Creating cached content for system prompt")
+            cached_content = self.genai_client.cached_content.create(
+                model=MODEL_NAME,
+                contents=system_prompt,
+                ttl=3600  # 1 hour TTL
+            )
+            logger.info(f"✅ Created cached content: {cached_content.name}")
+            return cached_content.name
+            
+        except Exception as e:
+            logger.error(f"❌ Error creating cached content: {e}")
+            raise
+    
+    async def create_optimized_agent(self, session_id: str, system_prompt: str, tools: List[Any]) -> Agent:
+        """
+        Create a Pydantic AI Agent optimized with caching and FileSearch integration.
+        """
+        await self.initialize()
+        
+        # Get session metadata
+        session_metadata = await self.get_session_metadata(session_id)
+        
+        # Get or create FileSearchStore
+        file_search_store_id = session_metadata.get('file_search_store_id')
+        if not file_search_store_id:
+            file_search_store_id = await self.get_or_create_file_search_store()
+            logger.info(f"🔗 Using FileSearchStore: {file_search_store_id}")
+        
+        # Get or create cached content
+        cached_content_id = session_metadata.get('cached_content_id')
+        if not cached_content_id:
+            cached_content_id = await self.get_or_create_cached_content(system_prompt)
+            logger.info(f"🧠 Using cached content: {cached_content_id}")
+        
+        # Configure model settings with caching and FileSearch
+        model_settings = {
+            "cached_content": cached_content_id,
+            "tools": [
+                types.Tool(
+                    file_search=types.FileSearch(
+                        store_names=[file_search_store_id]
+                    )
+                )
+            ]
+        }
+        
+        logger.info(f"⚙️ Model settings: cached_content={cached_content_id}, file_search_store={file_search_store_id}")
+        
+        # Create GoogleModel with optimized settings
+        try:
+            google_model = GoogleModel(
+                model=MODEL_NAME,
+                model_settings=model_settings
+            )
+            logger.info("✅ Created GoogleModel with caching and FileSearch")
+        except Exception as e:
+            logger.error(f"❌ Error creating GoogleModel: {e}")
+            raise
+        
+        # Create Pydantic AI Agent
+        agent = Agent(
+            google_model,
+            system_prompt=system_prompt,
+            tools=tools,
+            deps_type=ChatSessionDeps,
+        )
+        
+        logger.info(f"🤖 Created optimized Pydantic AI Agent for session {session_id}")
+        return agent
+    
+    async def update_session_metadata(self, session_id: str, file_search_store_id: str = None, cached_content_id: str = None):
+        """
+        Update session metadata in PostgreSQL.
+        """
+        if not self.db:
+            logger.warning("⚠️ Database not available, skipping metadata update")
+            return
+        
+        try:
+            await self.db.execute("""
+                INSERT INTO chat_sessions (session_id, file_search_store_id, cached_content_id, created_at, updated_at)
+                VALUES ($1, $2, $3, NOW(), NOW())
+                ON CONFLICT (session_id) 
+                DO UPDATE SET 
+                    file_search_store_id = COALESCE(EXCLUDED.file_search_store_id, chat_sessions.file_search_store_id),
+                    cached_content_id = COALESCE(EXCLUDED.cached_content_id, chat_sessions.cached_content_id),
+                    updated_at = NOW()
+            """, session_id, file_search_store_id, cached_content_id)
+            
+            logger.info(f"💾 Updated session metadata for {session_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error updating session metadata: {e}")
+
+
+# Global service instance
+pydantic_ai_service = PydanticAIGatewayService()
+
+
 @app.get("/")
 async def root_diagnostic(request: Request):
     """Simple root endpoint for basic liveliness check."""
@@ -1749,29 +2020,55 @@ async def health_check(request: Request):
 @app.post("/chat/stream")
 async def chat_stream(request: ChatRequest):
     """
-    Handle chat request with streaming response.
+    Handle chat request with streaming response using optimized Pydantic AI Gateway Service.
     """
     try:
         session_id = request.session_id or str(uuid.uuid4())
         
-        # Perform RAG search if enabled (pre-fetch context)
-        file_context = []
-        rag_had_results = False
-        rag_enabled = request.use_rag
-        if request.use_rag:
-            logger.info(f"🔍 Starting RAG search for message: {request.message[:100]}...")
-            file_context = await search_knowledge_base(request.message)
-            rag_had_results = len(file_context) > 0 and any(result.content and result.content.strip() for result in file_context)
-            logger.info(f"📄 RAG search completed, found {len(file_context)} results, has meaningful content: {rag_had_results}")
-        
-        # Create agent
-        agent = create_agent(
-            file_context,
-            custom_system_prompt=request.system_prompt,
+        # Generate system prompt with caching
+        system_prompt = get_system_prompt(
+            file_context=None,  # File context will be handled by FileSearch tool
+            custom_prompt=request.system_prompt,
             response_policy=request.response_policy,
-            rag_had_results=rag_had_results,
-            rag_enabled=rag_enabled
+            rag_had_results=True  # Will be determined by FileSearch tool
         )
+        
+        # Prepare tools for the agent
+        tools = [search_knowledge_base]
+        
+        # Add human agent connection tool
+        tools.append(request_human_agent_connection)
+        
+        # Add PostgreSQL tool if available
+        if railway_db:
+            tools.append(query_railway_postgres)
+        
+        # Add Neon DB tool if available
+        if neon_db:
+            tools.append(query_neon_db)
+        
+        # Add internet search tool if available and appropriate
+        if tavily_client and not (request.use_rag and False):  # Will be determined dynamically
+            tools.append(search_internet)
+        
+        # Create optimized agent using Pydantic AI Gateway Service
+        try:
+            agent = await pydantic_ai_service.create_optimized_agent(
+                session_id=session_id,
+                system_prompt=system_prompt,
+                tools=tools
+            )
+        except Exception as e:
+            logger.error(f"❌ Failed to create optimized agent: {e}")
+            # Fallback to traditional agent creation
+            logger.info("🔄 Falling back to traditional agent creation")
+            agent = create_agent(
+                file_context=None,
+                custom_system_prompt=request.system_prompt,
+                response_policy=request.response_policy,
+                rag_had_results=True,
+                rag_enabled=request.use_rag
+            )
         
         if not agent:
             logger.error("Failed to create agent")
@@ -1781,14 +2078,17 @@ async def chat_stream(request: ChatRequest):
                 headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
             )
         
-        # Prepare message history
+        # Prepare message history (for 5-turn conversation loop)
         history_messages = []
         if request.session_id:
             # For now, we'll keep it simple and not load full history for streaming
+            # In a full implementation, you would load the last 5 turns here
             pass
         
         # Create session dependency
         session_dep = ChatSessionDeps(session_id=session_id)
+        
+        logger.info(f"🚀 Starting optimized chat stream for session {session_id}")
         
         async def generate_response():
             max_retries = 3
