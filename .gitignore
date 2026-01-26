@@ -58,3 +58,4 @@ htmlcov/
 .env
 .env
 firebase/knowledgebot-433de-firebase-adminsdk-fbsvc-da698610fe.json
+services/chatbot_orchestration/knowledgebot.code-workspace
