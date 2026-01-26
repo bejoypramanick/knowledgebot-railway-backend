@@ -28,6 +28,7 @@ try:
     from dotenv import load_dotenv
     import uuid
     from datetime import datetime
+    from pathlib import Path
 except ImportError as e:
     logger.error(f"Failed to import basic components: {e}")
     raise
@@ -42,13 +43,6 @@ try:
     import re
 except ImportError as e:
     logger.error(f"Failed to import AI components: {e}")
-    raise
-    from pathlib import Path
-    logger.info("✅ Core modules imported successfully")
-except ImportError as e:
-    logger.critical(f"💥 IMPORT ERROR: Could not load required module: {e}")
-    # Print search path for debugging
-    logger.info(f"📍 Python Path: {sys.path}")
     raise
 
 try:
