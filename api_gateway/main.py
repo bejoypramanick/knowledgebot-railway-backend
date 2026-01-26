@@ -718,6 +718,127 @@ async def delete_session_endpoint(session_id: str, request: Request):
         raise HTTPException(status_code=500, detail=f"Chat service error: {str(e)}")
 
 
+@app.options("/api/v1/knowledgebase/upload/batch")
+async def knowledgebase_upload_batch_options():
+    """Handle CORS preflight requests for batch file uploads."""
+    return JSONResponse(
+        status_code=200,
+        content={"message": "CORS preflight OK for batch upload"},
+    )
+
+
+@app.post("/api/v1/knowledgebase/upload/batch")
+async def knowledgebase_upload_batch_endpoint(
+    request: Request,
+    files: List[UploadFile] = File(...),
+    display_names: Optional[str] = Form(None),
+    max_parallel: int = Form(5),
+    replace_existing: bool = Form(False),
+    user_email: Optional[str] = Header(None, alias="X-User-Email")
+):
+    """Route batch upload requests to knowledgebase ingestion service."""
+    file_contents = []
+    try:
+        logger.info(f"📁 Received batch upload request: {len(files)} files")
+        logger.info(f"📋 Max parallel: {max_parallel}")
+        logger.info(f"🔄 Replace existing: {replace_existing}")
+
+        # Prepare multipart form data for forwarding
+        files_data = []
+        for file in files:
+            file_content = await file.read()
+            files_data.append((
+                file.filename or 'uploaded_file',
+                file_content,
+                file.content_type or 'application/octet-stream'
+            ))
+        
+        # Prepare form data
+        data = {}
+        if display_names:
+            data['display_names'] = display_names
+        if max_parallel:
+            data['max_parallel'] = max_parallel
+        if replace_existing:
+            data['replace_existing'] = replace_existing
+
+        # Get request headers
+        request_headers = dict(request.headers)
+        headers = {}
+        for k, v in request_headers.items():
+            if k.lower() not in ['content-type', 'content-length', 'host']:
+                headers[k] = v
+
+        headers.update({k: v for k, v in request_headers.items()
+                       if k.lower() not in ['content-type', 'content-length', 'host']})
+
+        target_url = f"{KNOWLEDGEBASE_INGESTION_URL}/upload/batch"
+        logger.info(f"📤 Forwarding batch upload to: {target_url}")
+        logger.info(f"📋 Files count: {len(files)}")
+        logger.info(f"📋 File names: {[f.filename for f in files]}")
+        logger.info(f"📋 Form data fields: {data if data else 'None'}")
+        logger.info(f"📋 Custom headers: {headers if headers else 'None'}")
+
+        # Make the request to the backend service
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(
+                target_url,
+                files=files_data,
+                data=data,
+                headers=headers
+            )
+
+            logger.info(f"📥 Batch upload response status: {resp.status_code}")
+
+            # Parse response content
+            response_content = None
+            try:
+                response_content = resp.json()
+                logger.info(f"📥 Batch upload response (JSON): {response_content}")
+            except Exception as json_error:
+                logger.warning(f"⚠️  Could not parse response as JSON: {json_error}")
+                response_content = resp.text
+                logger.info(f"📥 Batch upload response (text): {response_content[:500]}")
+
+            # Log success or warnings
+            if resp.status_code == 200:
+                logger.info("✅ Batch upload completed successfully")
+            else:
+                logger.warning(f"⚠️  Batch upload returned status {resp.status_code}")
+                logger.warning(f"⚠️  Response details: {response_content}")
+
+            # Return the response from the backend service
+            return JSONResponse(
+                content=response_content,
+                status_code=resp.status_code
+            )
+
+    except httpx.TimeoutException as te:
+        logger.error(f"⏰ Batch upload request timed out: {te}")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Batch upload request timed out. The files may be too large or the service is slow to respond: {str(te)}"
+        )
+    except httpx.ConnectError as ce:
+        logger.error(f"🚫 Could not connect to knowledgebase service at {KNOWLEDGEBASE_INGESTION_URL}: {ce}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not connect to knowledgebase service: {str(ce)}"
+        )
+    except Exception as e:
+        logger.error(f"❌ Error routing batch upload request: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Knowledgebase service error: {str(e)}"
+        )
+
+    finally:
+        # Clean up file contents from memory
+        for file_content in file_contents:
+            del file_content
+        logger.debug("🧹 File contents cleaned from memory")
+
+
 @app.options("/api/v1/knowledgebase/upload")
 async def knowledgebase_upload_options():
     """Handle CORS preflight requests for file uploads."""
@@ -916,6 +1037,101 @@ async def knowledgebase_upload_constraints_endpoint(request: Request):
             }
         }
         return JSONResponse(status_code=200, content=fallback_constraints)
+
+
+@app.options("/api/v1/knowledgebase/delete/batch")
+async def knowledgebase_delete_batch_options():
+    """Handle CORS preflight requests for batch file deletes."""
+    return JSONResponse(
+        status_code=200,
+        content={"message": "CORS preflight OK for batch delete"},
+    )
+
+
+@app.post("/api/v1/knowledgebase/delete/batch")
+async def knowledgebase_delete_batch_endpoint(
+    request: Request,
+    file_ids: List[str] = Form(...),
+    max_parallel: int = Form(5)
+):
+    """Route batch delete requests to knowledgebase ingestion service."""
+    try:
+        logger.info(f"🗑️ Received batch delete request: {len(file_ids)} files")
+        logger.info(f"📋 Max parallel: {max_parallel}")
+
+        # Prepare form data
+        data = {
+            'file_ids': file_ids,
+            'max_parallel': max_parallel
+        }
+
+        # Get request headers
+        request_headers = dict(request.headers)
+        headers = {}
+        for k, v in request_headers.items():
+            if k.lower() not in ['content-type', 'content-length', 'host']:
+                headers[k] = v
+
+        headers.update({k: v for k, v in request_headers.items()
+                       if k.lower() not in ['content-type', 'content-length', 'host']})
+
+        target_url = f"{KNOWLEDGEBASE_INGESTION_URL}/delete/batch"
+        logger.info(f"📤 Forwarding batch delete to: {target_url}")
+        logger.info(f"📋 File IDs: {file_ids}")
+        logger.info(f"📋 Form data fields: {data if data else 'None'}")
+        logger.info(f"📋 Custom headers: {headers if headers else 'None'}")
+
+        # Make the request to the backend service
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(
+                target_url,
+                data=data,
+                headers=headers
+            )
+
+            logger.info(f"📥 Batch delete response status: {resp.status_code}")
+
+            # Parse response content
+            response_content = None
+            try:
+                response_content = resp.json()
+                logger.info(f"📥 Batch delete response (JSON): {response_content}")
+            except Exception as json_error:
+                logger.warning(f"⚠️  Could not parse response as JSON: {json_error}")
+                response_content = resp.text
+                logger.info(f"📥 Batch delete response (text): {response_content[:500]}")
+
+            # Log success or warnings
+            if resp.status_code == 200:
+                logger.info("✅ Batch delete completed successfully")
+            else:
+                logger.warning(f"⚠️  Batch delete returned status {resp.status_code}")
+                logger.warning(f"⚠️  Response details: {response_content}")
+
+            # Return the response from the backend service
+            return JSONResponse(
+                content=response_content,
+                status_code=resp.status_code
+            )
+
+    except httpx.TimeoutException as te:
+        logger.error(f"⏰ Batch delete request timed out: {te}")
+        raise HTTPException(
+            status_code=504,
+            detail=f"Batch delete request timed out. The service is slow to respond: {str(te)}"
+        )
+    except httpx.ConnectError as ce:
+        logger.error(f"🚫 Could not connect to knowledgebase service at {KNOWLEDGEBASE_INGESTION_URL}: {ce}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not connect to knowledgebase service: {str(ce)}"
+        )
+    except Exception as e:
+        logger.error(f"❌ Error routing batch delete request: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Knowledgebase service error: {str(e)}"
+        )
 
 
 @app.get("/api/v1/knowledgebase/files")
