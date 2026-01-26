@@ -107,8 +107,10 @@ async def lifespan(app: FastAPI):
         logger.info("🚀 Knowledgebase ingestion service started successfully")
         logger.info("🏥 Health check endpoint: /health")
         logger.info("📤 Upload endpoint: POST /upload")
-        logger.info("� Batch upload endpoint: POST /upload/batch (parallel processing)")
-        logger.info("�📄 Files endpoint: GET /files")
+        logger.info("📦 Batch upload endpoint: POST /upload/batch (parallel processing)")
+        logger.info("🗑️ Delete endpoint: DELETE /files/{file_id}")
+        logger.info("🗑️ Batch delete endpoint: POST /delete/batch (parallel processing)")
+        logger.info("📄 Files endpoint: GET /files")
 
         yield
 
@@ -262,6 +264,25 @@ class BatchUploadResponse(BaseModel):
     successful_uploads: int
     failed_uploads: int
     results: List[BatchUploadItem]
+    message: str
+    parallel_processing: bool = True
+
+
+class BatchDeleteItem(BaseModel):
+    file_id: str
+    filename: str
+    success: bool
+    message: str
+    error: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
+
+
+class BatchDeleteResponse(BaseModel):
+    success: bool
+    total_files: int
+    successful_deletes: int
+    failed_deletes: int
+    results: List[BatchDeleteItem]
     message: str
     parallel_processing: bool = True
 
@@ -1146,112 +1167,157 @@ async def process_single_file_upload(
         )
 
 
-@app.post("/upload/batch", response_model=BatchUploadResponse)
-async def upload_documents_batch(
-    files: List[UploadFile] = File(...),
-    display_names: Optional[str] = Form(None),  # Comma-separated display names
-    user_email: Optional[str] = Header(None, alias="X-User-Email"),
-    replace_existing: bool = Form(False),
-    max_parallel: int = Form(5)  # Max concurrent uploads
+async def process_single_file_delete(file_id: str) -> BatchDeleteItem:
+    """
+    Process a single file deletion for batch operations.
+    Returns BatchDeleteItem with result details.
+    """
+    start_time = time.perf_counter()
+    
+    try:
+        logger.info(f"🗑️ Processing batch delete for file ID: {file_id}")
+        
+        # Call the existing delete function
+        result = await delete_file(file_id)
+        
+        processing_time = time.perf_counter() - start_time
+        
+        # Extract filename from the result details or use file_id
+        filename = "Unknown file"
+        if result.get("details"):
+            # Try to get filename from database lookup
+            if db.railway_db:
+                try:
+                    file_record = await db.railway_db.fetchrow(
+                        "SELECT original_filename FROM file_uploads WHERE id = $1",
+                        file_id
+                    )
+                    if file_record:
+                        filename = file_record['original_filename']
+                except:
+                    pass
+        
+        logger.info(f"✅ Batch delete completed for {file_id} in {processing_time:.2f}s")
+        
+        return BatchDeleteItem(
+            file_id=file_id,
+            filename=filename,
+            success=result["success"],
+            message=result["message"],
+            details=result.get("details")
+        )
+        
+    except HTTPException as e:
+        # Re-raise HTTP exceptions
+        logger.error(f"❌ HTTP error in batch delete for {file_id}: {e.detail}")
+        return BatchDeleteItem(
+            file_id=file_id,
+            filename="Unknown file",
+            success=False,
+            message=e.detail,
+            error=str(e.detail)
+        )
+    except Exception as e:
+        logger.error(f"❌ Error in batch delete for {file_id}: {e}")
+        return BatchDeleteItem(
+            file_id=file_id,
+            filename="Unknown file",
+            success=False,
+            message="Delete failed",
+            error=str(e)
+        )
+
+
+@app.post("/delete/batch", response_model=BatchDeleteResponse)
+async def delete_files_batch(
+    file_ids: List[str] = Form(...),
+    max_parallel: int = Form(5)  # Max concurrent deletes
 ):
     """
-    Upload multiple documents in parallel for improved performance.
+    Delete multiple files in parallel for improved performance.
     
     Args:
-        files: List of files to upload
-        display_names: Optional comma-separated display names
-        user_email: User email for tracking
-        replace_existing: Whether to replace existing files
-        max_parallel: Maximum number of concurrent uploads (default: 5)
+        file_ids: List of file IDs to delete
+        max_parallel: Maximum number of concurrent deletes (default: 5)
     
     Returns:
-        BatchUploadResponse with results for each file
+        BatchDeleteResponse with results for each file
     """
     start_time = time.perf_counter()
     
     if not genai_client:
-        logger.critical("Batch upload failed: Gemini client not configured")
+        logger.critical("Batch delete failed: Gemini client not configured")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="File upload service is unavailable"
+            detail="File delete service is unavailable"
         )
     
-    if not files:
+    if not file_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No files provided for upload"
+            detail="No file IDs provided for deletion"
         )
     
-    logger.info(f"🚀 Starting batch upload of {len(files)} files with max_parallel={max_parallel}")
+    logger.info(f"🗑️ Starting batch delete of {len(file_ids)} files with max_parallel={max_parallel}")
     
-    # Parse display names if provided
-    display_name_list = []
-    if display_names:
-        display_name_list = [name.strip() for name in display_names.split(',') if name.strip()]
-    
-    # Create semaphore to limit concurrent uploads
+    # Create semaphore to limit concurrent deletes
     semaphore = asyncio.Semaphore(max_parallel)
     
-    async def upload_with_semaphore(file: UploadFile, index: int) -> BatchUploadItem:
+    async def delete_with_semaphore(file_id: str) -> BatchDeleteItem:
         async with semaphore:
-            display_name = display_name_list[index] if index < len(display_name_list) else None
-            return await process_single_file_upload(
-                file=file,
-                display_name=display_name,
-                user_email=user_email,
-                replace_existing=replace_existing
-            )
+            return await process_single_file_delete(file_id)
     
     # Process files in parallel
     try:
         tasks = [
-            upload_with_semaphore(file, i) 
-            for i, file in enumerate(files)
+            delete_with_semaphore(file_id) 
+            for file_id in file_ids
         ]
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
         # Process results and handle exceptions
         processed_results = []
-        successful_uploads = 0
-        failed_uploads = 0
+        successful_deletes = 0
+        failed_deletes = 0
         
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 # Handle unexpected exceptions
-                processed_results.append(BatchUploadItem(
-                    filename=files[i].filename or f"file_{i}",
+                processed_results.append(BatchDeleteItem(
+                    file_id=file_ids[i],
+                    filename="Unknown file",
                     success=False,
                     message="Unexpected error",
                     error=str(result)
                 ))
-                failed_uploads += 1
+                failed_deletes += 1
             else:
                 processed_results.append(result)
                 if result.success:
-                    successful_uploads += 1
+                    successful_deletes += 1
                 else:
-                    failed_uploads += 1
+                    failed_deletes += 1
         
         processing_time = time.perf_counter() - start_time
         
-        logger.info(f"✅ Batch upload completed: {successful_uploads}/{len(files)} successful in {processing_time:.2f}s")
+        logger.info(f"✅ Batch delete completed: {successful_deletes}/{len(file_ids)} successful in {processing_time:.2f}s")
         
-        return BatchUploadResponse(
-            success=successful_uploads > 0,
-            total_files=len(files),
-            successful_uploads=successful_uploads,
-            failed_uploads=failed_uploads,
+        return BatchDeleteResponse(
+            success=successful_deletes > 0,
+            total_files=len(file_ids),
+            successful_deletes=successful_deletes,
+            failed_deletes=failed_deletes,
             results=processed_results,
-            message=f"Batch upload completed: {successful_uploads} successful, {failed_uploads} failed",
+            message=f"Batch delete completed: {successful_deletes} successful, {failed_deletes} failed",
             parallel_processing=True
         )
         
     except Exception as e:
-        logger.error(f"❌ Critical error in batch upload: {e}")
+        logger.error(f"❌ Critical error in batch delete: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Batch upload failed: {str(e)}"
+            detail=f"Batch delete failed: {str(e)}"
         )
 
 
