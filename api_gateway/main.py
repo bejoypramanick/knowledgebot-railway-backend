@@ -1051,15 +1051,23 @@ async def knowledgebase_delete_batch_options():
 @app.post("/api/v1/knowledgebase/delete/batch")
 async def knowledgebase_delete_batch_endpoint(
     request: Request,
-    file_ids: List[str] = Form(...),
+    file_ids: Optional[List[str]] = Form(None),
     max_parallel: int = Form(5)
 ):
     """Route batch delete requests to knowledgebase ingestion service."""
     try:
-        logger.info(f"🗑️ Received batch delete request: {len(file_ids)} files")
+        # Handle the case where file_ids might come as a single string or list
+        # This is needed because FormData.append('file_ids', id) multiple times creates a list
+        if file_ids is None:
+            # Try to parse from request body manually if FastAPI doesn't parse it correctly
+            form_data = await request.form()
+            file_ids = form_data.getlist('file_ids') if 'file_ids' in form_data else []
+        
+        logger.info(f"🗑️ Received batch delete request: {len(file_ids) if file_ids else 0} files")
         logger.info(f"📋 Max parallel: {max_parallel}")
+        logger.info(f"📋 File IDs: {file_ids}")
 
-        # Prepare form data
+        # Prepare form data - ensure file_ids is properly formatted
         data = {
             'file_ids': file_ids,
             'max_parallel': max_parallel
@@ -1077,7 +1085,6 @@ async def knowledgebase_delete_batch_endpoint(
 
         target_url = f"{KNOWLEDGEBASE_INGESTION_URL}/delete/batch"
         logger.info(f"📤 Forwarding batch delete to: {target_url}")
-        logger.info(f"📋 File IDs: {file_ids}")
         logger.info(f"📋 Form data fields: {data if data else 'None'}")
         logger.info(f"📋 Custom headers: {headers if headers else 'None'}")
 
