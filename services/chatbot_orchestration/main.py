@@ -8,19 +8,31 @@ logger = logging.getLogger(__name__)
 
 # Log port and environment basic state
 logger.info("🔍 --- Chatbot Startup Diagnostics ---")
-logger.info("🆔 SERVICE_IDENTITY: CHATBOT_ORCHESTRATION_V1")
-logger.info(f"🐍 Python: {sys.version}")
-logger.info(f"📂 Current Dir: {os.getcwd()}")
 
 try:
-    from fastapi import FastAPI, HTTPException, Request, StreamingResponse
+    from fastapi import FastAPI, HTTPException, Request
     from fastapi.middleware.cors import CORSMiddleware
+except ImportError as e:
+    logger.error(f"Failed to import FastAPI components: {e}")
+    raise
+
+try:
     from pydantic import BaseModel, Field
     from typing import Optional, List, Dict, Any, Annotated
     from dataclasses import dataclass
+except ImportError as e:
+    logger.error(f"Failed to import Pydantic components: {e}")
+    raise
+
+try:
     from dotenv import load_dotenv
     import uuid
     from datetime import datetime
+except ImportError as e:
+    logger.error(f"Failed to import basic components: {e}")
+    raise
+
+try:
     from google import genai
     from contextlib import asynccontextmanager
     from pydantic_ai import Agent, RunContext
@@ -28,6 +40,9 @@ try:
     import asyncio
     import json
     import re
+except ImportError as e:
+    logger.error(f"Failed to import AI components: {e}")
+    raise
     from pathlib import Path
     logger.info("✅ Core modules imported successfully")
 except ImportError as e:
@@ -35,6 +50,48 @@ except ImportError as e:
     # Print search path for debugging
     logger.info(f"📍 Python Path: {sys.path}")
     raise
+
+try:
+    from fastapi.responses import StreamingResponse
+    logger.info("✅ StreamingResponse imported successfully")
+except ImportError as e:
+    logger.error(f"Failed to import StreamingResponse: {e}")
+    # Fallback: create a simple streaming response class
+    import asyncio
+    from starlette.responses import Response
+    
+    class StreamingResponse:
+        def __init__(self, content, media_type="text/plain", headers=None):
+            self.content = content
+            self.media_type = media_type
+            self.headers = headers or {}
+        
+        async def __call__(self, scope, receive, send):
+            await send({
+                'type': 'http.response.start',
+                'status': 200,
+                'headers': [
+                    [b'content-type', self.media_type.encode()],
+                    *[(k.encode(), v.encode()) for k, v in self.headers.items()]
+                ],
+            })
+            
+            if hasattr(self.content, '__aiter__'):
+                async for chunk in self.content:
+                    await send({
+                        'type': 'http.response.body',
+                        'body': chunk.encode() if isinstance(chunk, str) else chunk,
+                    })
+            else:
+                for chunk in self.content:
+                    await send({
+                        'type': 'http.response.body',
+                        'body': chunk.encode() if isinstance(chunk, str) else chunk,
+                    })
+            
+            await send({'type': 'http.response.body', 'body': b''})
+    
+    logger.warning("⚠️ Using fallback StreamingResponse implementation")
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
