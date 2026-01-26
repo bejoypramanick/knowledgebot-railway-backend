@@ -2259,11 +2259,38 @@ async def chat_stream(request: ChatRequest):
                     # Run agent and stream response
                     # Run agent with message history for multi-turn conversations
                     # This triggers Implicit Prefix Caching for turns 2-5
-                    result = await agent.run(
-                        request.message,
-                        message_history=message_history,  # Pass preserved message history
-                        deps=session_dep
-                    )
+                    try:
+                        result = await agent.run(
+                            request.message,
+                            message_history=message_history,  # Pass preserved message history
+                            deps=session_dep
+                        )
+                    except Exception as e:
+                        # Handle Pydantic AI validation errors (e.g., UNEXPECTED_TOOL_CALL finish reason)
+                        if "ValidationError" in str(e) and "finishReason" in str(e) and "UNEXPECTED_TOOL_CALL" in str(e):
+                            logger.warning(f"⚠️ Streaming: Pydantic AI validation error with UNEXPECTED_TOOL_CALL, retrying with basic model")
+                            # Fallback: try again without complex tools/settings
+                            try:
+                                from pydantic_ai.models.gemini import GeminiModel
+                                fallback_model = GeminiModel(MODEL_NAME)
+                                fallback_agent = Agent(
+                                    fallback_model,
+                                    system_prompt="You are a helpful assistant. Answer the user's question directly.",
+                                    deps_type=ChatSessionDeps,
+                                )
+                                result = await fallback_agent.run(
+                                    request.message,
+                                    message_history=message_history,
+                                    deps=session_dep
+                                )
+                                logger.info(f"✅ Streaming fallback agent succeeded")
+                            except Exception as fallback_error:
+                                logger.error(f"❌ Streaming fallback agent also failed: {fallback_error}")
+                                yield f"data: {json.dumps({'type': 'error', 'content': 'Chat service temporarily unavailable due to model compatibility issues'})}\n\n"
+                                return
+                        else:
+                            # Re-raise non-validation errors
+                            raise e
                     
                     # Update session state with result for next turn
                     session_state_manager.update_session_state(session_id, result)
@@ -2406,11 +2433,40 @@ async def chat(request: ChatRequest):
         # Run agent (with self-correction via model_retry)
         # Pass the current message as prompt and previous messages as history
         # Also pass the dependency instance for this specific run
-        result = await agent.run(
-            request.message, 
-            message_history=history_messages,
-            deps=session_dep
-        )
+        try:
+            result = await agent.run(
+                request.message, 
+                message_history=history_messages,
+                deps=session_dep
+            )
+        except Exception as e:
+            # Handle Pydantic AI validation errors (e.g., UNEXPECTED_TOOL_CALL finish reason)
+            if "ValidationError" in str(e) and "finishReason" in str(e) and "UNEXPECTED_TOOL_CALL" in str(e):
+                logger.warning(f"⚠️ Pydantic AI validation error with UNEXPECTED_TOOL_CALL, retrying with basic model")
+                # Fallback: try again without complex tools/settings
+                try:
+                    from pydantic_ai.models.gemini import GeminiModel
+                    fallback_model = GeminiModel(MODEL_NAME)
+                    fallback_agent = Agent(
+                        fallback_model,
+                        system_prompt="You are a helpful assistant. Answer the user's question directly.",
+                        deps_type=ChatSessionDeps,
+                    )
+                    result = await fallback_agent.run(
+                        request.message,
+                        message_history=history_messages,
+                        deps=session_dep
+                    )
+                    logger.info(f"✅ Fallback agent succeeded")
+                except Exception as fallback_error:
+                    logger.error(f"❌ Fallback agent also failed: {fallback_error}")
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Chat service temporarily unavailable due to model compatibility issues"
+                    )
+            else:
+                # Re-raise non-validation errors
+                raise e
         
         # Extract response text
         response_text = ""
