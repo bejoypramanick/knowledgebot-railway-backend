@@ -105,8 +105,22 @@ context_cache = {}
 
 def generate_cache_key(prompt_components: Dict[str, Any]) -> str:
     """Generate a unique cache key based on prompt components."""
+    # Safely extract file_context data to prevent NoneType errors
+    file_context = prompt_components.get('file_context', [])
+    safe_file_context = []
+    if file_context:
+        try:
+            safe_file_context = [
+                (f.file_name, f.content[:100] if f.content else '')
+                for f in file_context 
+                if f and hasattr(f, 'file_name') and hasattr(f, 'content')
+            ]
+        except Exception as e:
+            logger.warning(f"⚠️ Error processing file_context for cache key: {e}")
+            safe_file_context = []
+    
     cache_data = {
-        'file_context': str(sorted([(f.file_name, f.content[:100]) for f in prompt_components.get('file_context', [])])),
+        'file_context': str(sorted(safe_file_context)),
         'custom_prompt': prompt_components.get('custom_prompt', ''),
         'response_policy': prompt_components.get('response_policy', ''),
         'rag_had_results': prompt_components.get('rag_had_results', True),
