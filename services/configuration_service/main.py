@@ -983,18 +983,47 @@ async def request_human_agent(
     """Request a human agent for a chat session."""
     try:
         log_endpoint_request("configuration_service", "request-agent", None)
+        logger.info(f"🔧 Requesting human agent for session: {session_id}")
+        logger.info(f"🔧 Requested by user: {current_user.get('email', 'unknown')}")
         
         async with get_db_connection() as conn:
             # Get session details
+            logger.info(f"🔧 Looking for session in database: {session_id}")
             session = await conn.fetchrow(
                 "SELECT * FROM chat_sessions WHERE session_id = $1",
                 session_id
             )
             
             if not session:
-                raise HTTPException(status_code=404, detail="Session not found")
+                logger.warning(f"⚠️ Session not found in configuration database: {session_id}")
+                # Try to create the session if it doesn't exist (might be in chatbot orchestration db)
+                logger.info(f"🔧 Attempting to create session in configuration database: {session_id}")
+                try:
+                    await conn.execute(
+                        """
+                        INSERT INTO chat_sessions (session_id, user_email, created_at, last_activity_at, is_active)
+                        VALUES ($1, $2, NOW(), NOW(), TRUE)
+                        ON CONFLICT (session_id) DO NOTHING
+                        """,
+                        session_id, current_user.get('email', 'unknown')
+                    )
+                    # Fetch the newly created session
+                    session = await conn.fetchrow(
+                        "SELECT * FROM chat_sessions WHERE session_id = $1",
+                        session_id
+                    )
+                    if not session:
+                        logger.error(f"❌ Failed to create session: {session_id}")
+                        raise HTTPException(status_code=404, detail="Session not found and could not be created")
+                    logger.info(f"✅ Successfully created session: {session_id}")
+                except Exception as create_error:
+                    logger.error(f"❌ Error creating session {session_id}: {create_error}")
+                    raise HTTPException(status_code=500, detail=f"Error creating session: {str(create_error)}")
+            
+            logger.info(f"✅ Found session: {session_id}, user: {session.get('user_email', 'unknown')}")
             
             # Check if agent is already assigned
+            logger.info(f"🔧 Checking for existing agent assignment for session: {session_id}")
             existing_assignment = await conn.fetchrow(
                 """
                 SELECT ha.* FROM human_agents ha
@@ -1005,6 +1034,7 @@ async def request_human_agent(
             )
             
             if existing_assignment:
+                logger.info(f"✅ Agent already assigned to session {session_id}: {existing_assignment.get('email', 'unknown')}")
                 return {
                     "status": "already_assigned",
                     "agent": {
@@ -1015,6 +1045,7 @@ async def request_human_agent(
                 }
             
             # Find available agents
+            logger.info(f"🔧 Looking for available agents")
             available_agents = await conn.fetch(
                 """
                 SELECT * FROM human_agents 
@@ -1025,7 +1056,10 @@ async def request_human_agent(
                 """
             )
             
+            logger.info(f"🔧 Found {len(available_agents)} available agents")
+            
             if not available_agents:
+                logger.warning(f"⚠️ No agents available for session: {session_id}")
                 return {
                     "status": "no_agents_available",
                     "message": "No human agents are currently available"
@@ -1033,6 +1067,7 @@ async def request_human_agent(
             
             # Assign first available agent
             agent = available_agents[0]
+            logger.info(f"🔧 Assigning agent {agent.get('email', 'unknown')} to session {session_id}")
             
             # Create assignment record
             await conn.execute(
@@ -1046,6 +1081,7 @@ async def request_human_agent(
                 session_id, agent['id'], current_user.get('email', 'system')
             )
             
+            logger.info(f"✅ Successfully assigned agent {agent.get('email', 'unknown')} to session {session_id}")
             return {
                 "status": "assigned",
                 "agent": {
@@ -1055,8 +1091,11 @@ async def request_human_agent(
                 }
             }
             
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
-        logger.error(f"Error requesting human agent: {e}", exc_info=True)
+        logger.error(f"❌ Error requesting human agent for session {session_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error requesting human agent: {str(e)}")
 
 
