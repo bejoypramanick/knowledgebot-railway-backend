@@ -1230,20 +1230,29 @@ async def process_single_file_delete(file_id: str) -> BatchDeleteItem:
 
 @app.post("/delete/batch", response_model=BatchDeleteResponse)
 async def delete_files_batch(
-    file_ids: List[str] = Form(...),
+    request: Request,
     max_parallel: int = Form(5)  # Max concurrent deletes
 ):
     """
     Delete multiple files in parallel for improved performance.
     
     Args:
-        file_ids: List of file IDs to delete
+        request: Request object to parse form data manually
         max_parallel: Maximum number of concurrent deletes (default: 5)
     
     Returns:
         BatchDeleteResponse with results for each file
     """
     start_time = time.perf_counter()
+    
+    # Parse form data manually to handle file_ids correctly
+    form_data = await request.form()
+    file_ids = form_data.getlist('file_ids') if 'file_ids' in form_data else []
+    
+    logger.info(f"🗑️ Batch delete - Parsed form data:")
+    logger.info(f"📋 file_ids: {file_ids}")
+    logger.info(f"📋 max_parallel: {max_parallel}")
+    logger.info(f"📋 All form fields: {dict(form_data)}")
     
     if not genai_client:
         logger.critical("Batch delete failed: Gemini client not configured")
@@ -1253,6 +1262,7 @@ async def delete_files_batch(
         )
     
     if not file_ids:
+        logger.error("Batch delete failed: No file IDs provided")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No file IDs provided for deletion"
