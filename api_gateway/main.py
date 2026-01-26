@@ -745,10 +745,10 @@ async def knowledgebase_upload_batch_endpoint(
 
         # Prepare multipart form data for forwarding
         files_data = []
-        for file in files:
+        for i, file in enumerate(files):
             file_content = await file.read()
             files_data.append((
-                file.filename or 'uploaded_file',
+                'files',  # Field name for multiple files
                 file_content,
                 file.content_type or 'application/octet-stream'
             ))
