@@ -1000,7 +1000,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                                 'mime_type': file_record['mime_type'],
                                 'size_bytes': file_record['size_bytes'],
                                 'upload_date': file_record['created_at'].isoformat() if file_record['created_at'] else None,
-                                'db_metadata': dict(file_record['metadata']) if file_record['metadata'] else {}
+                                'db_metadata': file_record['metadata'] if isinstance(file_record['metadata'], dict) else {}
                             }
                             logger.info(f"Successfully retrieved database metadata for file {f.name}")
                         else:
