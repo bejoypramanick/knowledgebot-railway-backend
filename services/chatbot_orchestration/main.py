@@ -1740,45 +1740,73 @@ async def chat_stream(request: ChatRequest):
         session_dep = ChatSessionDeps(session_id=session_id)
         
         async def generate_response():
-            stream_completed = False
-            try:
-                # Send initial response chunk
-                yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
-                
-                # Run agent and stream response
-                result = await agent.run(
-                    request.message,
-                    message_history=history_messages,
-                    deps=session_dep
-                )
-                
-                response_text = ""
-                if hasattr(result, 'output'):
-                    response_text = result.output if isinstance(result.output, str) else str(result.output)
-                elif hasattr(result, 'data'):
-                    response_text = str(result.data)
-                elif hasattr(result, 'response') and result.response:
-                    response_text = result.response.text if hasattr(result.response, 'text') else str(result.response)
-                
-                # Stream the response word by word
-                words = response_text.split()
-                for i, word in enumerate(words):
-                    chunk = word + (' ' if i < len(words) - 1 else '')
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                    await asyncio.sleep(0.1)  # Increased delay for more natural streaming effect
-                
-                # Send final response with sources
-                yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': file_context})}\n\n"
-                yield f"data: [DONE]\n\n"
-                stream_completed = True
-                
-            except Exception as e:
-                logger.error(f"Error in streaming response: {e}")
-                
-                # Only send error if stream hasn't completed successfully
-                if not stream_completed:
-                    yield f"data: {json.dumps({'type': 'error', 'content': 'I encountered an error while processing your request. Please try again.'})}\n\n"
+            max_retries = 3
+            retry_delay = 1.0  # Start with 1 second delay
+            
+            for attempt in range(max_retries):
+                try:
+                    # Send initial response chunk only on first attempt
+                    if attempt == 0:
+                        yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
+                    
+                    # Run agent and stream response
+                    result = await agent.run(
+                        request.message,
+                        message_history=history_messages,
+                        deps=session_dep
+                    )
+                    
+                    response_text = ""
+                    if hasattr(result, 'output'):
+                        response_text = result.output if isinstance(result.output, str) else str(result.output)
+                    elif hasattr(result, 'data'):
+                        response_text = str(result.data)
+                    elif hasattr(result, 'response') and result.response:
+                        response_text = result.response.text if hasattr(result.response, 'text') else str(result.response)
+                    
+                    # Stream the response word by word
+                    words = response_text.split()
+                    for i, word in enumerate(words):
+                        chunk = word + (' ' if i < len(words) - 1 else '')
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                        await asyncio.sleep(0.1)  # Increased delay for more natural streaming effect
+                    
+                    # Send final response with sources
+                    yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': file_context})}\n\n"
                     yield f"data: [DONE]\n\n"
+                    
+                    # If we get here, success! Break the retry loop
+                    logger.info(f"✅ Stream completed successfully on attempt {attempt + 1}")
+                    return
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.error(f"❌ Error in streaming response (attempt {attempt + 1}/{max_retries}): {error_msg}")
+                    
+                    # Check if this is a database/connection error that should be retried
+                    is_retryable_error = any(keyword in error_msg.lower() for keyword in [
+                        'database', 'connection', 'timeout', 'network', 'unavailable',
+                        'sql', 'postgres', 'connection refused', 'connection reset',
+                        'operational error', 'deadlock', 'constraint', 'integrity'
+                    ])
+                    
+                    if attempt < max_retries - 1 and is_retryable_error:
+                        # This is a retryable error and we have attempts left
+                        logger.info(f"🔄 Retrying in {retry_delay}s due to database/connection error...")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay = min(retry_delay * 2, 8.0)  # Exponential backoff, max 8 seconds
+                        continue
+                    else:
+                        # This is the last attempt or non-retryable error
+                        if is_retryable_error:
+                            logger.error(f"❌ Max retries ({max_retries}) exceeded for database error")
+                        else:
+                            logger.error(f"❌ Non-retryable error occurred: {error_msg}")
+                        
+                        # Send error message only once at the end
+                        yield f"data: {json.dumps({'type': 'error', 'content': 'I encountered an error while processing your request. Please try again.'})}\n\n"
+                        yield f"data: [DONE]\n\n"
+                        return
         
         return StreamingResponse(
             generate_response(),
