@@ -107,7 +107,8 @@ async def lifespan(app: FastAPI):
         logger.info("🚀 Knowledgebase ingestion service started successfully")
         logger.info("🏥 Health check endpoint: /health")
         logger.info("📤 Upload endpoint: POST /upload")
-        logger.info("📄 Files endpoint: GET /files")
+        logger.info("� Batch upload endpoint: POST /upload/batch (parallel processing)")
+        logger.info("�📄 Files endpoint: GET /files")
 
         yield
 
@@ -244,6 +245,25 @@ class ValidationError(BaseModel):
 class ValidationResult(BaseModel):
     valid: bool
     errors: List[ValidationError] = []
+
+
+class BatchUploadItem(BaseModel):
+    filename: str
+    success: bool
+    file: Optional[FileInfo] = None
+    message: str
+    error: Optional[str] = None
+    replaced_existing: bool = False
+
+
+class BatchUploadResponse(BaseModel):
+    success: bool
+    total_files: int
+    successful_uploads: int
+    failed_uploads: int
+    results: List[BatchUploadItem]
+    message: str
+    parallel_processing: bool = True
 
 
 # ============================================================================
@@ -967,6 +987,273 @@ async def upload_document(
                 logger.debug(f"Temporary file deleted: {tmp_path}", extra=log_context)
             except Exception as cleanup_err:
                 logger.warning(f"Failed to delete temp file {tmp_path}: {cleanup_err}", extra=log_context)
+
+
+async def process_single_file_upload(
+    file: UploadFile,
+    display_name: Optional[str] = None,
+    user_email: Optional[str] = None,
+    replace_existing: bool = False
+) -> BatchUploadItem:
+    """
+    Process a single file upload for batch operations.
+    Returns BatchUploadItem with result details.
+    """
+    start_time = time.perf_counter()
+    original_filename = sanitize_filename(file.filename or "unknown_file")
+    file_display_name = display_name or original_filename
+    email = user_email or settings.default_user_email
+    
+    log_context = {"upload_file_name": original_filename, "user_email": email}
+    
+    try:
+        # Validate file
+        ext_valid, ext_error = validate_file_extension(original_filename)
+        if not ext_valid:
+            return BatchUploadItem(
+                filename=original_filename,
+                success=False,
+                message="Validation failed",
+                error=ext_error
+            )
+        
+        mime_valid, mime_error = validate_mime_type(file.content_type, original_filename)
+        if not mime_valid:
+            return BatchUploadItem(
+                filename=original_filename,
+                success=False,
+                message="Validation failed",
+                error=mime_error
+            )
+        
+        # Stream to temp file
+        tmp_path, file_size = await _stream_to_temp_file(file, original_filename)
+        
+        # Validate file size
+        size_valid, size_error = validate_file_size(file_size)
+        if not size_valid:
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            return BatchUploadItem(
+                filename=original_filename,
+                success=False,
+                message="Validation failed",
+                error=size_error
+            )
+        
+        # Process file upload (similar to main upload endpoint but simplified)
+        sha256_hash = calculate_sha256(tmp_path)
+        detected_mime_type = detect_mime_type_from_extension(original_filename, file.content_type)
+        
+        # Upload to Gemini
+        gemini_display_name = f"{file_display_name} | {original_filename}"
+        uploaded_file = genai_client.files.upload(
+            file=tmp_path,
+            config=types.UploadFileConfig(
+                display_name=gemini_display_name,
+                mime_type=detected_mime_type
+            )
+        )
+        
+        # Wait for processing
+        final_state = "PROCESSING"
+        gemini_processed_at = None
+        
+        for i in range(15):
+            current_file = genai_client.files.get(name=uploaded_file.name)
+            final_state = current_file.state.name
+            
+            if final_state == "ACTIVE":
+                from datetime import datetime
+                gemini_processed_at = datetime.utcnow()
+                break
+            elif final_state == "FAILED":
+                break
+                
+            await asyncio.sleep(2)
+        
+        if final_state != "ACTIVE":
+            # Cleanup on failure
+            try:
+                genai_client.files.delete(name=uploaded_file.name)
+            except:
+                pass
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            
+            return BatchUploadItem(
+                filename=original_filename,
+                success=False,
+                message="File processing failed",
+                error=f"Final state: {final_state}"
+            )
+        
+        # Store metadata
+        file_record_id = await _record_metadata(
+            user_id=email,
+            original_filename=original_filename,
+            file_display_name=file_display_name,
+            file_ext=original_filename.rsplit('.', 1)[-1] if '.' in original_filename else '',
+            uploaded_file=uploaded_file,
+            file_size=file_size,
+            sha256_hash=sha256_hash,
+            final_state=final_state,
+            gemini_processed_at=gemini_processed_at,
+            mime_type=detected_mime_type
+        )
+        
+        # Create response
+        file_info = FileInfo(
+            id=str(uploaded_file.name),
+            name=original_filename,
+            display_name=file_display_name,
+            size=file_size,
+            mime_type=detected_mime_type,
+            created_at=gemini_processed_at or datetime.utcnow(),
+            source="upload",
+            gemini_file_name=str(uploaded_file.name),
+            state=final_state,
+            sha256_hash=sha256_hash,
+            file_record_id=file_record_id
+        )
+        
+        processing_time = time.perf_counter() - start_time
+        logger.info(f"✅ Batch upload completed for {original_filename} in {processing_time:.2f}s", extra=log_context)
+        
+        return BatchUploadItem(
+            filename=original_filename,
+            success=True,
+            file=file_info,
+            message="Upload successful",
+            replaced_existing=False
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Error in batch upload for {original_filename}: {e}", extra=log_context)
+        
+        # Cleanup on error
+        if 'tmp_path' in locals() and tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+        
+        return BatchUploadItem(
+            filename=original_filename,
+            success=False,
+            message="Upload failed",
+            error=str(e)
+        )
+
+
+@app.post("/upload/batch", response_model=BatchUploadResponse)
+async def upload_documents_batch(
+    files: List[UploadFile] = File(...),
+    display_names: Optional[str] = Form(None),  # Comma-separated display names
+    user_email: Optional[str] = Header(None, alias="X-User-Email"),
+    replace_existing: bool = Form(False),
+    max_parallel: int = Form(5)  # Max concurrent uploads
+):
+    """
+    Upload multiple documents in parallel for improved performance.
+    
+    Args:
+        files: List of files to upload
+        display_names: Optional comma-separated display names
+        user_email: User email for tracking
+        replace_existing: Whether to replace existing files
+        max_parallel: Maximum number of concurrent uploads (default: 5)
+    
+    Returns:
+        BatchUploadResponse with results for each file
+    """
+    start_time = time.perf_counter()
+    
+    if not genai_client:
+        logger.critical("Batch upload failed: Gemini client not configured")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="File upload service is unavailable"
+        )
+    
+    if not files:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No files provided for upload"
+        )
+    
+    logger.info(f"🚀 Starting batch upload of {len(files)} files with max_parallel={max_parallel}")
+    
+    # Parse display names if provided
+    display_name_list = []
+    if display_names:
+        display_name_list = [name.strip() for name in display_names.split(',') if name.strip()]
+    
+    # Create semaphore to limit concurrent uploads
+    semaphore = asyncio.Semaphore(max_parallel)
+    
+    async def upload_with_semaphore(file: UploadFile, index: int) -> BatchUploadItem:
+        async with semaphore:
+            display_name = display_name_list[index] if index < len(display_name_list) else None
+            return await process_single_file_upload(
+                file=file,
+                display_name=display_name,
+                user_email=user_email,
+                replace_existing=replace_existing
+            )
+    
+    # Process files in parallel
+    try:
+        tasks = [
+            upload_with_semaphore(file, i) 
+            for i, file in enumerate(files)
+        ]
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process results and handle exceptions
+        processed_results = []
+        successful_uploads = 0
+        failed_uploads = 0
+        
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                # Handle unexpected exceptions
+                processed_results.append(BatchUploadItem(
+                    filename=files[i].filename or f"file_{i}",
+                    success=False,
+                    message="Unexpected error",
+                    error=str(result)
+                ))
+                failed_uploads += 1
+            else:
+                processed_results.append(result)
+                if result.success:
+                    successful_uploads += 1
+                else:
+                    failed_uploads += 1
+        
+        processing_time = time.perf_counter() - start_time
+        
+        logger.info(f"✅ Batch upload completed: {successful_uploads}/{len(files)} successful in {processing_time:.2f}s")
+        
+        return BatchUploadResponse(
+            success=successful_uploads > 0,
+            total_files=len(files),
+            successful_uploads=successful_uploads,
+            failed_uploads=failed_uploads,
+            results=processed_results,
+            message=f"Batch upload completed: {successful_uploads} successful, {failed_uploads} failed",
+            parallel_processing=True
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Critical error in batch upload: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Batch upload failed: {str(e)}"
+        )
+
 
 @app.get("/files")
 async def list_files(
