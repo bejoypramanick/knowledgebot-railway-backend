@@ -56,7 +56,7 @@ class DatabasePool:
 
     @retry(
         stop=stop_after_attempt(15),  # Try up to 15 times
-        wait=wait_exponential(multiplier=1, min=1, max=10),  # Exponential backoff: 1s, 2s, 4s, 8s, 10s...
+        wait=wait_exponential(multiplier=2, min=5, max=30),  # Start at 5s, exponential backoff: 5s, 10s, 20s, 30s...
         retry=lambda retry_state: retry_state.outcome.failed and isinstance(retry_state.outcome.exception, (
             ConnectionRefusedError, OSError, asyncpg.exceptions.ConnectionDoesNotExistError,
             asyncpg.exceptions.InterfaceError
@@ -237,7 +237,7 @@ class Database:
 
     @retry(
         stop=stop_after_attempt(15),  # Try up to 15 times
-        wait=wait_exponential(multiplier=1, min=1, max=10),  # Exponential backoff: 1s, 2s, 4s, 8s, 10s...
+        wait=wait_exponential(multiplier=2, min=5, max=30),  # Start at 5s, exponential backoff: 5s, 10s, 20s, 30s...
         retry=lambda retry_state: retry_state.outcome.failed and isinstance(retry_state.outcome.exception, (
             ConnectionRefusedError, OSError, asyncpg.exceptions.ConnectionDoesNotExistError,
             asyncpg.exceptions.InterfaceError
@@ -371,7 +371,7 @@ neon_db: Optional[Database] = None
 
 @retry(
     stop=stop_after_attempt(15),  # Try up to 15 times
-    wait=wait_exponential(multiplier=1, min=1, max=10),  # Exponential backoff: 1s, 2s, 4s, 8s, 10s...
+    wait=wait_exponential(multiplier=2, min=5, max=30),  # Start at 5s, exponential backoff: 5s, 10s, 20s, 30s...
     retry=lambda retry_state: retry_state.outcome.failed and isinstance(retry_state.outcome.exception, (
         ConnectionRefusedError, OSError, asyncpg.exceptions.ConnectionDoesNotExistError,
         asyncpg.exceptions.InterfaceError
