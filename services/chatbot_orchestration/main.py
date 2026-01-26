@@ -1032,20 +1032,32 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             
             # Construct the retrieval prompt
             retrieval_prompt = f"""
-            You are a specialized retrieval system. Your task is to extract information from the provided files to answer the user's query.
+            You are a specialized retrieval system with STRICT constraints on information sources.
 
             User Query: "{query}"
 
+            CRITICAL SYSTEM CONSTRAINTS:
+            - You MUST ONLY use information from the attached files provided in this specific query
+            - You are PROHIBITED from using any internet search capabilities
+            - You are PROHIBITED from using your training data or general knowledge
+            - You are PROHIBITED from accessing any external information sources
+            - You MUST NOT answer based on what you "know" about the topic
+            - You MUST ONLY answer if the information is explicitly found in the provided files
+
             Instructions:
-            1. Search through the attached files for information relevant to the query.
-            2. Extract direct quotes, data points, and context that answer the question.
-            3. If the files contain the answer, provide ONLY the relevant text content without any line numbers, page references, or formatting.
-            4. Do NOT include line numbers, page numbers, or section headers in your response.
-            5. If the files do NOT contain the answer, state "No relevant information found in the knowledge base."
+            1. Search ONLY through the attached files for information relevant to the query
+            2. Extract direct quotes, data points, and context that answer the question
+            3. If the files contain the answer, provide ONLY the relevant text content without any line numbers, page references, or formatting
+            4. Do NOT include line numbers, page numbers, or section headers in your response
+            5. If the files do NOT contain the answer, state exactly: "I could not find an answer in the available data"
+            6. NEVER make up information or use external knowledge
+            7. NEVER provide general information about the topic unless it's in the files
 
             Output Format:
             Source File: [Exact filename as shown in the file]
             Content: [Direct text content only - no line numbers, no page numbers, no formatting]
+
+            FAILURE TO COMPLY: If you cannot find the answer in the provided files, you MUST respond with "I could not find an answer in the available data" and nothing else.
             """
 
             # Generate content using the new API with files attached
@@ -1602,13 +1614,7 @@ CRITICAL RAG SECURITY & COMPLIANCE POLICY:
   * Make assumptions, speculate, or provide uncertain or unverified answers
   * Attempt to answer with general knowledge when specific, documented information is required
   * Provide recommendations without proper source attribution or verification
-- Instead, you MUST respond with this exact HTML-formatted message (OUTPUT DIRECTLY, NO CODE BLOCKS):
-<p><strong>Sorry, I do not have this information in my training database.</strong></p>
-<p>Would you like to:</p>
-<ul>
-<li>Ask any other question?</li>
-<li>Talk to a <strong>human agent</strong>?</li>
-</ul>
+- Instead, you MUST respond with this exact message: "I could not find an answer in the available data"
 - This mandatory policy applies to ALL queries that should be answered by RAG - if RAG cannot find the answer, transparently admit limitation rather than using alternative sources
 
 DYNAMIC RAG STATUS MONITORING SYSTEM:
