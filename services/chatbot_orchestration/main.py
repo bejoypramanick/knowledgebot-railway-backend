@@ -1049,8 +1049,19 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             """
 
             # Generate content using the new API with files attached
-            contents = [*files_to_search, retrieval_prompt]
-            logger.info(f"🚀 Making Gemini API call with {len(files_to_search)} files and prompt length {len(retrieval_prompt)}")
+            # Format files properly for Gemini FileSearch API using existing uploaded files
+            import google.generativeai as genai
+            
+            # Create file parts for the API call
+            file_parts = []
+            for f in files_to_search:
+                # Get the file object from Gemini
+                gemini_file = genai.get_file(f.name)
+                file_parts.append(gemini_file)
+            
+            # Add the prompt as the last part
+            contents = [*file_parts, retrieval_prompt]
+            logger.info(f"🚀 Making Gemini API call with {len(file_parts)} files and prompt length {len(retrieval_prompt)}")
 
             # Try different models in order of preference
             models_to_try = ['gemini-2.5-flash-lite', 'gemini-2.0-flash-exp', 'gemini-1.5-flash']
