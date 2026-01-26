@@ -11,12 +11,9 @@ logger.info("🔍 --- Chatbot Startup Diagnostics ---")
 logger.info("🆔 SERVICE_IDENTITY: CHATBOT_ORCHESTRATION_V1")
 logger.info(f"🐍 Python: {sys.version}")
 logger.info(f"📂 Current Dir: {os.getcwd()}")
-logger.info(f"🌐 CHATBOT_ORCH_PORT: {os.getenv('CHATBOT_ORCH_PORT')}")
-logger.info(f"🌐 PORT (Railway): {os.getenv('PORT')}")
-logger.info(f"🔍 ----------------------------------")
 
 try:
-    from fastapi import FastAPI, HTTPException, Request
+    from fastapi import FastAPI, HTTPException, Request, StreamingResponse
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel, Field
     from typing import Optional, List, Dict, Any, Annotated
@@ -1459,6 +1456,101 @@ async def health_check(request: Request):
     logger.info(f"Health check invoked: {request.url}")
     log_endpoint_request("chatbot_orchestration", "health", request)
     return {"status": "healthy", "service": "chatbot_orchestration"}
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    Handle chat request with streaming response.
+    """
+    try:
+        session_id = request.session_id or str(uuid.uuid4())
+        
+        # Perform RAG search if enabled (pre-fetch context)
+        file_context = []
+        rag_had_results = False
+        rag_enabled = request.use_rag
+        if request.use_rag:
+            logger.info(f"🔍 Starting RAG search for message: {request.message[:100]}...")
+            file_context = await search_knowledge_base(request.message)
+            rag_had_results = len(file_context) > 0 and any(result.content and result.content.strip() for result in file_context)
+            logger.info(f"📄 RAG search completed, found {len(file_context)} results, has meaningful content: {rag_had_results}")
+        
+        # Create agent
+        agent = create_agent(
+            file_context,
+            custom_system_prompt=request.system_prompt,
+            response_policy=request.response_policy,
+            rag_had_results=rag_had_results,
+            rag_enabled=rag_enabled
+        )
+        
+        if not agent:
+            logger.error("Failed to create agent")
+            return StreamingResponse(
+                iter(["data: " + json.dumps({"error": "Failed to create agent"}) + "\n\n"]),
+                media_type="text/plain",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+            )
+        
+        # Prepare message history
+        history_messages = []
+        if request.session_id:
+            # For now, we'll keep it simple and not load full history for streaming
+            pass
+        
+        # Create session dependency
+        session_dep = ChatSessionDeps(session_id=session_id)
+        
+        async def generate_response():
+            try:
+                # Send initial response chunk
+                yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
+                
+                # Run agent and stream response
+                result = await agent.run(
+                    request.message,
+                    message_history=history_messages,
+                    deps=session_dep
+                )
+                
+                response_text = ""
+                if hasattr(result, 'output'):
+                    response_text = result.output if isinstance(result.output, str) else str(result.output)
+                elif hasattr(result, 'data'):
+                    response_text = str(result.data)
+                elif hasattr(result, 'response') and result.response:
+                    response_text = result.response.text if hasattr(result.response, 'text') else str(result.response)
+                
+                # Stream the response word by word
+                words = response_text.split()
+                for i, word in enumerate(words):
+                    chunk = word + (' ' if i < len(words) - 1 else '')
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                    await asyncio.sleep(0.02)  # Small delay for streaming effect
+                
+                # Send final response with sources
+                yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': file_context})}\n\n"
+                yield f"data: [DONE]\n\n"
+                
+            except Exception as e:
+                logger.error(f"Error in streaming response: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'content': 'An error occurred while generating the response.'})}\n\n"
+                yield f"data: [DONE]\n\n"
+        
+        return StreamingResponse(
+            generate_response(),
+            media_type="text/plain",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Chat streaming error: {e}")
+        return StreamingResponse(
+            iter(["data: " + json.dumps({"error": f"Chat processing failed: {str(e)}"}) + "\n\ndata: [DONE]\n\n"]),
+            media_type="text/plain",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        )
+
 
 @app.post("/chat", response_model=ChatSessionResponse)
 async def chat(request: ChatRequest):
