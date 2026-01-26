@@ -975,6 +975,91 @@ async def get_chatbot_config():
         raise HTTPException(status_code=500, detail=f"Error fetching configuration: {str(e)}")
 
 
+@app.post("/api/v1/admin/chat-sessions/{session_id}/request-agent")
+async def request_human_agent(
+    session_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Request a human agent for a chat session."""
+    try:
+        log_endpoint_request("configuration_service", "request-agent", None)
+        
+        async with get_db_connection() as conn:
+            # Get session details
+            session = await conn.fetchrow(
+                "SELECT * FROM chat_sessions WHERE session_id = $1",
+                session_id
+            )
+            
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found")
+            
+            # Check if agent is already assigned
+            existing_assignment = await conn.fetchrow(
+                """
+                SELECT ha.* FROM human_agents ha
+                JOIN agent_session_assignments asa ON ha.id = asa.agent_id
+                WHERE asa.session_id = $1 AND asa.status = 'active'
+                """,
+                session_id
+            )
+            
+            if existing_assignment:
+                return {
+                    "status": "already_assigned",
+                    "agent": {
+                        "id": existing_assignment['id'],
+                        "email": existing_assignment['email'],
+                        "name": existing_assignment['name']
+                    }
+                }
+            
+            # Find available agents
+            available_agents = await conn.fetch(
+                """
+                SELECT * FROM human_agents 
+                WHERE is_active = true 
+                AND is_online = true
+                ORDER BY last_activity DESC
+                LIMIT 5
+                """
+            )
+            
+            if not available_agents:
+                return {
+                    "status": "no_agents_available",
+                    "message": "No human agents are currently available"
+                }
+            
+            # Assign first available agent
+            agent = available_agents[0]
+            
+            # Create assignment record
+            await conn.execute(
+                """
+                INSERT INTO agent_session_assignments 
+                (session_id, agent_id, status, assigned_at, assigned_by)
+                VALUES ($1, $2, 'active', NOW(), $3)
+                ON CONFLICT (session_id) DO UPDATE SET 
+                status = 'active', agent_id = $2, assigned_at = NOW()
+                """,
+                session_id, agent['id'], current_user.get('email', 'system')
+            )
+            
+            return {
+                "status": "assigned",
+                "agent": {
+                    "id": agent['id'],
+                    "email": agent['email'],
+                    "name": agent['name']
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"Error requesting human agent: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error requesting human agent: {str(e)}")
+
+
 @app.post("/api/v1/configuration/chatbot")
 async def save_chatbot_config(
     config: ChatbotConfigRequest,
