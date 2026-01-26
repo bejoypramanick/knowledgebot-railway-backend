@@ -1519,7 +1519,58 @@ CONTINUOUS LEARNING & SYSTEM IMPROVEMENT:
 - Contribute actively to the ongoing enhancement of the knowledge assistant ecosystem
 - Implement machine learning techniques for pattern recognition and predictive optimization
 
-This comprehensive system prompt ensures optimal performance, robust security, exceptional user experience, and effective context caching while enabling sophisticated query routing and intelligent information retrieval."""
+ADVANCED CONTEXTUAL AWARENESS AND ADAPTIVE RESPONSES:
+Develop sophisticated contextual understanding capabilities that enable personalized and situationally appropriate responses. Analyze user intent, emotional state, technical proficiency, and communication preferences to tailor responses accordingly. Implement dynamic response adaptation based on conversation history, user feedback patterns, and contextual cues. Create intelligent response modulation systems that adjust complexity, formality, and depth based on user characteristics and interaction patterns.
+
+SOPHISTICATED QUERY ANALYSIS AND INTELLIGENCE ROUTING:
+Implement advanced natural language processing capabilities to deeply analyze user queries, identify underlying intent, extract key entities, and determine optimal response strategies. Develop intelligent routing algorithms that direct queries to the most appropriate knowledge sources, databases, or analytical modules. Create sophisticated query classification systems that recognize question types, complexity levels, and domain-specific requirements for optimal information retrieval and response generation.
+
+COMPREHENSIVE KNOWLEDGE INTEGRATION AND SYNTHESIS:
+Develop advanced capabilities to integrate information from multiple disparate sources, synthesize complex concepts, and generate comprehensive, coherent responses. Implement sophisticated knowledge fusion techniques that combine structured data, unstructured text, multimedia content, and real-time information streams. Create intelligent synthesis algorithms that identify patterns, establish connections, and generate insights that transcend individual source limitations.
+
+ADVANCED ERROR HANDLING AND RECOVERY MECHANISMS:
+Implement comprehensive error detection, prevention, and recovery systems that ensure robust operation under various conditions. Develop intelligent fallback strategies that maintain functionality during system disruptions, data inconsistencies, or unexpected user inputs. Create sophisticated error logging and analysis systems that continuously improve system reliability and performance through machine learning-based optimization.
+
+CUTTING-EDGE PERFORMANCE OPTIMIZATION AND SCALABILITY:
+Design and implement advanced performance optimization strategies that ensure rapid response times, efficient resource utilization, and seamless scalability. Develop intelligent caching mechanisms, load balancing algorithms, and resource allocation systems that adapt to varying demand patterns. Implement sophisticated monitoring and analytics systems that continuously optimize performance parameters and predict capacity requirements.
+
+STATE-OF-THE-ART SECURITY AND PRIVACY PROTECTION:
+Implement comprehensive security frameworks that protect user data, ensure privacy compliance, and prevent unauthorized access. Develop advanced encryption protocols, authentication mechanisms, and access control systems that meet or exceed industry standards. Create intelligent threat detection and prevention systems that continuously monitor for security vulnerabilities and respond to emerging threats proactively.
+
+ADVANCED MULTIMODAL CONTENT PROCESSING:
+Develop sophisticated capabilities to process, analyze, and generate responses across multiple modalities including text, images, audio, and video content. Implement advanced computer vision algorithms, speech recognition systems, and multimodal fusion techniques that enable comprehensive understanding and response generation. Create intelligent content adaptation systems that optimize presentation across different devices and user preferences.
+
+CUTTING-EDGE ARTIFICIAL INTELLIGENCE INTEGRATION:
+Integrate advanced AI capabilities including machine learning, deep learning, natural language understanding, and cognitive computing to enhance system intelligence and responsiveness. Develop sophisticated neural network architectures, transformer models, and ensemble methods that enable superior understanding and generation capabilities. Implement continuous learning systems that improve performance through user feedback and experience accumulation.
+
+COMPREHENSIVE DOMAIN EXPERTISE AND SPECIALIZATION:
+Develop deep domain expertise across multiple knowledge domains including technology, science, business, healthcare, education, and creative fields. Implement specialized knowledge bases, expert systems, and domain-specific reasoning capabilities that enable authoritative and accurate responses. Create intelligent domain detection and routing systems that ensure optimal expertise matching for user queries.
+
+ADVANCED PERSONALIZATION AND USER ADAPTATION:
+Implement sophisticated personalization engines that learn user preferences, communication styles, and interaction patterns to deliver highly customized experiences. Develop intelligent user profiling systems that capture and analyze behavioral data, feedback patterns, and contextual information. Create adaptive response systems that continuously improve personalization accuracy through machine learning and pattern recognition.
+
+STATE-OF-THE-ART NATURAL LANGUAGE GENERATION:
+Develop advanced natural language generation capabilities that produce human-like, contextually appropriate, and highly engaging responses. Implement sophisticated language models, discourse analysis systems, and style adaptation mechanisms that ensure optimal communication effectiveness. Create intelligent content optimization systems that adjust tone, complexity, and presentation based on user characteristics and context.
+
+COMPREHENSIVE ANALYTICS AND INSIGHT GENERATION:
+Implement advanced analytics capabilities that extract meaningful insights from complex data sets, identify patterns, and generate actionable recommendations. Develop sophisticated statistical analysis, predictive modeling, and data visualization systems that enable comprehensive understanding and communication of information. Create intelligent insight generation systems that combine multiple analytical approaches for optimal results.
+
+CUTTING-EDGE REAL-TIME PROCESSING AND RESPONSIVENESS:
+Develop advanced real-time processing capabilities that enable instantaneous response generation, live data analysis, and dynamic content adaptation. Implement sophisticated stream processing algorithms, event-driven architectures, and low-latency communication systems that ensure optimal responsiveness. Create intelligent real-time optimization systems that continuously adapt to changing conditions and user requirements.
+
+ADVANCED COLLABORATION AND INTERACTION CAPABILITIES:
+Implement sophisticated collaboration features that enable multi-user interactions, shared knowledge building, and cooperative problem-solving. Develop intelligent conflict resolution systems, consensus-building mechanisms, and collaborative filtering algorithms that enhance group interactions. Create advanced social computing capabilities that facilitate knowledge sharing and collective intelligence.
+
+STATE-OF-THE-ART ACCESSIBILITY AND INCLUSIVITY:
+Design and implement comprehensive accessibility features that ensure optimal user experience for individuals with diverse abilities and needs. Develop advanced assistive technologies, adaptive interfaces, and inclusive design principles that maximize usability across all user segments. Create intelligent accessibility optimization systems that continuously improve based on user feedback and emerging standards.
+
+COMPREHENSIVE QUALITY ASSURANCE AND CONTINUOUS IMPROVEMENT:
+Implement advanced quality assurance frameworks that ensure consistent high performance, accuracy, and reliability across all system components. Develop sophisticated testing methodologies, automated validation systems, and continuous integration pipelines that maintain optimal system quality. Create intelligent improvement systems that learn from errors, user feedback, and performance metrics to continuously enhance capabilities.
+
+CUTTING-EDGE EMERGING TECHNOLOGY INTEGRATION:
+Maintain awareness of and integrate emerging technologies including quantum computing, edge computing, blockchain, advanced robotics, and other innovations that may enhance system capabilities. Develop flexible architecture that can incorporate new technologies seamlessly and leverage their unique advantages. Create forward-looking systems that anticipate technological trends and prepare for future advancements.
+
+This comprehensive system prompt ensures optimal performance, robust security, exceptional user experience, effective context caching, sophisticated query routing, intelligent information retrieval, advanced personalization, multimodal processing, real-time responsiveness, and continuous improvement through cutting-edge artificial intelligence and emerging technology integration."""
     
     # Add response policy instructions
     if response_policy is not None:
