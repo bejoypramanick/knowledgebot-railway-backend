@@ -10,6 +10,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import aiter_bytes
 from pydantic import BaseModel
 import asyncio
 import json
@@ -552,6 +553,53 @@ async def chatbot_bypass_diagnostic(request: Request):
 
 
 # API Gateway Routing Endpoints
+
+@app.post("/chat/stream")
+async def chat_stream_endpoint(request: Request):
+    """Route streaming chat requests to chatbot orchestration service."""
+    try:
+        log_endpoint_request("api_gateway", "chat/stream", request)
+        
+        # Get request body
+        body = await request.body()
+        
+        # Forward to chatbot orchestration service
+        chatbot_url = os.getenv('CHATBOT_ORCHESTRATION_URL')
+        if not chatbot_url:
+            logger.error("❌ CHATBOT_ORCHESTRATION_URL not configured")
+            raise HTTPException(status_code=500, detail="Chatbot service not configured")
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{chatbot_url}/chat/stream",
+                content=body,
+                headers={
+                    "Content-Type": request.headers.get("content-type", "application/json"),
+                    "Accept": request.headers.get("accept", "text/plain"),
+                }
+            )
+            
+            # Return streaming response
+            if response.status_code == 200:
+                return StreamingResponse(
+                    aiter_bytes(response.aiter_bytes()),
+                    media_type=response.headers.get("content-type", "text/plain"),
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                    }
+                )
+            else:
+                logger.error(f"❌ Chat stream service error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=f"Chat service error: {response.text}")
+                
+    except Exception as e:
+        logger.error(f"❌ Chat stream endpoint error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Chat stream service error: {str(e)}")
+
 
 @app.post("/api/v1/chat")
 async def chat_endpoint(chat_request: ChatRequest, request: Request):
