@@ -1588,7 +1588,7 @@ async def chat_stream(request: ChatRequest):
                 for i, word in enumerate(words):
                     chunk = word + (' ' if i < len(words) - 1 else '')
                     yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                    await asyncio.sleep(0.02)  # Small delay for streaming effect
+                    await asyncio.sleep(0.1)  # Increased delay for more natural streaming effect
                 
                 # Send final response with sources
                 yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': file_context})}\n\n"
