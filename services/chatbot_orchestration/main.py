@@ -105,22 +105,8 @@ context_cache = {}
 
 def generate_cache_key(prompt_components: Dict[str, Any]) -> str:
     """Generate a unique cache key based on prompt components."""
-    # Safely extract file_context data to prevent NoneType errors
-    file_context = prompt_components.get('file_context', [])
-    safe_file_context = []
-    if file_context:
-        try:
-            safe_file_context = [
-                (f.file_name, f.content[:100] if f.content else '')
-                for f in file_context 
-                if f and hasattr(f, 'file_name') and hasattr(f, 'content')
-            ]
-        except Exception as e:
-            logger.warning(f"⚠️ Error processing file_context for cache key: {e}")
-            safe_file_context = []
-    
     cache_data = {
-        'file_context': str(sorted(safe_file_context)),
+        'file_context': str(sorted([(f.file_name, f.content[:100]) for f in prompt_components.get('file_context', [])])),
         'custom_prompt': prompt_components.get('custom_prompt', ''),
         'response_policy': prompt_components.get('response_policy', ''),
         'rag_had_results': prompt_components.get('rag_had_results', True),
@@ -1014,7 +1000,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                                 'mime_type': file_record['mime_type'],
                                 'size_bytes': file_record['size_bytes'],
                                 'upload_date': file_record['created_at'].isoformat() if file_record['created_at'] else None,
-                                'db_metadata': file_record['metadata'] if isinstance(file_record['metadata'], dict) else {}
+                                'db_metadata': dict(file_record['metadata']) if file_record['metadata'] else {}
                             }
                             logger.info(f"Successfully retrieved database metadata for file {f.name}")
                         else:
@@ -1046,100 +1032,41 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             
             # Construct the retrieval prompt
             retrieval_prompt = f"""
-            You are a specialized retrieval system with STRICT constraints on information sources.
+            You are a specialized retrieval system. Your task is to extract information from the provided files to answer the user's query.
 
             User Query: "{query}"
 
-            CRITICAL SYSTEM CONSTRAINTS:
-            - You MUST ONLY use information from the attached files provided in this specific query
-            - You are PROHIBITED from using any internet search capabilities
-            - You are PROHIBITED from using your training data or general knowledge
-            - You are PROHIBITED from accessing any external information sources
-            - You MUST NOT answer based on what you "know" about the topic
-            - You MUST ONLY answer if the information is explicitly found in the provided files
-
             Instructions:
-            1. Search ONLY through the attached files for information relevant to the query
-            2. Extract direct quotes, data points, and context that answer the question
-            3. If the files contain the answer, provide ONLY the relevant text content without any line numbers, page references, or formatting
-            4. Do NOT include line numbers, page numbers, or section headers in your response
-            5. If the files do NOT contain the answer, state exactly: "I could not find an answer in the available data"
-            6. NEVER make up information or use external knowledge
-            7. NEVER provide general information about the topic unless it's in the files
+            1. Search through the attached files for information relevant to the query.
+            2. Extract direct quotes, data points, and context that answer the question.
+            3. If the files contain the answer, provide ONLY the relevant text content without any line numbers, page references, or formatting.
+            4. Do NOT include line numbers, page numbers, or section headers in your response.
+            5. If the files do NOT contain the answer, state "No relevant information found in the knowledge base."
 
             Output Format:
             Source File: [Exact filename as shown in the file]
             Content: [Direct text content only - no line numbers, no page numbers, no formatting]
-
-            FAILURE TO COMPLY: If you cannot find the answer in the provided files, you MUST respond with "I could not find an answer in the available data" and nothing else.
             """
 
             # Generate content using the new API with files attached
-            # Format files properly for Gemini FileSearch API using existing uploaded files
-            import google.generativeai as genai
-            
-            # Create file parts for the API call
-            file_parts = []
-            for f in files_to_search:
-                # Get the file object from Gemini
-                gemini_file = genai.get_file(f.name)
-                file_parts.append(gemini_file)
-            
-            # Add the prompt as the last part
-            contents = [*file_parts, retrieval_prompt]
-            logger.info(f"🚀 Making Gemini API call with {len(file_parts)} files and prompt length {len(retrieval_prompt)}")
+            contents = [*files_to_search, retrieval_prompt]
+            logger.info(f"🚀 Making Gemini API call with {len(files_to_search)} files and prompt length {len(retrieval_prompt)}")
 
-            # Try different models in order of preference
-            models_to_try = ['gemini-2.5-flash-lite', 'gemini-2.0-flash-exp', 'gemini-1.5-flash']
-            
-            for model_idx, model_name in enumerate(models_to_try):
-                max_retries = 2  # Reduce retries for subsequent models
-                retry_delay = 1.0
+            try:
+                response = genai_client.models.generate_content(
+                    model='gemini-2.5-flash-lite',
+                    contents=contents
+                )
+                logger.info(f"✅ Gemini API call completed, response type: {type(response)}")
                 
-                logger.info(f"🔄 Trying model: {model_name} ({model_idx + 1}/{len(models_to_try)})")
-                
-                for attempt in range(max_retries):
-                    try:
-                        logger.info(f"🔄 Gemini API attempt {attempt + 1}/{max_retries} with model {model_name}")
-                        response = genai_client.models.generate_content(
-                            model=model_name,
-                            contents=contents
-                        )
-                        logger.info(f"✅ Gemini API call completed with model {model_name}, response type: {type(response)}")
-                        break  # Success, exit retry loop
-                        
-                    except Exception as api_error:
-                        error_str = str(api_error)
-                        logger.error(f"❌ Gemini API call failed with model {model_name} (attempt {attempt + 1}): {api_error}")
-                        
-                        # Check if it's a 500 error that's worth retrying
-                        if "500" in error_str and "INTERNAL" in error_str and attempt < max_retries - 1:
-                            logger.warning(f"⚠️ Retrying Gemini API call in {retry_delay}s due to 500 error...")
-                            import time
-                            time.sleep(retry_delay)
-                            retry_delay *= 2  # Exponential backoff
-                            continue
-                        else:
-                            # Not a retryable error or max retries reached
-                            logger.error(f"❌ Gemini API call failed permanently with model {model_name}: {api_error}")
-                            break
-                
-                else:
-                    # All retries failed for this model, try next model
-                    logger.warning(f"⚠️ All retries failed for model {model_name}, trying next model...")
-                    continue
-                
-                # If we get here, the API call succeeded
-                break
-            else:
-                # All models failed
-                logger.error(f"❌ All Gemini models failed, returning empty results")
+                # Extract and log RAG metadata from the response
+                rag_metadata = extract_gemini_rag_metadata(response)
+                if rag_metadata:
+                    logger.info(f"📊 RAG metadata extracted and logged successfully")
+                    
+            except Exception as api_error:
+                logger.error(f"❌ Gemini API call failed: {api_error}")
                 return []
-
-            # Extract and log RAG metadata from the response
-            rag_metadata = extract_gemini_rag_metadata(response)
-            if rag_metadata:
-                logger.info(f"📊 RAG metadata extracted and logged successfully")
 
             # Track Gemini token usage from response - Paid tier should provide usage data
             logger.info(f"🔍 Gemini RAG Response Details: usage_metadata={getattr(response, 'usage_metadata', 'NO_USAGE_METADATA')}")
@@ -1628,7 +1555,13 @@ CRITICAL RAG SECURITY & COMPLIANCE POLICY:
   * Make assumptions, speculate, or provide uncertain or unverified answers
   * Attempt to answer with general knowledge when specific, documented information is required
   * Provide recommendations without proper source attribution or verification
-- Instead, you MUST respond with this exact message: "I could not find an answer in the available data"
+- Instead, you MUST respond with this exact HTML-formatted message (OUTPUT DIRECTLY, NO CODE BLOCKS):
+<p><strong>Sorry, I do not have this information in my training database.</strong></p>
+<p>Would you like to:</p>
+<ul>
+<li>Ask any other question?</li>
+<li>Talk to a <strong>human agent</strong>?</li>
+</ul>
 - This mandatory policy applies to ALL queries that should be answered by RAG - if RAG cannot find the answer, transparently admit limitation rather than using alternative sources
 
 DYNAMIC RAG STATUS MONITORING SYSTEM:
@@ -2326,38 +2259,11 @@ async def chat_stream(request: ChatRequest):
                     # Run agent and stream response
                     # Run agent with message history for multi-turn conversations
                     # This triggers Implicit Prefix Caching for turns 2-5
-                    try:
-                        result = await agent.run(
-                            request.message,
-                            message_history=message_history,  # Pass preserved message history
-                            deps=session_dep
-                        )
-                    except Exception as e:
-                        # Handle Pydantic AI validation errors (e.g., UNEXPECTED_TOOL_CALL finish reason)
-                        if "ValidationError" in str(e) and "finishReason" in str(e) and "UNEXPECTED_TOOL_CALL" in str(e):
-                            logger.warning(f"⚠️ Streaming: Pydantic AI validation error with UNEXPECTED_TOOL_CALL, retrying with basic model")
-                            # Fallback: try again without complex tools/settings
-                            try:
-                                from pydantic_ai.models.gemini import GeminiModel
-                                fallback_model = GeminiModel(MODEL_NAME)
-                                fallback_agent = Agent(
-                                    fallback_model,
-                                    system_prompt="You are a helpful assistant. Answer the user's question directly.",
-                                    deps_type=ChatSessionDeps,
-                                )
-                                result = await fallback_agent.run(
-                                    request.message,
-                                    message_history=message_history,
-                                    deps=session_dep
-                                )
-                                logger.info(f"✅ Streaming fallback agent succeeded")
-                            except Exception as fallback_error:
-                                logger.error(f"❌ Streaming fallback agent also failed: {fallback_error}")
-                                yield f"data: {json.dumps({'type': 'error', 'content': 'Chat service temporarily unavailable due to model compatibility issues'})}\n\n"
-                                return
-                        else:
-                            # Re-raise non-validation errors
-                            raise e
+                    result = await agent.run(
+                        request.message,
+                        message_history=message_history,  # Pass preserved message history
+                        deps=session_dep
+                    )
                     
                     # Update session state with result for next turn
                     session_state_manager.update_session_state(session_id, result)
@@ -2378,22 +2284,14 @@ async def chat_stream(request: ChatRequest):
                         await asyncio.sleep(0.1)  # Increased delay for more natural streaming effect
                     
                     # Send final response with sources
-                    # Ensure file_context is serializable
-                    safe_sources = []
-                    if file_context:
-                        safe_sources = [
-                            {
-                                'file_name': result.file_name,
-                                'content': result.content,
-                                'relevance_score': result.relevance_score,
-                                'similarity_score': result.similarity_score,
-                                'chunk_id': result.chunk_id,
-                                'metadata': result.metadata or {}
-                            }
-                            for result in file_context if result and hasattr(result, 'file_name')
-                        ]
+                    # Extract sources from agent result if available
+                    sources = []
+                    if hasattr(result, 'sources') and result.sources:
+                        sources = result.sources
+                    elif hasattr(result, 'data') and hasattr(result.data, 'sources'):
+                        sources = result.data.sources
                     
-                    yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': safe_sources})}\n\n"
+                    yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': sources})}\n\n"
                     yield f"data: [DONE]\n\n"
                     
                     # If we get here, success! Break the retry loop
@@ -2515,40 +2413,11 @@ async def chat(request: ChatRequest):
         # Run agent (with self-correction via model_retry)
         # Pass the current message as prompt and previous messages as history
         # Also pass the dependency instance for this specific run
-        try:
-            result = await agent.run(
-                request.message, 
-                message_history=history_messages,
-                deps=session_dep
-            )
-        except Exception as e:
-            # Handle Pydantic AI validation errors (e.g., UNEXPECTED_TOOL_CALL finish reason)
-            if "ValidationError" in str(e) and "finishReason" in str(e) and "UNEXPECTED_TOOL_CALL" in str(e):
-                logger.warning(f"⚠️ Pydantic AI validation error with UNEXPECTED_TOOL_CALL, retrying with basic model")
-                # Fallback: try again without complex tools/settings
-                try:
-                    from pydantic_ai.models.gemini import GeminiModel
-                    fallback_model = GeminiModel(MODEL_NAME)
-                    fallback_agent = Agent(
-                        fallback_model,
-                        system_prompt="You are a helpful assistant. Answer the user's question directly.",
-                        deps_type=ChatSessionDeps,
-                    )
-                    result = await fallback_agent.run(
-                        request.message,
-                        message_history=history_messages,
-                        deps=session_dep
-                    )
-                    logger.info(f"✅ Fallback agent succeeded")
-                except Exception as fallback_error:
-                    logger.error(f"❌ Fallback agent also failed: {fallback_error}")
-                    raise HTTPException(
-                        status_code=500,
-                        detail="Chat service temporarily unavailable due to model compatibility issues"
-                    )
-            else:
-                # Re-raise non-validation errors
-                raise e
+        result = await agent.run(
+            request.message, 
+            message_history=history_messages,
+            deps=session_dep
+        )
         
         # Extract response text
         response_text = ""
