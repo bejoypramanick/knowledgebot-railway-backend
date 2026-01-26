@@ -476,6 +476,7 @@ class AdminAccount(BaseModel):
 
         return v
 
+
 class ChatbotConfigRequest(BaseModel):
     admin_emails: Optional[List[Union[ValidatedEmail, AdminAccount]]] = Field(None, max_items=10)
     human_agents: Optional[List[ValidatedEmail]] = Field(None, max_items=20)
@@ -519,14 +520,13 @@ class ChatbotConfigRequest(BaseModel):
         return v
 
 
-    class Config:
-        # Enable validation of assignment
-        validate_assignment = True
-        # Custom error messages
-        error_msg_templates = {
+    model_config = {
+        'validate_assignment': True,
+        'error_msg_templates': {
             'value_error.const': 'Invalid value for field',
             'value_error.missing': 'This field is required',
         }
+    }
 
 # Position field validation model
 class PositionData(BaseModel):
@@ -636,8 +636,9 @@ class WidgetConfigRequest(BaseModel):
 
         return v
 
-    class Config:
-        validate_assignment = True
+    model_config = {
+        'validate_assignment': True
+    }
 
 
 # Business logic validation function
@@ -747,9 +748,39 @@ async def get_db_connection():
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    """Health check endpoint with enhanced database pool monitoring"""
+    """Shallow health check endpoint optimized for serverless - avoids DB queries to prevent keeping instances awake"""
+    # Simple service health check without database queries
+    # This prevents frequent health checks from keeping serverless instances awake unnecessarily
+    
+    # Basic service status - no DB queries for shallow check
+    db_status = "not_checked"  # Shallow check doesn't query DB
+    
+    # Only check DB connection status without querying
+    if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
+        db_status = "connected"
+    else:
+        db_status = "disconnected"
+
+    # Get overall service status
+    service_info = service_status.get_status()
+    service_info.update({
+        "database": db_status,
+        "timestamp": datetime.utcnow().isoformat() + "Z"  # Current timestamp
+    })
+
+    return {
+        "status": "healthy" if db_status in ["connected", "not_checked"] else "unhealthy",
+        "service": "configuration_service",
+        "database": db_status,
+        "timestamp": service_info["timestamp"]
+    }
+
+
+# Deep health check endpoint for detailed monitoring (not used by Railway's automatic health checks)
+@app.get("/health/deep")
+async def deep_health_check():
+    """Deep health check endpoint with database queries - use only for manual monitoring"""
     db_status = "disconnected"
-    pool_stats = None
     tables_status = {}
 
     if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
@@ -789,8 +820,7 @@ async def health_check():
     service_info.update({
         "database": db_status,
         "tables": tables_status,
-        "pool_stats": pool_stats,
-        "timestamp": "2026-01-13T07:34:00Z"  # Current date
+        "timestamp": datetime.utcnow().isoformat() + "Z"
     })
 
     return service_info

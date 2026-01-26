@@ -24,7 +24,7 @@ class DatabasePool:
     async def initialize_pool(
         self,
         dsn: str,
-        min_size: int = 5,
+        min_size: int = 2,  # Reduced from 5 to prevent DB overwhelm during container spin-up
         max_size: int = 20,
         command_timeout: float = 60.0,
         server_settings: Optional[Dict[str, str]] = None

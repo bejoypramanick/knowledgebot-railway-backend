@@ -49,9 +49,10 @@ class Settings(BaseSettings):
     # User Context (for tracking uploads)
     default_user_email: str = "globistaan@gmail.com"
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = {
+        'env_file': ".env",
+        'case_sensitive': False
+    }
 
 
 settings = Settings()
