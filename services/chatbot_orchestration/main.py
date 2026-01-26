@@ -2364,7 +2364,22 @@ async def chat_stream(request: ChatRequest):
                         await asyncio.sleep(0.1)  # Increased delay for more natural streaming effect
                     
                     # Send final response with sources
-                    yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': file_context})}\n\n"
+                    # Ensure file_context is serializable
+                    safe_sources = []
+                    if file_context:
+                        safe_sources = [
+                            {
+                                'file_name': result.file_name,
+                                'content': result.content,
+                                'relevance_score': result.relevance_score,
+                                'similarity_score': result.similarity_score,
+                                'chunk_id': result.chunk_id,
+                                'metadata': result.metadata or {}
+                            }
+                            for result in file_context if result and hasattr(result, 'file_name')
+                        ]
+                    
+                    yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': safe_sources})}\n\n"
                     yield f"data: [DONE]\n\n"
                     
                     # If we get here, success! Break the retry loop
