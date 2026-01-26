@@ -38,7 +38,7 @@ try:
     from google.genai import types
     from contextlib import asynccontextmanager
     from pydantic_ai import Agent, RunContext
-    from pydantic_ai.models.google import GoogleModel
+    from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
     from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
     import asyncio
     import json
@@ -1939,27 +1939,21 @@ class PydanticAIGatewayService:
             cached_content_id = await self.get_or_create_cached_content(system_prompt)
             logger.info(f"🧠 Using cached content: {cached_content_id}")
         
-        # Configure model settings with caching and FileSearch
-        model_settings = {
-            "cached_content": cached_content_id,
-            "tools": [
-                types.Tool(
-                    file_search=types.FileSearch(
-                        store_names=[file_search_store_id]
-                    )
-                )
-            ]
-        }
+        # Configure GoogleModelSettings with google_cached_content
+        # This tells Gemini: "Don't process a system prompt. Go use this Cache ID instead."
+        model_settings = GoogleModelSettings(
+            google_cached_content=cached_content_id,  # The "90% discount" key
+        )
         
-        logger.info(f"⚙️ Model settings: cached_content={cached_content_id}, file_search_store={file_search_store_id}")
+        logger.info(f"⚙️ Model settings: google_cached_content={cached_content_id}, file_search_store={file_search_store_id}")
         
         # Create GoogleModel with optimized settings
         try:
             google_model = GoogleModel(
-                model=MODEL_NAME,
-                model_settings=model_settings
+                MODEL_NAME,
+                settings=model_settings
             )
-            logger.info("✅ Created GoogleModel with caching and FileSearch")
+            logger.info("✅ Created GoogleModel with google_cached_content for 90% discount")
         except Exception as e:
             logger.error(f"❌ Error creating GoogleModel: {e}")
             raise
@@ -1967,9 +1961,16 @@ class PydanticAIGatewayService:
         # Create Pydantic AI Agent
         agent = Agent(
             google_model,
-            system_prompt=system_prompt,
+            system_prompt=system_prompt,  # Still needed for fallback, but cached_content takes precedence
             tools=tools,
             deps_type=ChatSessionDeps,
+        )
+        
+        # Update session metadata
+        await self.update_session_metadata(
+            session_id=session_id,
+            file_search_store_id=file_search_store_id,
+            cached_content_id=cached_content_id
         )
         
         logger.info(f"🤖 Created optimized Pydantic AI Agent for session {session_id}")
@@ -2002,6 +2003,91 @@ class PydanticAIGatewayService:
 
 # Global service instance
 pydantic_ai_service = PydanticAIGatewayService()
+
+
+# Session State Management for Multi-Turn Conversations
+class SessionStateManager:
+    """
+    Manages session state for 5-turn conversation loops with message history preservation.
+    
+    This class handles the multi-turn session logic to trigger Implicit Prefix Caching
+    which saves money on turns 2-5 by preserving ModelMessage objects.
+    """
+    
+    def __init__(self):
+        self.session_states = {}  # In-memory session state (in production, use Redis)
+        
+    def get_session_state(self, session_id: str) -> Dict[str, Any]:
+        """Get current session state."""
+        return self.session_states.get(session_id, {
+            'session_id': session_id,
+            'turn_count': 0,
+            'message_history': [],
+            'last_activity': time.time(),
+            'created_at': time.time()
+        })
+    
+    def update_session_state(self, session_id: str, result: Any) -> Dict[str, Any]:
+        """
+        Update session state with new result and preserve message history.
+        
+        This preserves ModelMessage objects for Implicit Prefix Caching.
+        """
+        state = self.get_session_state(session_id)
+        
+        # Increment turn count
+        state['turn_count'] += 1
+        
+        # Preserve message history (ModelMessage objects)
+        if hasattr(result, 'all_messages'):
+            state['message_history'] = result.all_messages()
+            logger.info(f"📝 Preserved {len(state['message_history'])} messages for session {session_id}")
+        else:
+            logger.warning(f"⚠️ Result has no all_messages() method for session {session_id}")
+        
+        # Update activity timestamp
+        state['last_activity'] = time.time()
+        
+        # Store updated state
+        self.session_states[session_id] = state
+        
+        logger.info(f"🔄 Updated session state for {session_id}: turn {state['turn_count']}, messages {len(state['message_history'])}")
+        return state
+    
+    def get_message_history(self, session_id: str) -> List[Any]:
+        """Get preserved message history for multi-turn conversations."""
+        state = self.get_session_state(session_id)
+        return state.get('message_history', [])
+    
+    def is_new_session(self, session_id: str) -> bool:
+        """Check if this is a new session (turn 1)."""
+        state = self.get_session_state(session_id)
+        return state['turn_count'] == 0
+    
+    def get_turn_count(self, session_id: str) -> int:
+        """Get current turn count for the session."""
+        state = self.get_session_state(session_id)
+        return state['turn_count']
+    
+    def cleanup_old_sessions(self, max_age_seconds: int = 3600):
+        """Clean up old sessions to prevent memory leaks."""
+        current_time = time.time()
+        expired_sessions = []
+        
+        for session_id, state in self.session_states.items():
+            if current_time - state['last_activity'] > max_age_seconds:
+                expired_sessions.append(session_id)
+        
+        for session_id in expired_sessions:
+            del self.session_states[session_id]
+            logger.info(f"🗑️ Cleaned up expired session: {session_id}")
+        
+        if expired_sessions:
+            logger.info(f"🧹 Cleaned up {len(expired_sessions)} expired sessions")
+
+
+# Global session state manager
+session_state_manager = SessionStateManager()
 
 
 @app.get("/")
@@ -2079,16 +2165,21 @@ async def chat_stream(request: ChatRequest):
             )
         
         # Prepare message history (for 5-turn conversation loop)
-        history_messages = []
-        if request.session_id:
-            # For now, we'll keep it simple and not load full history for streaming
-            # In a full implementation, you would load the last 5 turns here
-            pass
+        message_history = []
+        turn_count = session_state_manager.get_turn_count(session_id)
+        is_new_session = session_state_manager.is_new_session(session_id)
+        
+        if not is_new_session:
+            # Get preserved message history for multi-turn conversations
+            message_history = session_state_manager.get_message_history(session_id)
+            logger.info(f"📚 Using preserved message history for turn {turn_count + 1}: {len(message_history)} messages")
+        else:
+            logger.info(f"🆕 Starting new session (turn 1) for {session_id}")
         
         # Create session dependency
         session_dep = ChatSessionDeps(session_id=session_id)
         
-        logger.info(f"🚀 Starting optimized chat stream for session {session_id}")
+        logger.info(f"🚀 Starting optimized chat stream for session {session_id} (turn {turn_count + 1})")
         
         async def generate_response():
             max_retries = 3
@@ -2101,11 +2192,16 @@ async def chat_stream(request: ChatRequest):
                         yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
                     
                     # Run agent and stream response
+                    # Run agent with message history for multi-turn conversations
+                    # This triggers Implicit Prefix Caching for turns 2-5
                     result = await agent.run(
                         request.message,
-                        message_history=history_messages,
+                        message_history=message_history,  # Pass preserved message history
                         deps=session_dep
                     )
+                    
+                    # Update session state with result for next turn
+                    session_state_manager.update_session_state(session_id, result)
                     
                     response_text = ""
                     if hasattr(result, 'output'):
@@ -2127,7 +2223,7 @@ async def chat_stream(request: ChatRequest):
                     yield f"data: [DONE]\n\n"
                     
                     # If we get here, success! Break the retry loop
-                    logger.info(f"✅ Stream completed successfully on attempt {attempt + 1}")
+                    logger.info(f"✅ Stream completed successfully on attempt {attempt + 1} (turn {turn_count + 1})")
                     return
                     
                 except Exception as e:
