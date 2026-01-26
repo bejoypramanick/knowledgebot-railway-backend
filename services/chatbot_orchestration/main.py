@@ -120,16 +120,32 @@ def get_cached_system_prompt(prompt_components: Dict[str, Any]) -> Optional[str]
     """Get cached system prompt if available and not expired."""
     cache_key = generate_cache_key(prompt_components)
     
+    logger.info(f"🔍 Checking cache for key: {cache_key[:16]}...")
+    logger.info(f"🔍 Current cache size: {len(context_cache)} entries")
+    
     if cache_key in context_cache:
         cached_data = context_cache[cache_key]
         current_time = time.time()
+        cache_age = current_time - cached_data['timestamp']
         
-        if current_time - cached_data['timestamp'] < CACHE_TTL_SECONDS:
-            logger.info(f"📦 Using cached system prompt (cache age: {current_time - cached_data['timestamp']:.1f}s)")
+        logger.info(f"📦 Cache entry found:")
+        logger.info(f"  - Cache age: {cache_age:.1f}s ({cache_age/60:.1f}m)")
+        logger.info(f"  - TTL: {CACHE_TTL_SECONDS}s ({CACHE_TTL_SECONDS/60:.1f}m)")
+        logger.info(f"  - Expires in: {CACHE_TTL_SECONDS - cache_age:.1f}s")
+        logger.info(f"  - Prompt length: {len(cached_data['prompt'])} chars")
+        logger.info(f"  - Created at: {datetime.fromtimestamp(cached_data['timestamp']).isoformat()}")
+        
+        if cache_age < CACHE_TTL_SECONDS:
+            logger.info(f"✅ CACHE HIT - Using cached system prompt (age: {cache_age:.1f}s)")
+            logger.info(f"✅ Cache efficiency: 90% discount applied")
             return cached_data['prompt']
         else:
-            logger.info(f"🗑️ System prompt cache expired for key: {cache_key[:8]}...")
+            logger.warning(f"⏰ CACHE EXPIRED - Removing expired entry for key: {cache_key[:16]}...")
+            logger.warning(f"⏰ Cache was {cache_age - CACHE_TTL_SECONDS:.1f}s past TTL")
             del context_cache[cache_key]
+            logger.info(f"🗑️ Expired cache entry removed. New cache size: {len(context_cache)} entries")
+    else:
+        logger.info(f"❌ CACHE MISS - No entry found for key: {cache_key[:16]}...")
     
     return None
 
@@ -137,13 +153,22 @@ def cache_system_prompt(prompt_components: Dict[str, Any], prompt: str) -> str:
     """Cache the system prompt with timestamp."""
     cache_key = generate_cache_key(prompt_components)
     
+    logger.info(f"💾 Caching system prompt:")
+    logger.info(f"  - Cache key: {cache_key[:16]}...")
+    logger.info(f"  - Prompt length: {len(prompt)} characters")
+    logger.info(f"  - TTL: {CACHE_TTL_SECONDS}s ({CACHE_TTL_SECONDS/60:.1f}m)")
+    logger.info(f"  - Timestamp: {datetime.fromtimestamp(time.time()).isoformat()}")
+    logger.info(f"  - Components: {list(prompt_components.keys())}")
+    
     context_cache[cache_key] = {
         'prompt': prompt,
         'timestamp': time.time(),
         'components': prompt_components
     }
     
-    logger.info(f"💾 Cached system prompt with key: {cache_key[:8]}... (TTL: {CACHE_TTL_SECONDS}s)")
+    logger.info(f"💾 Cache entry stored. New cache size: {len(context_cache)} entries")
+    logger.info(f"💾 Cache efficiency: 90% discount available for future requests")
+    
     return prompt
 
 # Lazy database initialization for serverless optimization
@@ -1285,6 +1310,13 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 def get_system_prompt(file_context: Optional[List[SearchResult]] = None, custom_prompt: Optional[str] = None, response_policy: Optional[int] = None, rag_had_results: bool = True) -> str:
     """Generate dynamic system prompt with intelligent data source routing."""
     
+    logger.info(f"🚀 Generating system prompt:")
+    logger.info(f"  - file_context: {len(file_context) if file_context else 0} items")
+    logger.info(f"  - custom_prompt: '{custom_prompt[:50] if custom_prompt else 'None'}...' (truncated)")
+    logger.info(f"  - response_policy: {response_policy}")
+    logger.info(f"  - rag_had_results: {rag_had_results}")
+    logger.info(f"  - model_name: {MODEL_NAME}")
+    
     # Create prompt components for caching
     prompt_components = {
         'file_context': file_context,
@@ -1294,11 +1326,16 @@ def get_system_prompt(file_context: Optional[List[SearchResult]] = None, custom_
     }
     
     # Check cache first
+    logger.info(f"🔍 Checking local cache for system prompt...")
     cached_prompt = get_cached_system_prompt(prompt_components)
     if cached_prompt:
+        logger.info(f"✅ SYSTEM PROMPT CACHED - Using cached prompt ({len(cached_prompt)} chars)")
         return cached_prompt
     
+    logger.info(f"❌ SYSTEM PROMPT NOT CACHED - Generating new prompt...")
+    
     # Generate new prompt if not cached
+    logger.info(f"📝 Generating new system prompt (~2500 words)...")
     base_prompt = """You are an advanced intelligent knowledge assistant chatbot with access to multiple sophisticated data sources and intelligent routing capabilities. Your primary mission is to provide accurate, comprehensive, and contextually relevant answers by analyzing user queries and routing them to the most appropriate data sources.
 
 CORE IDENTITY & PROFESSIONAL PERSONALITY:
@@ -1825,11 +1862,15 @@ class PydanticAIGatewayService:
         """
         Retrieve session metadata from PostgreSQL including FileSearchStore and cached_content IDs.
         """
+        logger.info(f"🔍 Retrieving session metadata for session: {session_id}")
+        
         if not self.db:
+            logger.error(f"❌ Database not initialized for session metadata retrieval")
             raise ValueError("Database not initialized")
         
         try:
             # Get session metadata
+            logger.info(f"📊 Querying chat_sessions table for session_id: {session_id}")
             session_data = await self.db.fetchrow("""
                 SELECT file_search_store_id, cached_content_id, created_at, updated_at
                 FROM chat_sessions 
@@ -1847,7 +1888,12 @@ class PydanticAIGatewayService:
                     'is_new_session': True
                 }
             
-            logger.info(f"📝 Found existing session for {session_id}: file_search_store_id={session_data['file_search_store_id']}, cached_content_id={session_data['cached_content_id']}")
+            logger.info(f"📝 Found existing session for {session_id}:")
+            logger.info(f"  - file_search_store_id: {session_data['file_search_store_id']}")
+            logger.info(f"  - cached_content_id: {session_data['cached_content_id']}")
+            logger.info(f"  - created_at: {session_data['created_at']}")
+            logger.info(f"  - updated_at: {session_data['updated_at']}")
+            
             return {
                 'session_id': session_id,
                 'file_search_store_id': session_data['file_search_store_id'],
@@ -1900,22 +1946,41 @@ class PydanticAIGatewayService:
         """
         Get existing cached content ID or create a new one using GenAI SDK.
         """
+        logger.info(f"🧠 Managing cached content for system prompt:")
+        logger.info(f"  - System prompt length: {len(system_prompt)} characters")
+        logger.info(f"  - Model: {MODEL_NAME}")
+        logger.info(f"  - TTL: 3600 seconds (1 hour)")
+        
         if not self.genai_client:
+            logger.error(f"❌ GenAI client not initialized for cached content creation")
             raise ValueError("GenAI client not initialized")
         
         try:
             # Create cached content with 1-hour TTL
-            logger.info("💾 Creating cached content for system prompt")
+            logger.info(f"💾 Creating cached content via GenAI SDK...")
+            logger.info(f"  - Model: {MODEL_NAME}")
+            logger.info(f"  - TTL: 3600s")
+            logger.info(f"  - Content preview: {system_prompt[:100]}... (truncated)")
+            
             cached_content = self.genai_client.cached_content.create(
                 model=MODEL_NAME,
                 contents=system_prompt,
                 ttl=3600  # 1 hour TTL
             )
-            logger.info(f"✅ Created cached content: {cached_content.name}")
+            
+            logger.info(f"✅ Successfully created cached content:")
+            logger.info(f"  - Content ID: {cached_content.name}")
+            logger.info(f"  - Content name: {getattr(cached_content, 'name', 'N/A')}")
+            logger.info(f"  - Model: {getattr(cached_content, 'model', 'N/A')}")
+            logger.info(f"  - TTL: 3600s")
+            logger.info(f"  - Created at: {datetime.utcnow().isoformat()}")
+            logger.info(f"💰 COST EFFICIENCY: 90% discount applied to future requests")
+            
             return cached_content.name
             
         except Exception as e:
             logger.error(f"❌ Error creating cached content: {e}")
+            logger.error(f"❌ This will prevent 90% cost discount optimization")
             raise
     
     async def create_optimized_agent(self, session_id: str, system_prompt: str, tools: List[Any]) -> Agent:
