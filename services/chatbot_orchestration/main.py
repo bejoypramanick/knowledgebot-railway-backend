@@ -1052,21 +1052,57 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             contents = [*files_to_search, retrieval_prompt]
             logger.info(f"🚀 Making Gemini API call with {len(files_to_search)} files and prompt length {len(retrieval_prompt)}")
 
-            try:
-                response = genai_client.models.generate_content(
-                    model='gemini-2.5-flash-lite',
-                    contents=contents
-                )
-                logger.info(f"✅ Gemini API call completed, response type: {type(response)}")
+            # Try different models in order of preference
+            models_to_try = ['gemini-2.5-flash-lite', 'gemini-2.0-flash-exp', 'gemini-1.5-flash']
+            
+            for model_idx, model_name in enumerate(models_to_try):
+                max_retries = 2  # Reduce retries for subsequent models
+                retry_delay = 1.0
                 
-                # Extract and log RAG metadata from the response
-                rag_metadata = extract_gemini_rag_metadata(response)
-                if rag_metadata:
-                    logger.info(f"📊 RAG metadata extracted and logged successfully")
-                    
-            except Exception as api_error:
-                logger.error(f"❌ Gemini API call failed: {api_error}")
+                logger.info(f"🔄 Trying model: {model_name} ({model_idx + 1}/{len(models_to_try)})")
+                
+                for attempt in range(max_retries):
+                    try:
+                        logger.info(f"🔄 Gemini API attempt {attempt + 1}/{max_retries} with model {model_name}")
+                        response = genai_client.models.generate_content(
+                            model=model_name,
+                            contents=contents
+                        )
+                        logger.info(f"✅ Gemini API call completed with model {model_name}, response type: {type(response)}")
+                        break  # Success, exit retry loop
+                        
+                    except Exception as api_error:
+                        error_str = str(api_error)
+                        logger.error(f"❌ Gemini API call failed with model {model_name} (attempt {attempt + 1}): {api_error}")
+                        
+                        # Check if it's a 500 error that's worth retrying
+                        if "500" in error_str and "INTERNAL" in error_str and attempt < max_retries - 1:
+                            logger.warning(f"⚠️ Retrying Gemini API call in {retry_delay}s due to 500 error...")
+                            import time
+                            time.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                            continue
+                        else:
+                            # Not a retryable error or max retries reached
+                            logger.error(f"❌ Gemini API call failed permanently with model {model_name}: {api_error}")
+                            break
+                
+                else:
+                    # All retries failed for this model, try next model
+                    logger.warning(f"⚠️ All retries failed for model {model_name}, trying next model...")
+                    continue
+                
+                # If we get here, the API call succeeded
+                break
+            else:
+                # All models failed
+                logger.error(f"❌ All Gemini models failed, returning empty results")
                 return []
+
+            # Extract and log RAG metadata from the response
+            rag_metadata = extract_gemini_rag_metadata(response)
+            if rag_metadata:
+                logger.info(f"📊 RAG metadata extracted and logged successfully")
 
             # Track Gemini token usage from response - Paid tier should provide usage data
             logger.info(f"🔍 Gemini RAG Response Details: usage_metadata={getattr(response, 'usage_metadata', 'NO_USAGE_METADATA')}")

@@ -11,6 +11,16 @@ import tempfile
 import sys
 import re
 from datetime import datetime
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+def log_endpoint_request(service_name: str, endpoint: str, request_data=None):
+    """Log endpoint request for debugging"""
+    logger.info(f"📨 [{service_name}] {endpoint} - Request received")
+    if request_data:
+        logger.info(f"📊 Request data: {request_data}")
+
 try:
     import bleach
 except ImportError:
