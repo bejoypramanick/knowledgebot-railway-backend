@@ -1322,7 +1322,7 @@ CRITICAL RAG POLICY:
   * Use your own internal knowledge/training data to answer the question
   * Search the internet for information (internet search tool will be unavailable)
   * Make assumptions or provide speculative answers
-- Instead, you MUST respond with this exact HTML-formatted message:
+- Instead, you MUST respond with this exact HTML-formatted message (OUTPUT DIRECTLY, NO CODE BLOCKS):
 <p><strong>Sorry, I do not have this information in my training database.</strong></p>
 <p>Would you like to:</p>
 <ul>
