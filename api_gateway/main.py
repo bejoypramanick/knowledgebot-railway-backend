@@ -10,7 +10,6 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.responses import aiter_bytes
 from pydantic import BaseModel
 import asyncio
 import json
@@ -582,7 +581,7 @@ async def chat_stream_endpoint(request: Request):
             # Return streaming response
             if response.status_code == 200:
                 return StreamingResponse(
-                    aiter_bytes(response.aiter_bytes()),
+                    response.aiter_bytes(),
                     media_type=response.headers.get("content-type", "text/plain"),
                     headers={
                         "Cache-Control": "no-cache",
