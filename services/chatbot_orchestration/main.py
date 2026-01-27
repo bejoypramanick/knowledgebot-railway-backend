@@ -1111,8 +1111,8 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             if usage_data:
                 logger.info(f"✅ Found Gemini usage data, attempting to track: {type(usage_data)}")
                 try:
-                    # Use a default session_id for RAG search tracking since it's not provided
-                    rag_session_id = f"rag_search_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+                    # Use a proper UUID for RAG search tracking since database expects UUID format
+                    rag_session_id = str(uuid.uuid4())
                     await track_gemini_usage_from_response(usage_data, session_id=rag_session_id, api_call_type='rag')
                     logger.info("✅ Gemini usage tracking completed successfully")
                 except Exception as tracking_error:
