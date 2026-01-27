@@ -1083,7 +1083,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                     contents=retrieval_prompt
                 )
                 logger.info(f"🔍 Gemini RAG search completed using cached content (text-only)")
-                logger.info("RAG Response="+response)
+                logger.info("RAG Response=" + str(response))
             except Exception as cache_error:
                 logger.warning(f"⚠️ Failed to create/use cached content: {cache_error}")
                 # Fallback to direct API call without caching
