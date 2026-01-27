@@ -2017,9 +2017,9 @@ class PydanticAIGatewayService:
             raise ValueError("GenAI client not initialized")
         
         try:
-            # Check if client supports cached_content
-            if not hasattr(self.genai_client, 'cached_content'):
-                logger.warning(f"⚠️ Gemini client does not support cached_content - skipping optimization")
+            # Check if client supports caches
+            if not hasattr(self.genai_client, 'caches'):
+                logger.warning(f"⚠️ Gemini client does not support caches - skipping optimization")
                 logger.warning(f"⚠️ This will prevent 90% cost discount optimization")
                 # Return a mock cache ID for compatibility
                 return f"no_cache_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
@@ -2030,10 +2030,13 @@ class PydanticAIGatewayService:
             logger.info(f"  - TTL: 3600s")
             logger.info(f"  - Content preview: {system_prompt[:100]}... (truncated)")
             
-            cached_content = self.genai_client.cached_content.create(
+            cached_content = self.genai_client.caches.create(
                 model=MODEL_NAME,
-                contents=system_prompt,
-                ttl=3600  # 1 hour TTL
+                config=types.CreateCachedContentConfig(
+                    display_name=f"system_prompt_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                    contents=[types.Part.from_text(system_prompt)],
+                    ttl="3600s"
+                )
             )
             
             logger.info(f"✅ Successfully created cached content:")
