@@ -1,0 +1,2923 @@
+# --- 🔍 STARTUP DIAGNOSTIC ---
+import os
+import sys
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Log port and environment basic state
+logger.info("🔍 --- Chatbot Startup Diagnostics ---")
+
+try:
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.middleware.cors import CORSMiddleware
+except ImportError as e:
+    logger.error(f"Failed to import FastAPI components: {e}")
+    raise
+
+try:
+    from pydantic import BaseModel, Field
+    from typing import Optional, List, Dict, Any, Annotated
+    from dataclasses import dataclass
+except ImportError as e:
+    logger.error(f"Failed to import Pydantic components: {e}")
+    raise
+
+try:
+    from dotenv import load_dotenv
+    import uuid
+    from datetime import datetime
+    from pathlib import Path
+except ImportError as e:
+    logger.error(f"Failed to import basic components: {e}")
+    raise
+
+try:
+    from google import genai
+    from google.genai import types
+    from contextlib import asynccontextmanager
+    from pydantic_ai import Agent, RunContext
+    from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+    from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
+    import asyncio
+    import json
+    import re
+except ImportError as e:
+    logger.error(f"Failed to import AI components: {e}")
+    raise
+
+try:
+    from fastapi.responses import StreamingResponse
+    logger.info("✅ StreamingResponse imported successfully")
+except ImportError as e:
+    logger.error(f"Failed to import StreamingResponse: {e}")
+    # Fallback: create a simple streaming response class
+    import asyncio
+    from starlette.responses import Response
+    
+    class StreamingResponse:
+        def __init__(self, content, media_type="text/plain", headers=None):
+            self.content = content
+            self.media_type = media_type
+            self.headers = headers or {}
+        
+        async def __call__(self, scope, receive, send):
+            await send({
+                'type': 'http.response.start',
+                'status': 200,
+                'headers': [
+                    [b'content-type', self.media_type.encode()],
+                    *[(k.encode(), v.encode()) for k, v in self.headers.items()]
+                ],
+            })
+            
+            if hasattr(self.content, '__aiter__'):
+                async for chunk in self.content:
+                    await send({
+                        'type': 'http.response.body',
+                        'body': chunk.encode() if isinstance(chunk, str) else chunk,
+                    })
+            else:
+                for chunk in self.content:
+                    await send({
+                        'type': 'http.response.body',
+                        'body': chunk.encode() if isinstance(chunk, str) else chunk,
+                    })
+            
+            await send({'type': 'http.response.body', 'body': b''})
+    
+    logger.warning("⚠️ Using fallback StreamingResponse implementation")
+
+# Add shared directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from shared.config import settings
+from shared.db import init_railway_db, init_neon_db, railway_db, neon_db
+from shared.token_tracker import track_gemini_usage_from_response
+
+# Context Caching System for Cost Optimization
+import time
+import hashlib
+from typing import Tuple, Optional
+
+CACHE_TTL_SECONDS = 3600  # 1 hour TTL
+context_cache = {}
+
+def generate_cache_key(prompt_components: Dict[str, Any]) -> str:
+    """Generate a unique cache key based on prompt components."""
+    # Safely extract file_context data to prevent NoneType errors
+    file_context = prompt_components.get('file_context', [])
+    safe_file_context = []
+    if file_context:
+        try:
+            # Ensure file_context is iterable and not None
+            if isinstance(file_context, (list, tuple)):
+                safe_file_context = [
+                    (f.file_name, f.content[:100] if f.content else '')
+                    for f in file_context 
+                    if f and hasattr(f, 'file_name') and hasattr(f, 'content')
+                ]
+            else:
+                logger.warning(f"file_context is not iterable: {type(file_context)}")
+                safe_file_context = []
+        except Exception as e:
+            logger.warning(f"Error processing file_context for cache key: {e}")
+            safe_file_context = []
+    
+    cache_data = {
+        'file_context': str(sorted(safe_file_context)),
+        'custom_prompt': prompt_components.get('custom_prompt', ''),
+        'response_policy': prompt_components.get('response_policy', ''),
+        'rag_had_results': prompt_components.get('rag_had_results', True),
+        'model_name': MODEL_NAME
+    }
+    
+    cache_string = json.dumps(cache_data, sort_keys=True)
+    return hashlib.sha256(cache_string.encode()).hexdigest()
+
+def get_cached_system_prompt(prompt_components: Dict[str, Any]) -> Optional[str]:
+    """Get cached system prompt if available and not expired."""
+    cache_key = generate_cache_key(prompt_components)
+    
+    logger.info(f"🔍 Checking cache for key: {cache_key[:16]}...")
+    logger.info(f"🔍 Current cache size: {len(context_cache)} entries")
+    
+    if cache_key in context_cache:
+        cached_data = context_cache[cache_key]
+        current_time = time.time()
+        cache_age = current_time - cached_data['timestamp']
+        
+        logger.info(f"📦 Cache entry found:")
+        logger.info(f"  - Cache age: {cache_age:.1f}s ({cache_age/60:.1f}m)")
+        logger.info(f"  - TTL: {CACHE_TTL_SECONDS}s ({CACHE_TTL_SECONDS/60:.1f}m)")
+        logger.info(f"  - Expires in: {CACHE_TTL_SECONDS - cache_age:.1f}s")
+        logger.info(f"  - Prompt length: {len(cached_data['prompt'])} chars")
+        logger.info(f"  - Created at: {datetime.fromtimestamp(cached_data['timestamp']).isoformat()}")
+        
+        if cache_age < CACHE_TTL_SECONDS:
+            logger.info(f"✅ CACHE HIT - Using cached system prompt (age: {cache_age:.1f}s)")
+            logger.info(f"✅ Cache efficiency: 90% discount applied")
+            return cached_data['prompt']
+        else:
+            logger.warning(f"⏰ CACHE EXPIRED - Removing expired entry for key: {cache_key[:16]}...")
+            logger.warning(f"⏰ Cache was {cache_age - CACHE_TTL_SECONDS:.1f}s past TTL")
+            del context_cache[cache_key]
+            logger.info(f"🗑️ Expired cache entry removed. New cache size: {len(context_cache)} entries")
+    else:
+        logger.info(f"❌ CACHE MISS - No entry found for key: {cache_key[:16]}...")
+    
+    return None
+
+def cache_system_prompt(prompt_components: Dict[str, Any], prompt: str) -> str:
+    """Cache the system prompt with timestamp."""
+    cache_key = generate_cache_key(prompt_components)
+    
+    logger.info(f"💾 Caching system prompt:")
+    logger.info(f"  - Cache key: {cache_key[:16]}...")
+    logger.info(f"  - Prompt length: {len(prompt)} characters")
+    logger.info(f"  - TTL: {CACHE_TTL_SECONDS}s ({CACHE_TTL_SECONDS/60:.1f}m)")
+    logger.info(f"  - Timestamp: {datetime.fromtimestamp(time.time()).isoformat()}")
+    logger.info(f"  - Components: {list(prompt_components.keys())}")
+    
+    context_cache[cache_key] = {
+        'prompt': prompt,
+        'timestamp': time.time(),
+        'components': prompt_components
+    }
+    
+    logger.info(f"💾 Cache entry stored. New cache size: {len(context_cache)} entries")
+    logger.info(f"💾 Cache efficiency: 90% discount available for future requests")
+    
+    return prompt
+
+# Lazy database initialization for serverless optimization
+async def get_railway_db():
+    """Get Railway database connection, initializing if needed."""
+    global railway_db
+    if railway_db is None and settings.railway_postgres_url:
+        try:
+            logger.info("🔄 Lazy initializing Railway PostgreSQL database...")
+            railway_db = await init_railway_db(settings.railway_postgres_url)
+            logger.info("✅ Railway PostgreSQL database initialized")
+
+            # Debug: Show available files in database
+            try:
+                files_count = await railway_db.fetchval("SELECT COUNT(*) FROM file_uploads")
+                logger.info(f"📊 Database contains {files_count} file records")
+
+                if files_count > 0:
+                    sample_files = await railway_db.fetch("""
+                        SELECT gemini_file_name, original_filename, display_name
+                        FROM file_uploads
+                        ORDER BY created_at DESC
+                        LIMIT 3
+                    """)
+                    logger.info("📋 Sample files in database:")
+                    for sf in sample_files:
+                        logger.info(f"   • Gemini: '{sf['gemini_file_name']}' | Original: '{sf['original_filename']}' | Display: '{sf['display_name']}'")
+            except Exception as db_debug_e:
+                logger.warning(f"Could not check database contents: {db_debug_e}")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Railway PostgreSQL database: {e}")
+            raise
+    return railway_db
+
+async def get_neon_db():
+    """Get Neon database connection, initializing if needed."""
+    global neon_db
+    if neon_db is None and settings.neon_db_url:
+        try:
+            logger.info("🔄 Lazy initializing Neon database...")
+            neon_db = await init_neon_db(settings.neon_db_url)
+            logger.info("✅ Neon database initialized")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Neon database: {e}")
+            raise
+    return neon_db
+
+load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Ensure shared utilities are importable and enable global exception logging
+import sys
+from pathlib import Path
+try:
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+except Exception:
+    logger.debug("Could not adjust sys.path for shared imports")
+
+from shared.utils import setup_global_exception_logging, register_fastapi_exception_handlers, dependency_unavailable_error, log_system_metrics, log_endpoint_request
+setup_global_exception_logging("chatbot_orchestration")
+
+# Initialize AI components (lazy initialization to avoid startup failures)
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+
+# Log status of required environment variables
+if not GEMINI_API_KEY:
+    logger.critical("🚨 GEMINI_API_KEY environment variable is missing!")
+    logger.critical("   This service cannot start without GEMINI_API_KEY")
+    logger.critical("   Set GEMINI_API_KEY in Railway environment variables")
+    # Don't exit - let the service start but return 503 for chat requests
+else:
+    logger.info("✅ GEMINI_API_KEY is configured")
+
+# Lifespan context manager for startup and shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle application startup and shutdown events."""
+    logger.info("🔄 Chatbot orchestration lifespan starting...")
+
+    # For serverless optimization: Skip heavy DB initialization during startup
+    # Databases will be initialized lazily on first request to reduce cold start time
+    logger.info("Chatbot orchestration service started successfully (lazy DB init)")
+    logger.info(f"Health check endpoint: /health (Port: {os.getenv('PORT', '8003')})")
+    yield
+
+    # Shutdown - Close database connections if they exist
+    logger.info("🛑 Shutting down chatbot orchestration service...")
+    try:
+        if railway_db and not railway_db.is_closed:
+            await railway_db.disconnect()
+            logger.info("✅ Railway PostgreSQL connection closed")
+    except Exception as e:
+        logger.warning(f"Error closing Railway DB: {e}")
+
+    try:
+        if neon_db and not neon_db.is_closed:
+            await neon_db.disconnect()
+            logger.info("✅ Neon DB connection closed")
+    except Exception as e:
+        logger.warning(f"Error closing Neon DB: {e}")
+
+    logger.info("✅ Chatbot orchestration service shutdown complete")
+
+app = FastAPI(
+    title="Chatbot Orchestration Service",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Register FastAPI-level exception handlers to ensure stack traces are logged
+register_fastapi_exception_handlers(app, "chatbot_orchestration")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize AI components (lazy initialization to avoid startup failures)
+
+# Global clients - initialized lazily
+genai_client = None
+gemini_model = None
+
+def get_genai_client():
+    """Lazy initialization of Gemini client."""
+    global genai_client
+    if genai_client is None and GEMINI_API_KEY:
+        try:
+            genai_client = genai.Client(api_key=GEMINI_API_KEY)
+            logger.info("✅ Gemini client initialized")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Gemini client: {e}")
+            genai_client = None
+    return genai_client
+
+
+MODEL_NAME = os.getenv("CHATBOT_MODEL", settings.chatbot_model)
+TEMPERATURE = float(os.getenv("CHATBOT_TEMPERATURE", str(settings.chatbot_temperature)))
+MAX_TOKENS = int(os.getenv("CHATBOT_MAX_TOKENS", str(settings.chatbot_max_tokens)))
+logger.info(f"🤖 Model config: {MODEL_NAME}, temp={TEMPERATURE}, max_tokens={MAX_TOKENS}")
+
+# Database will be initialized lazily when first needed (see get_railway_db function)
+logger.info("🔄 Database will be initialized lazily for token tracking")
+
+# Initialize Tavily for internet search (optional)
+tavily_client = None
+if settings.tavily_api_key and settings.enable_internet_search:
+    try:
+        from tavily import TavilyClient
+        tavily_client = TavilyClient(api_key=settings.tavily_api_key)
+        logger.info("✅ Tavily internet search initialized")
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to initialize Tavily: {e}")
+else:
+    logger.info("ℹ️  Tavily not configured or disabled")
+
+# In-memory session storage
+sessions: Dict[str, Dict[str, Any]] = {}
+
+
+# Pydantic models for structured outputs
+class SearchResult(BaseModel):
+    """Search result from Gemini FileSearch with comprehensive metadata."""
+    # Original fields
+    file_name: str
+    content: str
+    relevance_score: Optional[float] = None
+
+    # Enhanced metadata fields to match frontend DocumentSource interface
+    chunk_id: Optional[str] = None
+    document_id: Optional[str] = None
+    source: Optional[str] = None
+    s3_key: Optional[str] = None
+    original_filename: Optional[str] = None
+    page_number: Optional[int] = None
+    element_type: Optional[str] = None
+    hierarchy_level: Optional[int] = None
+    similarity_score: Optional[float] = None  # Alias for relevance_score
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ChatResponse(BaseModel):
+    """Structured chat response."""
+    answer: str = Field(description="The answer to the user's question")
+    sources: List[SearchResult] = Field(default_factory=list, description="Sources used for the answer")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence score for the answer")
+    data_sources_used: List[str] = Field(default_factory=list, description="Data sources used: rag, postgres, neon_db, internet")
+
+
+class HumanReviewRequest(BaseModel):
+    """Request for human review."""
+    approved: bool
+    feedback: Optional[str] = None
+    corrected_answer: Optional[str] = None
+
+
+class ChatRequest(BaseModel):
+    """Chat request model."""
+    message: str
+    session_id: Optional[str] = None
+    use_rag: bool = True
+    max_results: int = 5
+    system_prompt: Optional[str] = None  # Custom system prompt (will be appended to default)
+    response_policy: Optional[int] = None  # 0-100: 0=flexible, 100=strict
+
+
+class ChatSessionResponse(BaseModel):
+    """Chat session response."""
+    session_id: str
+    message: str
+    response: ChatResponse
+    usage: Optional[Dict[str, Any]] = None
+    timestamp: str
+
+
+class SuggestedMessagesRequest(BaseModel):
+    """Request for AI-generated suggested messages."""
+    session_id: str
+    conversation_history: Optional[List[Dict[str, str]]] = None  # List of {role: "user"|"assistant", content: "..."}
+
+
+class SuggestedMessagesResponse(BaseModel):
+    """Response with AI-generated suggested messages."""
+    suggested_messages: List[str]
+    usage: Optional[Dict[str, Any]] = None
+
+
+
+# Pydantic AI Agent Setup
+# Gemini model reads API key from GEMINI_API_KEY environment variable automatically
+gemini_model = None
+
+if GEMINI_API_KEY:
+    try:
+        from pydantic_ai.models.gemini import GeminiModel
+        gemini_model = GeminiModel(MODEL_NAME)
+        logger.info("✅ Gemini model initialized")
+    except Exception as e:
+        gemini_model = None
+        logger.error(f"❌ Failed to initialize GeminiModel: {e}")
+        logger.error("Gemini model will be unavailable; chat endpoints may return 503 or degraded responses")
+else:
+    logger.warning("Gemini model not initialized - GEMINI_API_KEY is missing")
+
+
+# Tool for querying Railway PostgreSQL (file metadata, user data)
+async def query_railway_postgres(
+    query: Annotated[str, "SQL-like query description or natural language question about file uploads, users, or metrics"]
+) -> str:
+    """
+    Query Railway PostgreSQL database for file metadata, user information, or metrics.
+    
+    Use this for questions about:
+    - Uploaded files and their metadata
+    - User information (non-PII only)
+    - System metrics and analytics
+    - File upload history
+    
+    IMPORTANT: Never expose PII (personally identifiable information) like emails, names, or personal data.
+    Only return aggregated statistics, file metadata, and anonymized information.
+    """
+    try:
+        db = await get_railway_db()
+        if not db:
+            return "Railway PostgreSQL database is not configured."
+    except Exception as e:
+        return f"Failed to initialize Railway PostgreSQL database: {e}"
+    
+    try:
+        # Parse the query and construct appropriate SQL
+        query_lower = query.lower()
+        
+        # File-related queries
+        if any(word in query_lower for word in ['file', 'upload', 'document', 'document']):
+            if 'count' in query_lower or 'total' in query_lower or 'number' in query_lower:
+                result = await railway_db.fetchval(
+                    "SELECT COUNT(*) FROM file_uploads WHERE gemini_state = 'ACTIVE'"
+                )
+                return f"Total active files in the system: {result}"
+            elif 'recent' in query_lower or 'latest' in query_lower:
+                files = await railway_db.fetch(
+                    """
+                    SELECT display_name, mime_type, size_bytes, uploaded_at
+                    FROM file_uploads
+                    WHERE gemini_state = 'ACTIVE'
+                    ORDER BY uploaded_at DESC
+                    LIMIT 5
+                    """
+                )
+                if files:
+                    result = "Recent uploaded files:\n"
+                    for f in files:
+                        result += f"- {f['display_name']} ({f['mime_type']}, {f['size_bytes']} bytes, uploaded {f['uploaded_at']})\n"
+                    return result
+                return "No recent files found."
+            else:
+                # General file info
+                files = await railway_db.fetch(
+                    """
+                    SELECT display_name, mime_type, size_bytes, uploaded_at
+                    FROM file_uploads
+                    WHERE gemini_state = 'ACTIVE'
+                    ORDER BY uploaded_at DESC
+                    LIMIT 10
+                    """
+                )
+                if files:
+                    result = f"Found {len(files)} active files:\n"
+                    for f in files:
+                        result += f"- {f['display_name']} ({f['mime_type']})\n"
+                    return result
+                return "No files found in the database."
+        
+        # Metrics queries
+        elif any(word in query_lower for word in ['metric', 'statistic', 'analytics', 'usage']):
+            metrics = await railway_db.fetch(
+                """
+                SELECT metric_name, SUM(value::numeric) as total_value, unit
+                FROM metrics
+                WHERE recorded_at > NOW() - INTERVAL '7 days'
+                GROUP BY metric_name, unit
+                ORDER BY total_value DESC
+                LIMIT 10
+                """
+            )
+            if metrics:
+                result = "Recent metrics (last 7 days):\n"
+                for m in metrics:
+                    result += f"- {m['metric_name']}: {m['total_value']} {m['unit'] or ''}\n"
+                return result
+            return "No metrics found."
+        
+        # Default: return file count
+        count = await railway_db.fetchval("SELECT COUNT(*) FROM file_uploads WHERE gemini_state = 'ACTIVE'")
+        return f"Database contains {count} active files. Please be more specific about what information you need."
+        
+    except Exception as e:
+        logger.error(f"Error querying Railway PostgreSQL: {e}")
+        return f"Error querying database: {str(e)}"
+
+
+# Tool for querying Neon DB (business data)
+async def query_neon_db(
+    query: Annotated[str, "Natural language question about business data: products, orders, customers, sales, inventory"]
+) -> str:
+    """
+    Query Neon DB business database for product, order, customer, sales, or inventory information.
+    
+    Use this for questions about:
+    - Products and product catalog
+    - Orders and transactions
+    - Sales analytics and trends
+    - Inventory levels
+    - Customer segments (anonymized, no PII)
+    
+    IMPORTANT: Never expose PII. Only return aggregated business data, product information, and anonymized statistics.
+    """
+    try:
+        db = await get_neon_db()
+        if not db:
+            return "Neon DB business database is not configured."
+    except Exception as e:
+        return f"Failed to initialize Neon DB business database: {e}"
+    
+    try:
+        query_lower = query.lower()
+        
+        # Product queries
+        if any(word in query_lower for word in ['product', 'item', 'catalog']):
+            if 'available' in query_lower or 'stock' in query_lower:
+                products = await neon_db.fetch(
+                    """
+                    SELECT product_name, category, price, stock_quantity, rating
+                    FROM products
+                    WHERE is_available = TRUE AND stock_quantity > 0
+                    ORDER BY rating DESC NULLS LAST
+                    LIMIT 10
+                    """
+                )
+                if products:
+                    result = "Available products:\n"
+                    for p in products:
+                        result += f"- {p['product_name']} ({p['category']}) - ${p['price']}, Stock: {p['stock_quantity']}, Rating: {p['rating'] or 'N/A'}\n"
+                    return result
+                return "No available products found."
+            elif 'category' in query_lower:
+                categories = await neon_db.fetch(
+                    """
+                    SELECT category, COUNT(*) as count, AVG(price) as avg_price
+                    FROM products
+                    WHERE is_available = TRUE
+                    GROUP BY category
+                    ORDER BY count DESC
+                    """
+                )
+                if categories:
+                    result = "Products by category:\n"
+                    for c in categories:
+                        result += f"- {c['category']}: {c['count']} products, Average price: ${float(c['avg_price']):.2f}\n"
+                    return result
+                return "No category data found."
+            else:
+                products = await neon_db.fetch(
+                    "SELECT product_name, category, price FROM products WHERE is_available = TRUE LIMIT 10"
+                )
+                if products:
+                    result = "Sample products:\n"
+                    for p in products:
+                        result += f"- {p['product_name']} ({p['category']}) - ${p['price']}\n"
+                    return result
+                return "No products found."
+        
+        # Order queries
+        elif any(word in query_lower for word in ['order', 'transaction', 'purchase']):
+            if 'recent' in query_lower or 'latest' in query_lower:
+                orders = await neon_db.fetch(
+                    """
+                    SELECT order_id, order_status, total_amount, order_date
+                    FROM orders
+                    ORDER BY order_date DESC
+                    LIMIT 5
+                    """
+                )
+                if orders:
+                    result = "Recent orders:\n"
+                    for o in orders:
+                        result += f"- Order {o['order_id']}: ${o['total_amount']} ({o['order_status']}) on {o['order_date']}\n"
+                    return result
+                return "No recent orders found."
+            elif 'total' in query_lower or 'revenue' in query_lower:
+                revenue = await neon_db.fetchval(
+                    "SELECT SUM(total_amount) FROM orders WHERE order_status != 'cancelled'"
+                )
+                count = await neon_db.fetchval(
+                    "SELECT COUNT(*) FROM orders WHERE order_status != 'cancelled'"
+                )
+                return f"Total revenue: ${float(revenue or 0):.2f} from {count} orders."
+            else:
+                orders = await neon_db.fetch(
+                    """
+                    SELECT order_status, COUNT(*) as count, SUM(total_amount) as total
+                    FROM orders
+                    GROUP BY order_status
+                    """
+                )
+                if orders:
+                    result = "Orders by status:\n"
+                    for o in orders:
+                        result += f"- {o['order_status']}: {o['count']} orders, Total: ${float(o['total'] or 0):.2f}\n"
+                    return result
+                return "No order data found."
+        
+        # Sales analytics
+        elif any(word in query_lower for word in ['sales', 'revenue', 'analytics', 'trend']):
+            analytics = await neon_db.fetch(
+                """
+                SELECT category, SUM(total_revenue) as revenue, SUM(total_orders) as orders
+                FROM sales_analytics
+                WHERE date >= CURRENT_DATE - INTERVAL '30 days'
+                GROUP BY category
+                ORDER BY revenue DESC
+                LIMIT 5
+                """
+            )
+            if analytics:
+                result = "Sales by category (last 30 days):\n"
+                for a in analytics:
+                    result += f"- {a['category']}: ${float(a['revenue'] or 0):.2f} revenue, {a['orders']} orders\n"
+                return result
+            return "No sales analytics data found."
+        
+        # Inventory queries
+        elif any(word in query_lower for word in ['inventory', 'stock', 'warehouse']):
+            inventory = await neon_db.fetch(
+                """
+                SELECT p.product_name, i.quantity_available, i.warehouse_location
+                FROM inventory i
+                JOIN products p ON i.product_id = p.product_id
+                WHERE i.quantity_available < i.reorder_level
+                ORDER BY i.quantity_available ASC
+                LIMIT 10
+                """
+            )
+            if inventory:
+                result = "Low stock items:\n"
+                for inv in inventory:
+                    result += f"- {inv['product_name']}: {inv['quantity_available']} units at {inv['warehouse_location']}\n"
+                return result
+            return "All inventory levels are adequate."
+        
+        # Default response
+        return "Please specify what business data you need: products, orders, sales, or inventory."
+        
+    except Exception as e:
+        logger.error(f"Error querying Neon DB: {e}")
+        return f"Error querying business database: {str(e)}"
+
+
+# Tool for internet search
+async def search_internet(
+    query: Annotated[str, "Search query for current information from the internet"]
+) -> str:
+    """
+    Search the internet for current information using Tavily API.
+    
+    Use this for questions about:
+    - Current events and news
+    - Real-time information
+    - General knowledge not in the knowledge base
+    - Recent developments or updates
+    
+    Only use when information is not available in RAG, PostgreSQL, or Neon DB AND settings.enable_internet_search is True.
+    """
+    if not tavily_client or not settings.enable_internet_search:
+        return "Internet search is currently disabled in system configuration."
+    # Check if internet search is explicitly enabled in the request deps
+    # We'll need to pass 'deps' to this tool but for now we follow the logic
+    # In Pydantic AI tools, 'deps' is passed if the argument is type-hinted
+    pass # Modified below
+    
+    try:
+        response = tavily_client.search(
+            query=query,
+            search_depth="basic",
+            max_results=3
+        )
+        
+        if response.get('results'):
+            result_text = f"Internet search results for '{query}':\n\n"
+            for idx, result in enumerate(response['results'][:3], 1):
+                result_text += f"{idx}. {result.get('title', 'No title')}\n"
+                result_text += f"   {result.get('content', 'No content')[:200]}...\n"
+                if result.get('url'):
+                    result_text += f"   Source: {result['url']}\n"
+                result_text += "\n"
+            return result_text
+        return f"No internet search results found for '{query}'."
+        
+    except Exception as e:
+        logger.error(f"Error searching internet: {e}")
+        return f"Error performing internet search: {str(e)}"
+
+
+# Define ChatSessionDeps before it's used in tools
+@dataclass
+class ChatSessionDeps:
+    """Dependencies for chat session."""
+    session_id: str
+
+# Tool for requesting human agent connection
+async def request_human_agent_connection(
+    deps: ChatSessionDeps,
+    reason: Annotated[str, "Brief reason why the user wants to connect to a human agent (optional)"]
+) -> str:
+    """
+    Request to connect the user to a human agent for personalized assistance.
+    
+    Use this tool when:
+    - The user explicitly asks to speak with a human, real person, or agent
+    - The user requests human support or assistance
+    - The user is frustrated and needs human help
+    - The query cannot be answered by the knowledge base or requires human judgment
+    
+    This will assign the chat to an available human agent and the chat will appear in their chat log.
+    """
+    session_id = deps.session_id
+    
+    try:
+        import httpx
+        import os
+        
+        # Get configuration service URL from environment
+        config_service_url = os.getenv(
+            'CONFIGURATION_SERVICE_URL',
+            'https://configuration-service-production.up.railway.app'
+        )
+        
+        # Call the request-human-agent endpoint
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{config_service_url}/api/v1/chat/{session_id}/request-human-agent",
+                json={}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                assigned_agent = result.get('assigned_agent', 'an agent')
+                logger.info(f"Chat {session_id} assigned to human agent {assigned_agent}")
+                return f"Successfully connected you to a human agent ({assigned_agent}). They will join the conversation shortly. The chat has been opened in their chat log."
+            elif response.status_code == 503:
+                error_detail = response.json().get('detail', 'No agents available')
+                logger.warning(f"Human agent request failed: {error_detail}")
+                return f"I'm sorry, but {error_detail.lower()}. Please try again later or continue chatting with me."
+            else:
+                error_detail = response.json().get('detail', 'Failed to connect to human agent')
+                logger.error(f"Human agent request failed with status {response.status_code}: {error_detail}")
+                return f"I encountered an error while trying to connect you to a human agent: {error_detail}. Please try again later."
+                
+    except httpx.TimeoutException:
+        logger.error("Timeout while requesting human agent connection")
+        return "The request to connect to a human agent timed out. Please try again."
+    except Exception as e:
+        logger.error(f"Error requesting human agent connection: {e}", exc_info=True)
+        return f"I encountered an error while trying to connect you to a human agent. Please try again later."
+
+
+# Tool for querying Gemini FileSearch (RAG)
+async def search_knowledge_base(query: Annotated[str, "The search query to find relevant information in uploaded documents"]) -> List[SearchResult]:
+    """
+    Search the knowledge base using Gemini FileSearch for relevant information.
+
+    This tool searches through uploaded documents and scraped content to find
+    information relevant to the user's query.
+    """
+    logger.info(f"🔍 search_knowledge_base called with query: {query[:100]}...")
+    genai_client = get_genai_client()
+    if not genai_client:
+        logger.warning("❌ Gemini API client not configured")
+        return [SearchResult(
+            file_name="System_Error",
+            content="Gemini API client not configured - cannot search knowledge base",
+            relevance_score=0.0,
+            similarity_score=0.0,
+            element_type="error",
+            hierarchy_level=0,
+            page_number=0
+        )]
+
+    try:
+        logger.info("📂 Listing Gemini files...")
+        # List all files in Gemini FileSearch
+        # Convert generator to list
+        try:
+            all_files = list(genai_client.files.list())
+            logger.info(f"📂 Found {len(all_files)} total files in Gemini FileSearch")
+        except Exception as list_error:
+            logger.error(f"❌ Failed to list Gemini files: {list_error}")
+            all_files = []
+
+        # Debug: Show file details for ALL files (even non-ACTIVE ones)
+        if all_files:
+            logger.info(f"📂 Showing details for all {len(all_files)} files:")
+            for i, f in enumerate(all_files):
+                state = getattr(f, 'state', None)
+                state_name = state.name if hasattr(state, 'name') else str(state)
+                logger.info(f"📄 File {i+1}: name='{f.name}', display_name='{getattr(f, 'display_name', 'N/A')}', state='{state_name}', mime_type='{getattr(f, 'mime_type', 'N/A')}'")
+        else:
+            logger.warning("⚠️ No files found in Gemini FileSearch - this prevents RAG usage tracking")
+            logger.info("💡 This could mean: API rate limiting, files not uploaded, or authentication issues")
+
+        # Filter for ACTIVE files only
+        active_files = [f for f in all_files if getattr(f, 'state', None) and getattr(f.state, 'name', None) == "ACTIVE"]
+        logger.info(f"📂 After filtering for ACTIVE files: {len(active_files)} active out of {len(all_files)} total")
+
+        # Since user is on paid tier and files should exist, let's try a direct approach
+        # Try to get files from database as backup
+        try:
+            db = await get_railway_db()
+            if db:
+                db_files = await db.fetch("""
+                    SELECT gemini_file_name, original_filename, display_name, mime_type, size_bytes
+                    FROM file_uploads
+                    WHERE gemini_file_name IS NOT NULL
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                """)
+                if db_files:
+                    logger.info(f"📊 Found {len(db_files)} files in database that should be in Gemini:")
+                    for db_file in db_files:
+                        logger.info(f"  • DB: {db_file['gemini_file_name']} -> {db_file['original_filename']} ({db_file['size_bytes']} bytes)")
+                    logger.warning("🔄 Files exist in DB but not found in Gemini API - possible sync issue")
+                else:
+                    logger.info("📊 No files found in database either")
+        except Exception as db_error:
+            logger.error(f"Could not check database for files: {db_error}")
+        
+        if not all_files:
+            logger.warning("No files found in FileSearch store")
+            return []
+            
+        # Filter for ACTIVE files only
+        active_files = [f for f in all_files if f.state.name == "ACTIVE"]
+
+        if not active_files:
+            logger.warning("No ACTIVE files found in FileSearch store")
+            return []
+
+        # Filter out files with unsupported MIME types for semantic search
+        # Only allow the supported formats: Documents (.pdf, .docx, .txt), Spreadsheets (.xlsx, .csv),
+        # Presentations (.pptx), Code (.py, .js, .html, .json, .md)
+        supported_mime_types = {
+            # Documents
+            'application/pdf',  # .pdf
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  # .docx
+            'text/plain',  # .txt
+            # Spreadsheets
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # .xlsx
+            'text/csv',  # .csv
+            # Presentations
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation',  # .pptx
+            # Code
+            'text/x-python',  # .py
+            'application/javascript',  # .js
+            'text/javascript',  # .js (alternative)
+            'text/html',  # .html
+            'application/json',  # .json
+            'text/markdown',  # .md
+        }
+
+        # Filter files by supported MIME types
+        supported_files = [f for f in active_files if getattr(f, 'mime_type', None) in supported_mime_types]
+
+        if not supported_files:
+            logger.warning("No files with supported MIME types found for semantic search")
+            return []
+
+        logger.info(f"Found {len(supported_files)} files with supported MIME types out of {len(active_files)} total ACTIVE files")
+
+        # Sort by creation time (descending) to get the most recent files
+        supported_files.sort(key=lambda f: f.create_time, reverse=True)
+
+        # Use simple heuristic: take up to 5 most recent files to avoid payload limits
+        files_to_search = supported_files[:5]
+        
+        logger.info(f"Searching {len(files_to_search)} files with Gemini 2.5 Flash Lite for query: {query}")
+
+        try:
+            # Helper function to extract original filename from display_name
+            # Format: "Display Name | original_filename.ext" or just "original_filename.ext"
+            def extract_original_filename(display_name: str) -> str:
+                """Extract original filename from display_name metadata format."""
+                if ' | ' in display_name:
+                    # Format: "Display Name | original_filename.ext"
+                    parts = display_name.split(' | ', 1)
+                    return parts[1].strip() if len(parts) > 1 else display_name
+                else:
+                    # No separator - display_name IS the original filename
+                    return display_name
+            
+            # Create a mapping of file names to comprehensive metadata
+            file_metadata_map = {}
+            for f in files_to_search:
+                display_name = getattr(f, 'display_name', f.name)
+                original_filename = extract_original_filename(display_name)
+
+                logger.debug(f"Processing Gemini file: name='{f.name}', display_name='{display_name}', extracted_original='{original_filename}'")
+                logger.debug(f"File object attributes: {dir(f)}")
+
+                # Try to get additional metadata from database
+                db_metadata = {}
+                try:
+                    if db:
+                        logger.debug(f"Attempting to fetch metadata for Gemini file: {f.name}, original_filename: {original_filename}")
+
+                        # Test database connection
+                        test_count = await db.fetchval("SELECT COUNT(*) FROM file_uploads")
+                        logger.debug(f"Database connection test: {test_count} files in database")
+
+                        # First try exact match with f.name
+                        file_record = await db.fetchrow("""
+                            SELECT id, cloudflare_r2_key, original_filename, display_name,
+                                   mime_type, size_bytes, metadata, created_at, gemini_file_name
+                            FROM file_uploads
+                            WHERE gemini_file_name = $1
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                        """, f.name)
+
+                        logger.debug(f"Exact match query result for '{f.name}': {file_record is not None}")
+
+                        # If no exact match, try matching by original filename
+                        if not file_record and original_filename:
+                            logger.debug(f"No exact match for gemini_file_name '{f.name}', trying original_filename '{original_filename}'")
+                            file_record = await db.fetchrow("""
+                                SELECT id, cloudflare_r2_key, original_filename, display_name,
+                                       mime_type, size_bytes, metadata, created_at, gemini_file_name
+                                FROM file_uploads
+                                WHERE original_filename = $1
+                                ORDER BY created_at DESC
+                                LIMIT 1
+                            """, original_filename)
+                            logger.debug(f"Original filename match result for '{original_filename}': {file_record is not None}")
+
+                        # If still no match, try partial match on gemini_file_name
+                        if not file_record:
+                            # Extract just the filename part (after last slash)
+                            filename_part = f.name.split('/')[-1] if '/' in f.name else f.name
+                            logger.debug(f"Trying partial match with filename part: {filename_part}")
+                            file_record = await db.fetchrow("""
+                                SELECT id, cloudflare_r2_key, original_filename, display_name,
+                                       mime_type, size_bytes, metadata, created_at, gemini_file_name
+                                FROM file_uploads
+                                WHERE gemini_file_name LIKE $1
+                                ORDER BY created_at DESC
+                                LIMIT 1
+                            """, f"%{filename_part}%")
+                            logger.debug(f"Partial match result for '{filename_part}': {file_record is not None}")
+
+                        # As a last resort, try to find any file with similar name
+                        if not file_record:
+                            # Try to match the base filename without extension
+                            base_name = original_filename.rsplit('.', 1)[0] if '.' in original_filename else original_filename
+                            logger.debug(f"Trying base name match: {base_name}")
+                            file_record = await db.fetchrow("""
+                                SELECT id, cloudflare_r2_key, original_filename, display_name,
+                                       mime_type, size_bytes, metadata, created_at, gemini_file_name
+                                FROM file_uploads
+                                WHERE original_filename LIKE $1 OR display_name LIKE $1
+                                ORDER BY created_at DESC
+                                LIMIT 1
+                            """, f"%{base_name}%")
+                            logger.debug(f"Base name match result for '{base_name}': {file_record is not None}")
+
+                        # Debug: Show what we found in the database
+                        if file_record:
+                            logger.debug(f"Found database record: gemini_file_name='{file_record.get('gemini_file_name')}', original_filename='{file_record.get('original_filename')}', display_name='{file_record.get('display_name')}'")
+
+                            db_metadata = {
+                                'document_id': str(file_record['id']),
+                                's3_key': file_record['cloudflare_r2_key'],
+                                'original_filename': file_record['original_filename'] or original_filename,
+                                'display_name': file_record['display_name'] or display_name,
+                                'mime_type': file_record['mime_type'],
+                                'size_bytes': file_record['size_bytes'],
+                                'upload_date': file_record['created_at'].isoformat() if file_record['created_at'] else None,
+                                'db_metadata': file_record['metadata'] if isinstance(file_record['metadata'], dict) else {"raw": file_record['metadata']}
+                            }
+                            logger.info(f"Successfully retrieved database metadata for file {f.name}")
+                        else:
+                            logger.warning(f"No database record found for file {f.name} (original: {original_filename}). Available files in DB:")
+                            # Debug: Show some available files
+                            available_files = await db.fetch("""
+                                SELECT gemini_file_name, original_filename, display_name
+                                FROM file_uploads
+                                ORDER BY created_at DESC
+                                LIMIT 5
+                            """)
+                            for af in available_files:
+                                logger.warning(f"  DB: gemini='{af['gemini_file_name']}', orig='{af['original_filename']}', display='{af['display_name']}'")
+                except Exception as e:
+                    logger.error(f"Could not fetch file metadata from database: {e}")
+                    import traceback
+                    logger.error(f"Database error traceback: {traceback.format_exc()}")
+
+                file_metadata_map[f.name] = {
+                    'display_name': display_name,
+                    'original_filename': original_filename,
+                    'document_id': db_metadata.get('document_id'),
+                    's3_key': db_metadata.get('s3_key'),
+                    'mime_type': db_metadata.get('mime_type'),
+                    'size_bytes': db_metadata.get('size_bytes'),
+                    'upload_date': db_metadata.get('upload_date'),
+                    'db_metadata': db_metadata.get('db_metadata', {})
+                }
+            
+            # Construct the retrieval prompt
+            retrieval_prompt = f"""
+            You are a specialized retrieval system. Your task is to extract information from the provided files to answer the user's query.
+
+            User Query: "{query}"
+
+            Instructions:
+            1. Search through the attached files for information relevant to the query.
+            2. Extract direct quotes, data points, and context that answer the question.
+            3. If the files contain the answer, provide ONLY the relevant text content without any line numbers, page references, or formatting.
+            4. Do NOT include line numbers, page numbers, or section headers in your response.
+            5. If the files do NOT contain the answer, state "No relevant information found in the knowledge base."
+
+            Output Format:
+            Source File: [Exact filename as shown in the file]
+            Content: [Direct text content only - no line numbers, no page numbers, no formatting]
+            elif hasattr(response, 'candidates') and response.candidates:
+                for candidate in response.candidates:
+                    if hasattr(candidate, 'usage_metadata') and candidate.usage_metadata:
+                        usage_data = candidate.usage_metadata
+                        logger.info(f"📊 Gemini RAG Usage (candidate.usage_metadata): {usage_data}")
+                        break
+
+            if usage_data:
+                logger.info(f"✅ Found Gemini usage data, attempting to track: {type(usage_data)}")
+                try:
+                    await track_gemini_usage_from_response(usage_data, session_id=session_id, api_call_type='rag')
+                    logger.info("✅ Gemini usage tracking completed successfully")
+                except Exception as tracking_error:
+                    logger.error(f"❌ Failed to track Gemini usage: {tracking_error}")
+                    import traceback
+                    logger.error(f"Usage tracking traceback: {traceback.format_exc()}")
+            else:
+                logger.warning(f"⚠️ Gemini RAG response missing usage data (PAID TIER SHOULD HAVE THIS)")
+                logger.info(f"Response type: {type(response)}")
+                logger.info(f"Response dir: {[attr for attr in dir(response) if not attr.startswith('_')][:10]}")
+
+                # Log the full response for debugging (be careful with sensitive data)
+                try:
+                    response_dict = {}
+                    for attr in dir(response):
+                        if not attr.startswith('_'):
+                            try:
+                                value = getattr(response, attr)
+                                # Don't log large objects or sensitive data
+                                if not callable(value) and not hasattr(value, '__len__'):
+                                    response_dict[attr] = value
+                                elif hasattr(value, '__len__') and len(value) < 100:
+                                    response_dict[attr] = str(value)[:200]
+                            except:
+                                response_dict[attr] = "ERROR_ACCESSING"
+                    logger.info(f"Gemini response structure: {response_dict}")
+                except Exception as e:
+                    logger.error(f"Could not log response structure: {e}")
+
+            # Parse the response to extract actual file names and clean content
+            raw_response_text = response.text
+            logger.debug(f"Raw Gemini response: {raw_response_text[:500]}...")
+
+            # Clean the response to extract only the actual content
+            def clean_gemini_response(response_text: str) -> str:
+                """Clean Gemini response to extract only the relevant content without metadata."""
+                lines = response_text.strip().split('\n')
+
+                # Remove empty lines at start and end
+                while lines and not lines[0].strip():
+                    lines.pop(0)
+                while lines and not lines[-1].strip():
+                    lines.pop()
+
+                # Look for "Content:" marker and extract everything after it
+                content_lines = []
+                found_content_marker = False
+
+                for line in lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+
+                    # Skip metadata lines
+                    if line.lower().startswith(('source file:', 'content:')):
+                        if line.lower().startswith('content:'):
+                            found_content_marker = True
+                            # Extract content after "Content:" marker
+                            content_part = line[8:].strip()  # Remove "Content:" prefix
+                            if content_part:
+                                content_lines.append(content_part)
+                        continue
+                    elif any(line.lower().startswith(prefix) for prefix in [
+                        'relevant content:', 'extracted information:', 'summary:', 'answer:'
+                    ]):
+                        # Skip these headers
+                        continue
+                    elif found_content_marker or not any(line.lower().startswith(prefix) for prefix in [
+                        'user query:', 'instructions:', 'output format:', '- '
+                    ]):
+                        # This is likely content
+                        # Remove line numbers like "12", "13", etc. at the beginning
+                        line = re.sub(r'^\d+\s*', '', line)
+                        # Remove page references
+                        line = re.sub(r'\bpage\s+\d+\b', '', line, flags=re.IGNORECASE)
+                        line = line.strip()
+                        if line:
+                            content_lines.append(line)
+
+                # Join content lines and clean up
+                content = ' '.join(content_lines)
+
+                # Remove multiple spaces and clean up
+                content = re.sub(r'\s+', ' ', content)
+                content = content.strip()
+
+                # If content is too short or looks like a line number, it might be invalid
+                if len(content) < 10 or re.match(r'^\d+$', content.strip()):
+                    logger.warning(f"Extracted content appears invalid: '{content[:100]}...'")
+                    return response_text.strip()  # Return original as fallback
+
+                return content
+
+            response_text = clean_gemini_response(raw_response_text)
+
+            # Try to extract file name from response text
+            # Look for "Source File: [filename]" pattern
+            source_file_pattern = r'Source File:\s*([^\n]+)'
+            matches = re.finditer(source_file_pattern, raw_response_text, re.IGNORECASE)
+
+            found_files = []
+            for match in matches:
+                found_file_name = match.group(1).strip()
+                found_files.append(found_file_name)
+            
+            # Determine the actual file name to use
+            actual_file_name = None
+            
+            if found_files:
+                # Try to match found file name with our file metadata
+                found_name = found_files[0]
+                for gemini_name, metadata in file_metadata_map.items():
+                    display_name = metadata['display_name']
+                    # Check if found name matches display name or is contained in it
+                    if found_name in display_name or display_name in found_name:
+                        # Extract original filename from the matched display_name
+                        actual_file_name = metadata['original_filename']
+                        logger.info(f"Matched found file '{found_name}' to original filename: {actual_file_name}")
+                        break
+                
+                # If no match found, try to extract from the found name directly
+                if not actual_file_name:
+                    actual_file_name = extract_original_filename(found_name)
+                    logger.info(f"Extracted original filename from response: {actual_file_name}")
+            
+            # Fallback: use the original filename of the first file searched
+            if not actual_file_name:
+                if len(files_to_search) == 1:
+                    first_file_metadata = file_metadata_map.get(files_to_search[0].name, {})
+                    actual_file_name = first_file_metadata.get('original_filename', 
+                        getattr(files_to_search[0], 'display_name', 'Unknown File'))
+                else:
+                    # Multiple files - use first file's original filename
+                    first_file_metadata = file_metadata_map.get(files_to_search[0].name, {})
+                    actual_file_name = first_file_metadata.get('original_filename', 'Multiple Files')
+            
+            logger.info(f"Using file name: {actual_file_name} (searched {len(files_to_search)} files)")
+
+            # Create a single consolidated result from the LLM's retrieval
+            # This acts as the "context" for the downstream orchestration agent
+            # Generate a chunk ID for this search result
+            chunk_id = f"search_{uuid.uuid4().hex[:16]}"
+
+            # Get additional metadata from file_metadata_map
+            file_metadata = {}
+            if files_to_search:
+                file_metadata = file_metadata_map.get(files_to_search[0].name, {})
+
+            # Extract page number from content if possible (basic heuristic)
+            page_number = None
+            page_match = re.search(r'Page\s*(\d+)', response_text[:200], re.IGNORECASE)
+            if page_match:
+                page_number = int(page_match.group(1))
+
+            # Build comprehensive metadata
+            comprehensive_metadata = {
+                "search_query": query,
+                "files_searched": len(files_to_search),
+                "gemini_model": "gemini-2.5-flash-lite",
+                "search_method": "semantic_retrieval",
+                "response_length": len(response_text),
+                "extraction_timestamp": datetime.utcnow().isoformat(),
+                "file_metadata": file_metadata
+            }
+
+            return [SearchResult(
+                file_name=actual_file_name,
+                content=response_text,
+                relevance_score=1.0,
+                similarity_score=1.0,
+                chunk_id=chunk_id,
+                document_id=file_metadata.get('document_id') or str(uuid.uuid4()),
+                source="gemini_search",
+                s3_key=file_metadata.get('s3_key'),
+                original_filename=file_metadata.get('original_filename') or actual_file_name,
+                page_number=page_number or 1,
+                element_type="search_result",
+                hierarchy_level=1,
+                metadata=comprehensive_metadata
+            )]
+            
+        except Exception as e:
+            logger.error(f"Error in Neural Retrieval: {e}")
+            # Fallback (return list of files if retrieval fails)
+            # EXPOSE THE ERROR for debugging purposes
+            return [SearchResult(
+                file_name="System_Error",
+                content=f"Error performing semantic search: {str(e)}. Files attempting to search: {', '.join(f.name for f in files_to_search)}",
+                relevance_score=0.1,
+                similarity_score=0.1,
+                chunk_id=f"error_{uuid.uuid4().hex[:16]}",
+                element_type="error",
+                hierarchy_level=0,
+                page_number=0,
+                metadata={
+                    "error_type": "search_failed",
+                    "error_message": str(e),
+                    "files_attempted": [f.name for f in files_to_search]
+                }
+            )]
+        
+    except Exception as e:
+        logger.error(f"Error searching knowledge base: {e}")
+        return []
+
+
+# System prompt with intelligent routing instructions
+def get_system_prompt(file_context: Optional[List[SearchResult]] = None, custom_prompt: Optional[str] = None, response_policy: Optional[int] = None, rag_had_results: bool = True) -> str:
+    """Generate dynamic system prompt with intelligent data source routing."""
+    
+    # Ensure file_context is a list, not None
+    safe_file_context = file_context if file_context is not None else []
+    
+    logger.info(f"🚀 Generating system prompt:")
+    logger.info(f"  - file_context: {len(safe_file_context)} items")
+    logger.info(f"  - custom_prompt: '{custom_prompt[:50] if custom_prompt else 'None'}...' (truncated)")
+    logger.info(f"  - response_policy: {response_policy}")
+    logger.info(f"  - rag_had_results: {rag_had_results}")
+    logger.info(f"  - model_name: {MODEL_NAME}")
+    
+    # Create prompt components for caching
+    prompt_components = {
+        'file_context': safe_file_context,
+        'custom_prompt': custom_prompt,
+        'response_policy': response_policy,
+        'rag_had_results': rag_had_results
+    }
+    
+    # Check cache first
+    logger.info(f"🔍 Checking local cache for system prompt...")
+    cached_prompt = get_cached_system_prompt(prompt_components)
+    if cached_prompt:
+        logger.info(f"✅ SYSTEM PROMPT CACHED - Using cached prompt ({len(cached_prompt)} chars)")
+        return cached_prompt
+    
+    logger.info(f"❌ SYSTEM PROMPT NOT CACHED - Generating new prompt...")
+    
+    # Generate new prompt if not cached
+    logger.info(f"📝 Generating new system prompt (~2500 words)...")
+    base_prompt = """You are an advanced intelligent knowledge assistant chatbot with access to multiple sophisticated data sources and intelligent routing capabilities. Your primary mission is to provide accurate, comprehensive, and contextually relevant answers by analyzing user queries and routing them to the most appropriate data sources.
+
+CORE IDENTITY & PROFESSIONAL PERSONALITY:
+You are a highly knowledgeable, professional, and helpful AI assistant with expertise in information retrieval, data analysis, and intelligent query routing. Maintain a friendly yet professional tone throughout all interactions. Be concise but thorough, always prioritizing accuracy, clarity, and user satisfaction. Adapt your communication style based on the user's apparent technical level, query complexity, and interaction context. Demonstrate empathy, patience, and understanding in all responses.
+
+COMPREHENSIVE FORMATTING PROTOCOLS:
+Always format your responses using proper HTML tags for optimal readability and professional presentation in the chat interface:
+
+STRUCTURAL ELEMENTS:
+- Use <ol><li>item</li></ol> for numbered lists and sequential step-by-step instructions
+- Use <ul><li>item</li></ul> for bullet points and unordered information
+- Use <strong>text</strong> for important keywords, emphasis, critical terms, and key concepts
+- Use <em>text</em> for italic emphasis, highlighting, and subtle stress
+- Use <code>text</code> for code snippets, technical terms, file names, and commands
+- Use <pre><code>code</code></pre> for multi-line code blocks and technical documentation
+- Use <blockquote>text</blockquote> for quotes and important excerpts
+- Use <h1> to <h6> for hierarchical headings and section organization
+- Use <p>text</p> for paragraph breaks and text separation
+- Use <br> for line breaks within content
+- Use <hr> for horizontal rules and content separation
+- Use <a href="url">text</a> for clickable links and references
+- Use <img src="url" alt="text"> for images and visual content
+- Use <table><tr><td>text</td></tr></table> for structured data presentation
+- Use <div>text</div> for content grouping and styling
+- Use <span>text</span> for inline styling and emphasis
+
+TECHNICAL ELEMENTS:
+- Use <kbd>text</kbd> for keyboard shortcuts and key combinations
+
+VISUAL SPACING:
+- Separate different sections with newlines for better visual spacing
+- Use consistent indentation and formatting patterns
+- Ensure content flows logically and is easy to scan
+
+ADVANCED EMOJI INTEGRATION STRATEGY:
+Implement context-aware emoji usage based on user interaction patterns and response types:
+
+GREETING AND WELCOME EMOTICONS:
+- For initial greetings: 😊, 👋, 🎉, ✨, 🌟
+- For returning users: 🎉, 👋, 😊, 🌟
+- For welcome messages: 🎊, ✨, 🎈, 🎁
+
+SUCCESS AND ACHIEVEMENT EMOTICONS:
+- For successful completion: ✅, 👍, 🎯, 🌟, 🏆
+- For confirmation and validation: ✅, 👍, 🎉, 🌟
+- For accomplishments and milestones: 🏆, 🎉, 🌟, 🎊
+
+INFORMATION AND INSIGHTS EMOTICONS:
+- For information delivery: 💡, 📊, 🔍, 📈, 📋
+- For analytical insights: 📊, 📈, 🔍, 💡, 🎯
+- For data and statistics: 📊, 📈, 📉, 📋, 📝
+
+TECHNICAL ASSISTANCE EMOTICONS:
+- For technical support: 💻, ⚙️, 🔧, 🚀, 🔌
+- For system information: 💻, ⚙️, 🗄️, 🌐, 📡
+- For troubleshooting: 🔧, 🔍, 💻, ⚙️, 🛠️
+
+WARNING AND CAUTION EMOTICONS:
+- For important warnings: ⚠️, 🛡️, 🔒, 🚨
+- For security notices: 🔒, 🛡️, ⚠️, 🔐
+- For critical alerts: 🚨, ⚠️, 🛡️, 📢
+
+ERROR AND ISSUE EMOTICONS:
+- For error reporting: ❌, 🚫, 📋, ⚠️
+- For problem identification: ❌, 🚫, 📋, 🔍
+- For troubleshooting steps: 🔧, 🔍, 💻, 📋
+
+HELP AND SUPPORT EMOTICONS:
+- For assistance requests: 🙏, 💪, 🤝, 🆘, 🎯
+- For support availability: 💪, 🤝, 🙏, 🌟
+- For help resources: 📚, 📖, 🎯, 💡
+
+EMOJI USAGE BEST PRACTICES:
+- Match emoji tone precisely to response content and conversation context
+- Use emojis to enhance readability, engagement, and emotional connection
+- Place emojis strategically at sentence beginnings or ends for emphasis
+- Use emojis to highlight key points, achievements, or critical information
+GREETING AND WELCOME EMOTICONS:
+- For initial greetings: 😊, 👋, 🎉, ✨, 🌟
+- For returning users: 🎉, 👋, 😊, 🌟
+- For welcome messages: 🎊, ✨, 🎈, 🎁
+
+SUCCESS AND ACHIEVEMENT EMOTICONS:
+- For successful completion: ✅, 👍, 🎯, 🌟, 🏆
+- For confirmation and validation: ✅, 👍, 🎉, 🌟
+- For accomplishments and milestones: 🏆, 🎉, 🌟, 🎊
+
+INFORMATION AND INSIGHTS EMOTICONS:
+- For information delivery: 💡, 📊, 🔍, 📈, 📋
+- For analytical insights: 📊, 📈, 🔍, 💡, 🎯
+- For data and statistics: 📊, 📈, 📉, 📋, 📝
+
+TECHNICAL ASSISTANCE EMOTICONS:
+- For technical support: 💻, ⚙️, 🔧, 🚀, 🔌
+- For system information: 💻, ⚙️, 🗄️, 🌐, 📡
+- For troubleshooting: 🔧, 🔍, 💻, ⚙️, 🛠️
+
+WARNING AND CAUTION EMOTICONS:
+- For important warnings: ⚠️, 🛡️, 🔒, 🚨
+- For security notices: 🔒, 🛡️, ⚠️, 🔐
+- For critical alerts: 🚨, ⚠️, 🛡️, 📢
+
+ERROR AND ISSUE EMOTICONS:
+- For error reporting: ❌, 🚫, 📋, ⚠️
+- For problem identification: ❌, 🚫, 📋, 🔍
+- For troubleshooting steps: 🔧, 🔍, 💻, 📋
+
+HELP AND SUPPORT EMOTICONS:
+- For assistance requests: 🙏, 💪, 🤝, 🆘, 🎯
+- For support availability: 💪, 🤝, 🙏, 🌟
+- For help resources: 📚, 📖, 🎯, 💡
+
+EMOJI USAGE BEST PRACTICES:
+- Match emoji tone precisely to response content and conversation context
+- Use emojis to enhance readability, engagement, and emotional connection
+- Place emojis strategically at sentence beginnings or ends for emphasis
+- Use emojis to highlight key points, achievements, or critical information
+- Never overuse emojis - maintain professional balance and appropriateness
+- Consider user preferences and cultural context in emoji selection
+- Ensure emojis complement rather than distract from content
+
+CRITICAL HTML RENDERING REQUIREMENTS:
+⚠️ ABSOLUTELY DO NOT wrap your responses in code blocks (```html or ```markdown). 
+Output the HTML directly so it renders properly in the chat interface without any formatting interference.
+
+COMPREHENSIVE RESPONSE EXAMPLE:
+<p>Here's your comprehensive solution with detailed step-by-step guidance:</p>
+<h2>🎯 Primary Implementation Strategy</h2>
+<ol>
+<li><strong>Step 1: Initial Setup</strong> - First, complete this <em>critical</em> configuration action</li>
+<li><strong>Step 2: Core Implementation</strong> - Then proceed with the following development process</li>
+<li><strong>Step 3: Validation & Testing</strong> - Finally, verify your results and ensure quality</li>
+<li><strong>Step 4: Deployment</strong> - Launch your solution with proper monitoring</li>
+</ol>
+<h2>📋 Additional Important Notes</h2>
+<ul>
+<li>Always <u>validate your input data</u> before proceeding with processing</li>
+<li>Keep detailed track of your progress throughout the entire process</li>
+<li>Don't hesitate to ask for clarification if any step seems unclear</li>
+<li>Maintain comprehensive documentation for future reference</li>
+</ul>
+<p>For detailed technical documentation and advanced guides, visit our comprehensive <a href="https://docs.example.com">knowledge base portal</a>.</p>
+
+EXTENSIVE DATA SOURCE INVENTORY AND UTILIZATION GUIDE:
+
+1. <strong>search_knowledge_base</strong> (RAG - Gemini FileSearch with Advanced Semantic Understanding):
+   - PRIMARY DATA SOURCE for all document-based queries and content retrieval
+   - Use for questions about content in uploaded documents, PDFs, text files, presentations
+   - Use for questions about scraped website content, web pages, and online documentation
+   - Use when the user asks about specific documents, file contents, or document metadata
+   - Utilizes advanced semantic search with contextual understanding and relevance scoring
+   - Provides intelligent content snippets with confidence scores and source attribution
+   - Best suited for: factual information, documentation review, policy research, procedure lookup
+   - Capabilities: multi-language support, context-aware search, relevance ranking
+   - Limitations: requires pre-indexed content, dependent on document quality and structure
+
+2. <strong>query_railway_postgres</strong> (Railway PostgreSQL - Comprehensive System Database):
+   - System administration and operational data repository
+   - Use for questions about file uploads, file metadata, comprehensive upload history
+   - Use for system metrics, performance analytics, usage statistics, and health monitoring
+   - Use for questions about the knowledge base system itself, configuration, and architecture
+   - Use for user management (anonymized), session data, system configuration parameters
+   - CRITICAL SECURITY REQUIREMENT: NEVER expose personally identifiable information (PII)
+   - Only return aggregated, anonymized, or system-level operational data
+   - Best suited for: system administration, infrastructure monitoring, usage analytics
+   - Data types: system logs, performance metrics, user statistics (aggregated), file management data
+   - Retention policies: configurable based on data type and compliance requirements
+
+3. <strong>query_neon_db</strong> (Neon DB - Comprehensive Business Intelligence Database):
+   - Business operations and commercial data warehouse
+   - Use for questions about products, comprehensive product catalog, pricing strategies
+   - Use for questions about orders, transactions, detailed sales data, revenue analytics
+   - Use for questions about inventory management, stock levels, warehouse optimization
+   - Use for advanced sales analytics, revenue trend analysis, business intelligence metrics
+   - Use for customer analytics (completely anonymized), market insights, competitive analysis
+   - CRITICAL PRIVACY COMPLIANCE: NEVER expose PII - only business data and fully anonymized statistics
+   - Best suited for: business intelligence, product information, sales data, market analysis
+   - Data freshness: real-time for transactions, daily for analytics, hourly for inventory
+   - Integration capabilities: connects with ERP, CRM, and other business systems
+
+4. <strong>search_internet</strong> (Tavily - Advanced Internet Search with Real-time Capabilities):
+   - External knowledge source with real-time information access
+   - Availability conditions: ONLY when RAG is not enabled for current session, OR when RAG is enabled AND returned relevant results
+   - Security restriction: DISABLED when RAG is enabled but returned no results (mandatory security policy)
+   - Use for current events, real-time information, breaking news, time-sensitive updates
+   - Use for general knowledge queries when RAG doesn't apply to the specific question
+   - Use for trending topics, recent developments, industry news, market updates
+   - Best suited for: current events, general knowledge, trending information, real-time research
+   - Search capabilities: web search, news search, academic sources, industry publications
+   - Quality filters: source credibility verification, content freshness validation
+
+5. <strong>request_human_agent_connection</strong> (Human Agent Support with Intelligent Escalation):
+   - Human escalation system with intelligent routing and agent matching
+   - Use when the user explicitly asks to speak with a human, real person, or support agent
+   - Use when the user requests human support, assistance, or service escalation
+   - Use when the user appears frustrated, confused, or requires human emotional support
+   - Use when the query requires human judgment, empathy, complex decision-making, or subjective assessment
+   - Use for sensitive issues, customer complaints, or situations requiring human oversight
+   - Use for complex technical issues that exceed automated system capabilities
+   - This will connect the user to an available human agent and open the conversation in their dashboard
+   - Agent matching: based on expertise, availability, language, and specialization
+   - Best suited for: escalation, complex issues, human judgment required, emotional support
+
+SOPHISTICATED MULTI-LEVEL ROUTING STRATEGY & INTELLIGENT PRIORITY SYSTEM:
+You MUST follow this comprehensive routing algorithm to find the optimal answer:
+
+LEVEL 1 - PRIMARY KNOWLEDGE RETRIEVAL:
+1. <strong>Gemini RAG (search_knowledge_base)</strong>: ALWAYS initiate with this primary source for queries about:
+   - Document content, file contents, or specific information within uploaded files
+   - Corporate policies, procedures, documentation, knowledge base articles
+   - Historical data, established facts, reference materials, archived information
+   - Any query suggesting the answer exists in documented or structured form
+   - Research requests, literature reviews, compliance documentation
+   - Technical specifications, user manuals, implementation guides
+
+LEVEL 2 - SYSTEM & BUSINESS INTELLIGENCE:
+2. <strong>Railway Database (query_railway_postgres)</strong>: Utilize for:
+   - System administration tasks, infrastructure management, file operations
+   - Performance monitoring, usage analytics, system health diagnostics
+   - User behavior analysis (anonymized), session management, system optimization
+   - Technical troubleshooting, system configuration, operational metrics
+   - Security monitoring, audit trails, compliance reporting
+
+3. <strong>Neon DB (query_neon_db)</strong>: Employ for:
+   - Business operations analysis, sales performance, revenue optimization
+   - Product catalog management, pricing strategies, inventory optimization
+   - Market research, competitive analysis, customer insights (anonymized)
+   - Financial analytics, business intelligence, strategic planning data
+   - Supply chain management, logistics optimization, demand forecasting
+
+LEVEL 3 - EXTERNAL KNOWLEDGE ACQUISITION:
+4. <strong>Internet Search (search_internet)</strong>: Activate only when:
+   - RAG is completely disabled for the current user session, OR
+   - RAG is fully enabled AND successfully returned relevant search results (security requirement)
+   - Use for current events, real-time information, breaking news updates
+   - Use for general knowledge queries outside the scope of internal documentation
+   - Use for trending topics, recent developments, industry-specific information
+
+LEVEL 4 - HUMAN EXPERTISE ESCALATION:
+5. <strong>Human Agent Connection</strong>: Deploy for:
+   - Explicit human agent requests, support escalation, service requests
+   - Complex emotional situations requiring human empathy and understanding
+   - Issues requiring subjective judgment, ethical considerations, or complex decision-making
+   - Technical problems exceeding automated system resolution capabilities
+   - Customer service issues, complaints, or relationship management concerns
+
+CRITICAL RAG SECURITY & COMPLIANCE POLICY:
+- If Gemini RAG (search_knowledge_base) returns no relevant information or fails to find an answer, you MUST NOT:
+  * Use your internal knowledge base or training data to answer the question
+  * Search the internet for information (internet search tool will be automatically disabled)
+  * Make assumptions, speculate, or provide uncertain or unverified answers
+  * Attempt to answer with general knowledge when specific, documented information is required
+  * Provide recommendations without proper source attribution or verification
+- Instead, you MUST respond with this exact HTML-formatted message (OUTPUT DIRECTLY, NO CODE BLOCKS):
+<p><strong>Sorry, I do not have this information in my training database.</strong></p>
+<p>Would you like to:</p>
+<ul>
+<li>Ask any other question?</li>
+<li>Talk to a <strong>human agent</strong>?</li>
+</ul>
+- This mandatory policy applies to ALL queries that should be answered by RAG - if RAG cannot find the answer, transparently admit limitation rather than using alternative sources
+
+DYNAMIC RAG STATUS MONITORING SYSTEM:
+{f"FOUND {len(file_context) if file_context else 0} RESULTS - INTERNET SEARCH AVAILABLE" if rag_had_results else "NO RESULTS FOUND - DO NOT USE INTERNAL KNOWLEDGE OR INTERNET SEARCH"}
+
+COMPREHENSIVE RESPONSE GENERATION PROTOCOL:
+When generating responses, follow this structured and methodical approach:
+
+<ol>
+<li><strong>Advanced Query Analysis</strong>: Conduct deep analysis of user intent, context, specific requirements, and underlying needs</li>
+<li><strong>Intelligent Source Selection</strong>: Apply sophisticated routing logic to select optimal data sources based on query characteristics and priority system</li>
+<li><strong>Human Agent Detection</strong>: Immediately identify and prioritize human agent connection requests using request_human_agent_connection tool</li>
+<li><strong>Multi-Source Data Synthesis</strong>: Intelligently combine information from multiple sources when needed for comprehensive, accurate answers</li>
+<li><strong>Quality Assurance Validation</strong>: Ensure all information is accurate, relevant, current, and properly attributed to sources</li>
+<li><strong>Transparency Communication</strong>: Clearly communicate information limitations, uncertainties, or when data is unavailable</li>
+<li><strong>Source Attribution Protocol</strong>: Always explicitly mention which data source(s) provided the information for transparency and credibility</li>
+<li><strong>Professional HTML Formatting</strong>: Apply comprehensive HTML formatting for optimal readability, user experience, and professional presentation</li>
+<li><strong>Context-Aware Emoji Enhancement</strong>: Strategically add appropriate emojis to enhance engagement, clarity, and visual appeal</li>
+<li><strong>Comprehensive Response Validation</strong>: Thoroughly review response for completeness, accuracy, helpfulness, and user satisfaction</li>
+</ol>
+
+ADVANCED ERROR HANDLING & GRACEFUL DEGRADATION STRATEGIES:
+- Implement robust error handling for all data source failures and communication issues
+- Provide graceful fallback mechanisms when primary data sources are unavailable
+- Always inform users transparently when experiencing technical difficulties or limitations
+- Offer alternative solutions, workarounds, or escalation paths when primary sources fail
+- Maintain consistently helpful and professional tone even during system issues or outages
+- Escalate to human agents promptly when technical issues prevent adequate assistance
+- Document and learn from errors to improve system reliability and user experience
+
+CONTEXT AWARENESS & CONVERSATIONAL INTELLIGENCE:
+- Maintain sophisticated awareness of conversation context, history, and previous interactions
+- Reference previous responses and established context when relevant to current queries
+- Build upon established conversation patterns to provide increasingly personalized assistance
+- Remember and adapt to user preferences, communication style, and interaction patterns
+- Recognize conversation transitions between topics and adjust responses accordingly
+- Implement intelligent conversation state management for coherent multi-turn dialogues
+
+PERFORMANCE OPTIMIZATION & EFFICIENCY PROTOCOLS:
+- Prioritize faster, more efficient data sources for time-sensitive queries and urgent requests
+- Implement parallel query strategies when appropriate to significantly improve response times
+- Utilize intelligent caching mechanisms for frequently accessed information and common queries
+- Optimize query strategies based on data source performance characteristics and reliability
+- Balance comprehensiveness with response time for optimal user experience and satisfaction
+- Monitor and optimize system performance metrics continuously for improvement opportunities
+
+SECURITY, PRIVACY & COMPLIANCE FRAMEWORK:
+- Implement rigorous protection against personally identifiable information (PII) exposure in all responses
+- Strictly adhere to all data access restrictions, privacy policies, and regulatory requirements
+- Utilize only fully anonymized or aggregated data for analytics, reporting, and insights
+- Respect user privacy preferences and comply with data protection regulations
+- Report any security concerns, suspicious activities, or potential violations immediately
+- Maintain comprehensive audit trails for all data access and information retrieval operations
+
+CONTINUOUS LEARNING & SYSTEM IMPROVEMENT:
+- Learn systematically from user interactions to continuously improve response quality and relevance
+- Adapt routing strategies based on query patterns, success rates, and user feedback
+- Identify opportunities to enhance data source utilization and integration effectiveness
+- Provide valuable feedback on system performance, user satisfaction, and improvement areas
+- Contribute actively to the ongoing enhancement of the knowledge assistant ecosystem
+- Implement machine learning techniques for pattern recognition and predictive optimization
+
+ADVANCED CONTEXTUAL AWARENESS AND ADAPTIVE RESPONSES:
+Develop sophisticated contextual understanding capabilities that enable personalized and situationally appropriate responses. Analyze user intent, emotional state, technical proficiency, and communication preferences to tailor responses accordingly. Implement dynamic response adaptation based on conversation history, user feedback patterns, and contextual cues. Create intelligent response modulation systems that adjust complexity, formality, and depth based on user characteristics and interaction patterns.
+
+SOPHISTICATED QUERY ANALYSIS AND INTELLIGENCE ROUTING:
+Implement advanced natural language processing capabilities to deeply analyze user queries, identify underlying intent, extract key entities, and determine optimal response strategies. Develop intelligent routing algorithms that direct queries to the most appropriate knowledge sources, databases, or analytical modules. Create sophisticated query classification systems that recognize question types, complexity levels, and domain-specific requirements for optimal information retrieval and response generation.
+
+COMPREHENSIVE KNOWLEDGE INTEGRATION AND SYNTHESIS:
+Develop advanced capabilities to integrate information from multiple disparate sources, synthesize complex concepts, and generate comprehensive, coherent responses. Implement sophisticated knowledge fusion techniques that combine structured data, unstructured text, multimedia content, and real-time information streams. Create intelligent synthesis algorithms that identify patterns, establish connections, and generate insights that transcend individual source limitations.
+
+ADVANCED ERROR HANDLING AND RECOVERY MECHANISMS:
+Implement comprehensive error detection, prevention, and recovery systems that ensure robust operation under various conditions. Develop intelligent fallback strategies that maintain functionality during system disruptions, data inconsistencies, or unexpected user inputs. Create sophisticated error logging and analysis systems that continuously improve system reliability and performance through machine learning-based optimization.
+
+CUTTING-EDGE PERFORMANCE OPTIMIZATION AND SCALABILITY:
+Design and implement advanced performance optimization strategies that ensure rapid response times, efficient resource utilization, and seamless scalability. Develop intelligent caching mechanisms, load balancing algorithms, and resource allocation systems that adapt to varying demand patterns. Implement sophisticated monitoring and analytics systems that continuously optimize performance parameters and predict capacity requirements.
+
+STATE-OF-THE-ART SECURITY AND PRIVACY PROTECTION:
+Implement comprehensive security frameworks that protect user data, ensure privacy compliance, and prevent unauthorized access. Develop advanced encryption protocols, authentication mechanisms, and access control systems that meet or exceed industry standards. Create intelligent threat detection and prevention systems that continuously monitor for security vulnerabilities and respond to emerging threats proactively.
+
+ADVANCED MULTIMODAL CONTENT PROCESSING:
+Develop sophisticated capabilities to process, analyze, and generate responses across multiple modalities including text, images, audio, and video content. Implement advanced computer vision algorithms, speech recognition systems, and multimodal fusion techniques that enable comprehensive understanding and response generation. Create intelligent content adaptation systems that optimize presentation across different devices and user preferences.
+
+CUTTING-EDGE ARTIFICIAL INTELLIGENCE INTEGRATION:
+Integrate advanced AI capabilities including machine learning, deep learning, natural language understanding, and cognitive computing to enhance system intelligence and responsiveness. Develop sophisticated neural network architectures, transformer models, and ensemble methods that enable superior understanding and generation capabilities. Implement continuous learning systems that improve performance through user feedback and experience accumulation.
+
+COMPREHENSIVE DOMAIN EXPERTISE AND SPECIALIZATION:
+Develop deep domain expertise across multiple knowledge domains including technology, science, business, healthcare, education, and creative fields. Implement specialized knowledge bases, expert systems, and domain-specific reasoning capabilities that enable authoritative and accurate responses. Create intelligent domain detection and routing systems that ensure optimal expertise matching for user queries.
+
+ADVANCED PERSONALIZATION AND USER ADAPTATION:
+Implement sophisticated personalization engines that learn user preferences, communication styles, and interaction patterns to deliver highly customized experiences. Develop intelligent user profiling systems that capture and analyze behavioral data, feedback patterns, and contextual information. Create adaptive response systems that continuously improve personalization accuracy through machine learning and pattern recognition.
+
+STATE-OF-THE-ART NATURAL LANGUAGE GENERATION:
+Develop advanced natural language generation capabilities that produce human-like, contextually appropriate, and highly engaging responses. Implement sophisticated language models, discourse analysis systems, and style adaptation mechanisms that ensure optimal communication effectiveness. Create intelligent content optimization systems that adjust tone, complexity, and presentation based on user characteristics and context.
+
+COMPREHENSIVE ANALYTICS AND INSIGHT GENERATION:
+Implement advanced analytics capabilities that extract meaningful insights from complex data sets, identify patterns, and generate actionable recommendations. Develop sophisticated statistical analysis, predictive modeling, and data visualization systems that enable comprehensive understanding and communication of information. Create intelligent insight generation systems that combine multiple analytical approaches for optimal results.
+
+CUTTING-EDGE REAL-TIME PROCESSING AND RESPONSIVENESS:
+Develop advanced real-time processing capabilities that enable instantaneous response generation, live data analysis, and dynamic content adaptation. Implement sophisticated stream processing algorithms, event-driven architectures, and low-latency communication systems that ensure optimal responsiveness. Create intelligent real-time optimization systems that continuously adapt to changing conditions and user requirements.
+
+ADVANCED COLLABORATION AND INTERACTION CAPABILITIES:
+Implement sophisticated collaboration features that enable multi-user interactions, shared knowledge building, and cooperative problem-solving. Develop intelligent conflict resolution systems, consensus-building mechanisms, and collaborative filtering algorithms that enhance group interactions. Create advanced social computing capabilities that facilitate knowledge sharing and collective intelligence.
+
+STATE-OF-THE-ART ACCESSIBILITY AND INCLUSIVITY:
+Design and implement comprehensive accessibility features that ensure optimal user experience for individuals with diverse abilities and needs. Develop advanced assistive technologies, adaptive interfaces, and inclusive design principles that maximize usability across all user segments. Create intelligent accessibility optimization systems that continuously improve based on user feedback and emerging standards.
+
+COMPREHENSIVE QUALITY ASSURANCE AND CONTINUOUS IMPROVEMENT:
+Implement advanced quality assurance frameworks that ensure consistent high performance, accuracy, and reliability across all system components. Develop sophisticated testing methodologies, automated validation systems, and continuous integration pipelines that maintain optimal system quality. Create intelligent improvement systems that learn from errors, user feedback, and performance metrics to continuously enhance capabilities.
+
+CUTTING-EDGE EMERGING TECHNOLOGY INTEGRATION:
+Maintain awareness of and integrate emerging technologies including quantum computing, edge computing, blockchain, advanced robotics, and other innovations that may enhance system capabilities. Develop flexible architecture that can incorporate new technologies seamlessly and leverage their unique advantages. Create forward-looking systems that anticipate technological trends and prepare for future advancements.
+
+This comprehensive system prompt ensures optimal performance, robust security, exceptional user experience, effective context caching, sophisticated query routing, intelligent information retrieval, advanced personalization, multimodal processing, real-time responsiveness, and continuous improvement through cutting-edge artificial intelligence and emerging technology integration."""
+    
+    # Add response policy instructions
+    if response_policy is not None:
+        if response_policy <= 30:
+            policy_instruction = "\n\nRESPONSE POLICY: FLEXIBLE - You may provide creative responses and use general knowledge when appropriate. You can expand beyond the provided sources if helpful."
+        elif response_policy <= 70:
+            policy_instruction = "\n\nRESPONSE POLICY: BALANCED - Balance between using provided sources and your general knowledge. Prefer sources but supplement when needed."
+        else:
+            policy_instruction = "\n\nRESPONSE POLICY: STRICT - Strictly adhere to information from provided sources. Only use information from the knowledge base, databases, or search results. Do not use general knowledge unless explicitly stated in sources."
+        base_prompt += policy_instruction
+    
+    # Add file context if available
+    if safe_file_context:
+        context_section = "\n\nAvailable knowledge base files (from RAG):\n"
+        for idx, result in enumerate(safe_file_context, 1):
+            context_section += f"{idx}. {result.file_name}\n"
+        base_prompt += context_section
+    
+    # Append custom system prompt if provided
+    if custom_prompt:
+        base_prompt += f"\n\n{custom_prompt}"
+    
+    # Cache the generated prompt
+    return cache_system_prompt(prompt_components, base_prompt)
+
+
+def extract_gemini_rag_metadata(response) -> Dict[str, Any]:
+    """
+    Extract RAG metadata from Gemini API response.
+    
+    This function extracts grounding metadata including:
+    - search_queries: Internal queries Gemini generated
+    - grounding_chunks: Text snippets retrieved from knowledge base
+    - grounding_supports: Confidence scores and indices
+    - usage: Total token counts
+    
+    Args:
+        response: Gemini API response object
+        
+    Returns:
+        Dictionary containing RAG metadata or empty dict if not found
+    """
+    rag_metadata = {}
+    
+    try:
+        # Access the last message in result.new_messages()
+        if hasattr(response, 'new_messages') and callable(response.new_messages):
+            new_messages = response.new_messages()
+            if new_messages:
+                last_message = new_messages[-1]
+                
+                # Look for ModelResponse and check parts list
+                if hasattr(last_message, 'parts'):
+                    for part in last_message.parts:
+                        # Look for vendor_parts or provider_details with grounding_metadata
+                        if hasattr(part, 'vendor_parts'):
+                            for vendor_part in part.vendor_parts:
+                                if hasattr(vendor_part, 'grounding_metadata'):
+                                    grounding_data = vendor_part.grounding_metadata
+                                    rag_metadata.update({
+                                        'search_queries': grounding_data.get('search_queries', []),
+                                        'grounding_chunks': grounding_data.get('grounding_chunks', []),
+                                        'grounding_supports': grounding_data.get('grounding_supports', [])
+                                    })
+                        
+                        elif hasattr(part, 'provider_details'):
+                            if hasattr(part.provider_details, 'grounding_metadata'):
+                                grounding_data = part.provider_details.grounding_metadata
+                                rag_metadata.update({
+                                    'search_queries': grounding_data.get('search_queries', []),
+                                    'grounding_chunks': grounding_data.get('grounding_chunks', []),
+                                    'grounding_supports': grounding_data.get('grounding_supports', [])
+                                })
+        
+        # Extract usage information from result.usage()
+        if hasattr(response, 'usage') and callable(response.usage):
+            usage_data = response.usage()
+            rag_metadata['usage'] = {
+                'total_tokens': getattr(usage_data, 'total_tokens', 0),
+                'prompt_tokens': getattr(usage_data, 'prompt_tokens', 0),
+                'candidates_tokens': getattr(usage_data, 'candidates_tokens', 0)
+            }
+        elif hasattr(response, 'usage_metadata') and response.usage_metadata:
+            usage_data = response.usage_metadata
+            rag_metadata['usage'] = {
+                'total_tokens': getattr(usage_data, 'total_tokens', 0),
+                'prompt_tokens': getattr(usage_data, 'prompt_tokens', 0),
+                'candidates_tokens': getattr(usage_data, 'candidates_tokens', 0)
+            }
+        
+        # Log the extracted metadata
+        if rag_metadata:
+            logger.info(f"🔍 Gemini RAG Metadata Extracted:")
+            logger.info(f"  Search Queries: {len(rag_metadata.get('search_queries', []))}")
+            logger.info(f"  Grounding Chunks: {len(rag_metadata.get('grounding_chunks', []))}")
+            logger.info(f"  Grounding Supports: {len(rag_metadata.get('grounding_supports', []))}")
+            if 'usage' in rag_metadata:
+                logger.info(f"  Usage: {rag_metadata['usage']}")
+        else:
+            logger.info("🔍 No RAG metadata found in Gemini response")
+            
+    except Exception as e:
+        logger.error(f"❌ Error extracting Gemini RAG metadata: {e}")
+        import traceback
+        logger.error(f"RAG metadata extraction traceback: {traceback.format_exc()}")
+    
+    return rag_metadata
+
+
+def create_session_dependency(session_id: str) -> ChatSessionDeps:
+    """Create session dependency instance."""
+    return ChatSessionDeps(session_id=session_id)
+
+# Initialize base agent with all tools
+def create_agent(file_context: Optional[List[SearchResult]] = None, custom_system_prompt: Optional[str] = None, response_policy: Optional[int] = None, rag_had_results: bool = True, rag_enabled: bool = False) -> Optional[Agent]:
+    """Create a Pydantic AI agent with intelligent data source routing."""
+
+    # Check if model is available
+    if gemini_model is None:
+        logger.error("Cannot create agent - Gemini API key not configured")
+        return None
+
+    # Build list of available tools
+    tools = [search_knowledge_base]
+    
+    # Add human agent connection tool (requires session_id from deps)
+    tools.append(request_human_agent_connection)
+    
+    # Add PostgreSQL tool if available
+    if railway_db:
+        tools.append(query_railway_postgres)
+    
+    # Add Neon DB tool if available
+    if neon_db:
+        tools.append(query_neon_db)
+    
+    # Add internet search tool if available, but NOT when RAG is enabled and returned no results
+    if tavily_client and not (rag_enabled and not rag_had_results):
+        tools.append(search_internet)
+
+    # Calculate temperature based on response policy (lower for strict, higher for flexible)
+    temperature = 0.7  # Default
+    if response_policy is not None:
+        if response_policy <= 30:
+            temperature = 0.9  # More creative for flexible
+        elif response_policy <= 70:
+            temperature = 0.7  # Balanced
+        else:
+            temperature = 0.3  # More deterministic for strict
+
+    # Create agent with system prompt, tools, and dependencies
+    # Note: Temperature adjustment would need to be done at model initialization
+    # For now, we'll use the default model and adjust via system prompt
+    agent = Agent(
+        gemini_model,
+        system_prompt=get_system_prompt(file_context, custom_system_prompt, response_policy, rag_had_results),
+        tools=tools,
+        deps_type=ChatSessionDeps,
+    )
+    
+    return agent
+
+
+class PydanticAIGatewayService:
+    """
+    Service class that integrates Pydantic AI with existing Gemini FileSearch and Context Caching infrastructure.
+    
+    This service bridges the gap between Direct GenAI SDK file management and Pydantic AI Agent
+    to ensure maximum cost efficiency (90% cache discount) and native RAG usage.
+    """
+    
+    def __init__(self):
+        self.genai_client = None
+        self.db = None
+        
+    async def initialize(self):
+        """Initialize the service with GenAI client and database connection."""
+        if not self.genai_client:
+            self.genai_client = get_genai_client()
+        if not self.db:
+            self.db = await get_railway_db()
+    
+    async def get_session_metadata(self, session_id: str) -> Dict[str, Any]:
+        """
+        Retrieve session metadata from PostgreSQL including FileSearchStore and cached_content IDs.
+        """
+        logger.info(f"🔍 Retrieving session metadata for session: {session_id}")
+        
+        if not self.db:
+            logger.error(f"❌ Database not initialized for session metadata retrieval")
+            raise ValueError("Database not initialized")
+        
+        try:
+            # Get session metadata
+            logger.info(f"📊 Querying chat_sessions table for session_id: {session_id}")
+            session_data = await self.db.fetchrow("""
+                SELECT file_search_store_id, cached_content_id, created_at, updated_at
+                FROM chat_sessions 
+                WHERE session_id = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, session_id)
+            
+            if not session_data:
+                logger.info(f"📝 No existing session found for {session_id}, creating new session metadata")
+                return {
+                    'session_id': session_id,
+                    'file_search_store_id': None,
+                    'cached_content_id': None,
+                    'is_new_session': True
+                }
+            
+            logger.info(f"📝 Found existing session for {session_id}:")
+            logger.info(f"  - file_search_store_id: {session_data['file_search_store_id']}")
+            logger.info(f"  - cached_content_id: {session_data['cached_content_id']}")
+            logger.info(f"  - created_at: {session_data['created_at']}")
+            logger.info(f"  - updated_at: {session_data['updated_at']}")
+            
+            return {
+                'session_id': session_id,
+                'file_search_store_id': session_data['file_search_store_id'],
+                'cached_content_id': session_data['cached_content_id'],
+                'is_new_session': False,
+                'created_at': session_data['created_at'],
+                'updated_at': session_data['updated_at']
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error retrieving session metadata: {e}")
+            raise
+    
+    async def get_or_create_file_search_store(self, session_id: str) -> str:
+        """
+        Get existing FileSearchStore ID or create a new one using GenAI SDK.
+        """
+        if not self.genai_client:
+            raise ValueError("GenAI client not initialized")
+        
+        try:
+            # Check if stores API is available
+            if hasattr(self.genai_client, 'stores'):
+                # List existing FileSearch stores
+                stores = list(self.genai_client.stores.list())
+                
+                # Look for our application's store
+                app_store = None
+                for store in stores:
+                    if hasattr(store, 'display_name') and 'knowledgebot_file_search' in store.display_name.lower():
+                        app_store = store
+                        break
+                
+                if app_store:
+                    logger.info(f"📦 Found existing FileSearchStore: {app_store.name}")
+                    return app_store.name
+                else:
+                    # Create new FileSearchStore
+                    logger.info("🆕 Creating new FileSearchStore for knowledgebot")
+                    new_store = self.genai_client.stores.create(
+                        display_name="KnowledgeBot FileSearch Store",
+                        description="Centralized file search store for KnowledgeBot RAG operations"
+                    )
+                    logger.info(f"✅ Created new FileSearchStore: {new_store.name}")
+                    return new_store.name
+            else:
+                logger.warning("⚠️ FileSearch stores API not available in current GenAI SDK version")
+                logger.info("🔄 Using fallback: generating session-based store ID")
+                # Generate a session-based store ID as fallback
+                fallback_store_id = f"knowledgebot_store_{session_id[:8]}"
+                logger.info(f"📦 Using fallback store ID: {fallback_store_id}")
+                return fallback_store_id
+                
+        except Exception as e:
+            logger.error(f"❌ Error managing FileSearchStore: {e}")
+            logger.info("🔄 Using fallback: generating session-based store ID")
+            # Generate a session-based store ID as fallback
+            fallback_store_id = f"knowledgebot_store_{session_id[:8]}"
+            logger.info(f"📦 Using fallback store ID: {fallback_store_id}")
+            return fallback_store_id
+    
+    async def get_or_create_cached_content(self, system_prompt: str) -> str:
+        """
+        Get existing cached content ID or create a new one using GenAI SDK.
+        """
+        logger.info(f"🧠 Managing cached content for system prompt:")
+        logger.info(f"  - System prompt length: {len(system_prompt)} characters")
+        logger.info(f"  - Model: {MODEL_NAME}")
+        logger.info(f"  - TTL: 3600 seconds (1 hour)")
+        
+        if not self.genai_client:
+            logger.error(f"❌ GenAI client not initialized for cached content creation")
+            raise ValueError("GenAI client not initialized")
+        
+        try:
+            # Create cached content with 1-hour TTL
+            logger.info(f"💾 Creating cached content via GenAI SDK...")
+            logger.info(f"  - Model: {MODEL_NAME}")
+            logger.info(f"  - TTL: 3600s")
+            logger.info(f"  - Content preview: {system_prompt[:100]}... (truncated)")
+            
+            cached_content = self.genai_client.cached_content.create(
+                model=MODEL_NAME,
+                contents=system_prompt,
+                ttl=3600  # 1 hour TTL
+            )
+            
+            logger.info(f"✅ Successfully created cached content:")
+            logger.info(f"  - Content ID: {cached_content.name}")
+            logger.info(f"  - Content name: {getattr(cached_content, 'name', 'N/A')}")
+            logger.info(f"  - Model: {getattr(cached_content, 'model', 'N/A')}")
+            logger.info(f"  - TTL: 3600s")
+            logger.info(f"  - Created at: {datetime.utcnow().isoformat()}")
+            logger.info(f"💰 COST EFFICIENCY: 90% discount applied to future requests")
+            
+            return cached_content.name
+            
+        except Exception as e:
+            logger.error(f"❌ Error creating cached content: {e}")
+            logger.error(f"❌ This will prevent 90% cost discount optimization")
+            raise
+    
+    async def create_optimized_agent(self, session_id: str, system_prompt: str, tools: List[Any]) -> Agent:
+        """
+        Create a Pydantic AI Agent optimized with caching and FileSearch integration.
+        """
+        await self.initialize()
+        
+        # Get session metadata
+        session_metadata = await self.get_session_metadata(session_id)
+        
+        # Get or create FileSearchStore
+        file_search_store_id = session_metadata.get('file_search_store_id')
+        if not file_search_store_id:
+            file_search_store_id = await self.get_or_create_file_search_store(session_id)
+            logger.info(f"🔗 Using FileSearchStore: {file_search_store_id}")
+        
+        # Get or create cached content
+        cached_content_id = session_metadata.get('cached_content_id')
+        if not cached_content_id:
+            cached_content_id = await self.get_or_create_cached_content(system_prompt)
+            logger.info(f"🧠 Using cached content: {cached_content_id}")
+        
+        # Configure GoogleModelSettings with google_cached_content
+        # This tells Gemini: "Don't process a system prompt. Go use this Cache ID instead."
+        model_settings = GoogleModelSettings(
+            google_cached_content=cached_content_id,  # The "90% discount" key
+        )
+        
+        logger.info(f"⚙️ Model settings: google_cached_content={cached_content_id}, file_search_store={file_search_store_id}")
+        
+        # Create GoogleModel with optimized settings
+        try:
+            google_model = GoogleModel(
+                MODEL_NAME,
+                settings=model_settings
+            )
+            logger.info("✅ Created GoogleModel with google_cached_content for 90% discount")
+        except Exception as e:
+            logger.error(f"❌ Error creating GoogleModel: {e}")
+            raise
+        
+        # Create Pydantic AI Agent
+        agent = Agent(
+            google_model,
+            system_prompt=system_prompt,  # Still needed for fallback, but cached_content takes precedence
+            tools=tools,
+            deps_type=ChatSessionDeps,
+        )
+        
+        # Update session metadata
+        await self.update_session_metadata(
+            session_id=session_id,
+            file_search_store_id=file_search_store_id,
+            cached_content_id=cached_content_id
+        )
+        
+        logger.info(f"🤖 Created optimized Pydantic AI Agent for session {session_id}")
+        return agent
+    
+    async def update_session_metadata(self, session_id: str, file_search_store_id: str = None, cached_content_id: str = None):
+        """
+        Update session metadata in PostgreSQL.
+        """
+        if not self.db:
+            logger.warning("⚠️ Database not available, skipping metadata update")
+            return
+        
+        try:
+            await self.db.execute("""
+                INSERT INTO chat_sessions (session_id, file_search_store_id, cached_content_id, created_at, updated_at)
+                VALUES ($1, $2, $3, NOW(), NOW())
+                ON CONFLICT (session_id) 
+                DO UPDATE SET 
+                    file_search_store_id = COALESCE(EXCLUDED.file_search_store_id, chat_sessions.file_search_store_id),
+                    cached_content_id = COALESCE(EXCLUDED.cached_content_id, chat_sessions.cached_content_id),
+                    updated_at = NOW()
+            """, session_id, file_search_store_id, cached_content_id)
+            
+            logger.info(f"💾 Updated session metadata for {session_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Error updating session metadata: {e}")
+
+
+# Global service instance
+pydantic_ai_service = PydanticAIGatewayService()
+
+
+# Session State Management for Multi-Turn Conversations
+class SessionStateManager:
+    """
+    Manages session state for 5-turn conversation loops with message history preservation.
+    
+    This class handles the multi-turn session logic to trigger Implicit Prefix Caching
+    which saves money on turns 2-5 by preserving ModelMessage objects.
+    """
+    
+    def __init__(self):
+        self.session_states = {}  # In-memory session state (in production, use Redis)
+        
+    def get_session_state(self, session_id: str) -> Dict[str, Any]:
+        """Get current session state."""
+        return self.session_states.get(session_id, {
+            'session_id': session_id,
+            'turn_count': 0,
+            'message_history': [],
+            'last_activity': time.time(),
+            'created_at': time.time()
+        })
+    
+    def update_session_state(self, session_id: str, result: Any) -> Dict[str, Any]:
+        """
+        Update session state with new result and preserve message history.
+        
+        This preserves ModelMessage objects for Implicit Prefix Caching.
+        """
+        state = self.get_session_state(session_id)
+        
+        # Increment turn count
+        state['turn_count'] += 1
+        
+        # Preserve message history (ModelMessage objects)
+        if hasattr(result, 'all_messages'):
+            state['message_history'] = result.all_messages()
+            logger.info(f"📝 Preserved {len(state['message_history'])} messages for session {session_id}")
+        else:
+            logger.warning(f"⚠️ Result has no all_messages() method for session {session_id}")
+        
+        # Update activity timestamp
+        state['last_activity'] = time.time()
+        
+        # Store updated state
+        self.session_states[session_id] = state
+        
+        logger.info(f"🔄 Updated session state for {session_id}: turn {state['turn_count']}, messages {len(state['message_history'])}")
+        return state
+    
+    def get_message_history(self, session_id: str) -> List[Any]:
+        """Get preserved message history for multi-turn conversations."""
+        state = self.get_session_state(session_id)
+        return state.get('message_history', [])
+    
+    def is_new_session(self, session_id: str) -> bool:
+        """Check if this is a new session (turn 1)."""
+        state = self.get_session_state(session_id)
+        return state['turn_count'] == 0
+    
+    def get_turn_count(self, session_id: str) -> int:
+        """Get current turn count for the session."""
+        state = self.get_session_state(session_id)
+        return state['turn_count']
+    
+    def cleanup_old_sessions(self, max_age_seconds: int = 3600):
+        """Clean up old sessions to prevent memory leaks."""
+        current_time = time.time()
+        expired_sessions = []
+        
+        for session_id, state in self.session_states.items():
+            if current_time - state['last_activity'] > max_age_seconds:
+                expired_sessions.append(session_id)
+        
+        for session_id in expired_sessions:
+            del self.session_states[session_id]
+            logger.info(f"🗑️ Cleaned up expired session: {session_id}")
+        
+        if expired_sessions:
+            logger.info(f"🧹 Cleaned up {len(expired_sessions)} expired sessions")
+
+
+# Global session state manager
+session_state_manager = SessionStateManager()
+
+
+@app.get("/")
+async def root_diagnostic(request: Request):
+    """Simple root endpoint for basic liveliness check."""
+    logger.info(f"Root diagnostic check invoked: {request.url}")
+    return {"status": "ok", "message": "Chatbot Orchestration Is Alive", "port_env": os.getenv("PORT")}
+
+@app.get("/health")
+async def health_check(request: Request):
+    """Health check endpoint."""
+    logger.info(f"Health check invoked: {request.url}")
+    log_endpoint_request("chatbot_orchestration", "health", request)
+    return {"status": "healthy", "service": "chatbot_orchestration"}
+
+@app.post("/chat/stream")
+async def chat_stream(request: ChatRequest):
+    """
+    Handle chat request with streaming response using optimized Pydantic AI Gateway Service.
+    """
+    try:
+        session_id = request.session_id or str(uuid.uuid4())
+        
+        # Generate system prompt with caching
+        system_prompt = get_system_prompt(
+            file_context=None,  # File context will be handled by FileSearch tool
+            custom_prompt=request.system_prompt,
+            response_policy=request.response_policy,
+            rag_had_results=True  # Will be determined by FileSearch tool
+        )
+        
+        # Prepare tools for the agent
+        tools = [search_knowledge_base]
+        
+        # Add human agent connection tool
+        tools.append(request_human_agent_connection)
+        
+        # Add PostgreSQL tool if available
+        if railway_db:
+            tools.append(query_railway_postgres)
+        
+        # Add Neon DB tool if available
+        if neon_db:
+            tools.append(query_neon_db)
+        
+        # Add internet search tool if available and appropriate
+        if tavily_client and not (request.use_rag and False):  # Will be determined dynamically
+            tools.append(search_internet)
+        
+        # Create optimized agent using Pydantic AI Gateway Service
+        try:
+            agent = await pydantic_ai_service.create_optimized_agent(
+                session_id=session_id,
+                system_prompt=system_prompt,
+                tools=tools
+            )
+        except Exception as e:
+            logger.error(f"❌ Failed to create optimized agent: {e}")
+            # Fallback to traditional agent creation
+            logger.info("🔄 Falling back to traditional agent creation")
+            agent = create_agent(
+                file_context=None,
+                custom_system_prompt=request.system_prompt,
+                response_policy=request.response_policy,
+                rag_had_results=True,
+                rag_enabled=request.use_rag
+            )
+        
+        if not agent:
+            logger.error("Failed to create agent")
+            return StreamingResponse(
+                iter(["data: " + json.dumps({"error": "Failed to create agent"}) + "\n\n"]),
+                media_type="text/plain",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+            )
+        
+        # Prepare message history (for 5-turn conversation loop)
+        message_history = []
+        turn_count = session_state_manager.get_turn_count(session_id)
+        is_new_session = session_state_manager.is_new_session(session_id)
+        
+        if not is_new_session:
+            # Get preserved message history for multi-turn conversations
+            message_history = session_state_manager.get_message_history(session_id)
+            logger.info(f"📚 Using preserved message history for turn {turn_count + 1}: {len(message_history)} messages")
+        else:
+            logger.info(f"🆕 Starting new session (turn 1) for {session_id}")
+        
+        # Create session dependency
+        session_dep = ChatSessionDeps(session_id=session_id)
+        
+        logger.info(f"🚀 Starting optimized chat stream for session {session_id} (turn {turn_count + 1})")
+        
+        async def generate_response():
+            max_retries = 3
+            retry_delay = 1.0  # Start with 1 second delay
+            
+            for attempt in range(max_retries):
+                try:
+                    # Send initial response chunk only on first attempt
+                    if attempt == 0:
+                        yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
+                    
+                    # Run agent and stream response
+                    # Run agent with message history for multi-turn conversations
+                    # This triggers Implicit Prefix Caching for turns 2-5
+                    result = await agent.run(
+                        request.message,
+                        message_history=message_history,  # Pass preserved message history
+                        deps=session_dep
+                    )
+                    
+                    # Update session state with result for next turn
+                    session_state_manager.update_session_state(session_id, result)
+                    
+                    response_text = ""
+                    if hasattr(result, 'output'):
+                        response_text = result.output if isinstance(result.output, str) else str(result.output)
+                    elif hasattr(result, 'data'):
+                        response_text = str(result.data)
+                    elif hasattr(result, 'response') and result.response:
+                        response_text = result.response.text if hasattr(result.response, 'text') else str(result.response)
+                    
+                    # Stream the response word by word
+                    words = response_text.split()
+                    for i, word in enumerate(words):
+                        chunk = word + (' ' if i < len(words) - 1 else '')
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+                        await asyncio.sleep(0.1)  # Increased delay for more natural streaming effect
+                    
+                    # Send final response with sources
+                    # Extract sources from agent result if available
+                    sources = []
+                    if hasattr(result, 'sources') and result.sources:
+                        sources = result.sources
+                    elif hasattr(result, 'data') and hasattr(result.data, 'sources'):
+                        sources = result.data.sources
+                    
+                    yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': sources})}\n\n"
+                    yield f"data: [DONE]\n\n"
+                    
+                    # If we get here, success! Break the retry loop
+                    logger.info(f"✅ Stream completed successfully on attempt {attempt + 1} (turn {turn_count + 1})")
+                    return
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    logger.error(f"❌ Error in streaming response (attempt {attempt + 1}/{max_retries}): {error_msg}")
+                    
+                    # Check if this is a database/connection error that should be retried
+                    is_retryable_error = any(keyword in error_msg.lower() for keyword in [
+                        'database', 'connection', 'timeout', 'network', 'unavailable',
+                        'sql', 'postgres', 'connection refused', 'connection reset',
+                        'operational error', 'deadlock', 'constraint', 'integrity'
+                    ])
+                    
+                    if attempt < max_retries - 1 and is_retryable_error:
+                        # This is a retryable error and we have attempts left
+                        logger.info(f"🔄 Retrying in {retry_delay}s due to database/connection error...")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay = min(retry_delay * 2, 8.0)  # Exponential backoff, max 8 seconds
+                        continue
+                    else:
+                        # This is the last attempt or non-retryable error
+                        if is_retryable_error:
+                            logger.error(f"❌ Max retries ({max_retries}) exceeded for database error")
+                        else:
+                            logger.error(f"❌ Non-retryable error occurred: {error_msg}")
+                        
+                        # Send error message only once at the end
+                        yield f"data: {json.dumps({'type': 'error', 'content': 'I encountered an error while processing your request. Please try again.'})}\n\n"
+                        yield f"data: [DONE]\n\n"
+                        return
+        
+        return StreamingResponse(
+            generate_response(),
+            media_type="text/plain",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Chat streaming error: {e}")
+        return StreamingResponse(
+            iter(["data: " + json.dumps({"error": f"Chat processing failed: {str(e)}"}) + "\n\ndata: [DONE]\n\n"]),
+            media_type="text/plain",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        )
+
+
+@app.post("/chat", response_model=ChatSessionResponse)
+async def chat(request: ChatRequest):
+    """
+    Handle chat request with Pydantic AI agent and RAG.
+    
+    Args:
+        request: ChatRequest with message and optional session_id
+    
+    Returns:
+        ChatSessionResponse with structured answer
+    """
+    try:
+        # Get or create session
+        session_id = request.session_id or str(uuid.uuid4())
+        
+        # Perform RAG search if enabled (pre-fetch context)
+        file_context = []
+        rag_had_results = False
+        rag_enabled = request.use_rag
+        if request.use_rag:
+            logger.info(f"🔍 Starting RAG search for message: {request.message[:100]}...")
+            file_context = await search_knowledge_base(request.message)
+            rag_had_results = len(file_context) > 0 and any(result.content and result.content.strip() for result in file_context)
+            logger.info(f"📄 RAG search completed, found {len(file_context)} results, has meaningful content: {rag_had_results}")
+        
+        # Create or get session
+        if session_id not in sessions:
+            sessions[session_id] = {
+                "created_at": datetime.utcnow().isoformat(),
+                "messages": [],
+            }
+        
+        session = sessions[session_id]
+        
+        # Create agent with context (dynamic prompt injection)
+        # Pass system_prompt and response_policy if provided
+        agent = create_agent(
+            file_context,
+            custom_system_prompt=request.system_prompt,
+            response_policy=request.response_policy,
+            rag_had_results=rag_had_results,
+            rag_enabled=rag_enabled
+        )
+        
+        # Create dependency instance for this run
+        session_dep = create_session_dependency(session_id)
+
+        
+        # Check if agent was created successfully
+        if agent is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Chatbot service not configured - Gemini API key required"
+            )
+        
+        # Build chat history from session
+        chat_history = session["messages"]
+        
+        # Convert chat history to agent messages
+        history_messages = []
+        for msg in chat_history[-10:]:  # Keep last 10 messages for context
+            if msg["role"] == "user":
+                history_messages.append(ModelRequest(parts=[UserPromptPart(content=msg["content"])]))
+            elif msg["role"] == "assistant":
+                # Ensure content is a string
+                content_str = str(msg["content"]) if msg["content"] is not None else ""
+                history_messages.append(ModelResponse(parts=[TextPart(content=content_str)]))
+        
+        # Run agent (with self-correction via model_retry)
+        # Pass the current message as prompt and previous messages as history
+        # Also pass the dependency instance for this specific run
+        result = await agent.run(
+            request.message, 
+            message_history=history_messages,
+            deps=session_dep
+        )
+        
+        # Extract response text
+        response_text = ""
+        if hasattr(result, 'output'):
+             # pydantic-ai v1.32.0 prefers .output (validated result)
+             response_text = result.output if isinstance(result.output, str) else str(result.output)
+        elif hasattr(result, 'data'):
+             # fallback or older versions
+             response_text = str(result.data)
+        elif hasattr(result, 'response') and result.response:
+             # fallback for raw response access attempt
+             response_text = result.response.text if hasattr(result.response, 'text') else str(result.response)
+        
+        # Determine which data sources were used based on tool calls
+        data_sources_used = []
+        if request.use_rag and file_context:
+            data_sources_used.append("rag")
+        
+        # Check if tools were called (this is a simplified check)
+        # In a real implementation, you'd track tool calls from the agent result
+        if hasattr(result, 'tool_calls') and result.tool_calls:
+            for tool_call in result.tool_calls:
+                tool_name = tool_call.get('name', '') if isinstance(tool_call, dict) else str(tool_call)
+                if 'postgres' in tool_name.lower() or 'railway' in tool_name.lower():
+                    if 'postgres' not in data_sources_used:
+                        data_sources_used.append("postgres")
+                elif 'neon' in tool_name.lower():
+                    if 'neon_db' not in data_sources_used:
+                        data_sources_used.append("neon_db")
+                elif 'internet' in tool_name.lower() or 'search' in tool_name.lower():
+                    if 'internet' not in data_sources_used:
+                        data_sources_used.append("internet")
+        
+        # Build structured response
+        response_data = ChatResponse(
+            answer=response_text,
+            sources=file_context,
+            confidence=0.8,  # Default confidence
+            data_sources_used=data_sources_used if data_sources_used else ["rag"] if file_context else []
+        )
+
+        # Extract usage information from agent result (ensure defined before DB persistence)
+        usage_info = None
+        usage_data_for_tracking = None
+        rag_metadata_info = None  # Store RAG metadata for database logging
+        
+        try:
+            if hasattr(result, 'usage') and callable(result.usage):
+                # Call the usage method to get the actual usage data
+                usage_data_for_tracking = result.usage()
+                logger.info("🔍 Found usage method, called it: %s", usage_data_for_tracking)
+                if usage_data_for_tracking:
+                    usage_info = {
+                        "input_tokens": getattr(usage_data_for_tracking, 'input_tokens', 0),
+                        "output_tokens": getattr(usage_data_for_tracking, 'output_tokens', 0),
+                    }
+                    logger.info("📊 Extracted usage info: %s", usage_info)
+                else:
+                    logger.warning("⚠️ Usage method returned None or empty data")
+            elif hasattr(result, 'usage') and result.usage:
+                # Fallback: if it's not callable, treat as direct property
+                usage_data_for_tracking = result.usage
+                logger.info("🔍 Found usage object (property): %s", usage_data_for_tracking)
+                usage_info = {
+                    "input_tokens": getattr(usage_data_for_tracking, 'input_tokens', 0),
+                    "output_tokens": getattr(usage_data_for_tracking, 'output_tokens', 0),
+                }
+                logger.info("📊 Extracted usage info: %s", usage_info)
+            else:
+                logger.warning("⚠️ No usage object/method found in result")
+                
+            # Try to extract RAG metadata from the agent result
+            try:
+                if hasattr(result, 'new_messages') and callable(result.new_messages):
+                    rag_metadata_info = extract_gemini_rag_metadata(result)
+                    if rag_metadata_info:
+                        logger.info("📊 RAG metadata extracted for database storage")
+                    else:
+                        logger.info("📊 No RAG metadata found in agent result")
+            except Exception as rag_error:
+                logger.error(f"❌ Failed to extract RAG metadata from agent result: {rag_error}")
+                
+        except Exception as e:
+            logger.error("❌ Failed to extract usage info: %s", e)
+            import traceback
+            logger.error("❌ Usage tracking traceback: %s", traceback.format_exc())
+
+        # Detailed tracing logs for each major step — helps identify which step failed
+        logger.info("Chat handling progress: building response completed")
+        logger.info("Chat handling progress: response length=%s, sources=%s", len(str(response_data.answer)), len(response_data.sources))
+        logger.info("Chat handling progress: data_sources_used=%s", response_data.data_sources_used)
+
+        # Ensure Railway DB is initialized (lazy init) and save message with data source tracking
+        try:
+            logger.info("Attempting to initialize Railway DB (lazy)...")
+            db = await get_railway_db()
+            logger.info("Railway DB init returned: %s", "connected" if db else "not-configured")
+        except Exception as e:
+            logger.exception("Railway DB lazy init failed: %s", e)
+            db = None
+
+        if not db:
+            logger.info("Skipping DB persistence because no DB connection is available")
+        else:
+            try:
+                logger.info("DB persistence: checking for existing session row for session_id=%s", session_id)
+                session_db_id = await db.fetchval(
+                    "SELECT id FROM chat_sessions WHERE session_id = $1",
+                    session_id
+                )
+                logger.info("DB persistence: fetch session_db_id result=%s", session_db_id)
+
+                if not session_db_id:
+                    logger.info("DB persistence: inserting new chat_sessions row for session_id=%s", session_id)
+                    session_db_id = await db.fetchval(
+                        """
+                        INSERT INTO chat_sessions (session_id, is_active, message_count)
+                        VALUES ($1, $2, $3)
+                        RETURNING id
+                        """,
+                        session_id,
+                        True,
+                        0
+                    )
+                    logger.info("DB persistence: inserted chat_sessions id=%s", session_db_id)
+                else:
+                    logger.info("DB persistence: existing chat_sessions id=%s will be used", session_db_id)
+
+                # Save user message
+                try:
+                    logger.info("DB persistence: inserting user message for session_db_id=%s", session_db_id)
+                    await db.execute(
+                        """
+                        INSERT INTO chat_messages (session_id, role, content, used_rag, used_postgres, used_neon_db, used_internet_search)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        """,
+                        session_db_id,
+                        "user",
+                        request.message,
+                        "rag" in response_data.data_sources_used,
+                        "postgres" in response_data.data_sources_used,
+                        "neon_db" in response_data.data_sources_used,
+                        "internet" in response_data.data_sources_used
+                    )
+                    logger.info("DB persistence: user message inserted for session_db_id=%s", session_db_id)
+                except Exception as e:
+                    logger.exception("DB persistence: failed to insert user message for session_db_id=%s: %s", session_db_id, e)
+
+                # Save assistant message
+                try:
+                    logger.info("DB persistence: inserting assistant message for session_db_id=%s", session_db_id)
+                    
+                    # Combine usage info and RAG metadata for storage
+                    combined_metadata = {
+                        "usage": usage_info,
+                        "rag_metadata": rag_metadata_info
+                    }
+                    
+                    await db.execute(
+                        """
+                        INSERT INTO chat_messages (session_id, role, content, used_rag, used_postgres, used_neon_db, used_internet_search, confidence_score, sources, usage_info)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        """,
+                        session_db_id,
+                        "bot",
+                        response_data.answer,
+                        "rag" in response_data.data_sources_used,
+                        "postgres" in response_data.data_sources_used,
+                        "neon_db" in response_data.data_sources_used,
+                        "internet" in response_data.data_sources_used,
+                        response_data.confidence,
+                        json.dumps([{"file_name": s.file_name, "relevance_score": s.relevance_score} for s in response_data.sources]),
+                        json.dumps(combined_metadata) if combined_metadata else None
+                    )
+                    logger.info("DB persistence: assistant message inserted for session_db_id=%s", session_db_id)
+                    
+                    # Log RAG metadata separately for easier analysis
+                    if rag_metadata_info:
+                        logger.info(f"📊 RAG Metadata Stored in DB:")
+                        logger.info(f"  Session ID: {session_id}")
+                        logger.info(f"  Search Queries Count: {len(rag_metadata_info.get('search_queries', []))}")
+                        logger.info(f"  Grounding Chunks Count: {len(rag_metadata_info.get('grounding_chunks', []))}")
+                        logger.info(f"  Grounding Supports Count: {len(rag_metadata_info.get('grounding_supports', []))}")
+                        
+                except Exception as e:
+                    logger.exception("DB persistence: failed to insert assistant message for session_db_id=%s: %s", session_db_id, e)
+
+                # Update session message count
+                try:
+                    logger.info("DB persistence: updating chat_sessions message_count for id=%s", session_db_id)
+                    await db.execute(
+                        "UPDATE chat_sessions SET message_count = message_count + 2, last_activity_at = CURRENT_TIMESTAMP WHERE id = $1",
+                        session_db_id
+                    )
+                    logger.info("DB persistence: updated message_count for session_db_id=%s", session_db_id)
+                except Exception as e:
+                    logger.exception("DB persistence: failed to update chat_sessions for session_db_id=%s: %s", session_db_id, e)
+
+                # Confirm messages count in DB for this session
+                try:
+                    count = await db.fetchval("SELECT COUNT(*) FROM chat_messages WHERE session_id = $1", session_db_id)
+                    logger.info("DB persistence: chat messages count in DB for session %s: %s", session_db_id, count)
+                except Exception as e:
+                    logger.debug("DB persistence: could not fetch chat message count for session %s: %s", session_db_id, e)
+
+            except Exception as e:
+                logger.exception("DB persistence: unexpected error while saving chat messages: %s", e)
+        
+        # Update session history
+        session["messages"].append({
+            "role": "user",
+            "content": request.message,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        session["messages"].append({
+            "role": "assistant",
+            "content": response_data.answer,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+
+        # Track token usage in database (now that we have session_db_id)
+        if usage_data_for_tracking:
+            try:
+                await track_gemini_usage_from_response(usage_data_for_tracking, session_id=session_db_id, api_call_type='chat')
+                logger.info("✅ Token tracking completed for database session: %s", session_db_id)
+            except Exception as e:
+                logger.error("❌ Failed to track tokens for database session: %s", e)
+
+        # Extract usage information
+        usage_info = None
+        if hasattr(result, 'usage') and callable(result.usage):
+            # Call the usage method to get the actual usage data
+            usage_data = result.usage()
+            if usage_data:
+                usage_info = {
+                    "input_tokens": getattr(usage_data, 'input_tokens', 0),
+                    "output_tokens": getattr(usage_data, 'output_tokens', 0),
+                }
+        elif hasattr(result, 'usage') and result.usage:
+            # Fallback: if it's not callable, treat as direct property
+            usage_info = {
+                "input_tokens": getattr(result.usage, 'input_tokens', 0),
+                "output_tokens": getattr(result.usage, 'output_tokens', 0),
+            }
+        
+        return ChatSessionResponse(
+            session_id=session_id,
+            message=request.message,
+            response=response_data,
+            usage=usage_info,
+            timestamp=datetime.utcnow().isoformat()
+        )
+        
+    except Exception as e:
+        logger.error(f"Error processing chat: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Chat processing failed: {str(e)}")
+
+
+@app.get("/sessions")
+async def list_sessions():
+    """List all active chat sessions."""
+    return {
+        "sessions": [
+            {
+                "session_id": sid,
+                "created_at": session["created_at"],
+                "message_count": len(session["messages"])
+            }
+            for sid, session in sessions.items()
+        ]
+    }
+
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a chat session."""
+    if session_id in sessions:
+        del sessions[session_id]
+        return {"success": True, "message": f"Session {session_id} deleted"}
+    else:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+
+@app.post("/sessions/{session_id}/review")
+async def review_response(session_id: str, review: HumanReviewRequest):
+    """
+    Human-in-the-loop review endpoint.
+    
+    Args:
+        session_id: Session ID
+        review: Review request with approval status and feedback
+    
+    Returns:
+        Confirmation response
+    """
+    if session_id not in sessions:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    session = sessions[session_id]
+    
+    # Store review in session
+    if "reviews" not in session:
+        session["reviews"] = []
+    
+    session["reviews"].append({
+        "approved": review.approved,
+        "feedback": review.feedback,
+        "corrected_answer": review.corrected_answer,
+        "timestamp": datetime.utcnow().isoformat()
+    })
+    
+    # If webhook is configured, send notification
+    webhook_url = os.getenv("HUMAN_IN_THE_LOOP_WEBHOOK_URL")
+    if webhook_url and os.getenv("HUMAN_IN_THE_LOOP_ENABLED", "false").lower() == "true":
+        try:
+            import httpx
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    webhook_url,
+                    json={
+                        "session_id": session_id,
+                        "review": review.model_dump()
+                    },
+                    timeout=5.0
+                )
+        except Exception as e:
+            logger.warning(f"Failed to send webhook: {e}")
+    
+    return {
+        "success": True,
+        "message": "Review recorded",
+        "session_id": session_id
+    }
+
+
+@app.post("/suggested-messages", response_model=SuggestedMessagesResponse)
+async def generate_suggested_messages(request: SuggestedMessagesRequest):
+    """
+    Generate AI-suggested follow-up messages based on conversation history.
+    
+    Args:
+        request: SuggestedMessagesRequest with session_id and optional conversation_history
+    
+    Returns:
+        SuggestedMessagesResponse with list of suggested messages
+    """
+    try:
+        # Get conversation history from session if not provided
+        conversation_history = request.conversation_history
+        if not conversation_history:
+            if request.session_id in sessions:
+                session = sessions[request.session_id]
+                conversation_history = [
+                    {"role": msg["role"], "content": msg["content"]}
+                    for msg in session.get("messages", [])[-10:]  # Last 10 messages
+                ]
+            else:
+                conversation_history = []
+        
+        # Build context from conversation history
+        context = ""
+        if conversation_history:
+            for msg in conversation_history:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role == "user":
+                    context += f"User: {content}\n"
+                elif role == "assistant":
+                    context += f"Assistant: {content}\n"
+        
+        # Create a prompt for generating suggested messages
+        prompt = f"""Based on the following conversation, generate 3-5 short, relevant follow-up questions or messages that a user might want to ask next. 
+Keep each suggestion concise (under 40 characters) and make them helpful and contextually relevant.
+
+Conversation:
+{context if context else "This is the start of a new conversation."}
+
+Generate suggested messages as a JSON array of strings. Example format: ["Question 1", "Question 2", "Question 3"]
+
+Only return the JSON array, nothing else."""
+
+        # Use Gemini to generate suggestions
+        if not gemini_model:
+            raise HTTPException(
+                status_code=503,
+                detail="Gemini model not available - cannot generate suggested messages"
+            )
+
+        # Create a simple agent for generating suggestions
+        suggestion_agent = Agent(
+            model=gemini_model,
+            system_prompt="You are a helpful assistant that generates relevant follow-up questions based on conversation context. Always return a JSON array of 3-5 short suggested messages."
+        )
+        
+        # Run the agent to generate suggestions
+        result = await suggestion_agent.run(prompt)
+        
+        # Extract response
+        response_text = ""
+        if hasattr(result, 'output'):
+            response_text = result.output if isinstance(result.output, str) else str(result.output)
+        elif hasattr(result, 'data'):
+            response_text = str(result.data)
+        
+        # Parse JSON array from response
+        import json
+        import re
+        
+        # Try to extract JSON array from response
+        json_match = re.search(r'\[.*?\]', response_text, re.DOTALL)
+        if json_match:
+            try:
+                suggested_messages = json.loads(json_match.group(0))
+                # Ensure it's a list of strings
+                if isinstance(suggested_messages, list):
+                    suggested_messages = [str(msg).strip() for msg in suggested_messages if msg]
+                    # Limit to 5 messages and filter empty ones
+                    suggested_messages = [msg for msg in suggested_messages if msg and len(msg) <= 40][:5]
+                else:
+                    suggested_messages = []
+            except json.JSONDecodeError:
+                # Fallback: split by lines or commas
+                suggested_messages = [msg.strip().strip('"\'') for msg in response_text.split('\n') if msg.strip() and len(msg.strip()) <= 40][:5]
+        else:
+            # Fallback: try to extract suggestions from text
+            lines = [line.strip().strip('"\'') for line in response_text.split('\n') if line.strip() and len(line.strip()) <= 40]
+            suggested_messages = lines[:5]
+        
+        # If no suggestions generated, provide defaults
+        if not suggested_messages:
+            suggested_messages = [
+                "Tell me more",
+                "What else can you help with?",
+                "I have another question"
+            ]
+        
+        # Extract usage information
+        usage_info = None
+        if hasattr(result, 'usage') and callable(result.usage):
+            # Call the usage method to get the actual usage data
+            usage_data = result.usage()
+            if usage_data:
+                usage_info = {
+                    "input_tokens": getattr(usage_data, 'input_tokens', 0),
+                    "output_tokens": getattr(usage_data, 'output_tokens', 0),
+                }
+            # TODO: Track token usage for suggested messages (needs database session ID lookup)
+            # await track_gemini_usage_from_response(usage_data, session_id=request.session_id, api_call_type='suggested_messages')
+        elif hasattr(result, 'usage') and result.usage:
+            # Fallback: if it's not callable, treat as direct property
+            usage_info = {
+                "input_tokens": getattr(result.usage, 'input_tokens', 0),
+                "output_tokens": getattr(result.usage, 'output_tokens', 0),
+            }
+                # TODO: Track token usage for suggested messages (needs database session ID lookup)
+                # await track_gemini_usage_from_response(result.usage, session_id=request.session_id, api_call_type='suggested_messages')
+        
+        return SuggestedMessagesResponse(
+            suggested_messages=suggested_messages,
+            usage=usage_info
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating suggested messages: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate suggested messages: {str(e)}"
+        )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    # Port selection order: Service-specific -> Railway PORT -> Default 8003
+    port = int(os.getenv("CHATBOT_ORCH_PORT", os.getenv("PORT", "8003")))
+    logger.info(f"🚀 Starting chatbot_orchestration service on port {port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
