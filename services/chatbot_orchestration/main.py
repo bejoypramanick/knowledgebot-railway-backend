@@ -1065,6 +1065,13 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             Output Format:
             Source File: [Exact filename as shown in the file]
             Content: [Direct text content only - no line numbers, no page numbers, no formatting]
+            """
+            
+            # Extract usage data from response for tracking
+            usage_data = None
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                usage_data = response.usage_metadata
+                logger.info(f"📊 Gemini RAG Usage (response.usage_metadata): {usage_data}")
             elif hasattr(response, 'candidates') and response.candidates:
                 for candidate in response.candidates:
                     if hasattr(candidate, 'usage_metadata') and candidate.usage_metadata:
@@ -1327,26 +1334,20 @@ STRUCTURAL ELEMENTS:
 - Use <ul><li>item</li></ul> for bullet points and unordered information
 - Use <strong>text</strong> for important keywords, emphasis, critical terms, and key concepts
 - Use <em>text</em> for italic emphasis, highlighting, and subtle stress
-- Use <u>text</u> for underlined text (use sparingly for specific emphasis)
-- Use <p>text</p> for paragraphs and logical content separation
-- Use <br> for line breaks when needed within paragraphs
-- Use <hr> for horizontal rules to separate major content sections
+- Use <code>text</code> for code snippets, technical terms, file names, and commands
+- Use <pre><code>code</code></pre> for multi-line code blocks and technical documentation
+- Use <blockquote>text</blockquote> for quotes and important excerpts
+- Use <h1> to <h6> for hierarchical headings and section organization
+- Use <p>text</p> for paragraph breaks and text separation
+- Use <br> for line breaks within content
+- Use <hr> for horizontal rules and content separation
+- Use <a href="url">text</a> for clickable links and references
+- Use <img src="url" alt="text"> for images and visual content
+- Use <table><tr><td>text</td></tr></table> for structured data presentation
+- Use <div>text</div> for content grouping and styling
+- Use <span>text</span> for inline styling and emphasis
 
-LINKS AND REFERENCES:
-- Use <a href="url">link text</a> for hyperlinks and external references
-- Ensure all links are relevant and properly formatted
-- Provide descriptive link text that indicates destination content
-
-HIERARCHICAL HEADINGS:
-- Use <h1>text</h1> for main titles and primary section headers
-- Use <h2>text</h2> for major subsections and secondary topics
-- Use <h3>text</h3> for tertiary sections and detailed topics
-- Maintain logical heading hierarchy for content organization
-
-TECHNICAL FORMATTING:
-- Use <code>text</code> for inline code, technical terms, and file names
-- Use <pre><code>code block</code></pre> for multi-line code snippets and programming examples
-- Use <blockquote>text</blockquote> for quotes, important notices, and highlighted information
+TECHNICAL ELEMENTS:
 - Use <kbd>text</kbd> for keyboard shortcuts and key combinations
 
 VISUAL SPACING:
@@ -1357,6 +1358,46 @@ VISUAL SPACING:
 ADVANCED EMOJI INTEGRATION STRATEGY:
 Implement context-aware emoji usage based on user interaction patterns and response types:
 
+GREETING AND WELCOME EMOTICONS:
+- For initial greetings: 😊, 👋, 🎉, ✨, 🌟
+- For returning users: 🎉, 👋, 😊, 🌟
+- For welcome messages: 🎊, ✨, 🎈, 🎁
+
+SUCCESS AND ACHIEVEMENT EMOTICONS:
+- For successful completion: ✅, 👍, 🎯, 🌟, 🏆
+- For confirmation and validation: ✅, 👍, 🎉, 🌟
+- For accomplishments and milestones: 🏆, 🎉, 🌟, 🎊
+
+INFORMATION AND INSIGHTS EMOTICONS:
+- For information delivery: 💡, 📊, 🔍, 📈, 📋
+- For analytical insights: 📊, 📈, 🔍, 💡, 🎯
+- For data and statistics: 📊, 📈, 📉, 📋, 📝
+
+TECHNICAL ASSISTANCE EMOTICONS:
+- For technical support: 💻, ⚙️, 🔧, 🚀, 🔌
+- For system information: 💻, ⚙️, 🗄️, 🌐, 📡
+- For troubleshooting: 🔧, 🔍, 💻, ⚙️, 🛠️
+
+WARNING AND CAUTION EMOTICONS:
+- For important warnings: ⚠️, 🛡️, 🔒, 🚨
+- For security notices: 🔒, 🛡️, ⚠️, 🔐
+- For critical alerts: 🚨, ⚠️, 🛡️, 📢
+
+ERROR AND ISSUE EMOTICONS:
+- For error reporting: ❌, 🚫, 📋, ⚠️
+- For problem identification: ❌, 🚫, 📋, 🔍
+- For troubleshooting steps: 🔧, 🔍, 💻, 📋
+
+HELP AND SUPPORT EMOTICONS:
+- For assistance requests: 🙏, 💪, 🤝, 🆘, 🎯
+- For support availability: 💪, 🤝, 🙏, 🌟
+- For help resources: 📚, 📖, 🎯, 💡
+
+EMOJI USAGE BEST PRACTICES:
+- Match emoji tone precisely to response content and conversation context
+- Use emojis to enhance readability, engagement, and emotional connection
+- Place emojis strategically at sentence beginnings or ends for emphasis
+- Use emojis to highlight key points, achievements, or critical information
 GREETING AND WELCOME EMOTICONS:
 - For initial greetings: 😊, 👋, 🎉, ✨, 🌟
 - For returning users: 🎉, 👋, 😊, 🌟
