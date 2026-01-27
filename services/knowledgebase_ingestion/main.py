@@ -1230,29 +1230,20 @@ async def process_single_file_delete(file_id: str) -> BatchDeleteItem:
 
 @app.post("/delete/batch", response_model=BatchDeleteResponse)
 async def delete_files_batch(
-    request: Request,
+    file_ids: List[str] = Form(...),
     max_parallel: int = Form(5)  # Max concurrent deletes
 ):
     """
     Delete multiple files in parallel for improved performance.
     
     Args:
-        request: Request object to parse form data manually
+        file_ids: List of file IDs to delete
         max_parallel: Maximum number of concurrent deletes (default: 5)
     
     Returns:
         BatchDeleteResponse with results for each file
     """
     start_time = time.perf_counter()
-    
-    # Parse form data manually to handle file_ids correctly
-    form_data = await request.form()
-    file_ids = form_data.getlist('file_ids') if 'file_ids' in form_data else []
-    
-    logger.info(f"🗑️ Batch delete - Parsed form data:")
-    logger.info(f"📋 file_ids: {file_ids}")
-    logger.info(f"📋 max_parallel: {max_parallel}")
-    logger.info(f"📋 All form fields: {dict(form_data)}")
     
     if not genai_client:
         logger.critical("Batch delete failed: Gemini client not configured")
@@ -1262,7 +1253,6 @@ async def delete_files_batch(
         )
     
     if not file_ids:
-        logger.error("Batch delete failed: No file IDs provided")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No file IDs provided for deletion"
@@ -1328,121 +1318,6 @@ async def delete_files_batch(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Batch delete failed: {str(e)}"
-        )
-
-
-@app.post("/upload/batch", response_model=BatchUploadResponse)
-async def upload_documents_batch(
-    files: List[UploadFile] = File(...),
-    display_names: Optional[str] = Form(None),
-    max_parallel: int = Form(5),
-    replace_existing: bool = Form(False)
-):
-    """
-    Upload multiple documents in parallel for improved performance.
-    
-    Args:
-        files: List of files to upload
-        display_names: Optional comma-separated display names
-        max_parallel: Maximum number of concurrent uploads (default: 5)
-        replace_existing: Whether to replace existing files (default: False)
-    
-    Returns:
-        BatchUploadResponse with results for each file
-    """
-    start_time = time.perf_counter()
-    
-    logger.info(f"📦 Batch upload - Received files:")
-    logger.info(f"📋 files count: {len(files)}")
-    logger.info(f"📋 max_parallel: {max_parallel}")
-    logger.info(f"📋 display_names: {display_names}")
-    logger.info(f"📋 replace_existing: {replace_existing}")
-    logger.info(f"📋 File names: {[f.filename for f in files]}")
-    
-    if not genai_client:
-        logger.critical("Batch upload failed: Gemini client not configured")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="File upload service is unavailable"
-        )
-    
-    if not files:
-        logger.error("Batch upload failed: No files provided")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No files provided for upload"
-        )
-    
-    logger.info(f"🚀 Starting batch upload of {len(files)} files with max_parallel={max_parallel}")
-    
-    # Create semaphore to limit concurrent uploads
-    semaphore = asyncio.Semaphore(max_parallel)
-    
-    async def upload_with_semaphore(file: UploadFile, index: int) -> BatchUploadItem:
-        async with semaphore:
-            display_name = None
-            if display_names:
-                display_name_list = [name.strip() for name in display_names.split(',') if name.strip()]
-                if index < len(display_name_list):
-                    display_name = display_name_list[index]
-            
-            return await process_single_file_upload(
-                file=file,
-                display_name=display_name,
-                user_email=None,  # Will be extracted from headers if needed
-                replace_existing=replace_existing
-            )
-    
-    # Process files in parallel
-    try:
-        tasks = [
-            upload_with_semaphore(file, i) 
-            for i, file in enumerate(files)
-        ]
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Process results and handle exceptions
-        processed_results = []
-        successful_uploads = 0
-        failed_uploads = 0
-        
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                # Handle unexpected exceptions
-                processed_results.append(BatchUploadItem(
-                    filename=files[i].filename if hasattr(files[i], 'filename') else f"file_{i}",
-                    success=False,
-                    message="Unexpected error",
-                    error=str(result)
-                ))
-                failed_uploads += 1
-            else:
-                processed_results.append(result)
-                if result.success:
-                    successful_uploads += 1
-                else:
-                    failed_uploads += 1
-        
-        processing_time = time.perf_counter() - start_time
-        
-        logger.info(f"✅ Batch upload completed: {successful_uploads}/{len(files)} successful in {processing_time:.2f}s")
-        
-        return BatchUploadResponse(
-            success=successful_uploads > 0,
-            total_files=len(files),
-            successful_uploads=successful_uploads,
-            failed_uploads=failed_uploads,
-            results=processed_results,
-            message=f"Batch upload completed: {successful_uploads} successful, {failed_uploads} failed",
-            parallel_processing=True
-        )
-        
-    except Exception as e:
-        logger.error(f"❌ Critical error in batch upload: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Batch upload failed: {str(e)}"
         )
 
 

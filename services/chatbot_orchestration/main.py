@@ -1065,67 +1065,6 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             Output Format:
             Source File: [Exact filename as shown in the file]
             Content: [Direct text content only - no line numbers, no page numbers, no formatting]
-            """
-
-            # Generate content using the new API with files attached
-            contents = [*files_to_search, retrieval_prompt]
-            logger.info(f"🚀 Making Gemini API call with {len(files_to_search)} files and prompt length {len(retrieval_prompt)}")
-
-            # Implement retry logic for Gemini API calls
-            max_retries = 3
-            retry_delay = 1.0
-            
-            for attempt in range(max_retries):
-                try:
-                    logger.info(f"🔄 Gemini API attempt {attempt + 1}/{max_retries}")
-                    response = genai_client.models.generate_content(
-                        model='gemini-2.5-flash-lite',
-                        contents=contents
-                    )
-                    logger.info(f"✅ Gemini API call completed, response type: {type(response)}")
-                    break  # Success, exit retry loop
-                    
-                except Exception as api_error:
-                    error_msg = str(api_error)
-                    logger.error(f"❌ Gemini API call failed (attempt {attempt + 1}/{max_retries}): {api_error}")
-                    
-                    # Check if this is a retryable error
-                    is_retryable = any(keyword in error_msg.lower() for keyword in [
-                        '500', 'internal', 'timeout', 'overload', 'temporarily unavailable'
-                    ])
-                    
-                    if attempt < max_retries - 1 and is_retryable:
-                        logger.info(f"⏳ Retrying in {retry_delay} seconds...")
-                        await asyncio.sleep(retry_delay)
-                        retry_delay *= 2  # Exponential backoff
-                        continue
-                    else:
-                        logger.error(f"❌ All Gemini API retries failed")
-                        logger.info(f"📊 Files exist in DB but not found in Gemini API")
-                        return []
-
-            # Track Gemini token usage from response - Paid tier should provide usage data
-            logger.info(f"🔍 Gemini RAG Response Details: usage_metadata={getattr(response, 'usage_metadata', 'NO_USAGE_METADATA')}")
-
-            # Gemini API v1 uses different field structure - let's check all possibilities
-            usage_data = None
-
-            # Check direct usage_metadata (newer API)
-            if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                usage_data = response.usage_metadata
-                logger.info(f"📊 Gemini RAG Usage Metadata (usage_metadata): {usage_data}")
-
-            # Check usage field (direct)
-            elif hasattr(response, 'usage') and response.usage:
-                usage_data = response.usage
-                logger.info(f"📊 Gemini RAG Usage (usage): {usage_data}")
-
-            # Check metadata.usage (nested)
-            elif hasattr(response, 'metadata') and response.metadata and hasattr(response.metadata, 'usage'):
-                usage_data = response.metadata.usage
-                logger.info(f"📊 Gemini RAG Usage (metadata.usage): {usage_data}")
-
-            # Check if response has candidates with usage
             elif hasattr(response, 'candidates') and response.candidates:
                 for candidate in response.candidates:
                     if hasattr(candidate, 'usage_metadata') and candidate.usage_metadata:
