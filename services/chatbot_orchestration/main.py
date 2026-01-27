@@ -1095,6 +1095,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                     contents=retrieval_prompt
                 )
                 logger.info(f"🔍 Gemini RAG search completed (direct text-only call)")
+                logger.info("RAG Response=" + str(response))
             
             # Extract usage data from response for tracking
             usage_data = None
