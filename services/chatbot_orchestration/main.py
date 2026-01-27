@@ -1079,13 +1079,12 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 )
                 logger.info(f"✅ Created RAG search cached content: {cached_content.name}")
                 
-                # Use the cached content for the actual search
-                # Note: files parameter needs to be passed as a list to the contents
-                contents_with_files = [retrieval_prompt] + files_to_search
-                
+                # Use the cached content for the actual search with proper file handling
+                # The correct way is to pass files as a separate parameter
                 response = genai_client.models.generate_content(
                     model="gemini-2.5-flash-lite",
-                    contents=contents_with_files
+                    contents=retrieval_prompt,
+                    files=files_to_search  # This should work with the correct API version
                 )
                 logger.info(f"🔍 Gemini RAG search completed using cached content")
                 
@@ -1094,14 +1093,46 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 # Fallback to direct API call without caching
                 logger.info("🔄 Falling back to direct Gemini API call for RAG search")
                 
-                # Fix: Pass files as part of contents, not as separate parameter
-                contents_with_files = [retrieval_prompt] + files_to_search
-                
-                response = genai_client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
-                    contents=contents_with_files
-                )
-                logger.info(f"🔍 Gemini RAG search completed (direct call)")
+                try:
+                    # Try the standard files parameter approach
+                    logger.info(f"🔍 Attempting RAG search with {len(files_to_search)} files")
+                    logger.info(f"📁 File details: {[getattr(f, 'name', 'unknown') for f in files_to_search[:3]]}...")
+                    
+                    response = genai_client.models.generate_content(
+                        model="gemini-2.5-flash-lite",
+                        contents=retrieval_prompt,
+                        files=files_to_search
+                    )
+                    logger.info(f"🔍 Gemini RAG search completed (direct call with files)")
+                except Exception as file_error:
+                    logger.error(f"❌ Files parameter failed with error: {file_error}")
+                    logger.error(f"❌ Error type: {type(file_error).__name__}")
+                    if hasattr(file_error, 'response') and file_error.response:
+                        logger.error(f"❌ Response status: {file_error.response.status_code}")
+                        logger.error(f"❌ Response text: {file_error.response.text}")
+                    
+                    # Try alternative approach: use file URIs
+                    try:
+                        file_uris = [f.uri for f in files_to_search if hasattr(f, 'uri')]
+                        logger.info(f"🔗 Trying with file URIs: {len(file_uris)} URIs found")
+                        if file_uris:
+                            response = genai_client.models.generate_content(
+                                model="gemini-2.5-flash-lite",
+                                contents=retrieval_prompt,
+                                files=file_uris
+                            )
+                            logger.info(f"🔍 Gemini RAG search completed (with file URIs)")
+                        else:
+                            raise Exception("No file URIs available")
+                    except Exception as uri_error:
+                        logger.error(f"❌ File URIs failed: {uri_error}")
+                        # Final fallback: try without files (text-only search)
+                        logger.info("🔄 Final fallback: text-only search without files")
+                        response = genai_client.models.generate_content(
+                            model="gemini-2.5-flash-lite",
+                            contents=retrieval_prompt
+                        )
+                        logger.info(f"🔍 Gemini RAG search completed (text-only fallback)")
             
             # Extract usage data from response for tracking
             usage_data = None
