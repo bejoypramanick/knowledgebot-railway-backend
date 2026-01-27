@@ -1067,6 +1067,38 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             Content: [Direct text content only - no line numbers, no page numbers, no formatting]
             """
             
+            # Create cached content for RAG search prompt to optimize costs
+            logger.info(f"🧠 Creating cached content for RAG search prompt...")
+            try:
+                # Create cached content for the retrieval prompt
+                cached_content = genai_client.cached_content.create(
+                    model="gemini-2.5-flash-lite",
+                    contents=retrieval_prompt,
+                    ttl=3600,  # Cache for 1 hour
+                    display_name=f"rag_search_{query[:50]}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+                )
+                logger.info(f"✅ Created RAG search cached content: {cached_content.name}")
+                
+                # Use the cached content for the actual search
+                response = genai_client.models.generate_content(
+                    model="gemini-2.5-flash-lite",
+                    contents=retrieval_prompt,
+                    files=files_to_search,
+                    cached_content=cached_content.name  # Use cached content for cost optimization
+                )
+                logger.info(f"🔍 Gemini RAG search completed using cached content")
+                
+            except Exception as cache_error:
+                logger.warning(f"⚠️ Failed to create/use cached content: {cache_error}")
+                # Fallback to direct API call without caching
+                logger.info("🔄 Falling back to direct Gemini API call for RAG search")
+                response = genai_client.models.generate_content(
+                    model="gemini-2.5-flash-lite",
+                    contents=retrieval_prompt,
+                    files=files_to_search
+                )
+                logger.info(f"🔍 Gemini RAG search completed (direct call)")
+            
             # Extract usage data from response for tracking
             usage_data = None
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
@@ -2462,6 +2494,22 @@ async def chat(request: ChatRequest):
         elif hasattr(result, 'response') and result.response:
              # fallback for raw response access attempt
              response_text = result.response.text if hasattr(result.response, 'text') else str(result.response)
+        
+        # Add source document information to response if RAG was used
+        if request.use_rag and file_context:
+            source_docs = []
+            for result_item in file_context:
+                if hasattr(result_item, 'original_filename') and result_item.original_filename:
+                    source_docs.append(result_item.original_filename)
+                elif hasattr(result_item, 'file_name') and result_item.file_name:
+                    source_docs.append(result_item.file_name)
+            
+            if source_docs:
+                # Remove duplicates while preserving order
+                unique_sources = list(dict.fromkeys(source_docs))
+                source_text = f"\n\n📚 **Sources:** {', '.join(unique_sources)}"
+                response_text += source_text
+                logger.info(f"📚 Added source documents to response: {unique_sources}")
         
         # Determine which data sources were used based on tool calls
         data_sources_used = []
