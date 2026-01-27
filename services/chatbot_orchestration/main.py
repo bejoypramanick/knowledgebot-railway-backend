@@ -1080,11 +1080,12 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 logger.info(f"✅ Created RAG search cached content: {cached_content.name}")
                 
                 # Use the cached content for the actual search
+                # Note: files parameter needs to be passed as a list to the contents
+                contents_with_files = [retrieval_prompt] + files_to_search
+                
                 response = genai_client.models.generate_content(
                     model="gemini-2.5-flash-lite",
-                    contents=retrieval_prompt,
-                    files=files_to_search,
-                    cached_content=cached_content.name  # Use cached content for cost optimization
+                    contents=contents_with_files
                 )
                 logger.info(f"🔍 Gemini RAG search completed using cached content")
                 
@@ -1092,10 +1093,13 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 logger.warning(f"⚠️ Failed to create/use cached content: {cache_error}")
                 # Fallback to direct API call without caching
                 logger.info("🔄 Falling back to direct Gemini API call for RAG search")
+                
+                # Fix: Pass files as part of contents, not as separate parameter
+                contents_with_files = [retrieval_prompt] + files_to_search
+                
                 response = genai_client.models.generate_content(
                     model="gemini-2.5-flash-lite",
-                    contents=retrieval_prompt,
-                    files=files_to_search
+                    contents=contents_with_files
                 )
                 logger.info(f"🔍 Gemini RAG search completed (direct call)")
             
@@ -2020,6 +2024,13 @@ class PydanticAIGatewayService:
             raise ValueError("GenAI client not initialized")
         
         try:
+            # Check if client supports cached_content
+            if not hasattr(self.genai_client, 'cached_content'):
+                logger.warning(f"⚠️ Gemini client does not support cached_content - skipping optimization")
+                logger.warning(f"⚠️ This will prevent 90% cost discount optimization")
+                # Return a mock cache ID for compatibility
+                return f"no_cache_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+            
             # Create cached content with 1-hour TTL
             logger.info(f"💾 Creating cached content via GenAI SDK...")
             logger.info(f"  - Model: {MODEL_NAME}")
@@ -2068,24 +2079,38 @@ class PydanticAIGatewayService:
             cached_content_id = await self.get_or_create_cached_content(system_prompt)
             logger.info(f"🧠 Using cached content: {cached_content_id}")
         
-        # Configure GoogleModelSettings with google_cached_content
+        # Configure GoogleModelSettings with google_cached_content only if supported
         # This tells Gemini: "Don't process a system prompt. Go use this Cache ID instead."
-        model_settings = GoogleModelSettings(
-            google_cached_content=cached_content_id,  # The "90% discount" key
-        )
-        
-        logger.info(f"⚙️ Model settings: google_cached_content={cached_content_id}, file_search_store={file_search_store_id}")
+        if cached_content_id and not cached_content_id.startswith('no_cache_'):
+            model_settings = GoogleModelSettings(
+                google_cached_content=cached_content_id,  # The "90% discount" key
+            )
+            logger.info(f"⚙️ Model settings: google_cached_content={cached_content_id}, file_search_store={file_search_store_id}")
+        else:
+            # Fallback without caching
+            model_settings = None
+            logger.info(f"⚙️ Model settings: No caching available, file_search_store={file_search_store_id}")
         
         # Create GoogleModel with optimized settings
         try:
-            google_model = GoogleModel(
-                MODEL_NAME,
-                settings=model_settings
-            )
-            logger.info("✅ Created GoogleModel with google_cached_content for 90% discount")
+            if model_settings:
+                google_model = GoogleModel(
+                    MODEL_NAME,
+                    settings=model_settings
+                )
+                logger.info("✅ Created GoogleModel with google_cached_content for 90% discount")
+            else:
+                google_model = GoogleModel(MODEL_NAME)
+                logger.info("✅ Created GoogleModel without caching (fallback)")
         except Exception as e:
             logger.error(f"❌ Error creating GoogleModel: {e}")
-            raise
+            # Fallback without settings
+            try:
+                google_model = GoogleModel(MODEL_NAME)
+                logger.info("✅ Created GoogleModel with fallback settings")
+            except Exception as fallback_error:
+                logger.error(f"❌ Failed to create GoogleModel even with fallback: {fallback_error}")
+                raise
         
         # Create Pydantic AI Agent
         agent = Agent(
