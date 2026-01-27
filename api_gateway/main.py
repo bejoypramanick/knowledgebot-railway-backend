@@ -568,32 +568,59 @@ async def chat_stream_endpoint(request: Request):
             logger.error("❌ CHATBOT_ORCHESTRATION_URL not configured")
             raise HTTPException(status_code=500, detail="Chatbot service not configured")
         
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{chatbot_url}/chat/stream",
-                content=body,
-                headers={
-                    "Content-Type": request.headers.get("content-type", "application/json"),
-                    "Accept": request.headers.get("accept", "text/plain"),
-                }
-            )
-            
-            # Return streaming response
-            if response.status_code == 200:
-                return StreamingResponse(
-                    response.aiter_bytes(),
-                    media_type=response.headers.get("content-type", "text/plain"),
-                    headers={
-                        "Cache-Control": "no-cache",
-                        "Connection": "keep-alive",
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-                    }
-                )
-            else:
-                logger.error(f"❌ Chat stream service error: {response.status_code} - {response.text}")
-                raise HTTPException(status_code=response.status_code, detail=f"Chat service error: {response.text}")
+        # Retry logic for handling intermittent 502 errors
+        max_retries = 3
+        base_delay = 1.0  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    response = await client.post(
+                        f"{chatbot_url}/chat/stream",
+                        content=body,
+                        headers={
+                            "Content-Type": request.headers.get("content-type", "application/json"),
+                            "Accept": request.headers.get("accept", "text/plain"),
+                        }
+                    )
+                    
+                    # Return streaming response
+                    if response.status_code == 200:
+                        logger.info(f"✅ Chat stream successful on attempt {attempt + 1}")
+                        return StreamingResponse(
+                            response.aiter_bytes(),
+                            media_type=response.headers.get("content-type", "text/plain"),
+                            headers={
+                                "Cache-Control": "no-cache",
+                                "Connection": "keep-alive",
+                                "Access-Control-Allow-Origin": "*",
+                                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                            }
+                        )
+                    elif response.status_code in [502, 503, 504] and attempt < max_retries - 1:
+                        # Retry on server errors with exponential backoff
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"⚠️ Chat stream error {response.status_code} on attempt {attempt + 1}, retrying in {delay}s...")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"❌ Chat stream service error: {response.status_code} - {response.text}")
+                        raise HTTPException(status_code=response.status_code, detail=f"Chat service error: {response.text}")
+                        
+            except httpx.RequestError as req_err:
+                # Handle network/connection errors
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"⚠️ Network error on attempt {attempt + 1}: {req_err}, retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    logger.error(f"❌ Network error on final attempt: {req_err}")
+                    raise
+            except Exception as req_err:
+                logger.error(f"❌ Unexpected error on attempt {attempt + 1}: {req_err}")
+                raise
                 
     except Exception as e:
         logger.error(f"❌ Chat stream endpoint error: {e}", exc_info=True)
@@ -623,17 +650,52 @@ async def chat_endpoint(chat_request: ChatRequest, request: Request):
         target_url = f"{CHATBOT_ORCHESTRATION_URL}/chat"
         logger.info(f"🧪 Forwarding chat request to: {target_url}")
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                target_url,
-                json=chat_request.model_dump(),
-                headers=headers,
-                timeout=30.0
-            )
-            return JSONResponse(
-                status_code=resp.status_code,
-                content=resp.json() if resp.headers.get('content-type', '').startswith('application/json') else resp.text
-            )
+        # Retry logic for handling intermittent 502 errors
+        max_retries = 3
+        base_delay = 1.0  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.post(
+                        target_url,
+                        json=chat_request.model_dump(),
+                        headers=headers,
+                        timeout=30.0
+                    )
+                    
+                    if resp.status_code == 200:
+                        logger.info(f"✅ Chat request successful on attempt {attempt + 1}")
+                        return JSONResponse(
+                            status_code=resp.status_code,
+                            content=resp.json() if resp.headers.get('content-type', '').startswith('application/json') else resp.text
+                        )
+                    elif resp.status_code in [502, 503, 504] and attempt < max_retries - 1:
+                        # Retry on server errors with exponential backoff
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"⚠️ Chat error {resp.status_code} on attempt {attempt + 1}, retrying in {delay}s...")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"❌ Chat service error: {resp.status_code} - {resp.text}")
+                        return JSONResponse(
+                            status_code=resp.status_code,
+                            content=resp.json() if resp.headers.get('content-type', '').startswith('application/json') else resp.text
+                        )
+                        
+            except httpx.RequestError as req_err:
+                # Handle network/connection errors
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(f"⚠️ Network error on attempt {attempt + 1}: {req_err}, retrying in {delay}s...")
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    logger.error(f"❌ Network error on final attempt: {req_err}")
+                    raise
+            except Exception as req_err:
+                logger.error(f"❌ Unexpected error on attempt {attempt + 1}: {req_err}")
+                raise
     except Exception as e:
         logger.error(f"Error routing chat request: {e}")
         raise HTTPException(status_code=500, detail=f"Chat service error: {str(e)}")
