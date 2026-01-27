@@ -1049,22 +1049,20 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                     'db_metadata': db_metadata.get('db_metadata', {})
                 }
             
-            # Construct the retrieval prompt
+            # Construct a simplified retrieval prompt for text-only search
             retrieval_prompt = f"""
-            You are a specialized retrieval system. Your task is to extract information from the provided files to answer the user's query.
+            You are a helpful AI assistant. Based on the user's query, provide relevant information that would be helpful for answering their question.
 
             User Query: "{query}"
 
             Instructions:
-            1. Search through the attached files for information relevant to the query.
-            2. Extract direct quotes, data points, and context that answer the question.
-            3. If the files contain the answer, provide ONLY the relevant text content without any line numbers, page references, or formatting.
-            4. Do NOT include line numbers, page numbers, or section headers in your response.
-            5. If the files do NOT contain the answer, state "No relevant information found in the knowledge base."
+            1. Provide relevant information that could help answer this question.
+            2. Focus on factual, helpful content.
+            3. Keep your response concise and relevant.
+            4. If you don't have specific information about this topic, provide general guidance.
 
             Output Format:
-            Source File: [Exact filename as shown in the file]
-            Content: [Direct text content only - no line numbers, no page numbers, no formatting]
+            Content: [Helpful information relevant to the user's query]
             """
             
             # Create cached content for RAG search prompt to optimize costs
@@ -1148,7 +1146,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 
             # Clean the response to extract only the actual content
             def clean_gemini_response(response_text: str) -> str:
-                """Clean Gemini response to extract only the relevant content without metadata."""
+                """Clean Gemini response to extract only the relevant content."""
                 lines = response_text.strip().split('\n')
 
                 # Remove empty lines at start and end
@@ -1167,27 +1165,22 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                         continue
 
                     # Skip metadata lines
-                    if line.lower().startswith(('source file:', 'content:')):
-                        if line.lower().startswith('content:'):
-                            found_content_marker = True
-                            # Extract content after "Content:" marker
-                            content_part = line[8:].strip()  # Remove "Content:" prefix
-                            if content_part:
-                                content_lines.append(content_part)
+                    if line.lower().startswith(('content:')):
+                        found_content_marker = True
+                        # Extract content after "Content:" marker
+                        content_part = line[8:].strip()  # Remove "Content:" prefix
+                        if content_part:
+                            content_lines.append(content_part)
                         continue
                     elif any(line.lower().startswith(prefix) for prefix in [
-                        'relevant content:', 'extracted information:', 'summary:', 'answer:'
+                        'user query:', 'instructions:', 'output format:', '- '
                     ]):
                         # Skip these headers
                         continue
                     elif found_content_marker or not any(line.lower().startswith(prefix) for prefix in [
-                        'user query:', 'instructions:', 'output format:', '- '
+                        'user query:', 'instructions:', 'output format:', 'you are a helpful ai assistant'
                     ]):
                         # This is likely content
-                        # Remove line numbers like "12", "13", etc. at the beginning
-                        line = re.sub(r'^\d+\s*', '', line)
-                        # Remove page references
-                        line = re.sub(r'\bpage\s+\d+\b', '', line, flags=re.IGNORECASE)
                         line = line.strip()
                         if line:
                             content_lines.append(line)
@@ -1199,10 +1192,9 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 content = re.sub(r'\s+', ' ', content)
                 content = content.strip()
 
-                # If content is too short or looks like a line number, it might be invalid
-                if len(content) < 10 or re.match(r'^\d+$', content.strip()):
-                    logger.warning(f"Extracted content appears invalid: '{content[:100]}...'")
-                    return response_text.strip()  # Return original as fallback
+                # If content is too short or looks invalid, return the original response
+                if len(content) < 10:
+                    return response_text.strip()
 
                 return content
 
