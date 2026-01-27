@@ -1073,7 +1073,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                     model="gemini-2.5-flash-lite",
                     config=types.CreateCachedContentConfig(
                         display_name=f"rag_search_{query[:50]}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
-                        contents=retrieval_prompt,
+                        contents=[types.Part.from_text(retrieval_prompt)],
                         ttl="3600s"  # Cache for 1 hour
                     )
                 )
