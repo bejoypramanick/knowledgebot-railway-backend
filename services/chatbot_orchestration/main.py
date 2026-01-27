@@ -1069,18 +1069,21 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             logger.info(f"🧠 Creating cached content for RAG search prompt...")
             try:
                 # Create cached content for the retrieval prompt
-                cached_content = genai_client.cached_content.create(
+                cache = genai_client.caches.create(
                     model="gemini-2.5-flash-lite",
-                    contents=retrieval_prompt,
-                    ttl=3600,  # Cache for 1 hour
-                    display_name=f"rag_search_{query[:50]}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+                    config=types.CreateCachedContentConfig(
+                        display_name=f"rag_search_{query[:50]}_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                        contents=retrieval_prompt,
+                        ttl="3600s"  # Cache for 1 hour
+                    )
                 )
-                logger.info(f"✅ Created RAG search cached content: {cached_content.name}")
+                logger.info(f"✅ Created RAG search cached content: {cache.name}")
                 
                 # Use the cached content for the actual search (text-only for now)
                 response = genai_client.models.generate_content(
                     model="gemini-2.5-flash-lite",
-                    contents=retrieval_prompt
+                    contents=retrieval_prompt,
+                    config=types.GenerateContentConfig(cached_content=cache.name)
                 )
                 logger.info(f"🔍 Gemini RAG search completed using cached content (text-only)")
                 logger.info("RAG Response=" + str(response))
