@@ -136,3 +136,37 @@ class FileService:
         except Exception as e:
             logger.error(f"❌ [DB] Error recording metadata: {e}")
             raise
+
+    async def find_file_record(self, file_id: str):
+        """Find file record by ID across multiple tables"""
+        try:
+            # Look up in file_uploads table
+            record = await self.file_dao.find_file_by_id(file_id, 'file_uploads')
+            if record:
+                return {
+                    'gemini_file_name': record['gemini_file_name'],
+                    'original_filename': record['original_filename'],
+                    'table_name': 'file_uploads'
+                }
+            
+            # Look up in scraped_websites table
+            record = await self.file_dao.find_file_by_id(file_id, 'scraped_websites')
+            if record:
+                return {
+                    'gemini_file_name': record['gemini_file_name'],
+                    'original_filename': record.get('original_url', 'Unknown'),
+                    'table_name': 'scraped_websites'
+                }
+            
+            return None
+        except Exception as e:
+            logger.error(f"Error finding file record: {e}")
+            return None
+
+    async def delete_file_record(self, file_id: str, table_name: str):
+        """Delete file record from specified table"""
+        try:
+            await self.file_dao.delete_file_by_id(file_id, table_name)
+        except Exception as e:
+            logger.error(f"Error deleting file record: {e}")
+            raise

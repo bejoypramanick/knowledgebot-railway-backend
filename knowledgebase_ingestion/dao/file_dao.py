@@ -208,18 +208,36 @@ class FileDAO:
         )
 
     async def get_recent_metrics(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent metrics from the last 7 days."""
-        if not self.db:
+        """Get recent metrics"""
+        try:
+            return await self.get_recent_metrics(limit)
+        except Exception as e:
+            logger.error(f"Error getting recent metrics: {e}")
             return []
-        
-        return await self.db.fetch(
-            """
-            SELECT metric_name, SUM(value::numeric) as total_value, unit
-            FROM metrics
-            WHERE recorded_at > NOW() - INTERVAL '7 days'
-            GROUP BY metric_name, unit
-            ORDER BY total_value DESC
-            LIMIT $1
-            """,
-            limit
-        )
+
+    async def find_file_by_id(self, file_id: str, table_name: str):
+        """Find file by ID in specified table"""
+        try:
+            if table_name == 'file_uploads':
+                return await self.fetchrow(
+                    "SELECT gemini_file_name, original_filename, 'file_uploads' as table_name FROM file_uploads WHERE id = $1",
+                    file_id
+                )
+            elif table_name == 'scraped_websites':
+                return await self.fetchrow(
+                    "SELECT gemini_file_name, original_url as original_filename, 'scraped_websites' as table_name FROM scraped_websites WHERE id = $1",
+                    file_id
+                )
+            return None
+        except Exception as e:
+            logger.error(f"Error finding file by ID: {e}")
+            return None
+
+    async def delete_file_by_id(self, file_id: str, table_name: str):
+        """Delete file by ID from specified table"""
+        try:
+            query = f"DELETE FROM {table_name} WHERE id = $1"
+            await self.execute(query, file_id)
+        except Exception as e:
+            logger.error(f"Error deleting file by ID: {e}")
+            raise

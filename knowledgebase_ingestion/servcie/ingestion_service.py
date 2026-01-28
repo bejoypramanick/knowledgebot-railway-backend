@@ -20,7 +20,6 @@ from ..utils.validation import (
 from ..utils.files import stream_to_temp_file, calculate_sha256
 from ..schemas.models import FileInfo, BatchUploadItem, BatchDeleteItem
 from shared.config import settings
-from shared import db
 
 logger = logging.getLogger(__name__)
 
@@ -274,21 +273,14 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
         
     logger.info(f"🗑️ Starting deletion of file with ID: {file_id}")
     
+    file_service = FileService()
     gemini_file_name = file_id
     table_name = "gemini_only"
     original_filename = "Gemini-only file"
     
-    if not file_id.startswith("files/") and db.railway_db:
-         # Look up in DB
-         record = await db.railway_db.fetchrow(
-             "SELECT gemini_file_name, original_filename, 'file_uploads' as table_name FROM file_uploads WHERE id = $1",
-             file_id
-         )
-         if not record:
-             record = await db.railway_db.fetchrow(
-                 "SELECT gemini_file_name, original_url as original_filename, 'scraped_websites' as table_name FROM scraped_websites WHERE id = $1",
-                 file_id
-             )
+    if not file_id.startswith("files/"):
+         # Look up in DB using service
+         record = await file_service.find_file_record(file_id)
          
          if record:
              gemini_file_name = record['gemini_file_name']
@@ -316,10 +308,9 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
         deletion_results["gemini"]["error"] = "Unknown error"
 
     # Delete from DB
-    if db.railway_db and table_name != "gemini_only":
+    if table_name != "gemini_only":
         try:
-            query = f"DELETE FROM {table_name} WHERE id = $1"
-            await db.railway_db.execute(query, file_id)
+            await file_service.delete_file_record(file_id, table_name)
             deletion_results["postgres"]["success"] = True
         except Exception as e:
             deletion_results["postgres"]["error"] = str(e)
