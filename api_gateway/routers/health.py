@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api_gateway.core.config import (
     KNOWLEDGEBASE_INGESTION_URL, 
-    WEBSITE_SCRAPING_URL, 
+    WEBSITE_CRAWLING_URL, 
     CHATBOT_ORCHESTRATION_URL
 )
 from shared.utils import log_endpoint_request
@@ -43,7 +43,7 @@ async def health_check(request: Request):
 
         service_urls = {
             "knowledgebase_ingestion": KNOWLEDGEBASE_INGESTION_URL,
-            "website_scraping": WEBSITE_SCRAPING_URL,
+            "website_scraping": WEBSITE_CRAWLING_URL,
             "chatbot_orchestration": CHATBOT_ORCHESTRATION_URL
         }
 
@@ -96,7 +96,7 @@ async def system_status():
 
     services = {
         "knowledgebase": KNOWLEDGEBASE_INGESTION_URL,
-        "website_scraping": WEBSITE_SCRAPING_URL,
+        "website_scraping": WEBSITE_CRAWLING_URL,
         "chatbot": CHATBOT_ORCHESTRATION_URL
     }
     statuses = {"gateway": "online"}
