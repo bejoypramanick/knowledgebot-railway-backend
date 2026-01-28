@@ -132,7 +132,6 @@ async def archive_chat_session(
         raise HTTPException(status_code=403, detail="User email not found in token")
 
     service = ChatLogService(connection_manager)  # Service manages its own DAO
-    
     # Service handles role check internally
     await service.archive_chat_session(session_id, request.status, user_email)
     
@@ -156,17 +155,17 @@ async def get_session_messages(
         raise HTTPException(status_code=403, detail="User email not found")
     
     service = ChatLogService(connection_manager)  # Service manages its own DAO
-        messages_data = await service.get_session_messages(session_id)
-        
-        messages = [{
-            "id": str(msg['id']),
-            "text": msg['content'],
-            "sender": msg['role'],
-            "timestamp": msg['created_at'].isoformat() if msg['created_at'] else datetime.utcnow().isoformat(),
-            "session_id": session_id
-        } for msg in messages_data]
-        
-        return {"messages": messages}
+    messages_data = await service.get_session_messages(session_id)
+    
+    messages = [{
+        "id": str(msg['id']),
+        "text": msg['content'],
+        "sender": msg['role'],
+        "timestamp": msg['created_at'].isoformat() if msg['created_at'] else datetime.utcnow().isoformat(),
+        "session_id": session_id
+    } for msg in messages_data]
+    
+    return {"messages": messages}
 
 
 @router.post("/chat-sessions/{session_id}/messages", response_model=SendMessageResponse)
@@ -184,12 +183,12 @@ async def send_agent_message(
         raise HTTPException(status_code=403, detail="Agent ID must match authenticated user")
     
     service = ChatLogService(connection_manager)  # Service manages its own DAO
-        message_id = await service.send_agent_message(session_id, user_email, request.text)
-        
-        return SendMessageResponse(
-            message_id=str(message_id),
-            success=True
-        )
+    message_id = await service.send_agent_message(session_id, user_email, request.text)
+    
+    return SendMessageResponse(
+        message_id=str(message_id),
+        success=True
+    )
 
 
 @router.get("/chat-sessions/{session_id}/events")
@@ -238,22 +237,18 @@ async def assign_chat_session(
         raise HTTPException(status_code=403, detail="User email not found")
     
     service = ChatLogService(connection_manager)  # Service manages its own DAO
-        
-        roles = await dao.check_user_role(user_email)
-        if not roles["is_admin"]:
-            raise HTTPException(status_code=403, detail="Only admins can manually assign chats")
-            
-        assigned_agent = await service.assign_chat_with_load_balancing(session_id)
-        
-        if not assigned_agent:
-            raise HTTPException(status_code=503, detail="No available agents to assign chat")
-        
-        return {
-            "success": True,
-            "message": f"Chat assigned to agent {assigned_agent}",
-            "assigned_agent": assigned_agent,
-            "session_id": session_id
-        }
+    
+    assigned_agent = await service.assign_chat_with_load_balancing(session_id)
+    
+    if not assigned_agent:
+        raise HTTPException(status_code=503, detail="No available agents to assign chat")
+    
+    return {
+        "success": True,
+        "message": f"Chat assigned to agent {assigned_agent}",
+        "assigned_agent": assigned_agent,
+        "session_id": session_id
+    }
 
 
 @router.post("/chat-sessions/{session_id}/transfer", response_model=dict)
@@ -268,13 +263,13 @@ async def transfer_chat_session(
         raise HTTPException(status_code=403, detail="User email not found")
         
     service = ChatLogService(connection_manager)  # Service manages its own DAO
-        await service.transfer_chat_session(session_id, user_email, target_agent_email)
-        
-        return {
-            "success": True,
-            "message": f"Chat transferred to {target_agent_email}",
-            "assigned_agent": target_agent_email
-        }
+    await service.transfer_chat_session(session_id, user_email, target_agent_email)
+    
+    return {
+        "success": True,
+        "message": f"Chat transferred to {target_agent_email}",
+        "assigned_agent": target_agent_email
+    }
 
 
 @router.patch("/chat-sessions/{session_id}", response_model=dict)
@@ -307,30 +302,30 @@ async def end_customer_session(
         raise HTTPException(status_code=400, detail="User email is required")
 
     service = ChatLogService(connection_manager)  # Service manages its own DAO
-        await service.end_customer_session(session_id, user_email)
-        return {'success': True, 'message': 'Session ended successfully'}
+    await service.end_customer_session(session_id, user_email)
+    return {'success': True, 'message': 'Session ended successfully'}
 
 
 @public_chat_router.post("/{session_id}/request-human-agent", response_model=dict)
 async def request_human_agent(session_id: str, request: Request):
     """Request human agent connection for a chat session."""
     service = ChatLogService(connection_manager)  # Service manages its own DAO
-        assigned_agent = await service.request_human_agent(session_id)
-        
-        return {
-            "success": True,
-            "message": f"Chat assigned to agent {assigned_agent}",
-            "assigned_agent": assigned_agent,
-            "session_id": session_id
-        }
+    assigned_agent = await service.request_human_agent(session_id)
+    
+    return {
+        "success": True,
+        "message": f"Chat assigned to agent {assigned_agent}",
+        "assigned_agent": assigned_agent,
+        "session_id": session_id
+    }
 
 
 @public_chat_router.patch("/{session_id}/end", response_model=dict)
 async def public_end_customer_session(session_id: str, request: Request):
     """End a chat session from the customer side (public)."""
     service = ChatLogService(connection_manager)  # Service manages its own DAO
-        await service.public_end_customer_session(session_id)
-        return {"success": True, "message": "Session ended successfully"}
+    await service.public_end_customer_session(session_id)
+    return {"success": True, "message": "Session ended successfully"}
 
 
 @public_chat_router.get("/{session_id}/events")
