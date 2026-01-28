@@ -11,7 +11,7 @@ from typing import Optional
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from .main import get_db_connection
+from shared.db import get_db_connection
 from shared.dao.token_dao import TokenDAO
 
 logger = logging.getLogger(__name__)

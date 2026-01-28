@@ -13,7 +13,7 @@ from datetime import datetime
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.auth_middleware import get_current_user
-from .main import get_db_connection
+from shared.db import get_db_connection
 from dao.notifications_dao import NotificationsDAO
 
 logger = logging.getLogger(__name__)
@@ -116,7 +116,7 @@ async def get_notifications(
     Get notifications for a user.
     """
     try:
-        from .main import get_db_connection
+        from shared.db import get_db_connection
         async with get_db_connection() as conn:
             notifications_dao = NotificationsDAO(conn)
             

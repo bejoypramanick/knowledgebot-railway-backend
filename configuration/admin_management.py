@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.firebase_auth import get_user_from_firestore, save_user_to_firestore, update_user_role_in_firestore
 from shared.auth_middleware import get_current_user
-from .main import get_db_connection
+from shared.db import get_db_connection
 from dao.auth_dao import AuthDAO
 
 logger = logging.getLogger(__name__)
