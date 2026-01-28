@@ -4,12 +4,8 @@ Tracks and accumulates token usage from Gemini API responses.
 """
 import logging
 import os
-import sys
-from pathlib import Path
 from typing import Optional
 
-# Add shared directory to path
-sys.path.insert(0, str(Path(__file__).parent))
 from configuration.servcie.token_usage_service import TokenUsageService
 
 logger = logging.getLogger(__name__)
@@ -108,7 +104,6 @@ async def track_gemini_usage_detailed(
             logger.warning("⚠️ Skipping token_usage_log insert: neither session_id nor message_id provided")
 
         logger.info(f"✅ Tracked gemini detailed usage: {total_tokens} tokens total used, session: {session_id}")
-            logger.warning("Database not available for token tracking")
     except Exception as e:
         logger.error(f"Error tracking Gemini detailed token usage: {e}", exc_info=True)
 

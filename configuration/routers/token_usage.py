@@ -5,12 +5,8 @@ from fastapi import APIRouter, HTTPException
 import httpx
 import os
 import logging
-import sys
-from pathlib import Path
 from typing import Optional
 
-# Add shared directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.auth_middleware import get_current_user
 from ..servcie.token_usage_service import TokenUsageService
 

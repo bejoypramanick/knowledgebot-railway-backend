@@ -5,11 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Literal, Optional
 import logging
-import sys
-from pathlib import Path
 
-# Add shared directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.auth_middleware import get_current_user
 from ..servcie.feedback_service import FeedbackService
 

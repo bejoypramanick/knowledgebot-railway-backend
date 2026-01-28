@@ -1,7 +1,5 @@
-import sys
 import logging
 import os
-from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -12,8 +10,6 @@ from fastapi.responses import JSONResponse
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Add shared directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.config import settings
 from shared import db as shared_db
 from shared.utils import register_fastapi_exception_handlers, setup_global_exception_logging, log_endpoint_request

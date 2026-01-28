@@ -5,15 +5,6 @@ from fastapi import APIRouter, HTTPException
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 import logging
-import sys
-from pathlib import Path
-
-# Add shared directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/api/v1/admin", tags=["performance"])
 
 from shared.auth_middleware import get_current_user
 from ..servcie.performance_service import PerformanceService

@@ -1,8 +1,6 @@
-import sys
 import logging
 import os
 import time
-from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -16,12 +14,6 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Add shared directory to path
-try:
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-except Exception:
-    logger.debug("Could not adjust sys.path for shared imports")
 
 from shared.utils import setup_global_exception_logging, register_fastapi_exception_handlers
 

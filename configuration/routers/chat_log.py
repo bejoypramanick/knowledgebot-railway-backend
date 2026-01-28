@@ -7,8 +7,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Set
 import logging
-import sys
-from pathlib import Path
 from datetime import datetime, timedelta
 import uuid
 import json
@@ -16,8 +14,6 @@ import time
 import os
 import asyncio
 
-# Add shared directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.auth_middleware import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -284,8 +280,8 @@ async def update_chat_session(
         raise HTTPException(status_code=403, detail="User email not found")
     
     service = ChatLogService(connection_manager)  # Service manages its own DAO
-        await service.update_chat_session(session_id, user_email, status, assigned_agent, feedback, user_type)
-        return {'success': True, 'message': 'Session updated successfully'}
+    await service.update_chat_session(session_id, user_email, status, assigned_agent, feedback, user_type)
+    return {'success': True, 'message': 'Session updated successfully'}
 
 
 @router.post("/chat-sessions/{session_id}/end-customer", response_model=dict)
