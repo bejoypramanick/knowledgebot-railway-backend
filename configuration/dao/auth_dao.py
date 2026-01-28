@@ -83,13 +83,6 @@ class AuthDAO:
                 email
             )
 
-    async def get_all_human_agents(self) -> List[Dict[str, Any]]:
-        """Get all human agents for this service."""
-        async with get_db_connection() as conn:
-            return await conn.fetch(
-                "SELECT email FROM human_agents WHERE is_active = true"
-            )
-
     async def get_available_agents(self) -> List[Dict[str, Any]]:
         """Get available human agents for assignment."""
         async with get_db_connection() as conn:

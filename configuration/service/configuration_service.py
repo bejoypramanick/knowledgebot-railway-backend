@@ -5,6 +5,7 @@ Provides business logic layer between routers and DAO
 from typing import Any, Dict, List, Optional
 
 from shared.logging_config import get_railway_logger
+from shared.dao.user_dao import UserDAO
 
 from ..dao.auth_dao import AuthDAO
 from ..dao.chatbot_dao import ChatbotDAO
@@ -18,6 +19,7 @@ class ConfigurationService:
     
     def __init__(self):
         self._chatbot_dao = ChatbotDAO()  # Service manages its own DAO
+        self._user_dao = UserDAO()  # Use shared UserDAO for user operations
         self._widget_dao = WidgetDAO()    # Service manages its own DAO
         self._performance_dao = PerformanceDAO()  # Service manages its own DAO
         self._auth_dao = AuthDAO()  # Service manages its own DAO
@@ -40,18 +42,18 @@ class ConfigurationService:
             raise
     
     # Human Agent Management Methods
-    async def create_human_agent(self, email: str) -> int:
+    async def create_human_agent(self, email: str) -> str:
         """Create a new human agent"""
         try:
-            return await self._chatbot_dao.create_human_agent(email)
+            return await self._auth_dao.create_human_agent(email)
         except Exception as e:
             logger.error(f"Error creating human agent: {e}")
             raise
     
-    async def get_all_human_agents(self) -> List[Dict[str, Any]]:
+    async def get_all_human_agents(self) -> List[str]:
         """Get all human agents"""
         try:
-            return await self._chatbot_dao.get_all_human_agents()
+            return await self._user_dao.get_all_human_agents()
         except Exception as e:
             logger.error(f"Error getting human agents: {e}")
             return []
@@ -59,7 +61,7 @@ class ConfigurationService:
     async def delete_human_agent(self, email: str):
         """Delete a human agent"""
         try:
-            await self._chatbot_dao.delete_human_agent(email)
+            await self._auth_dao.remove_human_agent(email)
         except Exception as e:
             logger.error(f"Error deleting human agent: {e}")
             raise
@@ -81,7 +83,23 @@ class ConfigurationService:
             logger.error(f"Error updating widget config: {e}")
             raise
     
-    # Performance Metrics Methods
+    async def get_widget_config_with_transform(self):
+        """Get complete widget configuration with all data transformations"""
+        try:
+            # Get main widget configuration
+            row = await self._widget_dao.get_widget_config()
+            
+            # Get suggested messages
+            suggested_messages = await self._widget_dao.get_suggested_messages()
+            
+            return {
+                **row,
+                'suggested_messages': suggested_messages
+            }
+        except Exception as e:
+            logger.error(f"Error getting widget config with transform: {e}")
+            return None
+
     async def get_total_interactions(self) -> int:
         """Get total interactions"""
         try:
@@ -293,14 +311,6 @@ class ConfigurationService:
         except Exception as e:
             logger.error(f"Error adding human agent: {e}")
             raise
-
-    async def get_all_human_agents(self):
-        """Get all human agents"""
-        try:
-            return await self._chatbot_dao.get_all_human_agents()
-        except Exception as e:
-            logger.error(f"Error getting all human agents: {e}")
-            return []
 
     async def delete_human_agent(self, email: str):
         """Delete human agent by email"""
