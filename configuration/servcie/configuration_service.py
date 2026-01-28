@@ -228,5 +228,85 @@ class ConfigurationService:
             logger.error(f"Error adding suggested message: {e}")
             raise
 
+    async def upsert_configuration_metadata(self, meta_updates: dict):
+        """Upsert configuration metadata"""
+        try:
+            await self._chatbot_dao.upsert_configuration_metadata(meta_updates)
+        except Exception as e:
+            logger.error(f"Error upserting configuration metadata: {e}")
+            raise
+
+    async def upsert_notification_setting_with_desc(self, setting_name: str, value: bool, description: str):
+        """Upsert notification setting with description"""
+        try:
+            await self._chatbot_dao.upsert_notification_setting_with_desc(setting_name, value, description)
+        except Exception as e:
+            logger.error(f"Error upserting notification setting: {e}")
+            raise
+
+    async def upsert_security_setting_with_desc(self, setting_name: str, value: str, setting_type: str, description: str):
+        """Upsert security setting with description"""
+        try:
+            await self._chatbot_dao.upsert_security_setting_with_desc(setting_name, value, setting_type, description)
+        except Exception as e:
+            logger.error(f"Error upserting security setting: {e}")
+            raise
+
+    async def upsert_persona(self, persona_name: str, system_prompt: str):
+        """Upsert persona configuration"""
+        try:
+            await self._chatbot_dao.upsert_persona(persona_name, system_prompt)
+        except Exception as e:
+            logger.error(f"Error upserting persona: {e}")
+            raise
+
+    async def update_llm_tokens(self, provider: str, token_limit: int):
+        """Update LLM token limit"""
+        try:
+            await self._chatbot_dao.update_llm_tokens(provider, token_limit)
+        except Exception as e:
+            logger.error(f"Error updating LLM tokens: {e}")
+            raise
+
+    async def update_llm_used_tokens(self, provider: str, token_used: int):
+        """Update LLM used tokens"""
+        try:
+            await self._chatbot_dao.update_llm_used_tokens(provider, token_used)
+        except Exception as e:
+            logger.error(f"Error updating LLM used tokens: {e}")
+            raise
+
+    async def find_human_agent(self, email: str):
+        """Find human agent by email"""
+        try:
+            return await self._chatbot_dao.find_human_agent(email)
+        except Exception as e:
+            logger.error(f"Error finding human agent: {e}")
+            return None
+
+    async def add_human_agent(self, email: str):
+        """Add a new human agent"""
+        try:
+            return await self._chatbot_dao.add_human_agent(email)
+        except Exception as e:
+            logger.error(f"Error adding human agent: {e}")
+            raise
+
+    async def get_all_human_agents(self):
+        """Get all human agents"""
+        try:
+            return await self._chatbot_dao.get_all_human_agents()
+        except Exception as e:
+            logger.error(f"Error getting all human agents: {e}")
+            return []
+
+    async def delete_human_agent(self, email: str):
+        """Delete human agent by email"""
+        try:
+            await self._chatbot_dao.delete_human_agent(email)
+        except Exception as e:
+            logger.error(f"Error deleting human agent: {e}")
+            raise
+
 # Singleton instance
 configuration_service = ConfigurationService()
