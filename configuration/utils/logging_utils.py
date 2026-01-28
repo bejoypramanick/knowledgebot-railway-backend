@@ -1,7 +1,8 @@
 import logging
 import json
 from datetime import datetime
-from ..core.database import get_db_connection
+from shared.db import get_db_connection
+from ..dao.performance_dao import PerformanceDAO
 
 logger = logging.getLogger(__name__)
 

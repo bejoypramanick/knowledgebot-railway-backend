@@ -8,7 +8,6 @@ from ..dao.chatbot_dao import ChatbotDAO
 from ..dao.widget_dao import WidgetDAO
 from ..dao.performance_dao import PerformanceDAO
 from ..dao.auth_dao import AuthDAO
-from ..core.database import get_db_connection
 
 logger = logging.getLogger(__name__)
 

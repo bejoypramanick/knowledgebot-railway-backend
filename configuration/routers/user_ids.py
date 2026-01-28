@@ -12,8 +12,7 @@ import string
 import json
 
 from shared.auth_middleware import get_current_user
-from .main import get_db_connection
-from dao.user_dao import UserDAO
+from ..dao.user_dao import UserDAO
 
 logger = logging.getLogger(__name__)
 
@@ -77,56 +76,56 @@ async def get_or_create_unique_id(
     If email is None (anonymous user), creates a temporary ID.
     """
     try:
-        async with get_db_connection() as conn:
-            user_dao = UserDAO(conn)
-            
-            role = request.role.lower()
-            if role not in ['customer', 'agent', 'admin']:
-                raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")
-            
-            # For anonymous users (no email), generate temporary ID
-            if not request.email:
-                temp_id = f"TEMP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
-                return UniqueIdResponse(
-                    unique_id=temp_id,
-                    email=None,
-                    role=role,
-                    created=True
-                )
-            
-            # Check if unique ID already exists for this email and role
-            existing = await user_dao.get_unique_id_by_email_role(request.email, role)
-            
-            if existing:
-                logger.info(f"Found existing unique ID for {request.email} ({role})")
-                return UniqueIdResponse(
-                    unique_id=existing['unique_id'],
-                    email=request.email,
-                    role=role,
-                    created=False
-                )
-            
-            # Generate new unique ID
-            unique_id = generate_unique_id(role)
-            
-            # Ensure uniqueness (retry if collision)
-            max_retries = 5
-            for attempt in range(max_retries):
-                existing_id = await user_dao.check_unique_id_exists(unique_id)
-                if not existing_id:
-                    break
-                unique_id = generate_unique_id(role)
-            
-            # Insert new unique ID
-            await user_dao.create_unique_id(request.email, unique_id, role)
-            
-            logger.info(f"Created new unique ID {unique_id} for {request.email} ({role})")
+        user_dao = UserDAO()
+        
+        role = request.role.lower()
+        if role not in ['customer', 'agent', 'admin']:
+            raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")
+        
+        # For anonymous users (no email), generate temporary ID
+        if not request.email:
+            temp_id = f"TEMP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
             return UniqueIdResponse(
-                unique_id=unique_id,
-                email=request.email,
+                unique_id=temp_id,
+                email=None,
                 role=role,
                 created=True
             )
+        
+        # Check if unique ID already exists for this email and role
+        existing = await user_dao.get_unique_id_by_email_role(request.email, role)
+        
+        if existing:
+            logger.info(f"Found existing unique ID for {request.email} ({role})")
+            return UniqueIdResponse(
+                unique_id=existing['unique_id'],
+                email=request.email,
+                role=role,
+                created=False
+            )
+        
+        # Generate new unique ID
+        unique_id = generate_unique_id(role)
+        
+        # Ensure uniqueness (retry if collision)
+        max_retries = 5
+        for attempt in range(max_retries):
+            existing_id = await user_dao.check_unique_id_exists(unique_id)
+            if not existing_id:
+                break
+            unique_id = generate_unique_id(role)
+        
+        # Insert new unique ID
+        await user_dao.create_unique_id(request.email, unique_id, role)
+        
+        logger.info(f"Created new unique ID {unique_id} for {request.email} ({role})")
+        
+        return UniqueIdResponse(
+            unique_id=unique_id,
+            email=request.email,
+            role=role,
+            created=True
+        )
             
     except HTTPException:
         raise

@@ -5,11 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Form
 from fastapi.responses import JSONResponse
 from typing import Optional
 
-from ..core.database import get_db_connection
 from ..schemas.models import WidgetConfigRequest
 from ..utils.logging_utils import log_configuration_change
 from ..servcie.configuration_service import configuration_service
 from shared.auth_middleware import get_current_user
+from ..dao.widget_dao import WidgetDAO
 
 logger = logging.getLogger(__name__)
 

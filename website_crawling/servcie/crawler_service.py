@@ -5,7 +5,6 @@ Provides business logic for website crawling operations
 import logging
 from typing import List, Optional, Dict, Any
 from ..dao.scraping_dao import ScrapingDAO
-from shared.db import get_db_connection
 
 logger = logging.getLogger(__name__)
 

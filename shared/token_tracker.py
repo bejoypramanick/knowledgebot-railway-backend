@@ -10,24 +10,24 @@ from typing import Optional
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent))
-from shared.db import railway_db, init_railway_db
+from shared.dao.token_dao import TokenDAO
 
 logger = logging.getLogger(__name__)
 
-
-async def get_db_connection():
-    """Get database connection - use shared database utilities."""
-    if railway_db is not None:
-        return railway_db
-    
-    # Try to initialize if not available (fallback)
-    database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL")
-    if database_url:
-        try:
-            db = await init_railway_db(database_url)
-            return db
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize database in token_tracker: {e}")
+async def track_token_usage(session_id: str, message_id: str, provider: str, model: str, 
+                          prompt_tokens: int, completion_tokens: int, total_tokens: int, 
+                          api_call_type: str, request_metadata: Optional[dict] = None):
+    """Track token usage using the TokenDAO"""
+    try:
+        token_dao = TokenDAO()
+        await token_dao.log_token_usage(
+            session_id, message_id, provider, model,
+            prompt_tokens, completion_tokens, total_tokens,
+            api_call_type, request_metadata
+        )
+        logger.info(f"Token usage tracked for session {session_id}")
+    except Exception as e:
+        logger.error(f"Error tracking token usage: {e}")
     
     return None
 
