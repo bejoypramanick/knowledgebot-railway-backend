@@ -16,8 +16,9 @@ import json
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from shared.db import railway_db
 from shared.auth_middleware import get_current_user
+from .main import get_db_connection
+from .dao.user_dao import UserDAO
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +82,9 @@ async def get_or_create_unique_id(
     If email is None (anonymous user), creates a temporary ID.
     """
     try:
-        # Use get_db_connection to ensure database is initialized
-        from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
+            user_dao = UserDAO(conn)
+            
             role = request.role.lower()
             if role not in ['customer', 'agent', 'admin']:
                 raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")
@@ -99,14 +100,7 @@ async def get_or_create_unique_id(
                 )
             
             # Check if unique ID already exists for this email and role
-            existing = await conn.fetchrow(
-                """
-                SELECT unique_id, created_at 
-                FROM user_unique_ids 
-                WHERE email = $1 AND role = $2
-                """,
-                request.email, role
-            )
+            existing = await user_dao.get_unique_id_by_email_role(request.email, role)
             
             if existing:
                 logger.info(f"Found existing unique ID for {request.email} ({role})")
@@ -123,25 +117,13 @@ async def get_or_create_unique_id(
             # Ensure uniqueness (retry if collision)
             max_retries = 5
             for attempt in range(max_retries):
-                existing_id = await conn.fetchval(
-                    "SELECT unique_id FROM user_unique_ids WHERE unique_id = $1",
-                    unique_id
-                )
+                existing_id = await user_dao.check_unique_id_exists(unique_id)
                 if not existing_id:
                     break
                 unique_id = generate_unique_id(role)
             
             # Insert new unique ID
-            await conn.execute(
-                """
-                INSERT INTO user_unique_ids (email, unique_id, role)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (email, role) DO UPDATE
-                SET updated_at = CURRENT_TIMESTAMP
-                RETURNING unique_id
-                """,
-                request.email, unique_id, role
-            )
+            await user_dao.create_unique_id(request.email, unique_id, role)
             
             logger.info(f"Created new unique ID {unique_id} for {request.email} ({role})")
             return UniqueIdResponse(
