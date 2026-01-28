@@ -11,26 +11,21 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Add shared directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from shared.db import close_databases, railway_db
 from shared.utils import validate_environment, wait_for_railway_network, service_status
 from shared.firebase_auth import init_firebase_auth
-
-# Import Core modules
 from shared.database_initializer import database_initializer
 
 # Import Routers
-from services.configuration_service.routers import chatbot, widget
-from services.configuration_service.human_agents import router as human_agents_router
-from services.configuration_service.feedback import router as feedback_router
-from services.configuration_service.token_usage import router as token_usage_router
-from services.configuration_service.performance import router as performance_router
-from services.configuration_service.admin_management import router as admin_management_router
-from services.configuration_service.auth_optimized import router as auth_router
-from services.configuration_service.chat_log import router as chat_log_router, public_chat_router
-from services.configuration_service.user_ids import router as user_ids_router
+from .routers import chatbot, widget
+from .human_agents import router as human_agents_router
+from .feedback import router as feedback_router
+from .token_usage import router as token_usage_router
+from .performance import router as performance_router
+from .admin_management import router as admin_management_router
+from .auth_optimized import router as auth_router
+from .chat_log import router as chat_log_router, public_chat_router
+from .user_ids import router as user_ids_router
 
 load_dotenv()
 

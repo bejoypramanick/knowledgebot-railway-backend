@@ -6,9 +6,9 @@ from typing import List, Annotated, Dict, Any, Optional
 
 from google.genai import types
 
-from services.chatbot_orchestration.core.ai import get_genai_client
-from services.chatbot_orchestration.core.database import get_railway_db
-from services.chatbot_orchestration.schemas.models import SearchResult
+from ..core.ai import get_genai_client
+from ..core.database import get_railway_db
+from ..schemas.models import SearchResult
 from shared.token_tracker import track_gemini_usage_from_response
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         # Since user is on paid tier and files should exist, let's try a direct approach
         # Try to get files from database as backup
         try:
-            from services.chatbot_orchestration.servcie.chat_service import chat_service
+            from ..servcie.chat_service import chat_service
             db_files = await chat_service.get_recent_files(limit=5)
             if db_files:
                 logger.info(f"📊 Found {len(db_files)} files in database that should be in Gemini:")

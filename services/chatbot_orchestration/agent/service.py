@@ -9,15 +9,15 @@ from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from google import genai
 from google.genai import types
 
-from services.chatbot_orchestration.core.ai import get_genai_client, MODEL_NAME, gemini_model
-from services.chatbot_orchestration.core.database import get_railway_db
-from services.chatbot_orchestration.core.dependencies import ChatSessionDeps
-from services.chatbot_orchestration.schemas.models import SearchResult
-from services.chatbot_orchestration.tools.rag import search_knowledge_base
-from services.chatbot_orchestration.tools.general import (
+from ..core.ai import get_genai_client, MODEL_NAME, gemini_model
+from ..core.database import get_railway_db
+from ..core.dependencies import ChatSessionDeps
+from ..schemas.models import SearchResult
+from ..tools.rag import search_knowledge_base
+from ..tools.general import (
     request_human_agent_connection, query_railway_postgres
 )
-from services.chatbot_orchestration.agent.prompt import get_system_prompt
+from .prompt import get_system_prompt
 from shared.config import settings
 from shared.db import railway_db # Import for checking availability
 
@@ -34,7 +34,7 @@ class PydanticAIGatewayService:
         if not self.genai_client:
             self.genai_client = get_genai_client()
         if not self.db:
-            from services.chatbot_orchestration.servcie.chat_service import chat_service
+            from ..servcie.chat_service import chat_service
             self.db = chat_service
     
     async def get_session_metadata(self, session_id: str) -> Dict[str, Any]:

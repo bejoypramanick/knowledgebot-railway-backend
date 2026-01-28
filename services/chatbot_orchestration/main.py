@@ -7,16 +7,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from shared.config import settings
 from shared.utils import log_endpoint_request
-from services.chatbot_orchestration.agent.service import pydantic_ai_service
-from services.chatbot_orchestration.routers import chat
-from services.chatbot_orchestration.core.database import get_railway_db
+from .agent.service import pydantic_ai_service
+from .routers import chat
+from .core.database import get_railway_db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Add shared directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

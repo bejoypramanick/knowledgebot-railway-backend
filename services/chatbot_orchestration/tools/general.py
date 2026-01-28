@@ -3,8 +3,8 @@ import os
 import httpx
 from typing import Annotated
 from shared.config import settings
-from services.chatbot_orchestration.core.database import get_railway_db
-from services.chatbot_orchestration.core.dependencies import ChatSessionDeps
+from ..core.database import get_railway_db
+from ..core.dependencies import ChatSessionDeps
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ async def query_railway_postgres(
     Only return aggregated statistics, file metadata, and anonymized information.
     """
     try:
-        from services.chatbot_orchestration.core.database import get_railway_db
+        from ..core.database import get_railway_db
         from services.knowledgebase_ingestion.dao.file_dao import FileDAO
         
         db = await get_railway_db()
