@@ -48,3 +48,33 @@ class ScrapingService:
         except Exception as e:
             logger.error(f"Error inserting scraped metadata: {e}")
             raise
+
+    async def handle_scrape_request(self, request, sse_queue=None) -> dict:
+        """Handle scrape request with all business logic"""
+        try:
+            domain = urlparse(request.url).netloc.replace('www.', '')
+            
+            # Check existing
+            existing = await self.get_existing_website(request.url, domain)
+            version = 1
+            
+            if existing:
+                if not request.replace_existing:
+                    raise HTTPException(status_code=409, detail={
+                        "message": f"Website already scraped (Version {existing['version']})",
+                        "existing_url": existing['original_url'],
+                        "version": existing['version'],
+                        "suggestion": "Set replace_existing=true to re-scrape"
+                    })
+                else:
+                    version = existing['version'] + 1
+                    if existing['gemini_file_name']:
+                        await self.delete_gemini_file(existing['gemini_file_name'])
+                    await self.delete_website_record(existing['id'])
+            
+            return {"existing": existing, "version": version}
+        except Exception as e:
+            logger.error(f"Error handling scrape request: {e}")
+            raise
+
+# Singleton instance

@@ -83,21 +83,18 @@ async def upload_document(
         
         sha256_hash = calculate_sha256(tmp_path)
         
-        # Check duplicates
-        from ..servcie.file_service import FileService
+        # Check duplicates using service
         file_service = FileService()
-        existing_file = await file_service.check_duplicate_file(sha256_hash, original_filename)
-        if existing_file:
-            match_type = existing_file.get("match_type", "unknown")
-            if match_type == "hash":
-                pass # Allow exact duplicate content with different name
-            else:
-                if not replace_existing:
-                    raise HTTPException(409, detail=f"File {original_filename} already exists. Set replace_existing=true.")
-                else:
-                    # Logic to replace
-                    await delete_file_logic(existing_file['id']) # This deletes safely
-                    replaced_existing = True
+        duplicate_result = await file_service.handle_duplicate_check(sha256_hash, original_filename, replace_existing)
+        
+        if not duplicate_result["allow"]:
+            if duplicate_result["reason"] == "file_exists":
+                raise HTTPException(409, detail=duplicate_result["detail"])
+            elif duplicate_result["reason"] == "error":
+                raise HTTPException(500, detail="Error checking duplicate file")
+        
+        if duplicate_result["reason"] == "replaced":
+            replaced_existing = True
         
         # We need to re-open the file OR re-use process_with_gemini logic.
         # But process_single_file_upload handles streaming internally.

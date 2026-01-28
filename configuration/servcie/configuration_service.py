@@ -412,5 +412,69 @@ class ConfigurationService:
             logger.error(f"Error requesting human agent: {e}")
             raise
 
+    async def get_widget_config_with_transform(self):
+        """Get complete widget configuration with all data transformations"""
+        try:
+            # Get main widget configuration
+            row = await self._widget_dao.get_widget_config()
+
+            # Get suggested messages
+            suggested_messages = await self._widget_dao.get_suggested_messages()
+
+            if not row:
+                # Return default configuration
+                data = {
+                    "display_name": "GLOBISTAAN",
+                    "initial_message": "Hi! What can I help you with?",
+                    "auto_show_duration": 4,
+                    "suggested_messages": [],
+                    "keep_showing_suggested": True,
+                    "theme": "light",
+                    "primary_color": "#3B81F6",
+                    "use_primary_for_header": True,
+                    "chat_bubble_color": "#3B81F6",
+                    "align_bubble": "right",
+                    "display_chatbot": True,
+                    "profile_picture_url": None,
+                    "chat_icon_url": None,
+                    "profile_zoom": 1.0,
+                    "chat_icon_zoom": 1.0,
+                    "profile_position": {"x": 0, "y": 0},
+                    "chat_icon_position": {"x": 0, "y": 0}
+                }
+                return data
+
+            # Build data object
+            data = {
+                "display_name": row["display_name"],
+                "initial_message": row["initial_message"],
+                "auto_show_duration": row["auto_show_duration"],
+                "suggested_messages": suggested_messages,
+                "keep_showing_suggested": row["keep_showing_suggested"],
+                "theme": row["theme"],
+                "primary_color": row["primary_color"],
+                "use_primary_for_header": row["use_primary_for_header"],
+                "chat_bubble_color": row["chat_bubble_color"],
+                "align_bubble": row["align_bubble"],
+                "display_chatbot": row["display_chatbot"] if row["display_chatbot"] is not None else True,
+                "profile_picture_url": row["profile_picture_url"],
+                "chat_icon_url": row["chat_icon_url"],
+            }
+            
+            data["profile_zoom"] = float(row.get("profile_zoom", 1.0)) if row.get("profile_zoom") is not None else 1.0
+            data["chat_icon_zoom"] = float(row.get("chat_icon_zoom", 1.0)) if row.get("chat_icon_zoom") is not None else 1.0
+            data["profile_position"] = row.get("profile_position") if isinstance(row.get("profile_position"), dict) else {"x": 0, "y": 0}
+            data["chat_icon_position"] = row.get("chat_icon_position") if isinstance(row.get("chat_icon_position"), dict) else {"x": 0, "y": 0}
+            
+            if "profile_picture_filename" in row:
+                data["profile_picture_filename"] = row.get("profile_picture_filename")
+            if "chat_icon_filename" in row:
+                data["chat_icon_filename"] = row.get("chat_icon_filename")
+
+            return data
+        except Exception as e:
+            logger.error(f"Error getting widget configuration: {e}")
+            raise
+
 # Singleton instance
 configuration_service = ConfigurationService()

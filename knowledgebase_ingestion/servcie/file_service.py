@@ -170,3 +170,38 @@ class FileService:
         except Exception as e:
             logger.error(f"Error deleting file record: {e}")
             raise
+
+    async def process_file_upload(self, file_data: dict, user_email: str) -> dict:
+        """Process single file upload with business logic"""
+        try:
+            # Check for duplicate file
+            duplicate = await self.check_duplicate_file(file_data['sha256'], user_email)
+            if duplicate:
+                return {"success": False, "message": "Duplicate file", "file_id": duplicate['id']}
+            
+            return {"success": True, "message": "File processed successfully"}
+        except Exception as e:
+            logger.error(f"Error processing file upload: {e}")
+            raise
+
+    async def handle_duplicate_check(self, sha256_hash: str, original_filename: str, replace_existing: bool = False) -> dict:
+        """Handle duplicate file checking logic"""
+        try:
+            existing_file = await self.check_duplicate_file(sha256_hash, original_filename)
+            if existing_file:
+                match_type = existing_file.get("match_type", "unknown")
+                if match_type == "hash":
+                    return {"allow": True, "reason": "exact_duplicate"}
+                else:
+                    if not replace_existing:
+                        return {"allow": False, "reason": "file_exists", "detail": f"File {original_filename} already exists. Set replace_existing=true."}
+                    else:
+                        # Delete existing file
+                        await self.delete_existing_file_record(existing_file['id'])
+                        return {"allow": True, "reason": "replaced"}
+            return {"allow": True, "reason": "new_file"}
+        except Exception as e:
+            logger.error(f"Error checking duplicate file: {e}")
+            return {"allow": False, "reason": "error"}
+
+# Singleton instance

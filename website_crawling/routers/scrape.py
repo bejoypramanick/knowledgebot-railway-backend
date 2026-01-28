@@ -77,25 +77,14 @@ async def scrape_website_endpoint(request: ScrapeRequest):
     try:
         domain = urlparse(request.url).netloc.replace('www.', '')
         
-        # Check existing
+        # Service handles all business logic
         from ..servcie.scraping_service import ScrapingService
         scraping_service = ScrapingService()
-        existing = await scraping_service.get_existing_website(request.url, domain)
-        version = 1
+        scrape_result = await scraping_service.handle_scrape_request(request, sse_queue)
         
-        if existing:
-            if not request.replace_existing:
-                raise HTTPException(409, detail={
-                    "message": f"Website already scraped (Version {existing['version']})",
-                    "existing_url": existing['original_url'],
-                    "version": existing['version'],
-                    "suggestion": "Set replace_existing=true to re-scrape"
-                })
-            else:
-                version = existing['version'] + 1
-                if existing['gemini_file_name']:
-                    await scraping_service.delete_gemini_file(existing['gemini_file_name'])
-                await scraping_service.delete_website_record(existing['id'])
+        # Set version from service result
+        version = scrape_result["version"]
+        existing = scrape_result["existing"]
                 
         # Crawl
         content, scraped_urls = await crawl_website(request, sse_queue)

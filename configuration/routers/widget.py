@@ -18,67 +18,12 @@ router = APIRouter(prefix="/api/v1", tags=["Widget Configuration"])
 async def get_widget_config():
     """Get widget configuration"""
     try:
-        # Get main widget configuration
-        row = await configuration_service.get_widget_config()
-
-        # Get suggested messages
-        suggested_messages = await configuration_service.get_suggested_messages()
-
-        if not row:
-            # Return default configuration
-            data = {
-                "display_name": "GLOBISTAAN",
-                "initial_message": "Hi! What can I help you with?",
-                "auto_show_duration": 4,
-                "suggested_messages": [],
-                "keep_showing_suggested": True,
-                "theme": "light",
-                "primary_color": "#3B81F6",
-                "use_primary_for_header": True,
-                "chat_bubble_color": "#3B81F6",
-                "align_bubble": "right",
-                "display_chatbot": True,
-                "profile_picture_url": None,
-                "chat_icon_url": None,
-                "profile_zoom": 1.0,
-                "chat_icon_zoom": 1.0,
-                "profile_position": {"x": 0, "y": 0},
-                "chat_icon_position": {"x": 0, "y": 0}
-            }
-            response = JSONResponse(content=data)
-            response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
-            return response
-
-            # Build data object
-            data = {
-                "display_name": row["display_name"],
-                "initial_message": row["initial_message"],
-                "auto_show_duration": row["auto_show_duration"],
-                "suggested_messages": suggested_messages,
-                "keep_showing_suggested": row["keep_showing_suggested"],
-                "theme": row["theme"],
-                "primary_color": row["primary_color"],
-                "use_primary_for_header": row["use_primary_for_header"],
-                "chat_bubble_color": row["chat_bubble_color"],
-                "align_bubble": row["align_bubble"],
-                "display_chatbot": row["display_chatbot"] if row["display_chatbot"] is not None else True,
-                "profile_picture_url": row["profile_picture_url"],
-                "chat_icon_url": row["chat_icon_url"],
-            }
-            
-            data["profile_zoom"] = float(row.get("profile_zoom", 1.0)) if row.get("profile_zoom") is not None else 1.0
-            data["chat_icon_zoom"] = float(row.get("chat_icon_zoom", 1.0)) if row.get("chat_icon_zoom") is not None else 1.0
-            data["profile_position"] = row.get("profile_position") if isinstance(row.get("profile_position"), dict) else {"x": 0, "y": 0}
-            data["chat_icon_position"] = row.get("chat_icon_position") if isinstance(row.get("chat_icon_position"), dict) else {"x": 0, "y": 0}
-            
-            if "profile_picture_filename" in row:
-                data["profile_picture_filename"] = row.get("profile_picture_filename")
-            if "chat_icon_filename" in row:
-                data["chat_icon_filename"] = row.get("chat_icon_filename")
-
-            response = JSONResponse(content=data)
-            response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
-            return response
+        # Service handles all data transformation
+        data = await configuration_service.get_widget_config_with_transform()
+        
+        response = JSONResponse(content=data)
+        response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
+        return response
     except Exception as e:
         logger.error(f"Error fetching widget configuration: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching widget configuration: {str(e)}")
