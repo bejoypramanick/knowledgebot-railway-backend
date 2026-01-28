@@ -87,6 +87,28 @@ class AuthService:
             logger.error(f"Error getting user role: {e}")
             raise
 
+    async def remove_admin(self, email: str, current_user_email: str) -> dict:
+        """Remove an admin. Only admins can remove other admins."""
+        # Check if current user is an admin
+        is_admin = await self.check_admin_exists(current_user_email)
+        
+        if not is_admin or is_admin == 0:
+            raise HTTPException(status_code=403, detail="Only admins can remove other admins")
+        
+        # Check if admin exists
+        admin = await self.check_admin_exists(email)
+        
+        if not admin:
+            raise HTTPException(status_code=404, detail="Admin not found")
+        
+        # Remove admin
+        await self.auth_dao.remove_admin(email)
+        
+        return {
+            "success": True,
+            "message": "Admin removed successfully"
+        }
+
     async def execute_role_query(self, query: str, email: str) -> List[Dict[str, Any]]:
         """Execute role query."""
         try:

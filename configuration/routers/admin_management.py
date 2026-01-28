@@ -104,28 +104,8 @@ async def remove_admin(email: str, current_user: dict = Depends(get_current_user
     
     try:
         auth_service = AuthService()  # Service manages its own DAO
-        
-        # Check if current user is an admin
-        is_admin = await auth_service.check_admin_exists(user_email)
-        
-        if not is_admin or is_admin == 0:
-            raise HTTPException(status_code=403, detail="Only admins can remove other admins")
-        
-        # Check if admin exists
-        admin = await auth_dao.check_admin_exists(email)
-        
-        if not admin:
-            raise HTTPException(status_code=404, detail="Admin not found")
-        
-        # Remove admin
-        await auth_dao.remove_admin(email)
-        
-        # Admin removed - no email notification sent
-        
-        return {
-            "success": True,
-            "message": "Admin removed successfully"
-        }
+        result = await auth_service.remove_admin(email, user_email)
+        return result
     except HTTPException:
         raise
     except Exception as e:
