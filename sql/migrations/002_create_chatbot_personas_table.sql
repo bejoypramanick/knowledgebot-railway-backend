@@ -1,5 +1,5 @@
 -- Migration 002: Create chatbot_personas table
--- This table stores different chatbot personas that can be activated
+-- This table is missing from the database schema and is needed for persona switching
 
 CREATE TABLE IF NOT EXISTS public.chatbot_personas (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -47,3 +47,7 @@ CREATE TRIGGER chatbot_personas_updated_at
     BEFORE UPDATE ON public.chatbot_personas
     FOR EACH ROW
     EXECUTE FUNCTION public.update_chatbot_personas_updated_at();
+
+-- Verify table was created
+SELECT table_name FROM information_schema.tables 
+WHERE table_schema = 'public' AND table_name = 'chatbot_personas';

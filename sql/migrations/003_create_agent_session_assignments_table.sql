@@ -1,5 +1,6 @@
--- Migration 005: Create agent_session_assignments table
--- This table manages assignments of human agents to chat sessions
+-- Migration 003: Create agent_session_assignments table
+-- This table is missing from the database schema and is needed for human agent assignments
+-- Note: The existing session_assignments table uses assignee_email, but we need agent_id for proper FK
 
 CREATE TABLE IF NOT EXISTS public.agent_session_assignments (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -22,13 +23,14 @@ CREATE INDEX IF NOT EXISTS idx_session_assignments_status ON public.agent_sessio
 CREATE INDEX IF NOT EXISTS idx_session_assignments_status_updated ON public.agent_session_assignments USING btree (status, assigned_at DESC);
 
 -- Add comments
-COMMENT ON TABLE public.agent_session_assignments IS 'Assignments of human agents to chat sessions';
+COMMENT ON TABLE public.agent_session_assignments IS 'Assignments of human agents to chat sessions (using agent_id FK)';
 COMMENT ON COLUMN public.agent_session_assignments.session_id IS 'ID of the chat session';
-COMMENT ON COLUMN public.agent_session_assignments.agent_id IS 'ID of the assigned human agent';
+COMMENT ON COLUMN public.agent_session_assignments.agent_id IS 'ID of the assigned human agent (FK to human_agents)';
 COMMENT ON COLUMN public.agent_session_assignments.assigned_at IS 'When the assignment was made';
 COMMENT ON COLUMN public.agent_session_assignments.status IS 'Assignment status: waiting (pending), active (currently handling), transferred (moved to another agent), ended (completed)';
 COMMENT ON COLUMN public.agent_session_assignments.assigned_by_email IS 'Email of the admin who made the assignment';
 COMMENT ON COLUMN public.agent_session_assignments.ended_at IS 'When the assignment ended';
 
--- Create trigger for updated_at (if needed in future)
--- Note: This table doesn't have updated_at column, but keeping the pattern for consistency
+-- Verify table was created
+SELECT table_name FROM information_schema.tables 
+WHERE table_schema = 'public' AND table_name = 'agent_session_assignments';
