@@ -1,22 +1,24 @@
 import logging
 from typing import Optional, Dict, Any, List
+from shared.db import get_db_connection
 
 logger = logging.getLogger(__name__)
 
 class UserDAO:
-    def __init__(self, connection):
-        self.conn = connection
+    def __init__(self):
+        pass  # No connection parameter - DAO manages its own connection
 
     async def get_unique_id_by_email_role(self, email: str, role: str) -> Optional[Dict[str, Any]]:
         """Get unique ID by email and role."""
-        return await self.conn.fetchrow(
-            """
-            SELECT unique_id, created_at 
-            FROM user_unique_ids 
-            WHERE email = $1 AND role = $2
-            """,
-            email, role
-        )
+        async with get_db_connection() as conn:
+            return await conn.fetchrow(
+                """
+                SELECT unique_id, created_at 
+                FROM user_unique_ids 
+                WHERE email = $1 AND role = $2
+                """,
+                email, role
+            )
 
     async def check_unique_id_exists(self, unique_id: str) -> Optional[str]:
         """Check if unique ID already exists."""

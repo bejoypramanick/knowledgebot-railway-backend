@@ -1,21 +1,24 @@
 import logging
 from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime, timedelta
+from shared.db import get_db_connection
 
 logger = logging.getLogger(__name__)
 
 class PerformanceDAO:
-    def __init__(self, connection):
-        self.conn = connection
+    def __init__(self):
+        pass  # No connection parameter - DAO manages its own connection
 
     # Basic Metrics
     async def get_total_interactions(self) -> int:
         """Get total number of user interactions."""
-        return await self.conn.fetchval("SELECT COUNT(*) FROM chat_messages WHERE role = 'user'")
+        async with get_db_connection() as conn:
+            return await conn.fetchval("SELECT COUNT(*) FROM chat_messages WHERE role = 'user'")
 
     async def get_total_sessions(self) -> int:
         """Get total number of chat sessions."""
-        return await self.conn.fetchval("SELECT COUNT(*) FROM chat_sessions")
+        async with get_db_connection() as conn:
+            return await conn.fetchval("SELECT COUNT(*) FROM chat_sessions")
 
     async def get_active_sessions(self) -> int:
         """Get number of active sessions (last 24 hours)."""
