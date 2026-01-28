@@ -87,28 +87,25 @@ async def get_assigned_chat_sessions(
         raise HTTPException(status_code=403, detail="User email not found")
     
     try:
-        from .main import get_db_connection
-        async with get_db_connection() as conn:
-            dao = ChatLogDAO(conn)
-            service = ChatLogService(dao, connection_manager)
-            
-            sessions, total_count = await service.get_chat_sessions(
-                role=role,
-                user_email=user_email,
-                archive_status=archive_status,
-                page=page,
-                limit=limit,
-                agent_id=agent_id
-            )
-            
-            total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
-            return ChatSessionsResponse(
-                sessions=sessions,
-                total_count=total_count,
-                page=page,
-                limit=limit,
-                total_pages=total_pages
-            )
+        service = ChatLogService(connection_manager)  # Service manages its own DAO
+        
+        sessions, total_count = await service.get_chat_sessions(
+            role=role,
+            user_email=user_email,
+            archive_status=archive_status,
+            page=page,
+            limit=limit,
+            agent_id=agent_id
+        )
+        
+        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
+        return ChatSessionsResponse(
+            sessions=sessions,
+            total_count=total_count,
+            page=page,
+            limit=limit,
+            total_pages=total_pages
+        )
 
     except HTTPException:
         raise

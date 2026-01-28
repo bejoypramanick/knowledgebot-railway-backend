@@ -9,8 +9,8 @@ from ..dao.chat_log_dao import ChatLogDAO
 logger = logging.getLogger(__name__)
 
 class ChatLogService:
-    def __init__(self, dao: ChatLogDAO, connection_manager=None):
-        self.dao = dao
+    def __init__(self, connection_manager=None):
+        self.dao = ChatLogDAO()  # Service manages its own DAO
         self.connection_manager = connection_manager
 
     async def get_agent_online_status(self, agent_email: str) -> bool:
