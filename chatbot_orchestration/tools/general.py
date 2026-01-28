@@ -78,7 +78,7 @@ async def query_railway_postgres(
     """
     try:
         from ..core.database import get_railway_db
-        from services.knowledgebase_ingestion.dao.file_dao import FileDAO
+        from knowledgebase_ingestion.dao.file_dao import FileDAO
         
         db = await get_railway_db()
         if not db:
