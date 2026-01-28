@@ -8,7 +8,7 @@ from shared.config import settings
 from shared.utils import log_endpoint_request
 from shared.logging_config import auto_configure_logging
 from chatbot_orchestration.service.agent_service import pydantic_ai_service
-from chatbot_orchestration.routers import chat, human_agents
+from chatbot_orchestration.routers import chat_router, human_agents_router
 
 # Configure Railway-compatible logging
 logger = auto_configure_logging("chatbot_orchestration")
@@ -64,8 +64,8 @@ app.add_middleware(
 )
 
 # Include Routers
-app.include_router(chat.router)
-app.include_router(human_agents.router)
+app.include_router(chat_router)
+app.include_router(human_agents_router)
 
 @app.get("/")
 async def root_diagnostic(request: Request):

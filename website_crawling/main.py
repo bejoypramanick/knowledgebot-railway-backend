@@ -72,7 +72,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # Routers
-app.include_router(scrape.router)
+app.include_router(router)
 
 if __name__ == "__main__":
     import uvicorn

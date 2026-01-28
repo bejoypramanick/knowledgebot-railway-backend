@@ -19,7 +19,7 @@ logger = auto_configure_logging("api_gateway")
 from shared.utils import setup_global_exception_logging, register_fastapi_exception_handlers
 
 # Import routers and config
-from api_gateway.routers import health, knowledgebase, scrape, chat, config, sse
+from api_gateway.routers import health_router, knowledgebase_router, scrape_router, chat_router, config_router, sse_router
 from api_gateway.utils.middleware import log_requests_middleware, add_security_headers_middleware
 from api_gateway.core.config import SERVICE_IDENTITY
 
@@ -95,12 +95,12 @@ async def chatbot_bypass_diagnostic(request: Request):
     )
 
 # Include Routers
-app.include_router(health.router)
-app.include_router(knowledgebase.router, prefix="/api/v1/knowledgebase")
-app.include_router(scrape.router, prefix="/api/v1")
-app.include_router(chat.router) # Chat router has mixed prefixes, so we include it directly
-app.include_router(config.router, prefix="/api/v1")
-app.include_router(sse.router)
+app.include_router(health_router)
+app.include_router(knowledgebase_router, prefix="/api/v1/knowledgebase")
+app.include_router(scrape_router, prefix="/api/v1")
+app.include_router(chat_router) # Chat router has mixed prefixes, so we include it directly
+app.include_router(config_router, prefix="/api/v1")
+app.include_router(sse_router)
 
 if __name__ == "__main__":
     import uvicorn
