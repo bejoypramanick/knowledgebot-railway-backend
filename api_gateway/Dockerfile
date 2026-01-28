@@ -33,7 +33,7 @@ RUN echo "📦 Installing system dependencies..." && \
     echo "🧹 Cleaned up apt cache"
 
 # Copy and install Python dependencies
-COPY requirements-base.txt ./requirements-base.txt
+COPY ../requirements-base.txt ./requirements-base.txt
 COPY api_gateway/requirements.txt ./requirements.txt
 RUN echo "🐍 Installing Python dependencies..." && \
     pip install --no-cache-dir -r requirements-base.txt -r requirements.txt && \
@@ -42,7 +42,7 @@ RUN echo "🐍 Installing Python dependencies..." && \
 
 # Copy application code with logging
 COPY api_gateway/ ./api_gateway/
-COPY shared ./shared/
+COPY ../shared ./shared/
 RUN echo "📁 Application code copied" && \
     ls -la api_gateway/ && \
     echo "📄 Main application file:" && \
