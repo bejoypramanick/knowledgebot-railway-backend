@@ -30,10 +30,11 @@ async def lifespan(app: FastAPI):
     await pydantic_ai_service.initialize()
     logger.info("🤖 Pydantic AI Service initialized")
     
-    # Trigger lazy DB init to ensure connections are warm
+    # Initialize database using centralized initializer
     try:
-        await get_railway_db()
-        logger.info("🗄️ Database connections initialized")
+        from shared.database_initializer import database_initializer
+        await database_initializer.initialize_database()
+        logger.info("🗄️ Database connections initialized (singleton)")
     except Exception as e:
         logger.warning(f"⚠️ Initial database connection check failed: {e}")
 

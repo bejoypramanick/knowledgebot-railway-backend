@@ -28,9 +28,11 @@ setup_global_exception_logging("knowledgebase_ingestion")
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     try:
+        # Initialize database using centralized initializer
         if settings.railway_postgres_url:
-            await db.init_railway_db(settings.railway_postgres_url)
-            logger.info("✅ Railway PostgreSQL database initialized")
+            from shared.database_initializer import database_initializer
+            await database_initializer.initialize_and_validate(settings.railway_postgres_url)
+            logger.info("✅ Railway PostgreSQL database initialized and validated")
         
         # Initialize Gemini Client (Check)
         if get_genai_client():
