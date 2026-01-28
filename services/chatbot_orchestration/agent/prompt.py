@@ -1,8 +1,8 @@
 import logging
 from typing import List, Optional, Dict, Any, Union
-from services.chatbot_orchestration.schemas.models import SearchResult
-from services.chatbot_orchestration.core.ai import MODEL_NAME
-from services.chatbot_orchestration.core.cache import get_cached_system_prompt, cache_system_prompt
+from ..schemas.models import SearchResult
+from ..core.ai import MODEL_NAME
+from ..core.cache import get_cached_system_prompt, cache_system_prompt
 
 logger = logging.getLogger(__name__)
 

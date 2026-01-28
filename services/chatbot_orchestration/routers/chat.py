@@ -8,22 +8,22 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from services.chatbot_orchestration.schemas.models import (
+from ..schemas.models import (
     ChatRequest, ChatResponse, ChatSessionResponse, 
     SuggestedMessagesRequest, SuggestedMessagesResponse, HumanReviewRequest
 )
-from services.chatbot_orchestration.core.memory import sessions
-from services.chatbot_orchestration.core.dependencies import ChatSessionDeps
-from services.chatbot_orchestration.core.database import get_railway_db
-from services.chatbot_orchestration.agent.service import (
+from ..core.memory import sessions
+from ..core.dependencies import ChatSessionDeps
+from ..core.database import get_railway_db
+from ..agent.service import (
     pydantic_ai_service, session_state_manager
 )
-from services.chatbot_orchestration.core.ai import gemini_model
-from services.chatbot_orchestration.tools.rag import search_knowledge_base
-from services.chatbot_orchestration.tools.general import (
+from ..core.ai import gemini_model
+from ..tools.rag import search_knowledge_base
+from ..tools.general import (
     request_human_agent_connection, query_railway_postgres
 )
-from services.chatbot_orchestration.agent.prompt import get_system_prompt, extract_gemini_rag_metadata
+from ..agent.prompt import get_system_prompt, extract_gemini_rag_metadata
 from shared.token_tracker import track_gemini_usage_from_response
 from shared.utils import log_endpoint_request
 

@@ -4,7 +4,7 @@ Provides business logic layer between routers/tools and DAO
 """
 import logging
 from typing import List, Dict, Any, Optional
-from services.chatbot_orchestration.dao.chat_dao import ChatDAO
+from ..dao.chat_dao import ChatDAO
 from shared.db import get_db_connection
 
 logger = logging.getLogger(__name__)
