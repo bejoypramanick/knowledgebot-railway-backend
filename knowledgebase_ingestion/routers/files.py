@@ -8,10 +8,9 @@ from fastapi import APIRouter, UploadFile, File, Form, Header, HTTPException, Qu
 from ..schemas.models import (
     UploadResponse, FileInfo, BatchUploadResponse, BatchDeleteResponse, BatchUploadItem, BatchDeleteItem
 )
-from ..service.ingestion import (
+from ..service.ingestion_service import (
     process_single_file_upload, delete_file_logic, process_single_file_delete
 )
-from ..service.service_factory import ServiceFactory
 from ..utils.files import stream_to_temp_file, calculate_sha256
 from ..utils.validation import (
     sanitize_filename, validate_file_extension, validate_mime_type, validate_file_size, detect_mime_type_from_extension
