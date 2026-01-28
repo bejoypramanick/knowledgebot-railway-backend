@@ -96,8 +96,8 @@ async def get_db_connection():
     The database pool is initialized during service startup for optimal performance.
     """
     try:
-        # Use the pre-initialized DatabaseConnection context manager
-        async with DatabaseConnection() as conn:
+        from shared.db import get_db_connection as shared_get_conn
+        async with shared_get_conn() as conn:
             yield conn
 
     except RuntimeError as e:

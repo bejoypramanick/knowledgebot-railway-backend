@@ -16,7 +16,7 @@ from services.chatbot_orchestration.core.memory import sessions
 from services.chatbot_orchestration.core.dependencies import ChatSessionDeps
 from services.chatbot_orchestration.core.database import get_railway_db
 from services.chatbot_orchestration.agent.service import (
-    pydantic_ai_service, session_state_manager, create_agent_legacy
+    pydantic_ai_service, session_state_manager
 )
 from services.chatbot_orchestration.core.ai import gemini_model
 from services.chatbot_orchestration.tools.rag import search_knowledge_base
@@ -44,7 +44,7 @@ async def chat_stream(request: ChatRequest):
         session_id = request.session_id or str(uuid.uuid4())
         
         # Generate system prompt with caching (logic inside get_system_prompt handles caching check)
-        # Note: In optimized path, we pass prompt content to create_optimized_agent which handles caching
+        # Note: In optimized path, we pass prompt content to create_agent which handles caching
         # But get_system_prompt currently returns the *cached* prompt from local cache if enabled?
         # Revisiting logic: get_system_prompt in agent/prompt.py calls cache_system_prompt.
         # It generates the prompt string.
@@ -69,20 +69,18 @@ async def chat_stream(request: ChatRequest):
         
         # Create optimized agent using Pydantic AI Gateway Service
         try:
-            agent = await pydantic_ai_service.create_optimized_agent(
+            agent = await pydantic_ai_service.create_agent(
                 session_id=session_id,
                 system_prompt=system_prompt,
                 tools=tools
             )
         except Exception as e:
             logger.error(f"❌ Failed to create optimized agent: {e}")
-            logger.info("🔄 Falling back to traditional agent creation")
-            agent = create_agent_legacy(
-                file_context=None,
-                custom_system_prompt=request.system_prompt,
-                response_policy=request.response_policy,
-                rag_had_results=True,
-                rag_enabled=request.use_rag
+            logger.error("❌ No fallback available - agent creation failed")
+            return StreamingResponse(
+                iter(["data: " + json.dumps({"error": "Failed to create agent"}) + "\n\n"]),
+                media_type="text/plain",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
             )
         
         if not agent:
@@ -149,8 +147,10 @@ async def chat_stream(request: ChatRequest):
                     
                     # Extract grounding metadata (RAG)
                     rag_metadata = extract_gemini_rag_metadata(result)
+                    sources = []
                     if rag_metadata:
                         logger.info(f"📊 Extracted RAG metadata: {len(rag_metadata)} items")
+                        sources = rag_metadata
 
                     yield f"data: {json.dumps({'type': 'complete', 'content': response_text, 'sources': sources, 'metadata': rag_metadata})}\n\n"
                     yield f"data: [DONE]\n\n"

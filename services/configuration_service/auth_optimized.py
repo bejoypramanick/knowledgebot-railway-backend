@@ -22,7 +22,7 @@ from shared.firebase_auth import (
     update_user_role_in_firestore
 )
 from shared.auth_middleware import get_current_user
-from shared.db import railway_db, DatabaseConnection
+from shared.db import get_db_connection
 from shared.utils import retry_database_operation
 
 logger = logging.getLogger(__name__)
@@ -50,12 +50,12 @@ async def execute_role_query_with_retry(conn, query: str, email: str) -> list:
 async def execute_database_operations_with_retry(email: str) -> tuple:
     """
     Execute all database operations with enhanced retry logic and connection handling.
-    Uses the new DatabaseConnection context manager for robust database access.
+    Uses the new DatabaseManager for robust database access.
     Returns (roles_result, db_time)
     """
     db_start_time = time.time()
 
-    async with DatabaseConnection() as conn:
+    async with get_db_connection() as conn:
         # DEBUG: Check admin table for this user
         admin_check = await conn.fetchrow(
             "SELECT email FROM admins WHERE email = $1",
@@ -272,10 +272,18 @@ async def verify_token(request: TokenVerificationRequest):
         is_human_agent = user_data.get('is_human_agent', False)
         
         # Check database for exact roles (source of truth) - REQUIRED, no fallback
-        if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
+        try:
+            from shared.db import DatabaseManager
+            db_manager = await DatabaseManager.get_instance()
+            if not db_manager._pool:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Database connection unavailable - authentication service is down"
+                )
+        except Exception:
             raise HTTPException(
                 status_code=503,
-                detail="Database connection unavailable - authentication service is down"
+                detail="Database service temporarily unavailable"
             )
 
         if not email:
@@ -284,7 +292,7 @@ async def verify_token(request: TokenVerificationRequest):
                 detail="Email not available from Firebase token"
             )
 
-        async with railway_db.acquire() as conn:
+        async with get_db_connection() as conn:
             # Check if user is an admin (status removed)
             admin = await conn.fetchrow(
                 "SELECT email FROM admins WHERE email = $1",
@@ -356,31 +364,28 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
         is_human_agent = False
         
         try:
-            # Import here to avoid circular dependency
-            from shared.db import railway_db
-            
-            if railway_db and hasattr(railway_db, '_pool') and railway_db._pool is not None:
-                async with railway_db.acquire() as conn:
-                    # Check if user is an admin (status removed)
-                    admin = await conn.fetchrow(
-                        "SELECT email FROM admins WHERE email = $1",
-                        email
-                    )
-                    if admin:
-                        user_roles.append('admin')
-                        is_admin = True
-                        primary_role = 'admin'  # Admin takes precedence
-                    
-                    # Check if user is a human agent (status removed)
-                    agent = await conn.fetchrow(
-                        "SELECT email FROM human_agents WHERE email = $1",
-                        email
-                    )
-                    if agent:
-                        user_roles.append('human_agent')
-                        is_human_agent = True
-                        if primary_role == 'user':
-                            primary_role = 'human_agent'
+            # Use new DatabaseManager for connection
+            async with get_db_connection() as conn:
+                # Check if user is an admin (status removed)
+                admin = await conn.fetchrow(
+                    "SELECT email FROM admins WHERE email = $1",
+                    email
+                )
+                if admin:
+                    user_roles.append('admin')
+                    is_admin = True
+                    primary_role = 'admin'  # Admin takes precedence
+                
+                # Check if user is a human agent (status removed)
+                agent = await conn.fetchrow(
+                    "SELECT email FROM human_agents WHERE email = $1",
+                    email
+                )
+                if agent:
+                    user_roles.append('human_agent')
+                    is_human_agent = True
+                    if primary_role == 'user':
+                        primary_role = 'human_agent'
         except Exception as role_error:
             logger.warning(f"Error determining user roles from database: {role_error}, defaulting to 'user'")
         

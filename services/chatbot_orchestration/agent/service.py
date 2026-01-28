@@ -34,9 +34,10 @@ class PydanticAIGatewayService:
         if not self.genai_client:
             self.genai_client = get_genai_client()
         if not self.db:
-            db_conn = await get_railway_db()
+            from shared.db import DatabaseManager
+            db_manager = await DatabaseManager.get_instance()
             from services.chatbot_orchestration.dao.chat_dao import ChatDAO
-            self.db = ChatDAO(db_conn)
+            self.db = ChatDAO(db_manager)
     
     async def get_session_metadata(self, session_id: str) -> Dict[str, Any]:
         logger.info(f"🔍 Retrieving session metadata for session: {session_id}")
@@ -111,7 +112,8 @@ class PydanticAIGatewayService:
             logger.error(f"❌ Error creating cached content: {e}")
             raise
 
-    async def create_optimized_agent(self, session_id: str, system_prompt: str, tools: List[Any]) -> Agent:
+    async def create_agent(self, session_id: str, system_prompt: str, tools: List[Any]) -> Agent:
+        """Create a Pydantic AI agent using optimized Gateway service features."""
         await self.initialize()
         session_metadata = await self.get_session_metadata(session_id)
         
@@ -183,28 +185,3 @@ class SessionStateManager:
         return state
 
 session_state_manager = SessionStateManager()
-
-def create_agent_legacy(file_context: Optional[List[SearchResult]] = None, custom_system_prompt: Optional[str] = None, response_policy: Optional[int] = None, rag_had_results: bool = True, rag_enabled: bool = False) -> Optional[Agent]:
-    """Create a Pydantic AI agent (legacy method without optimized Gateway service)."""
-    if gemini_model is None:
-        logger.error("Cannot create agent - Gemini API key not configured")
-        return None
-
-    tools = [search_knowledge_base, request_human_agent_connection]
-    
-    # Check if DBs are available (need to access the module-level connection objects or check if they are initialized)
-    # Since this is synchronous-ish factory, we just check if referencing them works.
-    # In shared.db, railway_db starts as None. 
-    # But usually get_railway_db() is called before this.
-    # To be safe, we add them if we think they are available.
-    
-    if settings.railway_postgres_url: 
-         tools.append(query_railway_postgres)
-    
-    agent = Agent(
-        gemini_model,
-        system_prompt=get_system_prompt(file_context, custom_system_prompt, response_policy, rag_had_results),
-        tools=tools,
-        deps_type=ChatSessionDeps,
-    )
-    return agent
