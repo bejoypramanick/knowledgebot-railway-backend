@@ -14,7 +14,6 @@ from ..schemas.models import (
 )
 from ..core.memory import sessions
 from ..core.dependencies import ChatSessionDeps
-from ..core.database import get_railway_db
 from ..servcie.agent_service import (
     pydantic_ai_service, session_state_manager
 )

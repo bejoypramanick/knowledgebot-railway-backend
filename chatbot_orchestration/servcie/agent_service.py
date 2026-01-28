@@ -10,7 +10,6 @@ from google import genai
 from google.genai import types
 
 from ..core.ai import get_genai_client, MODEL_NAME, gemini_model
-from ..core.database import get_railway_db
 from ..core.dependencies import ChatSessionDeps
 from ..schemas.models import SearchResult
 from ..tools.rag import search_knowledge_base
@@ -19,7 +18,7 @@ from ..tools.general import (
 )
 from ..agent.prompt import get_system_prompt
 from shared.config import settings
-from shared.db import railway_db # Import for checking availability
+from shared.db import get_db_connection, railway_db
 
 logger = logging.getLogger(__name__)
 
