@@ -63,18 +63,15 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         # Since user is on paid tier and files should exist, let's try a direct approach
         # Try to get files from database as backup
         try:
-            db_conn = await get_railway_db()
-            if db_conn:
-                from services.chatbot_orchestration.dao.chat_dao import ChatDAO
-                chat_dao = ChatDAO(db_conn)
-                db_files = await chat_dao.get_recent_files(limit=5)
-                if db_files:
-                    logger.info(f"📊 Found {len(db_files)} files in database that should be in Gemini:")
-                    for db_file in db_files:
-                        logger.info(f"  • DB: {db_file['gemini_file_name']} -> {db_file['original_filename']} ({db_file['size_bytes']} bytes)")
-                    logger.warning("🔄 Files exist in DB but not found in Gemini API - possible sync issue")
-                else:
-                    logger.info("📊 No files found in database either")
+            from services.chatbot_orchestration.services.chat_service import chat_service
+            db_files = await chat_service.get_recent_files(limit=5)
+            if db_files:
+                logger.info(f"📊 Found {len(db_files)} files in database that should be in Gemini:")
+                for db_file in db_files:
+                    logger.info(f"  • DB: {db_file['gemini_file_name']} -> {db_file['original_filename']} ({db_file['size_bytes']} bytes)")
+                logger.warning("🔄 Files exist in DB but not found in Gemini API - possible sync issue")
+            else:
+                logger.info("📊 No files found in database either")
         except Exception as db_error:
             logger.error(f"Could not check database for files: {db_error}")
         

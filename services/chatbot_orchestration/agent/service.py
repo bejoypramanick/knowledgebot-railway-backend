@@ -34,10 +34,8 @@ class PydanticAIGatewayService:
         if not self.genai_client:
             self.genai_client = get_genai_client()
         if not self.db:
-            from shared.db import DatabaseManager
-            db_manager = await DatabaseManager.get_instance()
-            from services.chatbot_orchestration.dao.chat_dao import ChatDAO
-            self.db = ChatDAO(db_manager)
+            from services.chatbot_orchestration.services.chat_service import chat_service
+            self.db = chat_service
     
     async def get_session_metadata(self, session_id: str) -> Dict[str, Any]:
         logger.info(f"🔍 Retrieving session metadata for session: {session_id}")
