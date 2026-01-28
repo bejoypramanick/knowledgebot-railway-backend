@@ -3,7 +3,7 @@ Feedback Endpoints
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Literal
+from typing import Literal, Optional
 import logging
 import sys
 from pathlib import Path
@@ -34,6 +34,24 @@ async def submit_feedback(request: FeedbackRequest):
     
     try:
         async with railway_db.acquire() as conn:
+            # Security check: Verify the message actually belongs to this session
+            # This prevents spoofing feedback for other sessions
+            actual_session_id = await conn.fetchval(
+                "SELECT session_id FROM chat_messages WHERE id::text = $1 LIMIT 1",
+                request.message_id
+            )
+            
+            if not actual_session_id:
+                # Try without casting if id is not UUID
+                actual_session_id = await conn.fetchval(
+                    "SELECT session_id FROM chat_messages WHERE id = $1 LIMIT 1",
+                    request.message_id
+                )
+
+            if not actual_session_id or actual_session_id != request.session_id:
+                logger.warning(f"Feedback session mismatch: message {request.message_id} (session {actual_session_id}) != request session {request.session_id}")
+                raise HTTPException(status_code=400, detail="Invalid session_id for this message")
+
             # Insert feedback
             await conn.execute(
                 """
@@ -42,10 +60,8 @@ async def submit_feedback(request: FeedbackRequest):
                 """,
                 request.message_id, request.session_id, request.feedback
             )
-
-            # Note: Session feedback is now computed on-the-fly, no need to update aggregated column
             
-            logger.info(f"Feedback recorded: {request.feedback} for message {request.message_id}")
+            logger.info(f"Feedback recorded: {request.feedback} for message {request.message_id} in session {request.session_id}")
             
             return {
                 "success": True,

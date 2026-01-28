@@ -21,7 +21,7 @@ from services.chatbot_orchestration.agent.service import (
 from services.chatbot_orchestration.core.ai import gemini_model
 from services.chatbot_orchestration.tools.rag import search_knowledge_base
 from services.chatbot_orchestration.tools.general import (
-    request_human_agent_connection, query_railway_postgres, query_neon_db
+    request_human_agent_connection, query_railway_postgres
 )
 from services.chatbot_orchestration.agent.prompt import get_system_prompt, extract_gemini_rag_metadata
 from shared.token_tracker import track_gemini_usage_from_response
@@ -65,7 +65,6 @@ async def chat_stream(request: ChatRequest):
         # The logic in main.py checked DB availability.
         # We can do basic checks or just include them.
         tools.append(query_railway_postgres) # It handles internal check
-        tools.append(query_neon_db)
         
         
         # Create optimized agent using Pydantic AI Gateway Service

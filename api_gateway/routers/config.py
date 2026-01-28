@@ -368,3 +368,63 @@ async def proxy_notifications_routes(request: Request, path: str):
     except Exception as e:
         logger.error(f"Unexpected error in notifications proxy: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+# Feedback API endpoints - proxy to configuration service
+@router.post("/feedback")
+@router.post("/feedback/submit")
+async def proxy_feedback_submit(request: Request):
+    """Proxy feedback submission to configuration service"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Note: Both /feedback and /feedback/submit hit the same backend endpoint /api/v1/feedback
+            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/feedback"
+            
+            body = await request.body()
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.post(
+                url=url,
+                content=body,
+                headers=headers
+            )
+            
+            return JSONResponse(
+                content=response.json() if "application/json" in response.headers.get("content-type", "") else response.text,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"Error proxying feedback to configuration service: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+# Public Chat handoff - proxy to configuration service
+@router.post("/request-human-agent")
+async def proxy_request_human_agent(request: Request):
+    """Proxy human agent request from widget to configuration service"""
+    try:
+        data = await request.json()
+        session_id = data.get('session_id')
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+            
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Proxies to public_chat_router: /api/v1/chat/{session_id}/request-human-agent
+            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/chat/{session_id}/request-human-agent"
+            
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.post(
+                url=url,
+                headers=headers
+            )
+            
+            return JSONResponse(
+                content=response.json() if "application/json" in response.headers.get("content-type", "") else response.text,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"Error proxying human agent request: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")

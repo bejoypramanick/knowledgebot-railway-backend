@@ -124,27 +124,34 @@ async def get_assigned_chat_sessions(
         raise HTTPException(status_code=500, detail=f"Error fetching chat sessions: {str(e)}")
 
 
-@router.patch("/chat-sessions/{session_id}/archive", response_model=dict)
+class ArchiveSessionRequest(BaseModel):
+    status: str
+
+@router.put("/chat-sessions/{session_id}/archive", response_model=dict)
 async def archive_chat_session(
     session_id: str,
-    archive_status: str = Query(..., description="New archive status: active, closed, archived, transferred"),
+    request: ArchiveSessionRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """Archive or change status of a chat session."""
     user_email = current_user.get('email')
     if not user_email:
-        raise HTTPException(status_code=403, detail="User email not found")
+        raise HTTPException(status_code=403, detail="User email not found in token")
 
     from services.configuration_service.main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)
-        await service.archive_chat_session(session_id, archive_status, user_email)
+        
+        # Service handles role check internally
+        await service.archive_chat_session(session_id, request.status, user_email)
+        
+        logger.info(f"Session {session_id} marked as {request.status} by {user_email}")
         return {
             "success": True,
-            "message": f"Session status changed to {archive_status}",
+            "message": f"Session status changed to {request.status}",
             "session_id": session_id,
-            "archive_status": archive_status
+            "status": request.status
         }
 
 
