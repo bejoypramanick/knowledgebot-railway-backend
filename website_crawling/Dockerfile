@@ -16,11 +16,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY website_scraping/ ./website_scraping/
+COPY website_crawling/ ./website_crawling/
 COPY shared ./shared/
 
 # Set working directory
-WORKDIR /app/website_scraping
+WORKDIR /app/website_crawling
 
 # Set the PYTHONPATH environment variable to include the /app directory
 ENV PYTHONPATH="/app"
@@ -28,8 +28,8 @@ ENV PYTHONPATH="/app"
 # Update health check to use the `/health` endpoint
 # More forgiving start-period to account for cold starts and heavy startup tasks
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
-    CMD sh -c 'curl -f http://localhost:${WEBSITE_SCRAPING_PORT:-${PORT:-8002}}/health || exit 1'
+    CMD sh -c 'curl -f http://localhost:${website_crawling_PORT:-${PORT:-8002}}/health || exit 1'
 
-# Run the application with uvicorn - prefer WEBSITE_SCRAPING_PORT, else PORT, else default 8002
+# Run the application with uvicorn - prefer website_crawling_PORT, else PORT, else default 8002
 # Enable debug log level and access logs for better visibility
-CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${WEBSITE_SCRAPING_PORT:-${PORT:-8002}} --log-level debug --access-log"]
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${website_crawling_PORT:-${PORT:-8002}} --log-level debug --access-log"]
