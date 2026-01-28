@@ -1,7 +1,7 @@
 """
 Feedback Endpoints
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Literal, Optional
 import logging
@@ -10,8 +10,7 @@ from pathlib import Path
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from shared.db import get_db_connection
-from ..servcie.feedback_service import FeedbackService
+from ..servcie.service_factory import ServiceFactory
 
 logger = logging.getLogger(__name__)
 
@@ -28,15 +27,14 @@ class FeedbackRequest(BaseModel):
 async def submit_feedback(request: FeedbackRequest):
     """Submit feedback for a chat message."""
     try:
-        async with get_db_connection() as conn:
-            service = FeedbackService(conn)
-            result = await service.submit_feedback(
-                request.message_id, 
-                request.session_id, 
-                request.feedback
-            )
-            
-            return result
+        service = await ServiceFactory.create_feedback_service()
+        result = await service.submit_feedback(
+            request.message_id, 
+            request.session_id, 
+            request.feedback
+        )
+        
+        return result
     except Exception as e:
         logger.error(f"Error submitting feedback: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error submitting feedback: {str(e)}")
