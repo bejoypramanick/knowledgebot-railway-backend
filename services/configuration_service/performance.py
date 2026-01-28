@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from shared.db import railway_db
 
 logger = logging.getLogger(__name__)
 
