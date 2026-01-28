@@ -73,6 +73,14 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                 metadata['prompt_feedback'] = response.prompt_feedback
             if hasattr(response, 'usage_metadata'):
                 metadata['usage_metadata'] = response.usage_metadata._asdict() if hasattr(response.usage_metadata, '_asdict') else str(response.usage_metadata)
+            if hasattr(response, 'finish_reason'):
+                metadata['finish_reason'] = response.finish_reason
+            if hasattr(response, 'safety_ratings'):
+                metadata['safety_ratings'] = [rating._asdict() if hasattr(rating, '_asdict') else str(rating) for rating in response.safety_ratings]
+            
+            # Note: Gemini doesn't provide similarity_score or relevance_score
+            # These would need to be calculated by the application if needed
+            metadata['note'] = "Gemini API provides usage metadata, not similarity scores"
             
             return [SearchResult(
                 file_name="RAG_Response",
