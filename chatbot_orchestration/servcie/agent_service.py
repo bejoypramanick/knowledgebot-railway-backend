@@ -18,7 +18,7 @@ from ..tools.general import (
 )
 from ..agent.prompt import get_system_prompt
 from shared.config import settings
-from shared.db import get_db_connection, railway_db
+from shared.dao.chat_dao import ChatDAO
 
 logger = logging.getLogger(__name__)
 
@@ -27,26 +27,25 @@ class PydanticAIGatewayService:
     
     def __init__(self):
         self.genai_client = None
-        self.db = None
+        self.chat_dao = None
         
     async def initialize(self):
         if not self.genai_client:
             self.genai_client = get_genai_client()
-        if not self.db:
-            from ..servcie.chat_service import chat_service
-            self.db = chat_service
+        if not self.chat_dao:
+            self.chat_dao = ChatDAO()
     
     async def get_session_metadata(self, session_id: str) -> Dict[str, Any]:
         logger.info(f"🔍 Retrieving session metadata for session: {session_id}")
-        if not self.db:
-            # Try to init DB if missing
+        if not self.chat_dao:
+            # Try to init if missing
             await self.initialize()
-            if not self.db:
+            if not self.chat_dao:
                 logger.warning(f"❌ DAO not initialized for session metadata retrieval")
                 return {'session_id': session_id, 'is_new_session': True}
         
         try:
-            session_data = await self.db.get_session_metadata(session_id)
+            session_data = await self.chat_dao.get_session_metadata(session_id)
             
             if not session_data:
                 return {'session_id': session_id, 'is_new_session': True}

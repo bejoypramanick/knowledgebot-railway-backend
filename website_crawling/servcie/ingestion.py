@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from google.genai import types
 from ..core.ai import get_genai_client
 from ..schemas.models import ScrapeRequest
-from shared.db import get_db_connection
+from ..dao.scraping_dao import ScrapingDAO
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
@@ -109,12 +109,8 @@ async def record_scraped_metadata(
     scraped_urls: List[str],
     version: int = 1
 ):
-    if not shared_db.railway_db:
-        return
-        
     try:
-        from ..dao.scraping_dao import ScrapingDAO
-        dao = ScrapingDAO(shared_db.railway_db)
+        dao = ScrapingDAO()
         
         scraping_cfg = {
             "max_depth": request.max_depth,

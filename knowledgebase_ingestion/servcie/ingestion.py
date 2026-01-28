@@ -12,7 +12,7 @@ from google.genai import types
 from fastapi import UploadFile, HTTPException, status
 
 from ..core.ai import get_genai_client
-from shared.db import get_db_connection
+from ..dao.file_dao import FileDAO
 from ..utils.validation import (
     detect_mime_type_from_extension, sanitize_filename, 
     validate_file_extension, validate_mime_type, validate_file_size
@@ -25,25 +25,19 @@ from shared import db
 logger = logging.getLogger(__name__)
 
 async def record_metadata(*args, **kwargs):
-    """Wrapper for record_metadata using shared.db"""
-    async with get_db_connection() as conn:
-        from ..dao.file_dao import FileDAO
-        file_dao = FileDAO(conn)
-        return await file_dao.record_metadata(*args, **kwargs)
+    """Wrapper for record_metadata using FileDAO"""
+    file_dao = FileDAO()
+    return await file_dao.record_metadata(*args, **kwargs)
 
 async def delete_existing_file_record(*args, **kwargs):
-    """Wrapper for delete_existing_file_record using shared.db"""
-    async with get_db_connection() as conn:
-        from ..dao.file_dao import FileDAO
-        file_dao = FileDAO(conn)
-        return await file_dao.delete_existing_file_record(*args, **kwargs)
+    """Wrapper for delete_existing_file_record using FileDAO"""
+    file_dao = FileDAO()
+    return await file_dao.delete_existing_file_record(*args, **kwargs)
 
 async def record_api_usage(*args, **kwargs):
-    """Wrapper for record_api_usage using shared.db"""
-    async with get_db_connection() as conn:
-        from ..dao.file_dao import FileDAO
-        file_dao = FileDAO(conn)
-        return await file_dao.record_api_usage(*args, **kwargs)
+    """Wrapper for record_api_usage using FileDAO"""
+    file_dao = FileDAO()
+    return await file_dao.record_api_usage(*args, **kwargs)
 
 async def process_with_gemini(tmp_path: str, file_display_name: str, original_filename: str, mime_type: str, user_email: Optional[str] = None):
     """Upload to Gemini FileSearch and poll for processing completion."""
