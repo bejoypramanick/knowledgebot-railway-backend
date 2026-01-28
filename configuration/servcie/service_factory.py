@@ -61,16 +61,6 @@ class ServiceFactory:
             return PerformanceService(performance_dao)
     
     @staticmethod
-    async def create_user_ids_service():
-        """Create UserIdsService with UserDAO"""
-        from ..servcie.user_ids_service import UserIdsService
-        from ..dao.user_dao import UserDAO
-        
-        async with get_db_connection() as conn:
-            user_dao = UserDAO(conn)
-            return UserIdsService(user_dao)
-    
-    @staticmethod
     async def create_auth_service():
         """Create AuthService with AuthDAO"""
         from ..servcie.auth_service import AuthService

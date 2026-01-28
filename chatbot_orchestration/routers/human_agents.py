@@ -7,7 +7,6 @@ from typing import List, Optional
 import logging
 
 from shared.auth_middleware import get_current_user
-from shared.db import get_db_connection
 from ..servcie.human_agents_service import HumanAgentsService
 
 logger = logging.getLogger(__name__)
@@ -32,15 +31,13 @@ async def add_human_agents(
 ):
     """Add human agents to the system."""
     try:
-        async with get_db_connection() as conn:
-            service = HumanAgentsService(conn)
-            result = await service.add_human_agents(request.emails)
-            
-            return {
-                "success": True,
-                "message": "Agents processed successfully",
-                "results": result["results"]
-            }
+        result = await HumanAgentsService.add_human_agents(request.emails)
+        
+        return {
+            "success": True,
+            "message": "Agents processed successfully",
+            "results": result["results"]
+        }
     except Exception as e:
         logger.error(f"Error adding human agents: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error adding agents: {str(e)}")
@@ -52,18 +49,16 @@ async def get_human_agents(
 ):
     """Get all human agents."""
     try:
-        async with get_db_connection() as conn:
-            service = HumanAgentsService(conn)
-            agents = await service.get_human_agents()
-            
-            return [
-                AgentResponse(
-                    email=agent.get("email", ""),
-                    status="active",
-                    online=agent.get("is_online", False)
-                )
-                for agent in agents
-            ]
+        agents = await HumanAgentsService.get_human_agents()
+        
+        return [
+            AgentResponse(
+                email=agent.get("email", ""),
+                status="active",
+                online=agent.get("is_online", False)
+            )
+            for agent in agents
+        ]
     except Exception as e:
         logger.error(f"Error fetching human agents: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching agents: {str(e)}")
@@ -75,18 +70,16 @@ async def get_online_agents(
 ):
     """Get all online human agents."""
     try:
-        async with get_db_connection() as conn:
-            service = HumanAgentsService(conn)
-            agents = await service.get_online_agents()
-            
-            return [
-                AgentResponse(
-                    email=agent.get("email", ""),
-                    status="online",
-                    online=True
-                )
-                for agent in agents
-            ]
+        agents = await HumanAgentsService.get_online_agents()
+        
+        return [
+            AgentResponse(
+                email=agent.get("email", ""),
+                status="online",
+                online=True
+            )
+            for agent in agents
+        ]
     except Exception as e:
         logger.error(f"Error fetching online agents: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching online agents: {str(e)}")
@@ -99,14 +92,12 @@ async def remove_human_agent(
 ):
     """Remove a human agent from the system."""
     try:
-        async with get_db_connection() as conn:
-            service = HumanAgentsService(conn)
-            await service.delete_human_agent(email)
-            
-            return {
-                "success": True,
-                "message": "Agent removed successfully"
-            }
+        await HumanAgentsService.delete_human_agent(email)
+        
+        return {
+            "success": True,
+            "message": "Agent removed successfully"
+        }
     except Exception as e:
         logger.error(f"Error removing agent: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error removing agent: {str(e)}")
@@ -119,15 +110,13 @@ async def get_agent_status(
 ):
     """Get the online status of a specific agent."""
     try:
-        async with get_db_connection() as conn:
-            service = HumanAgentsService(conn)
-            is_online = await service.get_agent_online_status(email)
-            
-            return {
-                "email": email,
-                "online": is_online,
-                "status": "online" if is_online else "offline"
-            }
+        is_online = await HumanAgentsService.get_agent_online_status(email)
+        
+        return {
+            "email": email,
+            "online": is_online,
+            "status": "online" if is_online else "offline"
+        }
     except Exception as e:
         logger.error(f"Error checking agent status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error checking agent status: {str(e)}")

@@ -17,7 +17,14 @@ from shared.firebase_auth import init_firebase_auth
 from shared.database_initializer import database_initializer
 
 # Import Routers
-from configuration.routers import chatbot, widget, admin_management, auth_optimized, chat_log, feedback, notifications, performance, token_usage, user_ids
+from configuration.routers import chatbot, widget
+from configuration.feedback import router as feedback_router
+from configuration.token_usage import router as token_usage_router
+from configuration.performance import router as performance_router
+from configuration.admin_management import router as admin_management_router
+from configuration.auth_optimized import router as auth_router
+from configuration.chat_log import router as chat_log_router, public_chat_router
+from configuration.user_ids import router as user_ids_router
 
 load_dotenv()
 
@@ -165,15 +172,14 @@ async def health_check():
 # Include Routers
 app.include_router(chatbot.router)
 app.include_router(widget.router)
-app.include_router(admin_management.router)
-app.include_router(auth_optimized.router)
-app.include_router(chat_log.router)
-app.include_router(chat_log.public_chat_router)
-app.include_router(feedback.router)
-app.include_router(notifications.router)
-app.include_router(performance.router)
-app.include_router(token_usage.router)
-app.include_router(user_ids.router)
+app.include_router(feedback_router)
+app.include_router(token_usage_router)
+app.include_router(admin_management_router)
+app.include_router(auth_router)
+app.include_router(performance_router)
+app.include_router(chat_log_router)
+app.include_router(user_ids_router)
+app.include_router(public_chat_router)
 
 logger.info("✅ All endpoints loaded successfully")
 
