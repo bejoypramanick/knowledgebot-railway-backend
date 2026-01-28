@@ -342,3 +342,77 @@ This comprehensive system prompt ensures optimal performance, security, and user
     
     # Cache and return the generated prompt
     return cache_system_prompt(prompt_components, base_prompt, MODEL_NAME)
+
+
+def extract_gemini_rag_metadata(result) -> list:
+    """
+    Extract grounding metadata (RAG sources) from Gemini API response.
+    
+    Args:
+        result: Gemini API response object
+        
+    Returns:
+        List of source metadata or empty list if no grounding data found
+    """
+    try:
+        sources = []
+        
+        # Check for grounding metadata in different possible locations
+        if hasattr(result, 'grounding_metadata'):
+            # Direct grounding metadata
+            grounding_data = result.grounding_metadata
+            if isinstance(grounding_data, list):
+                sources = grounding_data
+            elif hasattr(grounding_data, 'grounding_chunks'):
+                sources = grounding_data.grounding_chunks
+            elif hasattr(grounding_data, 'sources'):
+                sources = grounding_data.sources
+                
+        elif hasattr(result, 'candidates') and result.candidates:
+            # Check in candidate responses
+            for candidate in result.candidates:
+                if hasattr(candidate, 'grounding_metadata'):
+                    grounding_data = candidate.grounding_metadata
+                    if isinstance(grounding_data, list):
+                        sources.extend(grounding_data)
+                    elif hasattr(grounding_data, 'grounding_chunks'):
+                        sources.extend(grounding_data.grounding_chunks)
+                    elif hasattr(grounding_data, 'sources'):
+                        sources.extend(grounding_data.sources)
+                        
+        elif hasattr(result, 'response') and hasattr(result.response, 'grounding_metadata'):
+            # Check in response object
+            grounding_data = result.response.grounding_metadata
+            if isinstance(grounding_data, list):
+                sources = grounding_data
+            elif hasattr(grounding_data, 'grounding_chunks'):
+                sources = grounding_data.grounding_chunks
+            elif hasattr(grounding_data, 'sources'):
+                sources = grounding_data.sources
+        
+        # Extract relevant information from each source
+        extracted_sources = []
+        for source in sources:
+            if isinstance(source, dict):
+                extracted_source = {
+                    'title': source.get('title', ''),
+                    'uri': source.get('uri', ''),
+                    'snippet': source.get('text', '') or source.get('snippet', ''),
+                    'relevance_score': source.get('relevance_score', 0.0)
+                }
+                extracted_sources.append(extracted_source)
+            elif hasattr(source, 'title'):
+                extracted_source = {
+                    'title': getattr(source, 'title', ''),
+                    'uri': getattr(source, 'uri', ''),
+                    'snippet': getattr(source, 'text', '') or getattr(source, 'snippet', ''),
+                    'relevance_score': getattr(source, 'relevance_score', 0.0)
+                }
+                extracted_sources.append(extracted_source)
+        
+        logger.info(f"📊 Extracted {len(extracted_sources)} RAG sources from Gemini response")
+        return extracted_sources
+        
+    except Exception as e:
+        logger.warning(f"⚠️ Error extracting RAG metadata: {e}")
+        return []
