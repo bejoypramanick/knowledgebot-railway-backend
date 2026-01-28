@@ -44,43 +44,43 @@ async def add_admins(request: AdminRequest, current_user: dict = Depends(get_cur
         raise HTTPException(status_code=403, detail="User email not found in token")
     
     try:
-        async with get_db_connection() as conn:
-            auth_dao = AuthDAO(conn)
-            
-            # Check if current user is an admin
-            is_admin = await auth_dao.check_admin_exists(user_email)
-            
-            if not is_admin or is_admin == 0:
-                raise HTTPException(status_code=403, detail="Only admins can add new admins")
-            
-            # Create admins directly without email confirmation
-            admins_created = []
-            
-            for email in request.emails:
-                # Check if admin already exists
-                existing = await auth_dao.check_admin_exists(email)
+        auth_dao = AuthDAO()
+        service = AuthService(auth_dao)
+        
+        # Check if current user is an admin
+        is_admin = await auth_dao.check_admin_exists(user_email)
+        
+        if not is_admin or is_admin == 0:
+            raise HTTPException(status_code=403, detail="Only admins can add new admins")
+        
+        # Create admins directly without email confirmation
+        admins_created = []
+        
+        for email in request.emails:
+            # Check if admin already exists
+            existing = await auth_dao.check_admin_exists(email)
 
-                if existing:
-                    logger.info(f"Admin {email} already exists, skipping")
-                    continue
-                
-                # Create new admin
-                token = generate_confirmation_token()
-                admin_id = await auth_dao.create_admin(email, token, user_email)
-                
-                # Admin created successfully
-                admins_created.append({
-                    "email": email,
-                    "status": "active",
-                    "confirmation_token": token
-                })
-                logger.info(f"Admin {email} created successfully")
+            if existing:
+                logger.info(f"Admin {email} already exists, skipping")
+                continue
             
-            return {
-                "success": True,
-                "message": "Admins created successfully",
-                "admins": admins_created
-            }
+            # Create new admin
+            token = generate_confirmation_token()
+            admin_id = await auth_dao.create_admin(email, token, user_email)
+            
+            # Admin created successfully
+            admins_created.append({
+                "email": email,
+                "status": "active",
+                "confirmation_token": token
+            })
+            logger.info(f"Admin {email} created successfully")
+        
+        return {
+            "success": True,
+            "message": "Admins created successfully",
+            "admins": admins_created
+        }
     except HTTPException:
         raise
     except Exception as e:
