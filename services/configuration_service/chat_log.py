@@ -29,13 +29,13 @@ router = APIRouter(prefix="/api/v1/admin", tags=["chat-log"])
 public_chat_router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
 
-from services.configuration_service.schemas.chat_log_schemas import (
+from .schemas.chat_log_schemas import (
     ChatMessageResponse, ChatSessionResponse, ChatSessionsResponse,
     SendMessageRequest, SendMessageResponse
 )
-from services.configuration_service.services.chat_log_service import ChatLogService
-from services.configuration_service.utils.sse_manager import connection_manager
-from services.configuration_service.dao.chat_log_dao import ChatLogDAO
+from .services.chat_log_service import ChatLogService
+from .utils.sse_manager import connection_manager
+from .dao.chat_log_dao import ChatLogDAO
 
 
 @router.get("/agents/online", response_model=dict)
@@ -45,7 +45,7 @@ async def get_online_agents(current_user: dict = Depends(get_current_user)):
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found")
 
-    from services.configuration_service.main import get_db_connection
+    from .main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)
@@ -60,7 +60,7 @@ async def agent_heartbeat(current_user: dict = Depends(get_current_user)):
     if not user_email:
         raise HTTPException(status_code=401, detail="User email not found")
     
-    from services.configuration_service.main import get_db_connection
+    from .main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)
@@ -94,28 +94,29 @@ async def get_assigned_chat_sessions(
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found")
     
-    from services.configuration_service.main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
-        
-        sessions, total_count = await service.get_chat_sessions(
-            role=role,
-            user_email=user_email,
-            archive_status=archive_status,
-            page=page,
-            limit=limit,
-            agent_id=agent_id
-        )
-        
-        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
-        return ChatSessionsResponse(
-            sessions=sessions,
-            total_count=total_count,
-            page=page,
-            limit=limit,
-            total_pages=total_pages
-        )
+    try:
+        from .main import get_db_connection
+        async with get_db_connection() as conn:
+            dao = ChatLogDAO(conn)
+            service = ChatLogService(dao, connection_manager)
+            
+            sessions, total_count = await service.get_chat_sessions(
+                role=role,
+                user_email=user_email,
+                archive_status=archive_status,
+                page=page,
+                limit=limit,
+                agent_id=agent_id
+            )
+            
+            total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
+            return ChatSessionsResponse(
+                sessions=sessions,
+                total_count=total_count,
+                page=page,
+                limit=limit,
+                total_pages=total_pages
+            )
 
     except HTTPException:
         raise
@@ -138,7 +139,7 @@ async def archive_chat_session(
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found in token")
 
-    from services.configuration_service.main import get_db_connection
+    from .main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)
@@ -165,7 +166,7 @@ async def get_session_messages(
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found")
     
-    from services.configuration_service.main import get_db_connection
+    from .main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)
@@ -196,7 +197,7 @@ async def send_agent_message(
     if request.agent_id != user_email:
         raise HTTPException(status_code=403, detail="Agent ID must match authenticated user")
     
-    from services.configuration_service.main import get_db_connection
+    from .main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)
@@ -253,7 +254,7 @@ async def assign_chat_session(
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found")
     
-    from services.configuration_service.main import get_db_connection
+    from .main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)
@@ -286,7 +287,7 @@ async def transfer_chat_session(
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found")
         
-    from services.configuration_service.main import get_db_connection
+    from .main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)
@@ -313,7 +314,7 @@ async def update_chat_session(
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found")
     
-    from services.configuration_service.main import get_db_connection
+    from .main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)
@@ -331,7 +332,7 @@ async def end_customer_session(
     if not user_email:
         raise HTTPException(status_code=400, detail="User email is required")
 
-    from services.configuration_service.main import get_db_connection
+    from .main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)
@@ -342,7 +343,7 @@ async def end_customer_session(
 @public_chat_router.post("/{session_id}/request-human-agent", response_model=dict)
 async def request_human_agent(session_id: str, request: Request):
     """Request human agent connection for a chat session."""
-    from services.configuration_service.main import get_db_connection
+    from .main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)
@@ -359,7 +360,7 @@ async def request_human_agent(session_id: str, request: Request):
 @public_chat_router.patch("/{session_id}/end", response_model=dict)
 async def public_end_customer_session(session_id: str, request: Request):
     """End a chat session from the customer side (public)."""
-    from services.configuration_service.main import get_db_connection
+    from .main import get_db_connection
     async with get_db_connection() as conn:
         dao = ChatLogDAO(conn)
         service = ChatLogService(dao, connection_manager)

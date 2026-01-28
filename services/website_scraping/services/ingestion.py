@@ -6,8 +6,8 @@ import tempfile
 from typing import Dict, Any, List
 from urllib.parse import urlparse
 from google.genai import types
-from services.website_scraping.core.ai import get_genai_client
-from services.website_scraping.schemas.models import ScrapeRequest
+from ..core.ai import get_genai_client
+from ..schemas.models import ScrapeRequest
 from shared import db as shared_db
 from fastapi import HTTPException
 
@@ -113,7 +113,7 @@ async def record_scraped_metadata(
         return
         
     try:
-        from services.website_scraping.dao.scraping_dao import ScrapingDAO
+        from ..dao.scraping_dao import ScrapingDAO
         dao = ScrapingDAO(shared_db.railway_db)
         
         scraping_cfg = {

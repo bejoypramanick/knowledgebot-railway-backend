@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Set
 from fastapi import HTTPException
-from services.configuration_service.dao.chat_log_dao import ChatLogDAO
+from .dao.chat_log_dao import ChatLogDAO
 
 logger = logging.getLogger(__name__)
 

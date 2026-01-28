@@ -19,8 +19,8 @@ router = APIRouter(prefix="/api/v1/admin", tags=["performance"])
 
 # Import the shared get_db_connection from main.py
 # This ensures we use the same connection pattern as other endpoints
-from services.configuration_service.main import get_db_connection
-from services.configuration_service.dao.performance_dao import PerformanceDAO
+from .main import get_db_connection
+from .dao.performance_dao import PerformanceDAO
 
 
 @router.get("/performance/metrics")

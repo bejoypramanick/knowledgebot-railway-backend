@@ -54,7 +54,7 @@ async def get_chatbot_config():
                 notifications['user_interactions_enabled'] = row['is_enabled']
             elif row['setting_name'] == 'error_alerts_enabled':
                 notifications['error_alerts_enabled'] = row['is_enabled']
-                elif row['setting_name'] == 'feedback_requests_enabled':
+            elif row['setting_name'] == 'feedback_requests_enabled':
                 notifications['feedback_requests_enabled'] = row['is_enabled']
 
         # Build security settings dict
@@ -64,25 +64,25 @@ async def get_chatbot_config():
             "restrict_config": False
         }
         for row in security_rows:
-                if row['setting_name'] == 'response_timeout':
-                    security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
-                elif row['setting_name'] == 'remove_pii':
-                    security['remove_pii'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
-                elif row['setting_name'] == 'restrict_config':
-                    security['restrict_config'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
+            if row['setting_name'] == 'response_timeout':
+                security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
+            elif row['setting_name'] == 'remove_pii':
+                security['remove_pii'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
+            elif row['setting_name'] == 'restrict_config':
+                security['restrict_config'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
 
-            # Build LLM tokens dict
-            llm_tokens = {
-                "gemini": {"used": 0, "available": 20000, "limit": 20000}
-            }
-            for row in llm_rows:
-                provider = row['provider_name']
-                if provider == 'gemini':
-                    llm_tokens['gemini'] = {
-                        "used": row['token_used'] or 0,
-                        "available": (row['token_limit'] or 0) - (row['token_used'] or 0),
-                        "limit": row['token_limit'] or 0
-                    }
+        # Build LLM tokens dict
+        llm_tokens = {
+            "gemini": {"used": 0, "available": 20000, "limit": 20000}
+        }
+        for row in llm_rows:
+            provider = row['provider_name']
+            if provider == 'gemini':
+                llm_tokens['gemini'] = {
+                    "used": row['token_used'] or 0,
+                    "available": (row['token_limit'] or 0) - (row['token_used'] or 0),
+                    "limit": row['token_limit'] or 0
+                }
 
             # Build persona dict
             persona_config = {
@@ -132,7 +132,7 @@ async def save_chatbot_config(
             )
 
         async with get_db_connection() as conn:
-                from services.configuration_service.dao.chatbot_dao import ChatbotDAO
+                from .dao.chatbot_dao import ChatbotDAO
                 dao = ChatbotDAO(conn)
 
                 # Handle admin emails

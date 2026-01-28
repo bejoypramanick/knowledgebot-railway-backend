@@ -18,9 +18,9 @@ from shared.config import settings
 from shared import db as shared_db
 from shared.utils import register_fastapi_exception_handlers, setup_global_exception_logging, log_endpoint_request
 
-from services.website_scraping.routers import scrape
-from services.website_scraping.utils.middleware import log_requests_middleware
-from services.website_scraping.core.ai import get_genai_client
+from .routers import scrape
+from .utils.middleware import log_requests_middleware
+from .core.ai import get_genai_client
 
 setup_global_exception_logging("website_scraping")
 

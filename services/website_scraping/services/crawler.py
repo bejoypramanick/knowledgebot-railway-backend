@@ -3,8 +3,8 @@ import asyncio
 from typing import List, Tuple
 from crawl4ai import AsyncWebCrawler
 from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig
-from services.website_scraping.schemas.models import ScrapeRequest
-from services.website_scraping.utils.links import extract_links_from_result
+from ..schemas.models import ScrapeRequest
+from ..utils.links import extract_links_from_result
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)

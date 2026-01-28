@@ -4,11 +4,11 @@ Provides business logic layer between routers and DAO
 """
 import logging
 from typing import List, Dict, Any, Optional
-from services.configuration_service.dao.chatbot_dao import ChatbotDAO
-from services.configuration_service.dao.widget_dao import WidgetDAO
-from services.configuration_service.dao.performance_dao import PerformanceDAO
-from services.configuration_service.dao.auth_dao import AuthDAO
-from services.configuration_service.core.database import get_db_connection
+from .dao.chatbot_dao import ChatbotDAO
+from .dao.widget_dao import WidgetDAO
+from .dao.performance_dao import PerformanceDAO
+from .dao.auth_dao import AuthDAO
+from .core.database import get_db_connection
 
 logger = logging.getLogger(__name__)
 

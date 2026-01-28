@@ -1,8 +1,8 @@
 import logging
 from typing import Optional, Dict, Any
 from shared import db as shared_db
-from services.website_scraping.core.ai import get_genai_client
-from services.website_scraping.dao.scraping_dao import ScrapingDAO
+from ..core.ai import get_genai_client
+from ..dao.scraping_dao import ScrapingDAO
 
 logger = logging.getLogger(__name__)
 
