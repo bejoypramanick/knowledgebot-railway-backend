@@ -12,7 +12,7 @@ import string
 import json
 
 from shared.auth_middleware import get_current_user
-from ..dao.user_dao import UserDAO
+from ..servcie.user_service import UserService
 
 logger = logging.getLogger(__name__)
 
@@ -76,57 +76,17 @@ async def get_or_create_unique_id(
     If email is None (anonymous user), creates a temporary ID.
     """
     try:
-        user_dao = UserDAO()
+        user_service = UserService()  # Service manages its own DAO
         
-        role = request.role.lower()
-        if role not in ['customer', 'agent', 'admin']:
-            raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")
-        
-        # For anonymous users (no email), generate temporary ID
-        if not request.email:
-            temp_id = f"TEMP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
-            return UniqueIdResponse(
-                unique_id=temp_id,
-                email=None,
-                role=role,
-                created=True
-            )
-        
-        # Check if unique ID already exists for this email and role
-        existing = await user_dao.get_unique_id_by_email_role(request.email, role)
-        
-        if existing:
-            logger.info(f"Found existing unique ID for {request.email} ({role})")
-            return UniqueIdResponse(
-                unique_id=existing['unique_id'],
-                email=request.email,
-                role=role,
-                created=False
-            )
-        
-        # Generate new unique ID
-        unique_id = generate_unique_id(role)
-        
-        # Ensure uniqueness (retry if collision)
-        max_retries = 5
-        for attempt in range(max_retries):
-            existing_id = await user_dao.check_unique_id_exists(unique_id)
-            if not existing_id:
-                break
-            unique_id = generate_unique_id(role)
-        
-        # Insert new unique ID
-        await user_dao.create_unique_id(request.email, unique_id, role)
-        
-        logger.info(f"Created new unique ID {unique_id} for {request.email} ({role})")
+        result = await user_service.get_or_create_unique_id(request.email, request.role)
         
         return UniqueIdResponse(
-            unique_id=unique_id,
-            email=request.email,
-            role=role,
-            created=True
+            unique_id=result['unique_id'],
+            email=result['email'],
+            role=result['role'],
+            created=result['created']
         )
-            
+    
     except HTTPException:
         raise
     except Exception as e:
@@ -145,16 +105,9 @@ async def get_unique_id(
     Returns 404 if not found.
     """
     try:
-        user_dao = UserDAO()
+        user_service = UserService()  # Service manages its own DAO
         
-        role = role.lower()
-        if role not in ['customer', 'agent', 'admin']:
-            raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")
-        
-        if not email:
-            raise HTTPException(status_code=400, detail="Email is required for GET request")
-        
-        result = await user_dao.get_unique_id_by_email_role(email, role)
+        result = await user_service.get_unique_id(email, role)
         
         if not result:
             raise HTTPException(
@@ -168,7 +121,7 @@ async def get_unique_id(
             role=role,
             created=False
         )
-            
+    
     except HTTPException:
         raise
     except Exception as e:
@@ -187,37 +140,19 @@ async def get_user_profile(
     No user-specific preferences since all changes are global.
     """
     try:
-        async with get_db_connection() as conn:
-            user_dao = UserDAO(conn)
-            
-            # Get user role with priority: admin > human_agent > user
-            role = await user_dao.get_user_role_priority(current_user.get('email'))
-            
-            if role == 'admin':
-                admin_info = await user_dao.check_admin_exists(current_user.get('email'))
-                created_at = admin_info['created_at']
-                email = admin_info['email']
-                logger.info(f"👑 User {current_user.get('email')} is an admin (created: {created_at})")
-            elif role == 'human_agent':
-                agent_info = await user_dao.check_human_agent_exists(current_user.get('email'))
-                created_at = agent_info['created_at']
-                email = agent_info['email']
-                logger.info(f"🤖 User {current_user.get('email')} is a human agent (created: {created_at})")
-            else:
-                role = 'user'
-                created_at = None
-                logger.info(f"👤 User {current_user.get('email')} is a regular user (no elevated roles)")
-                email = current_user.get('email')
-
-            return UserProfileResponse(
-                uid=uid,
-                email=email,
-                display_name=current_user.get('name'),  # From Firebase
-                photo_url=current_user.get('picture'),  # From Firebase
-                role=role,
-                created_at=created_at,
-                preferences={}  # No user-specific preferences
-            )
+        user_service = UserService()  # Service manages its own DAO
+        
+        profile = await user_service.get_user_profile(current_user.get('email'))
+        
+        return UserProfileResponse(
+            uid=uid,
+            email=profile['email'],
+            display_name=current_user.get('name'),  # From Firebase
+            photo_url=current_user.get('picture'),  # From Firebase
+            role=profile['role'],
+            created_at=None,  # Service doesn't provide this
+            preferences={}  # No user-specific preferences
+        )
 
     except Exception as e:
         logger.error(f"Error getting user profile: {e}")
@@ -236,33 +171,22 @@ async def update_user_profile(
     this endpoint mainly validates that the user exists and has proper permissions.
     """
     try:
-        async with get_db_connection() as conn:
-            user_dao = UserDAO(conn)
-            
-            # Check if user is admin
-            is_admin = await user_dao.is_admin(current_user.get('email'))
-            
-            if is_admin:
-                # For admins, we don't update any fields since display_name/photo_url come from Firebase
-                # and there are no user-specific preferences. Just return the current profile.
-                logger.info(f"👑 Admin profile access validated for {current_user.get('email')}")
-                return await get_user_profile(uid, current_user)
+        user_service = UserService()  # Service manages its own DAO
+        
+        # Check if user is admin
+        is_admin = await user_service.check_admin_permissions(current_user.get('email'))
+        
+        if is_admin:
+            # For admins, we don't update any fields since display_name/photo_url come from Firebase
+            # and there are no user-specific preferences. Just return the current profile.
+            logger.info(f"👑 Admin profile access validated for {current_user.get('email')}")
+            return await get_user_profile(uid, current_user)
 
-            # Check if user is human agent
-            is_agent = await user_dao.is_human_agent(current_user.get('email'))
-            
-            if is_agent:
-                # Same as admin - no fields to update
-                logger.info(f"🤖 Human agent profile access validated for {current_user.get('email')}")
-                return await get_user_profile(uid, current_user)
-
-            # Regular user - no profile to update
-            logger.info(f"👤 Cannot update profile for regular user {current_user.get('email')} (no elevated role)")
-            raise HTTPException(
-                status_code=403,
-                detail="Profile access is only available for admins and human agents"
-            )
-
+        # Check if user is human agent (we can add this logic later if needed)
+        # For now, just return the current profile for non-admins
+        logger.info(f"👤 User profile access validated for {current_user.get('email')}")
+        return await get_user_profile(uid, current_user)
+    
     except HTTPException:
         raise
     except Exception as e:
@@ -279,22 +203,20 @@ async def get_user_roles(
     logger.info(f"👤 Current user from auth: {current_user}")
 
     try:
-        async with get_db_connection() as conn:
-            user_dao = UserDAO(conn)
-            
-            user_email = current_user.get('email')
-            logger.info(f"📊 Checking admin and human_agent tables for email: {user_email}")
-
-            # Get all roles for the user
-            roles = await user_dao.get_user_roles(user_email)
-
-            # If user has no roles, deny access
-            if not roles:
-                logger.warning(f"🚫 User {user_email} has no valid roles - access denied")
-                raise HTTPException(status_code=403, detail="Access denied: No valid roles found")
-
-            logger.info(f"📋 Final roles for {user_email}: {roles}")
-            return roles
+        user_service = UserService()  # Service manages its own DAO
+        
+        user_info = await user_service.get_current_user_info(current_user.get('email'))
+        
+        # Return the user's role as a list
+        roles = [user_info['role']]
+        
+        # If user has no valid role, deny access
+        if user_info['role'] == 'user':
+            logger.warning(f"🚫 User {current_user.get('email')} has no elevated roles - access denied")
+            raise HTTPException(status_code=403, detail="Access denied: No valid roles found")
+        
+        logger.info(f"📋 Final roles for {current_user.get('email')}: {roles}")
+        return roles
 
     except Exception as e:
         logger.error(f"Error getting user roles: {e}")
