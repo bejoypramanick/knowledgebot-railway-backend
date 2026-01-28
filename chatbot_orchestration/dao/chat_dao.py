@@ -40,21 +40,6 @@ class ChatDAO:
         except Exception as e:
             logger.error(f"Error updating session metadata: {e}")
 
-    async def get_recent_files(self, limit: int = 5) -> List[Dict[str, Any]]:
-        """Retrieve recent file uploads metadata."""
-        try:
-            async with get_db_connection() as conn:
-                return await conn.fetch("""
-                    SELECT gemini_file_name, original_filename, display_name, mime_type, size_bytes, created_at
-                    FROM file_uploads
-                    WHERE gemini_file_name IS NOT NULL
-                    ORDER BY created_at DESC
-                    LIMIT $1
-                """, limit)
-        except Exception as e:
-            logger.error(f"Error getting recent files: {e}")
-            return []
-
     async def find_file_by_name(self, gemini_file_name: str) -> Optional[Dict[str, Any]]:
         """Find file metadata by Gemini file name."""
         try:
