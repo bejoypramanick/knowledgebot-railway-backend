@@ -1,5 +1,8 @@
 # API Gateway Service-Specific Requirements
 # Note: Base dependencies are in requirements-base.txt
 
+# Form data support for file uploads
+python-multipart>=0.0.9
+
 # WebSocket support
 websockets>=12.0
