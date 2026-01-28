@@ -1,5 +1,7 @@
-from pydantic import BaseModel, HttpUrl, Field
-from typing import Optional, List, Dict, Any, Union
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel
+
 
 class FileInfo(BaseModel):
     name: str

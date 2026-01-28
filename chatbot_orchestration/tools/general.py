@@ -1,9 +1,10 @@
-from shared.logging_config import get_railway_logger
-import logging
 import os
-import httpx
 from typing import Annotated
-from shared.config import settings
+
+import httpx
+
+from shared.logging_config import get_railway_logger
+
 from ..core.dependencies import ChatSessionDeps
 from ..service.file_service import FileService
 

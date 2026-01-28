@@ -1,11 +1,12 @@
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form, Header
-from fastapi.responses import JSONResponse
-import httpx
-from shared.logging_config import get_railway_logger
-import logging
 from typing import Optional
 
+import httpx
+from fastapi import (APIRouter, File, Form, Header, HTTPException, Request,
+                     UploadFile)
+from fastapi.responses import JSONResponse
+
 from api_gateway.core.config import KNOWLEDGEBASE_INGESTION_URL
+from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

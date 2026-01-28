@@ -2,18 +2,18 @@
 Token Metrics Endpoints
 Provides API endpoints for monitoring token tracking metrics and health status
 """
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
-from typing import Optional, Dict, Any
-from shared.logging_config import get_railway_logger
-import logging
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from shared.auth_middleware import get_current_user
-from shared.token_metrics import (
-    get_token_tracking_metrics,
-    get_token_tracking_health
-)
+from shared.logging_config import get_railway_logger
 from shared.rate_limiter import rate_limit_metrics
-from shared.token_alerting import get_alert_manager, AlertSeverity, setup_default_alerting
+from shared.token_alerting import (AlertSeverity, get_alert_manager,
+                                   setup_default_alerting)
+from shared.token_metrics import (get_token_tracking_health,
+                                  get_token_tracking_metrics)
+
 
 # Initialize alerting on module import
 async def init_alerting():

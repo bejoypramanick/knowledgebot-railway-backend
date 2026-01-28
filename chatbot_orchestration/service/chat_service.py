@@ -2,29 +2,23 @@
 Chat Service Layer for Chatbot Orchestration
 Provides business logic for chat operations
 """
-from shared.logging_config import get_railway_logger
-import logging
+import asyncio
 import json
 import uuid
-import asyncio
-from typing import List, Dict, Any, Optional
-from fastapi import HTTPException
+
 from fastapi.responses import StreamingResponse
 
-from ..core.dependencies import ChatSessionDeps
-from ..service.agent_service import (
-    pydantic_ai_service, session_state_manager
-)
-from ..tools.rag import search_knowledge_base
-from ..tools.general import (
-    request_human_agent_connection, query_railway_postgres
-)
-from ..agent.prompt import get_system_prompt, extract_gemini_rag_metadata
+from shared.logging_config import get_railway_logger
 from shared.token_tracker import track_gemini_usage_from_response
 
+from ..agent.prompt import get_system_prompt
+from ..core.dependencies import ChatSessionDeps
+from ..service.agent_service import pydantic_ai_service, session_state_manager
+from ..tools.general import (query_railway_postgres,
+                             request_human_agent_connection)
+from ..tools.rag import search_knowledge_base
+
 # Pydantic AI imports for processing messages
-from pydantic_ai import Agent
-from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
 
 logger = get_railway_logger(__name__)
 

@@ -2,13 +2,14 @@
 Optimized Authentication Endpoints
 Handles Firebase Auth token verification and user management with performance improvements.
 """
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, EmailStr
-from typing import Optional, Dict, Any
-from shared.logging_config import get_railway_logger
-import logging
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from shared.auth_middleware import get_current_user
+from shared.logging_config import get_railway_logger
+
 from ..service.auth_optimized_service import auth_optimized_service
 
 logger = get_railway_logger(__name__)

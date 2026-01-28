@@ -1,17 +1,18 @@
-from shared.logging_config import get_railway_logger
-import logging
 import asyncio
 import json
 from urllib.parse import urlparse
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from ..schemas.models import ScrapeRequest, ScrapeResponse
-from ..core.sessions import active_scraping_sessions
-from ..service.service_factory import ServiceFactory
-from ..service.crawler import crawl_website
-from ..service.ingestion_service import upload_scraped_content, record_scraped_metadata
+from shared.logging_config import get_railway_logger
 from shared.utils import log_endpoint_request
+
+from ..core.sessions import active_scraping_sessions
+from ..schemas.models import ScrapeRequest, ScrapeResponse
+from ..service.crawler import crawl_website
+from ..service.ingestion_service import (record_scraped_metadata,
+                                         upload_scraped_content)
 
 logger = get_railway_logger(__name__)
 

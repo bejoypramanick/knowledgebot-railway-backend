@@ -2,13 +2,13 @@
 FastAPI Authentication Middleware
 Verifies Firebase Auth tokens and protects endpoints.
 """
-from fastapi import HTTPException, Security, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional, Dict, Any
-from shared.logging_config import get_railway_logger
-import logging
+from typing import Any, Dict, Optional
+
+from fastapi import HTTPException, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from shared.firebase_auth import verify_firebase_token
+from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

@@ -2,9 +2,10 @@
 Crawler Service Layer
 Provides business logic for website crawling operations
 """
+from typing import Any, Dict, Optional
+
 from shared.logging_config import get_railway_logger
-import logging
-from typing import List, Optional, Dict, Any
+
 from ..dao.scraping_dao import ScrapingDAO
 
 logger = get_railway_logger(__name__)

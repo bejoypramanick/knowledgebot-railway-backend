@@ -1,15 +1,12 @@
 import time
+
 import httpx
-from shared.logging_config import get_railway_logger
-import logging
-from typing import Dict
 from fastapi import APIRouter, HTTPException, Request
 
-from api_gateway.core.config import (
-    KNOWLEDGEBASE_INGESTION_URL, 
-    WEBSITE_CRAWLING_URL, 
-    CHATBOT_ORCHESTRATION_URL
-)
+from api_gateway.core.config import (CHATBOT_ORCHESTRATION_URL,
+                                     KNOWLEDGEBASE_INGESTION_URL,
+                                     WEBSITE_CRAWLING_URL)
+from shared.logging_config import get_railway_logger
 from shared.utils import log_endpoint_request
 
 logger = get_railway_logger(__name__)

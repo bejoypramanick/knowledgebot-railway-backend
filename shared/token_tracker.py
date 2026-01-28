@@ -2,15 +2,12 @@
 Token Usage Tracker
 Tracks and accumulates token usage from Gemini API responses.
 """
-from shared.logging_config import get_railway_logger
-import logging
-import asyncio
-from typing import Optional, Dict, Any, Union
 from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 from configuration.service.token_usage_service import TokenUsageService
-from shared.token_metrics import track_token_metrics, MetricsContext
 from shared.logging_config import get_railway_logger
+from shared.token_metrics import track_token_metrics
 
 logger = get_railway_logger(__name__)
 

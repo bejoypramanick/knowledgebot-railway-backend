@@ -1,26 +1,24 @@
 # Append to existing content or rewrite?
 # I will rewrite to include everything.
 
-from shared.logging_config import get_railway_logger
-import logging
 import asyncio
 import os
-import json
 import time
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, Optional
+
+from fastapi import HTTPException, UploadFile
 from google.genai import types
-from fastapi import UploadFile, HTTPException, status
+
+from shared.logging_config import get_railway_logger
 
 from ..core.ai import get_genai_client
+from ..schemas.models import BatchDeleteItem, BatchUploadItem, FileInfo
+from ..utils.files import calculate_sha256, stream_to_temp_file
+from ..utils.validation import (detect_mime_type_from_extension,
+                                sanitize_filename, validate_file_extension,
+                                validate_file_size, validate_mime_type)
 from .file_service import FileService
-from ..utils.validation import (
-    detect_mime_type_from_extension, sanitize_filename, 
-    validate_file_extension, validate_mime_type, validate_file_size
-)
-from ..utils.files import stream_to_temp_file, calculate_sha256
-from ..schemas.models import FileInfo, BatchUploadItem, BatchDeleteItem
-from shared.config import settings
 
 logger = get_railway_logger(__name__)
 

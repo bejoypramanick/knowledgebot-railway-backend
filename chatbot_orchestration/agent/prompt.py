@@ -1,9 +1,9 @@
+from typing import Optional
+
 from shared.logging_config import get_railway_logger
-import logging
-from typing import List, Optional, Dict, Any, Union
-from ..schemas.models import SearchResult
+
 from ..core.ai import MODEL_NAME
-from ..core.cache import get_cached_system_prompt, cache_system_prompt
+from ..core.cache import cache_system_prompt, get_cached_system_prompt
 
 logger = get_railway_logger(__name__)
 

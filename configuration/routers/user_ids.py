@@ -2,17 +2,16 @@
 User Management Endpoints
 Handles user profiles, roles, and unique IDs for users, agents, and admins.
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
-from pydantic import BaseModel
-from typing import Optional, List
-from shared.logging_config import get_railway_logger
-import logging
-import uuid
 import random
 import string
-import json
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from shared.auth_middleware import get_current_user
+from shared.logging_config import get_railway_logger
+
 from ..service.user_service import UserService
 
 logger = get_railway_logger(__name__)

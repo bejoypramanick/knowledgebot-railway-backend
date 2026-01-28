@@ -2,13 +2,12 @@
 Token Tracking Metrics and Monitoring
 Provides metrics collection and monitoring for token tracking operations
 """
-import time
 import asyncio
-from typing import Dict, Any, Optional
-from dataclasses import dataclass, field
+import time
 from collections import defaultdict, deque
-from shared.logging_config import get_railway_logger
-import logging
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
 from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)

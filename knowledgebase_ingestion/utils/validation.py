@@ -1,8 +1,11 @@
+import mimetypes
 import os
 import re
-import mimetypes
 from typing import Optional, Tuple
-from ..utils.constants import ALLOWED_FILE_EXTENSIONS, ALLOWED_MIME_TYPES, MAX_FILE_SIZE_BYTES
+
+from ..utils.constants import (ALLOWED_FILE_EXTENSIONS, ALLOWED_MIME_TYPES,
+                               MAX_FILE_SIZE_BYTES)
+
 
 def validate_file_extension(filename: str) -> Tuple[bool, str]:
     """Validate file extension is allowed."""

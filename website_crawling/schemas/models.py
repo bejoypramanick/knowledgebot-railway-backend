@@ -1,6 +1,8 @@
-from pydantic import BaseModel, HttpUrl, Field, validator
-from typing import Optional, List, Dict, Any
-from ..utils.validation import validate_url, validate_patterns, MAX_URL_LENGTH
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field, validator
+
+from ..utils.validation import MAX_URL_LENGTH, validate_patterns, validate_url
 
 MAX_PAGES_LIMIT = 100
 MAX_DEPTH_LIMIT = 5

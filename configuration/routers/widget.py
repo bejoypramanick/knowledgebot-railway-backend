@@ -1,15 +1,14 @@
 import json
-import os
-from shared.logging_config import get_railway_logger
-import logging
-from fastapi import APIRouter, Depends, HTTPException, Request, Form
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from typing import Optional
+
+from shared.auth_middleware import get_current_user
+from shared.logging_config import get_railway_logger
 
 from ..schemas.models import WidgetConfigRequest
-from ..utils.logging_utils import log_configuration_change
 from ..service.configuration_service import configuration_service
-from shared.auth_middleware import get_current_user
+from ..utils.logging_utils import log_configuration_change
 
 logger = get_railway_logger(__name__)
 

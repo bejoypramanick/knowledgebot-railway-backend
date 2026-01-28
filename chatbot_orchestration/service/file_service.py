@@ -2,10 +2,10 @@
 File Service Layer for Chatbot Orchestration
 Provides business logic for file operations
 """
-from shared.logging_config import get_railway_logger
-import logging
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List
+
 from knowledgebase_ingestion.dao.file_dao import FileDAO
+from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

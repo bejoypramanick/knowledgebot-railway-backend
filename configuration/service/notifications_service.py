@@ -2,9 +2,10 @@
 Notifications Service Layer
 Provides business logic for notifications management operations
 """
+from typing import Any, Dict, List
+
 from shared.logging_config import get_railway_logger
-import logging
-from typing import List, Optional, Dict, Any
+
 from ..dao.notifications_dao import NotificationsDAO
 
 logger = get_railway_logger(__name__)

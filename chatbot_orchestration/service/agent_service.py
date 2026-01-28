@@ -1,25 +1,16 @@
-from shared.logging_config import get_railway_logger
-import logging
-import uuid
 import time
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List
 
+from google.genai import types
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from google import genai
-from google.genai import types
 
-from ..core.ai import get_genai_client, MODEL_NAME, gemini_model
-from ..core.dependencies import ChatSessionDeps
-from ..schemas.models import SearchResult
-from ..tools.rag import search_knowledge_base
-from ..tools.general import (
-    request_human_agent_connection, query_railway_postgres
-)
-from ..agent.prompt import get_system_prompt
-from shared.config import settings
 from shared.dao.chat_dao import ChatDAO
+from shared.logging_config import get_railway_logger
+
+from ..core.ai import MODEL_NAME, get_genai_client
+from ..core.dependencies import ChatSessionDeps
 
 logger = get_railway_logger(__name__)
 

@@ -1,16 +1,17 @@
-from shared.logging_config import get_railway_logger
-import logging
 import asyncio
 import os
-import json
 import tempfile
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 from urllib.parse import urlparse
+
+from fastapi import HTTPException
 from google.genai import types
+
+from shared.logging_config import get_railway_logger
+
 from ..core.ai import get_genai_client
 from ..schemas.models import ScrapeRequest
 from .scraping_service import ScrapingService
-from fastapi import HTTPException
 
 logger = get_railway_logger(__name__)
 

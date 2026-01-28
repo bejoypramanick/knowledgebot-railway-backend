@@ -1,5 +1,5 @@
+from typing import List, Optional, Tuple
 from urllib.parse import urlparse
-from typing import Optional, List, Tuple
 
 MAX_URL_LENGTH = 2048
 BLOCKED_DOMAINS = [

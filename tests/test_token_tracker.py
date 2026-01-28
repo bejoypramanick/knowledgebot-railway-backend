@@ -1,22 +1,17 @@
 """
 Unit tests for token tracking functionality
 """
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-import asyncio
-from unittest.mock import Mock, AsyncMock, patch
-from typing import Optional, Dict, Any
 
 # Import the functions we want to test
-from shared.token_tracker import (
-    track_token_usage,
-    track_gemini_usage,
-    track_gemini_usage_detailed,
-    track_gemini_usage_from_response,
-    track_gemini_usage_with_db,
-    TokenUsageData,
-    get_token_service,
-    log_async
-)
+from shared.token_tracker import (TokenUsageData, get_token_service, log_async,
+                                  track_gemini_usage,
+                                  track_gemini_usage_detailed,
+                                  track_gemini_usage_from_response,
+                                  track_gemini_usage_with_db,
+                                  track_token_usage)
 
 
 class TestTokenTracker:

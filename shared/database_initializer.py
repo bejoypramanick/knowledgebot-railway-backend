@@ -2,13 +2,13 @@
 Centralized Database Initialization Service
 Handles all database initialization logic for the singleton pattern.
 """
-from shared.logging_config import get_railway_logger
-import logging
 import os
 from pathlib import Path
 from typing import Optional
 
-from .db import init_railway_db, railway_db
+from shared.logging_config import get_railway_logger
+
+from .db import init_railway_db
 
 logger = get_railway_logger(__name__)
 
@@ -70,7 +70,7 @@ class DatabaseInitializer:
         """
         try:
             import asyncpg
-            
+
             # Use provided URL or get from environment
             db_url = database_url or os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
             

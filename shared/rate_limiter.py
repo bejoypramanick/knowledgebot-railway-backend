@@ -4,15 +4,13 @@ Provides rate limiting functionality for metrics endpoints and other APIs
 """
 import asyncio
 import time
-from typing import Dict, Optional, Tuple
-from dataclasses import dataclass
 from collections import defaultdict, deque
-from shared.logging_config import get_railway_logger
-import logging
-import hashlib
-import ipaddress
-from fastapi import Request, HTTPException
+from dataclasses import dataclass
+from typing import Dict, Tuple
+
+from fastapi import HTTPException, Request
 from fastapi.security import HTTPException as FastAPIHTTPException
+
 from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
@@ -266,14 +264,11 @@ def create_rate_limit_decorator(limiter_name: str, config: RateLimitConfig):
 @create_rate_limit_decorator("metrics", METRICS_RATE_LIMIT)
 async def rate_limit_metrics():
     """Rate limiting decorator for metrics endpoints"""
-    pass
 
 @create_rate_limit_decorator("admin", ADMIN_RATE_LIMIT)
 async def rate_limit_admin():
     """Rate limiting decorator for admin endpoints"""
-    pass
 
 @create_rate_limit_decorator("api", API_RATE_LIMIT)
 async def rate_limit_api():
     """Rate limiting decorator for general API endpoints"""
-    pass

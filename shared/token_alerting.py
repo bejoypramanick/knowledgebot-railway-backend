@@ -3,13 +3,14 @@ Token Tracking Alerting System
 Provides alerting for high error rates and performance issues
 """
 import asyncio
-import time
-from typing import Dict, Any, Optional, List, Callable
-from dataclasses import dataclass
-from enum import Enum
-import logging
 import json
-from datetime import datetime, timedelta
+import logging
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from enum import Enum
+from typing import Any, Dict, List, Optional
+
 from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)

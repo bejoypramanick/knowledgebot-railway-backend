@@ -1,9 +1,10 @@
-from pydantic import BaseModel, validator, Field
-from typing import List, Optional, Union
 import re
+from typing import List, Optional, Union
+
+from pydantic import BaseModel, Field, validator
 
 try:
-    from email_validator import validate_email, EmailNotValidError
+    from email_validator import EmailNotValidError, validate_email
 except ImportError:
     # Fallback if email_validator is not installed
     def validate_email(email, check_deliverability=True):

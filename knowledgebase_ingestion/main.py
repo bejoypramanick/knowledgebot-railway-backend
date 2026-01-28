@@ -1,23 +1,24 @@
-import sys
 import os
-from pathlib import Path
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
 from shared.logging_config import auto_configure_logging
 
 # Configure Railway-compatible logging
 logger = auto_configure_logging("knowledgebase_ingestion")
 
-from shared.config import settings
-from shared import db
-from shared.utils import register_fastapi_exception_handlers, setup_global_exception_logging, log_endpoint_request
-
+from knowledgebase_ingestion.core.ai import get_genai_client
 from knowledgebase_ingestion.routers import files
 from knowledgebase_ingestion.utils.middleware import log_requests_middleware
-from knowledgebase_ingestion.core.ai import get_genai_client
+from shared import db
+from shared.config import settings
+from shared.utils import (log_endpoint_request,
+                          register_fastapi_exception_handlers,
+                          setup_global_exception_logging)
 
 setup_global_exception_logging("knowledgebase_ingestion")
 

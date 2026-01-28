@@ -1,13 +1,14 @@
 """
 Feedback Endpoints
 """
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Literal, Optional
-from shared.logging_config import get_railway_logger
-import logging
 
 from shared.auth_middleware import get_current_user
+from shared.logging_config import get_railway_logger
+
 from ..service.feedback_service import FeedbackService
 
 logger = get_railway_logger(__name__)

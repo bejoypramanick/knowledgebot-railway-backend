@@ -1,8 +1,7 @@
-from shared.logging_config import get_railway_logger
-import logging
-from typing import Optional, Dict, Any, List, Union
-from ..schemas.models import ChatbotConfigRequest
+from typing import Any, Dict, List, Optional
+
 from shared.db import get_db_connection
+from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

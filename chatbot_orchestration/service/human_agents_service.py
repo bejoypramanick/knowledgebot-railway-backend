@@ -2,10 +2,12 @@
 Human Agents Service Layer for Chatbot Orchestration
 Provides business logic for human agents management operations
 """
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel
+
 from shared.logging_config import get_railway_logger
-import logging
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, EmailStr
+
 from ..dao.chat_dao import ChatDAO
 
 logger = get_railway_logger(__name__)

@@ -1,14 +1,13 @@
 import os
-import sys
 from contextlib import asynccontextmanager
-from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from shared.config import settings
-from shared.utils import log_endpoint_request
-from shared.logging_config import auto_configure_logging
-from chatbot_orchestration.service.agent_service import pydantic_ai_service
+
 from chatbot_orchestration.routers import chat_router, human_agents_router
+from chatbot_orchestration.service.agent_service import pydantic_ai_service
+from shared.logging_config import auto_configure_logging
+from shared.utils import log_endpoint_request
 
 # Configure Railway-compatible logging
 logger = auto_configure_logging("chatbot_orchestration")
@@ -82,6 +81,7 @@ async def health_check(request: Request):
 
 if __name__ == "__main__":
     import uvicorn
+
     # Port selection order: Service-specific -> Railway PORT -> Default 8003
     port = int(os.getenv("CHATBOT_ORCH_PORT", os.getenv("PORT", "8003")))
     logger.info(f"🚀 Starting chatbot_orchestration service on port {port}")

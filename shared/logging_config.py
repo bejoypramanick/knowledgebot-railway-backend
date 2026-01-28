@@ -3,9 +3,9 @@ Railway-compatible logging configuration
 Ensures logs are properly formatted and visible in Railway deployment
 """
 import logging
-import sys
 import os
-from typing import Optional
+import sys
+
 
 def setup_railway_logging(service_name: str, level: str = "INFO") -> logging.Logger:
     """

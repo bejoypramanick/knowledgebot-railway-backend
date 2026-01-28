@@ -2,20 +2,17 @@
 Chat Log Endpoints for Human Agents
 Handles chat session management, assignment, and messaging for human agents.
 """
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
+import asyncio
+import json
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Set
-from shared.logging_config import get_railway_logger
-import logging
-from datetime import datetime, timedelta
-import uuid
-import json
-import time
-import os
-import asyncio
 
 from shared.auth_middleware import get_current_user
+from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 
@@ -25,10 +22,9 @@ router = APIRouter(prefix="/api/v1/admin", tags=["chat-log"])
 public_chat_router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
 
-from ..schemas.chat_log_schemas import (
-    ChatMessageResponse, ChatSessionResponse, ChatSessionsResponse,
-    SendMessageRequest, SendMessageResponse
-)
+from ..schemas.chat_log_schemas import (ChatSessionsResponse,
+                                        SendMessageRequest,
+                                        SendMessageResponse)
 from ..service.chat_log_service import ChatLogService
 from ..utils.sse_manager import connection_manager
 

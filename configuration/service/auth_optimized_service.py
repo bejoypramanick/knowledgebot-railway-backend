@@ -2,20 +2,16 @@
 Auth Optimized Service Layer for Configuration
 Provides business logic for optimized authentication operations
 """
-from shared.logging_config import get_railway_logger
-import logging
 import time
-from typing import Optional, Dict, Any, List, Tuple
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from typing import Any, Dict, Tuple
 
-from shared.firebase_auth import (
-    verify_firebase_token,
-    get_user_by_uid,
-    init_firebase_auth,
-    get_user_from_firestore,
-    save_user_to_firestore,
-    update_user_role_in_firestore
-)
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+from shared.firebase_auth import (get_user_from_firestore,
+                                  save_user_to_firestore,
+                                  verify_firebase_token)
+from shared.logging_config import get_railway_logger
+
 from ..service.auth_service import AuthService
 
 logger = get_railway_logger(__name__)

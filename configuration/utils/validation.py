@@ -1,5 +1,3 @@
-import re
-from typing import List, Dict
 
 try:
     import bleach
@@ -10,6 +8,7 @@ except ImportError:
     bleach = type('bleach', (), {'clean': staticmethod(clean)})()
 
 from ..schemas.models import ChatbotConfigRequest
+
 
 def sanitize_text_input(text: str, max_length: int = 1000) -> str:
     """Sanitize user input to prevent XSS and other attacks"""

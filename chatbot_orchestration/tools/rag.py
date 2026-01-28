@@ -1,10 +1,9 @@
-from shared.logging_config import get_railway_logger
-import logging
-import uuid
 import os
-from typing import List, Annotated
+from typing import Annotated, List
 
 from google.genai import types
+
+from shared.logging_config import get_railway_logger
 
 from ..core.ai import get_genai_client
 from ..schemas.models import SearchResult

@@ -2,11 +2,12 @@
 Scraping Service Layer for Website Crawling
 Provides business logic for website scraping operations
 """
+from typing import Any, Dict, Optional
+
 from shared.logging_config import get_railway_logger
-import logging
-from typing import Optional, Dict, Any
-from ..dao.scraping_dao import ScrapingDAO
+
 from ..core.ai import get_genai_client
+from ..dao.scraping_dao import ScrapingDAO
 
 logger = get_railway_logger(__name__)
 
@@ -40,7 +41,6 @@ class ScrapingService:
                 logger.info(f"Deleted Gemini file: {file_name}")
             except Exception as e:
                 logger.warning(f"Failed to delete Gemini file {file_name}: {e}")
-                pass
 
     async def insert_scraped_metadata(self, metadata: dict):
         """Insert scraped metadata into database."""

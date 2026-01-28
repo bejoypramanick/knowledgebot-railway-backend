@@ -1,30 +1,32 @@
 """
 Configuration Service - Handles chatbot and widget configuration management
 """
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import os
 import datetime
+import os
 import sys
-from pathlib import Path
-from dotenv import load_dotenv
+from contextlib import asynccontextmanager
 
-from shared.db import close_databases, railway_db
-from shared.utils import validate_environment, wait_for_railway_network, service_status
-from shared.firebase_auth import init_firebase_auth
-from shared.database_initializer import database_initializer
-from shared.logging_config import auto_configure_logging
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 # Import Routers
 from configuration.routers import chatbot_router, widget_router
-from configuration.routers.feedback import router as feedback_router
-from configuration.routers.token_usage import router as token_usage_router
-from configuration.routers.performance import router as performance_router
-from configuration.routers.admin_management import router as admin_management_router
+from configuration.routers.admin_management import \
+    router as admin_management_router
 from configuration.routers.auth_optimized import router as auth_router
-from configuration.routers.chat_log import router as chat_log_router, public_chat_router
+from configuration.routers.chat_log import public_chat_router
+from configuration.routers.chat_log import router as chat_log_router
+from configuration.routers.feedback import router as feedback_router
+from configuration.routers.performance import router as performance_router
+from configuration.routers.token_usage import router as token_usage_router
 from configuration.routers.user_ids import router as user_ids_router
+from shared.database_initializer import database_initializer
+from shared.db import close_databases, railway_db
+from shared.firebase_auth import init_firebase_auth
+from shared.logging_config import auto_configure_logging
+from shared.utils import (service_status, validate_environment,
+                          wait_for_railway_network)
 
 load_dotenv()
 

@@ -1,10 +1,11 @@
-from shared.logging_config import get_railway_logger
-import logging
 import json
-import asyncio
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Set
+from typing import Optional
+
 from fastapi import HTTPException
+
+from shared.logging_config import get_railway_logger
+
 from ..dao.chat_log_dao import ChatLogDAO
 
 logger = get_railway_logger(__name__)

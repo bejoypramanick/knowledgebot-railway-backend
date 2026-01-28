@@ -1,12 +1,15 @@
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
-import httpx
-from shared.logging_config import get_railway_logger
-import logging
 import asyncio
 
+import httpx
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+
 from api_gateway.core.config import CHATBOT_ORCHESTRATION_URL
-from api_gateway.schemas.models import ChatRequest, SuggestedMessagesRequest, SuggestedMessagesResponse, ListSessionsResponse, DeleteSessionResponse
+from api_gateway.schemas.models import (DeleteSessionResponse,
+                                        ListSessionsResponse,
+                                        SuggestedMessagesRequest,
+                                        SuggestedMessagesResponse)
+from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

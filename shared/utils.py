@@ -1,20 +1,21 @@
 """Shared utility functions."""
-import httpx
-from typing import Optional, Dict, Any, Callable, TypeVar, Tuple
-from shared.logging_config import get_railway_logger
+import asyncio
+import faulthandler
 import logging
-from fastapi import HTTPException, FastAPI, Request
+import os
+import signal
+import sys
+import time
+import traceback
+from typing import Any, Dict, Optional
+
+import httpx
+import psutil
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.status import HTTP_503_SERVICE_UNAVAILABLE
-import sys
-import os
-import asyncio
-import signal
-import traceback
-import faulthandler
-import time
 from tenacity import retry, stop_after_attempt, wait_exponential
-import psutil
+
 from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
@@ -342,8 +343,8 @@ class GracefulShutdown:
         logger.warning(f"Received signal {signum} ({signal_name}) - initiating shutdown; dumping tracebacks for diagnostics")
 
         # Log current stack traces for debugging
-        import traceback
         import threading
+        import traceback
 
         logger.info("Current thread dump:")
         for thread in threading.enumerate():

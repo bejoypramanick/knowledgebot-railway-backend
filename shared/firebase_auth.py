@@ -3,11 +3,12 @@ Firebase Authentication and Firestore Service
 Verifies Firebase Auth tokens and manages user data in Firestore.
 """
 import os
-from shared.logging_config import get_railway_logger
-import logging
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 import firebase_admin
-from firebase_admin import credentials, auth, firestore
+from firebase_admin import auth, credentials, firestore
+
+from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

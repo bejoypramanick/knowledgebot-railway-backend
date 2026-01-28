@@ -1,27 +1,30 @@
-from shared.logging_config import get_railway_logger
-import logging
 import os
 import time
 from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
 # Configure Railway-compatible logging
 from shared.logging_config import auto_configure_logging
+
 logger = auto_configure_logging("api_gateway")
 
-from shared.utils import setup_global_exception_logging, register_fastapi_exception_handlers
-
-# Import routers and config
-from api_gateway.routers import health_router, knowledgebase_router, scrape_router, chat_router, config_router, sse_router
-from api_gateway.utils.middleware import log_requests_middleware, add_security_headers_middleware
 from api_gateway.core.config import SERVICE_IDENTITY
+# Import routers and config
+from api_gateway.routers import (chat_router, config_router, health_router,
+                                 knowledgebase_router, scrape_router,
+                                 sse_router)
+from api_gateway.utils.middleware import (add_security_headers_middleware,
+                                          log_requests_middleware)
+from shared.utils import (register_fastapi_exception_handlers,
+                          setup_global_exception_logging)
 
 setup_global_exception_logging("api_gateway")
 

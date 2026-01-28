@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+
 @dataclass
 class ChatSessionDeps:
     """Dependencies for chat session."""

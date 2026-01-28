@@ -1,7 +1,7 @@
-from urllib.parse import urlparse
 from typing import List
+from urllib.parse import urlparse
+
 from shared.logging_config import get_railway_logger
-import logging
 
 logger = get_railway_logger(__name__)
 

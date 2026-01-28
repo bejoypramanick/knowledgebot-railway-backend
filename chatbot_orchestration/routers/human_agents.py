@@ -1,14 +1,15 @@
 """
 Human Agents Management Endpoints for Chatbot Orchestration
 """
-from fastapi import APIRouter, HTTPException, Depends
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
-from typing import List, Optional
-from shared.logging_config import get_railway_logger
-import logging
 
 from shared.auth_middleware import get_current_user
-from ..service.human_agents_service import HumanAgentsService, AgentResponse
+from shared.logging_config import get_railway_logger
+
+from ..service.human_agents_service import AgentResponse, HumanAgentsService
 
 logger = get_railway_logger(__name__)
 

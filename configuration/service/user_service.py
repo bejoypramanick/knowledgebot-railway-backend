@@ -2,9 +2,10 @@
 User Service Layer
 Provides business logic for user management operations
 """
+from typing import Any, Dict, Optional
+
 from shared.logging_config import get_railway_logger
-import logging
-from typing import Optional, Dict, Any, List
+
 from ..dao.user_dao import UserDAO
 
 logger = get_railway_logger(__name__)
@@ -75,9 +76,9 @@ class UserService:
     
     def _generate_unique_id(self, role: str) -> str:
         """Generate a new unique ID."""
-        import uuid
         import random
         import string
+        import uuid
         
         prefix = {
             'customer': 'CUST',

@@ -1,9 +1,10 @@
 import hashlib
 import os
-from shared.logging_config import get_railway_logger
-import logging
 import tempfile
+
 from fastapi import UploadFile
+
+from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

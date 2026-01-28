@@ -1,28 +1,26 @@
-from shared.logging_config import get_railway_logger
-import logging
 import asyncio
+import os
 import time
 from typing import List, Optional
-from fastapi import APIRouter, UploadFile, File, Form, Header, HTTPException, Query, Request, status
 
-from ..schemas.models import (
-    UploadResponse, FileInfo, BatchUploadResponse, BatchDeleteResponse, BatchUploadItem, BatchDeleteItem
-)
-from ..service.ingestion_service import (
-    process_single_file_upload, delete_file_logic, process_single_file_delete
-)
-from ..utils.files import stream_to_temp_file, calculate_sha256
-from ..utils.validation import (
-    sanitize_filename, validate_file_extension, validate_mime_type, validate_file_size, detect_mime_type_from_extension
-)
-from ..utils.constants import (
-    MAX_FILE_SIZE_BYTES, ALLOWED_FILE_EXTENSIONS, ALLOWED_MIME_TYPES
-)
-from ..core.ai import get_genai_client, genai_client
-from shared.config import settings
+from fastapi import (APIRouter, File, Form, Header, HTTPException, Query,
+                     UploadFile)
+
 from shared import db
-from shared.utils import log_endpoint_request
-import os
+from shared.logging_config import get_railway_logger
+
+from ..core.ai import get_genai_client
+from ..schemas.models import (BatchDeleteItem, BatchDeleteResponse,
+                              BatchUploadResponse, FileInfo, UploadResponse)
+from ..service.ingestion_service import (delete_file_logic,
+                                         process_single_file_delete,
+                                         process_single_file_upload)
+from ..utils.constants import (ALLOWED_FILE_EXTENSIONS, ALLOWED_MIME_TYPES,
+                               MAX_FILE_SIZE_BYTES)
+from ..utils.files import calculate_sha256, stream_to_temp_file
+from ..utils.validation import (detect_mime_type_from_extension,
+                                sanitize_filename, validate_file_extension,
+                                validate_file_size, validate_mime_type)
 
 logger = get_railway_logger(__name__)
 
@@ -100,7 +98,7 @@ async def upload_document(
         # But process_single_file_upload handles streaming internally.
         # We already streamed it here.
         # Let's import process_with_gemini from services.ingestion_service
-        from ..service.ingestion_service import process_with_gemini, record_metadata
+        from ..service.ingestion_service import process_with_gemini
         
         detected_mime = detect_mime_type_from_extension(original_filename, file.content_type)
         uploaded_file, final_state, gemini_processed_at = await process_with_gemini(

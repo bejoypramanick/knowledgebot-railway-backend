@@ -2,15 +2,15 @@
 Admin Management Endpoints
 Handles admin user creation, verification, and role management.
 """
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, EmailStr
-from typing import List, Optional
 import secrets
-from shared.logging_config import get_railway_logger
-import logging
+from typing import List
 
-from shared.firebase_auth import get_user_from_firestore, save_user_to_firestore, update_user_role_in_firestore
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, EmailStr
+
 from shared.auth_middleware import get_current_user
+from shared.logging_config import get_railway_logger
+
 from ..service.auth_service import AuthService
 
 logger = get_railway_logger(__name__)

@@ -2,9 +2,10 @@
 Auth Service Layer
 Provides business logic for authentication operations
 """
+from typing import Any, Dict, List, Optional
+
 from shared.logging_config import get_railway_logger
-import logging
-from typing import List, Optional, Dict, Any
+
 from ..dao.auth_dao import AuthDAO
 
 logger = get_railway_logger(__name__)

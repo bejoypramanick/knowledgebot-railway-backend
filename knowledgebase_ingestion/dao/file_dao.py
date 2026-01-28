@@ -1,8 +1,7 @@
-from shared.logging_config import get_railway_logger
-import logging
 import json
-from typing import Optional, Dict, Any, List
-from shared import db
+from typing import Any, Dict, List, Optional
+
+from shared.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 
