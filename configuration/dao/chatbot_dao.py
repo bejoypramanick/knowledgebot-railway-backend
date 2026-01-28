@@ -40,18 +40,60 @@ class ChatbotDAO:
             )
 
     async def get_active_persona(self) -> Optional[Dict[str, Any]]:
-        """Get active chatbot persona (fallback to default since chatbot_personas table doesn't exist)."""
+        """Get active chatbot persona from database."""
         try:
-            # Return default persona since chatbot_personas table doesn't exist
+            async with get_db_connection() as conn:
+                # Try to get active persona from database
+                persona = await conn.fetchrow(
+                    """
+                    SELECT persona_name, persona_description, system_prompt, is_active
+                    FROM chatbot_personas
+                    WHERE is_active = true
+                    LIMIT 1
+                    """
+                )
+                
+                if persona:
+                    return dict(persona)
+                else:
+                    # Fallback to default persona if no active persona found
+                    return {
+                        'persona_name': 'KnowledgeBot',
+                        'persona_description': 'A helpful AI assistant for knowledge management',
+                        'is_active': True,
+                        'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
+                    }
+        except Exception as e:
+            logger.error(f"Error getting active persona: {e}")
+            # Return fallback persona in case of database error
             return {
                 'persona_name': 'KnowledgeBot',
                 'persona_description': 'A helpful AI assistant for knowledge management',
                 'is_active': True,
                 'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
             }
+
+    async def get_all_personas(self) -> List[Dict[str, Any]]:
+        """Get all available personas from database."""
+        try:
+            async with get_db_connection() as conn:
+                personas = await conn.fetch(
+                    """
+                    SELECT persona_name, persona_description, system_prompt, is_active
+                    FROM chatbot_personas
+                    ORDER BY persona_name
+                    """
+                )
+                return [dict(persona) for persona in personas]
         except Exception as e:
-            logger.error(f"Error getting active persona: {e}")
-            return None
+            logger.error(f"Error getting all personas: {e}")
+            # Return fallback persona list in case of database error
+            return [{
+                'persona_name': 'KnowledgeBot',
+                'persona_description': 'A helpful AI assistant for knowledge management',
+                'is_active': True,
+                'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
+            }]
 
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
         """Get LLM providers for this service."""

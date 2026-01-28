@@ -14,6 +14,36 @@ logger = get_railway_logger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["Chatbot Configuration"])
 
+@router.get("/personas", response_model=dict)
+async def get_all_personas(current_user: dict = Depends(get_current_user)):
+    """Get all available chatbot personas."""
+    try:
+        service = ConfigurationService()
+        personas = await service.get_all_personas()
+        return {
+            "personas": personas,
+            "total": len(personas)
+        }
+    except Exception as e:
+        logger.error(f"Error fetching personas: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching personas: {str(e)}")
+
+
+@router.post("/personas/{persona_name}/activate", response_model=dict)
+async def activate_persona(persona_name: str, current_user: dict = Depends(get_current_user)):
+    """Activate a specific persona."""
+    try:
+        service = ConfigurationService()
+        success = await service.activate_persona(persona_name)
+        if success:
+            return {"message": f"Persona '{persona_name}' activated successfully"}
+        else:
+            raise HTTPException(status_code=404, detail=f"Persona '{persona_name}' not found")
+    except Exception as e:
+        logger.error(f"Error activating persona: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error activating persona: {str(e)}")
+
+
 @router.get("/configuration/chatbot")
 async def get_chatbot_config():
     """Get chatbot configuration"""

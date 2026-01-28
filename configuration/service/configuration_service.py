@@ -376,8 +376,11 @@ class ConfigurationService:
             # Build persona dict
             persona_config = {
                 "system_prompt": persona.get('system_prompt', '') if persona else "",
-                "selected_persona": persona.get('persona_name', 'KnowledgeBot') if persona else "friendly-receptionist"
+                "selected_persona": persona.get('persona_name', 'KnowledgeBot') if persona else "KnowledgeBot"
             }
+
+            # Get all available personas
+            all_personas = await self.get_all_personas()
 
             # Build final configuration
             data = {
@@ -393,6 +396,7 @@ class ConfigurationService:
                     "backup_logs": False  # This was removed from old schema, keeping default
                 },
                 "persona": persona_config,
+                "available_personas": all_personas,
                 "llm_tokens": llm_tokens
             }
 
@@ -486,6 +490,40 @@ class ConfigurationService:
             return data
         except Exception as e:
             logger.error(f"Error getting widget configuration: {e}")
+            raise
+
+    async def get_all_personas(self) -> List[Dict[str, Any]]:
+        """Get all available personas from the database."""
+        try:
+            chatbot_dao = ChatbotDAO()
+            return await chatbot_dao.get_all_personas()
+        except Exception as e:
+            logger.error(f"Error getting all personas: {e}")
+            raise
+
+    async def activate_persona(self, persona_name: str) -> bool:
+        """Activate a specific persona by deactivating all others and activating the selected one."""
+        try:
+            chatbot_dao = ChatbotDAO()
+            async with get_db_connection() as conn:
+                # Start transaction
+                async with conn.transaction():
+                    # Deactivate all personas
+                    await conn.execute(
+                        "UPDATE chatbot_personas SET is_active = false, updated_at = NOW()"
+                    )
+                    # Activate the selected persona
+                    result = await conn.execute(
+                        """
+                        UPDATE chatbot_personas 
+                        SET is_active = true, updated_at = NOW() 
+                        WHERE persona_name = $1
+                        """,
+                        persona_name
+                    )
+                    return result == "UPDATE 1"
+        except Exception as e:
+            logger.error(f"Error activating persona '{persona_name}': {e}")
             raise
 
 # Singleton instance
