@@ -147,3 +147,27 @@ class UserDAO:
                 logger.info(f"🤖 Human agent role confirmed for {user_email}")
 
         return roles
+
+    async def get_all_human_agents(self) -> List[str]:
+        """Get all human agent emails."""
+        try:
+            async with get_db_connection() as conn:
+                results = await conn.fetch(
+                    "SELECT email FROM human_agents WHERE is_active = true"
+                )
+                return [row['email'] for row in results]
+        except Exception as e:
+            logger.error(f"Error getting human agents: {e}")
+            return []
+
+    async def get_all_admins(self) -> List[str]:
+        """Get all admin emails."""
+        try:
+            async with get_db_connection() as conn:
+                results = await conn.fetch(
+                    "SELECT email FROM admins WHERE status = 'active'"
+                )
+                return [row['email'] for row in results]
+        except Exception as e:
+            logger.error(f"Error getting admins: {e}")
+            return []
