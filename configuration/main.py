@@ -18,7 +18,6 @@ from shared.database_initializer import database_initializer
 
 # Import Routers
 from configuration.routers import chatbot, widget
-from configuration.human_agents import router as human_agents_router
 from configuration.feedback import router as feedback_router
 from configuration.token_usage import router as token_usage_router
 from configuration.performance import router as performance_router
@@ -173,7 +172,6 @@ async def health_check():
 # Include Routers
 app.include_router(chatbot.router)
 app.include_router(widget.router)
-app.include_router(human_agents_router)
 app.include_router(feedback_router)
 app.include_router(token_usage_router)
 app.include_router(admin_management_router)

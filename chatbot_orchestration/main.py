@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from shared.config import settings
 from shared.utils import log_endpoint_request
 from chatbot_orchestration.servcie.agent_service import pydantic_ai_service
-from chatbot_orchestration.routers import chat
+from chatbot_orchestration.routers import chat, human_agents
 from chatbot_orchestration.core.database import get_railway_db
 
 # Configure logging
@@ -67,6 +67,7 @@ app.add_middleware(
 
 # Include Routers
 app.include_router(chat.router)
+app.include_router(human_agents.router)
 
 @app.get("/")
 async def root_diagnostic(request: Request):
