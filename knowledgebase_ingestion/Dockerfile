@@ -35,7 +35,7 @@ RUN echo "📦 Installing system dependencies..." && \
     echo "🧹 Cleaned up apt cache"
 
 # Copy and install Python dependencies
-COPY requirements.txt .
+COPY knowledgebase_ingestion/requirements.txt ./requirements.txt
 RUN echo "🐍 Installing Python dependencies..." && \
     pip install --no-cache-dir -r requirements.txt && \
     echo "✅ Python dependencies installed" && \

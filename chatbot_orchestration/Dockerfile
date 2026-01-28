@@ -14,7 +14,7 @@ RUN echo "✅ System Packages installed successfully"
 
 # Build Stage 2: Python Dependencies
 RUN echo "🐍 --- Installing Python Dependencies ---"
-COPY requirements.txt .
+COPY chatbot_orchestration/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 RUN echo "📦 --- Installed Python Packages ---"
 RUN pip list
