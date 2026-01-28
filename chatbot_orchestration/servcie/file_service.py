@@ -4,6 +4,11 @@ Provides business logic for file operations
 """
 import logging
 from typing import List, Optional, Dict, Any
+import sys
+from pathlib import Path
+
+# Add the project root to the path to allow cross-module imports
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from knowledgebase_ingestion.dao.file_dao import FileDAO
 
 logger = logging.getLogger(__name__)
