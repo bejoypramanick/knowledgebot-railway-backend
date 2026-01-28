@@ -1,10 +1,8 @@
 import json
 import os
-import tempfile
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, Form
 from fastapi.responses import JSONResponse
-import asyncpg
 from typing import Optional
 
 from services.configuration_service.core.database import get_db_connection
@@ -157,64 +155,5 @@ async def save_widget_config(
         logger.error(f"Error saving widget configuration: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error saving widget configuration: {str(e)}")
 
-@router.post("/widget/upload-image")
-async def upload_widget_image(
-    file: UploadFile = File(...),
-    type: str = Form(...),  # 'profile', 'chatIcon', or 'headerIcon'
-    current_user: dict = Depends(get_current_user),
-    request: Request = None
-):
-    """Upload widget related images (profile, chat icon, header icon) to R2 storage."""
-    
-    # Access r2_storage from app state
-    r2_storage = getattr(request.app.state, 'r2_storage', None)
-    
-    if not r2_storage:
-        raise HTTPException(status_code=503, detail="R2 storage not configured")
-
-    if type not in ['profile', 'chatIcon', 'headerIcon']:
-        raise HTTPException(status_code=400, detail="Invalid image type. Must be 'profile', 'chatIcon', or 'headerIcon'")
-
-    # Validate file type
-    allowed_content_types = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
-    if file.content_type not in allowed_content_types:
-        raise HTTPException(status_code=400, detail="Invalid file type. Only JPEG, PNG, WEBP, and GIF are allowed.")
-
-    # Validate file size (max 2MB)
-    MAX_SIZE = 2 * 1024 * 1024
-    content = await file.read()
-    if len(content) > MAX_SIZE:
-        raise HTTPException(status_code=400, detail="File too large. Maximum size is 2MB.")
-    
-    # Reset file cursor for further reading if needed (not needed for small files read into memory)
-    
-    try:
-        # Create a temp file to upload
-        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename or "")[1]) as tmp:
-            tmp.write(content)
-            tmp_path = tmp.name
-
-        try:
-            # Upload to R2
-            # prefix = f"widget/{type}" # Unused prefix?
-            result = await r2_storage.upload_file(
-                file_path=tmp_path,
-                content_type=file.content_type,
-                metadata={'original_filename': file.filename or "unknown", 'user': current_user.get('email', 'unknown')}
-            )
-            
-            if not result or not result.get('url'):
-                raise HTTPException(status_code=500, detail="Failed to generate public URL for uploaded file")
-
-            logger.info(f"Successfully uploaded {type} image: {result['url']}")
-            return {
-                "url": result['url'],
-                "filename": file.filename
-            }
-        finally:
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-
-    except Exception as e:
-        logger.error(f"Error uploading image to R2: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
+# Images are now persisted directly in PostgreSQL database
+# No R2 storage upload needed

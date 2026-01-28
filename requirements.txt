@@ -26,11 +26,6 @@ aiofiles>=24.1.0
 python-multipart>=0.0.9
 psutil>=6.1.0
 
-# Cloudflare R2 (S3-compatible)
-# Use version compatible with pydantic-ai-slim bedrock extra (requires boto3>=1.40.14)
-boto3>=1.40.14
-botocore>=1.40.14
-
 # PostgreSQL
 asyncpg>=0.29.0
 psycopg2-binary>=2.9.0

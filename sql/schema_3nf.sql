@@ -369,14 +369,11 @@ CREATE TABLE file_uploads (
     original_filename VARCHAR(500) NOT NULL,
     display_name VARCHAR(500),
     file_extension VARCHAR(50),
-    cloudflare_r2_url TEXT,
-    cloudflare_r2_key VARCHAR(500),
     gemini_file_name VARCHAR(500),
     gemini_file_uri TEXT,
     mime_type VARCHAR(255),
     size_bytes BIGINT,
     sha256_hash VARCHAR(64),
-    r2_upload_status VARCHAR(50) DEFAULT 'pending',
     gemini_upload_status VARCHAR(50) DEFAULT 'pending',
     gemini_state VARCHAR(50),
     uploaded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -391,12 +388,11 @@ CREATE TABLE file_uploads (
 CREATE INDEX idx_file_uploads_user_id ON file_uploads(user_id);
 CREATE INDEX idx_file_uploads_gemini_file_name ON file_uploads(gemini_file_name);
 CREATE INDEX idx_file_uploads_gemini_state ON file_uploads(gemini_state);
-CREATE INDEX idx_file_uploads_r2_key ON file_uploads(cloudflare_r2_key);
 CREATE INDEX idx_file_uploads_uploaded_at ON file_uploads(uploaded_at DESC);
 
 -- REMOVED: CREATE TRIGGER update_file_uploads_updated_at
 
-COMMENT ON TABLE file_uploads IS 'Uploaded files with cloud storage references';
+COMMENT ON TABLE file_uploads IS 'Uploaded files with Gemini FileSearch integration';
 
 -- Scraped websites
 CREATE TABLE scraped_websites (

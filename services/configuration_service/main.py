@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from shared.db import close_databases, railway_db
 from shared.utils import validate_environment, wait_for_railway_network, service_status
-from shared.r2_storage import R2Storage
 from shared.firebase_auth import init_firebase_auth
 
 # Import Core modules
@@ -104,30 +103,6 @@ async def lifespan(app: FastAPI):
             app.state.database_url = None
             service_status.set_status("error")
             raise ValueError("Database URL not configured")
-
-        # Initialize R2 Storage
-        r2_url = os.getenv("R2_CONNECTION_URL")
-        if not r2_url:
-            # Construct from individual vars if available
-            r2_key = os.getenv("CLOUDFLARE_R2_ACCESS_KEY_ID")
-            r2_secret = os.getenv("CLOUDFLARE_R2_SECRET_ACCESS_KEY")
-            r2_account = os.getenv("CLOUDFLARE_R2_ACCOUNT_ID")
-            r2_bucket = os.getenv("CLOUDFLARE_R2_BUCKET_NAME")
-            r2_public = os.getenv("CLOUDFLARE_R2_PUBLIC_URL")
-            if all([r2_key, r2_secret, r2_account, r2_bucket]):
-                r2_url = f"r2://{r2_key}:{r2_secret}@{r2_account}/{r2_bucket}"
-                if r2_public:
-                    r2_url += f"?public_url={r2_public}"
-        
-        if r2_url:
-            try:
-                app.state.r2_storage = R2Storage(r2_url)
-                logger.info("✅ R2 storage initialized")
-            except Exception as e:
-                logger.error(f"❌ Failed to initialize R2 storage: {e}")
-                app.state.r2_storage = None
-        else:
-            app.state.r2_storage = None
 
         # Initialize Firebase Auth and Firestore
         try:

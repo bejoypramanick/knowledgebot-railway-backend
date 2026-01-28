@@ -55,7 +55,7 @@ class ChatDAO:
             return None
             
         return await self.db.fetchrow("""
-            SELECT id, cloudflare_r2_key, original_filename, display_name,
+            SELECT id, original_filename, display_name,
                    mime_type, size_bytes, metadata, created_at, gemini_file_name
             FROM file_uploads
             WHERE gemini_file_name = $1
@@ -69,7 +69,7 @@ class ChatDAO:
             return None
             
         return await self.db.fetchrow("""
-            SELECT id, cloudflare_r2_key, original_filename, display_name,
+            SELECT id, original_filename, display_name,
                    mime_type, size_bytes, metadata, created_at, gemini_file_name
             FROM file_uploads
             WHERE original_filename = $1
@@ -83,7 +83,7 @@ class ChatDAO:
             return None
             
         return await self.db.fetchrow("""
-            SELECT id, cloudflare_r2_key, original_filename, display_name,
+            SELECT id, original_filename, display_name,
                    mime_type, size_bytes, metadata, created_at, gemini_file_name
             FROM file_uploads
             WHERE gemini_file_name LIKE $1
@@ -97,7 +97,7 @@ class ChatDAO:
             return None
             
         return await self.db.fetchrow("""
-            SELECT id, cloudflare_r2_key, original_filename, display_name,
+            SELECT id, original_filename, display_name,
                    mime_type, size_bytes, metadata, created_at, gemini_file_name
             FROM file_uploads
             WHERE original_filename LIKE $1 OR display_name LIKE $1

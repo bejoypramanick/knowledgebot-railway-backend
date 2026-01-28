@@ -173,7 +173,6 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                         if file_record:
                             db_metadata = {
                                 'document_id': str(file_record['id']),
-                                's3_key': file_record['cloudflare_r2_key'],
                                 'original_filename': file_record['original_filename'] or original_filename,
                                 'display_name': file_record['display_name'] or display_name,
                                 'mime_type': file_record['mime_type'],
