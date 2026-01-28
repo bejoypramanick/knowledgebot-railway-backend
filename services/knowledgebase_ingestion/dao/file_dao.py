@@ -165,3 +165,61 @@ class FileDAO:
             metric_data['file_id'],
             json.dumps(metric_data['metadata'])
         )
+
+    async def get_active_files_count(self) -> int:
+        """Get count of active files."""
+        if not self.db:
+            return 0
+        
+        return await self.db.fetchval(
+            "SELECT COUNT(*) FROM file_uploads WHERE gemini_state = 'ACTIVE'"
+        )
+
+    async def get_recent_files(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Get recent uploaded files."""
+        if not self.db:
+            return []
+        
+        return await self.db.fetch(
+            """
+            SELECT display_name, mime_type, size_bytes, uploaded_at
+            FROM file_uploads
+            WHERE gemini_state = 'ACTIVE'
+            ORDER BY uploaded_at DESC
+            LIMIT $1
+            """,
+            limit
+        )
+
+    async def get_files(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get active files."""
+        if not self.db:
+            return []
+        
+        return await self.db.fetch(
+            """
+            SELECT display_name, mime_type, size_bytes, uploaded_at
+            FROM file_uploads
+            WHERE gemini_state = 'ACTIVE'
+            ORDER BY uploaded_at DESC
+            LIMIT $1
+            """,
+            limit
+        )
+
+    async def get_recent_metrics(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """Get recent metrics from the last 7 days."""
+        if not self.db:
+            return []
+        
+        return await self.db.fetch(
+            """
+            SELECT metric_name, SUM(value::numeric) as total_value, unit
+            FROM metrics
+            WHERE recorded_at > NOW() - INTERVAL '7 days'
+            GROUP BY metric_name, unit
+            ORDER BY total_value DESC
+            LIMIT $1
+            """,
+            limit
+        )

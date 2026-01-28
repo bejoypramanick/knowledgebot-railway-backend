@@ -77,9 +77,14 @@ async def query_railway_postgres(
     Only return aggregated statistics, file metadata, and anonymized information.
     """
     try:
+        from services.chatbot_orchestration.core.database import get_railway_db
+        from services.knowledgebase_ingestion.dao.file_dao import FileDAO
+        
         db = await get_railway_db()
         if not db:
             return "Railway PostgreSQL database is not configured."
+        
+        file_dao = FileDAO(db)
     except Exception as e:
         return f"Failed to initialize Railway PostgreSQL database: {e}"
     
@@ -90,20 +95,10 @@ async def query_railway_postgres(
         # File-related queries
         if any(word in query_lower for word in ['file', 'upload', 'document', 'document']):
             if 'count' in query_lower or 'total' in query_lower or 'number' in query_lower:
-                result = await db.fetchval(
-                    "SELECT COUNT(*) FROM file_uploads WHERE gemini_state = 'ACTIVE'"
-                )
+                result = await file_dao.get_active_files_count()
                 return f"Total active files in the system: {result}"
             elif 'recent' in query_lower or 'latest' in query_lower:
-                files = await db.fetch(
-                    """
-                    SELECT display_name, mime_type, size_bytes, uploaded_at
-                    FROM file_uploads
-                    WHERE gemini_state = 'ACTIVE'
-                    ORDER BY uploaded_at DESC
-                    LIMIT 5
-                    """
-                )
+                files = await file_dao.get_recent_files(5)
                 if files:
                     result = "Recent uploaded files:\n"
                     for f in files:
@@ -112,15 +107,7 @@ async def query_railway_postgres(
                 return "No recent files found."
             else:
                 # General file info
-                files = await db.fetch(
-                    """
-                    SELECT display_name, mime_type, size_bytes, uploaded_at
-                    FROM file_uploads
-                    WHERE gemini_state = 'ACTIVE'
-                    ORDER BY uploaded_at DESC
-                    LIMIT 10
-                    """
-                )
+                files = await file_dao.get_files(10)
                 if files:
                     result = f"Found {len(files)} active files:\n"
                     for f in files:
@@ -130,16 +117,7 @@ async def query_railway_postgres(
         
         # Metrics queries
         elif any(word in query_lower for word in ['metric', 'statistic', 'analytics', 'usage']):
-            metrics = await db.fetch(
-                """
-                SELECT metric_name, SUM(value::numeric) as total_value, unit
-                FROM metrics
-                WHERE recorded_at > NOW() - INTERVAL '7 days'
-                GROUP BY metric_name, unit
-                ORDER BY total_value DESC
-                LIMIT 10
-                """
-            )
+            metrics = await file_dao.get_recent_metrics(10)
             if metrics:
                 result = "Recent metrics (last 7 days):\n"
                 for m in metrics:
@@ -148,7 +126,7 @@ async def query_railway_postgres(
             return "No metrics found."
         
         # Default: return file count
-        count = await db.fetchval("SELECT COUNT(*) FROM file_uploads WHERE gemini_state = 'ACTIVE'")
+        count = await file_dao.get_active_files_count()
         return f"Database contains {count} active files. Please be more specific about what information you need."
         
     except Exception as e:
