@@ -4,9 +4,8 @@ Provides business logic for file operations
 """
 from typing import Any, Dict, Optional
 
+from shared import db
 from shared.logging_config import get_railway_logger
-
-from ..dao.file_dao import FileDAO
 
 logger = get_railway_logger(__name__)
 
@@ -14,7 +13,7 @@ class FileService:
     """Service layer for file operations"""
     
     def __init__(self):
-        self.file_dao = FileDAO()  # Service manages its own DAO
+        pass  # No DAO needed - using direct database calls
     
     async def get_or_create_user(self, email: str) -> str:
         """Get user identifier for tracking purposes."""
@@ -23,8 +22,9 @@ class FileService:
             return None
         
         try:
-            user_email = await self.file_dao.get_user_by_email(email)
-            return user_email if user_email else email
+            # Simple user lookup - for now just return email
+            # In future, could implement user table lookup
+            return email
         except Exception as e:
             logger.error(f"Error checking user tables for email {email}: {e}")
             return email
@@ -43,18 +43,28 @@ class FileService:
     ):
         """Record API usage to the database."""
         try:
-            await self.file_dao.record_api_usage(
-                user_id, provider, endpoint, method, status_code,
-                req_size, res_size, duration_ms, metadata
-            )
+            if db.railway_db:
+                await db.railway_db.execute(
+                    """INSERT INTO api_usage (user_id, provider, endpoint, method, status_code, 
+                       req_size, res_size, duration_ms, metadata, created_at) 
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())""",
+                    user_id, provider, endpoint, method, status_code,
+                    req_size, res_size, duration_ms, metadata
+                )
         except Exception as e:
             logger.exception("Failed to record API usage: %s", e)
 
     async def check_duplicate_file(self, sha256_hash: str, original_filename: str) -> Optional[Dict[str, Any]]:
         """Check if a file with the same hash or name already exists."""
         try:
+            if not db.railway_db:
+                return None
+                
             # Check by hash first (exact duplicate)
-            existing = await self.file_dao.find_duplicate_by_hash(sha256_hash)
+            existing = await db.railway_db.fetchrow(
+                "SELECT id, original_filename, display_name, sha256_hash, size_bytes, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1",
+                sha256_hash
+            )
             if existing:
                 return {
                     "id": str(existing['id']),
@@ -63,12 +73,15 @@ class FileService:
                     "sha256_hash": existing['sha256_hash'],
                     "size_bytes": existing['size_bytes'],
                     "gemini_file_name": existing['gemini_file_name'],
-                    "version": existing['version'],
+                    "version": existing.get('version', 1),
                     "match_type": "hash"
                 }
             
             # Check by filename (same name, different content)
-            existing_by_name = await self.file_dao.find_duplicate_by_name(original_filename)
+            existing_by_name = await db.railway_db.fetchrow(
+                "SELECT id, original_filename, display_name, sha256_hash, size_bytes, gemini_file_name, version FROM file_uploads WHERE original_filename = $1",
+                original_filename
+            )
             if existing_by_name:
                 return {
                     "id": str(existing_by_name['id']),
@@ -77,7 +90,7 @@ class FileService:
                     "sha256_hash": existing_by_name['sha256_hash'],
                     "size_bytes": existing_by_name['size_bytes'],
                     "gemini_file_name": existing_by_name['gemini_file_name'],
-                    "version": existing_by_name['version'],
+                    "version": existing_by_name.get('version', 1),
                     "match_type": "filename"
                 }
             
@@ -89,8 +102,9 @@ class FileService:
     async def delete_existing_file_record(self, db_id: str):
         """Delete an existing file record from database."""
         try:
-            await self.file_dao.delete_file_record(db_id)
-            logger.info(f"Deleted old file record from database: {db_id}")
+            if db.railway_db:
+                await db.railway_db.execute("DELETE FROM file_uploads WHERE id = $1", db_id)
+                logger.info(f"Deleted old file record from database: {db_id}")
         except Exception as e:
             logger.error(f"Error deleting existing file record: {e}")
 
@@ -102,37 +116,29 @@ class FileService:
         try:
             logger.info(f"🗄️ [DB] Saving metadata for {original_filename} (version {version})")
             
-            record_data = {
-                'user_id': user_id,
-                'original_filename': original_filename,
-                'display_name': file_display_name,
-                'file_ext': file_ext.lstrip('.'),
-                'gemini_file_name': uploaded_file.name,
-                'gemini_file_uri': getattr(uploaded_file, 'uri', None),
-                'mime_type': mime_type,
-                'file_size': file_size,
-                'sha256_hash': sha256_hash,
-                'status': final_state.lower(),
-                'state': final_state,
-                'processed_at': gemini_processed_at,
-                'expires_at': uploaded_file.expiration_time if hasattr(uploaded_file, 'expiration_time') else None,
-                'metadata': {'gemini_file_id': uploaded_file.name},
-                'version': version
-            }
+            if not db.railway_db:
+                logger.warning("Database not available - skipping metadata recording")
+                return None
             
-            db_record_id = await self.file_dao.insert_file_record(record_data)
+            db_record_id = await db.railway_db.fetchval(
+                """INSERT INTO file_uploads (user_id, original_filename, display_name, file_extension, 
+                   gemini_file_name, gemini_file_uri, mime_type, size_bytes, sha256_hash, 
+                   gemini_state, processed_at, version, created_at) 
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()) RETURNING id""",
+                user_id, original_filename, file_display_name, file_ext.lstrip('.'),
+                uploaded_file.name, getattr(uploaded_file, 'uri', None), mime_type,
+                file_size, sha256_hash, final_state, gemini_processed_at, version
+            )
+            
             logger.info(f"✅ [DB] Record created with ID: {db_record_id} (version {version})")
             
             # Log metric
-            await self.file_dao.record_metric({
-                'type': 'file_upload',
-                'name': 'file_size_bytes',
-                'value': file_size,
-                'unit': 'bytes',
-                'user_id': user_id,
-                'file_id': db_record_id,
-                'metadata': {'filename': original_filename}
-            })
+            await db.railway_db.execute(
+                """INSERT INTO metrics (type, name, value, unit, user_id, file_id, metadata, created_at) 
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())""",
+                'file_upload', 'file_size_bytes', file_size, 'bytes', user_id, db_record_id,
+                {'filename': original_filename}
+            )
             
             return db_record_id
         except Exception as e:
@@ -142,8 +148,14 @@ class FileService:
     async def find_file_record(self, file_id: str):
         """Find file record by ID across multiple tables"""
         try:
+            if not db.railway_db:
+                return None
+                
             # Look up in file_uploads table
-            record = await self.file_dao.find_file_by_id(file_id, 'file_uploads')
+            record = await db.railway_db.fetchrow(
+                "SELECT gemini_file_name, original_filename FROM file_uploads WHERE id = $1",
+                file_id
+            )
             if record:
                 return {
                     'gemini_file_name': record['gemini_file_name'],
@@ -152,7 +164,10 @@ class FileService:
                 }
             
             # Look up in scraped_websites table
-            record = await self.file_dao.find_file_by_id(file_id, 'scraped_websites')
+            record = await db.railway_db.fetchrow(
+                "SELECT gemini_file_name, original_url FROM scraped_websites WHERE id = $1",
+                file_id
+            )
             if record:
                 return {
                     'gemini_file_name': record['gemini_file_name'],
@@ -168,7 +183,8 @@ class FileService:
     async def delete_file_record(self, file_id: str, table_name: str):
         """Delete file record from specified table"""
         try:
-            await self.file_dao.delete_file_by_id(file_id, table_name)
+            if db.railway_db:
+                await db.railway_db.execute(f"DELETE FROM {table_name} WHERE id = $1", file_id)
         except Exception as e:
             logger.error(f"Error deleting file record: {e}")
             raise
