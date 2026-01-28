@@ -200,10 +200,6 @@ class ChatbotConfigRequest(BaseModel):
 
     model_config = {
         'validate_assignment': True,
-        'error_msg_templates': {
-            'value_error.const': 'Invalid value for field',
-            'value_error.missing': 'This field is required',
-        }
     }
 
 class PositionData(BaseModel):

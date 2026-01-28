@@ -76,7 +76,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # Routers
-app.include_router(files.router)
+app.include_router(files)
 
 @app.get("/health")
 async def health_check(request: Request):

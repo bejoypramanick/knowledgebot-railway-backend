@@ -309,21 +309,25 @@ async def wait_for_railway_network() -> None:
 
 def validate_environment() -> None:
     """Validate required environment variables."""
-    required_vars = [
-        'DATABASE_URL',
-        'GEMINI_API_KEY'
-    ]
+    # Import here to avoid circular imports
+    from shared.config import settings
+    
+    required_vars = []
+    
+    # Check for database URL using the centralized settings
+    if not settings.railway_postgres_url:
+        required_vars.append('DATABASE_URL (via settings.railway_postgres_url)')
+    
+    # Check for Gemini API key
+    if not settings.gemini_api_key:
+        required_vars.append('GEMINI_API_KEY')
 
-    missing_vars = []
-    for var in required_vars:
-        if not os.getenv(var):
-            missing_vars.append(var)
-
-    if missing_vars:
-        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+    if required_vars:
+        raise ValueError(f"Missing required environment variables: {', '.join(required_vars)}")
 
     # Log configuration status
-    logger.info(f"INFO:main:GEMINI_API_KEY configured: {'YES' if os.getenv('GEMINI_API_KEY') else 'NO'}")
+    logger.info(f"INFO:main:GEMINI_API_KEY configured: {'YES' if settings.gemini_api_key else 'NO'}")
+    logger.info(f"INFO:main:DATABASE_URL configured: {'YES' if settings.railway_postgres_url else 'NO'}")
 
 
 class GracefulShutdown:
