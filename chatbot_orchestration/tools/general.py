@@ -3,8 +3,8 @@ import os
 import httpx
 from typing import Annotated
 from shared.config import settings
-from ..core.database import get_railway_db
 from ..core.dependencies import ChatSessionDeps
+from ..servcie.file_service import FileService
 
 logger = logging.getLogger(__name__)
 
@@ -77,28 +77,18 @@ async def query_railway_postgres(
     Only return aggregated statistics, file metadata, and anonymized information.
     """
     try:
-        from ..core.database import get_railway_db
-        from knowledgebase_ingestion.dao.file_dao import FileDAO
+        file_service = FileService()  # Service manages its own DAO
         
-        db = await get_railway_db()
-        if not db:
-            return "Railway PostgreSQL database is not configured."
-        
-        file_dao = FileDAO(db)
-    except Exception as e:
-        return f"Failed to initialize Railway PostgreSQL database: {e}"
-    
-    try:
-        # Parse the query and construct appropriate SQL
+        # Parse the query and construct appropriate response
         query_lower = query.lower()
         
         # File-related queries
         if any(word in query_lower for word in ['file', 'upload', 'document', 'document']):
             if 'count' in query_lower or 'total' in query_lower or 'number' in query_lower:
-                result = await file_dao.get_active_files_count()
+                result = await file_service.get_active_files_count()
                 return f"Total active files in the system: {result}"
             elif 'recent' in query_lower or 'latest' in query_lower:
-                files = await file_dao.get_recent_files(5)
+                files = await file_service.get_recent_files(5)
                 if files:
                     result = "Recent uploaded files:\n"
                     for f in files:
@@ -107,7 +97,7 @@ async def query_railway_postgres(
                 return "No recent files found."
             else:
                 # General file info
-                files = await file_dao.get_files(10)
+                files = await file_service.get_recent_files(10)
                 if files:
                     result = f"Found {len(files)} active files:\n"
                     for f in files:
@@ -117,7 +107,7 @@ async def query_railway_postgres(
         
         # Metrics queries
         elif any(word in query_lower for word in ['metric', 'statistic', 'analytics', 'usage']):
-            metrics = await file_dao.get_recent_metrics(10)
+            metrics = await file_service.get_recent_metrics(10)
             if metrics:
                 result = "Recent metrics (last 7 days):\n"
                 for m in metrics:
@@ -126,7 +116,7 @@ async def query_railway_postgres(
             return "No metrics found."
         
         # Default: return file count
-        count = await file_dao.get_active_files_count()
+        count = await file_service.get_active_files_count()
         return f"Database contains {count} active files. Please be more specific about what information you need."
         
     except Exception as e:

@@ -9,7 +9,6 @@ from shared.config import settings
 from shared.utils import log_endpoint_request
 from chatbot_orchestration.servcie.agent_service import pydantic_ai_service
 from chatbot_orchestration.routers import chat, human_agents
-from chatbot_orchestration.core.database import get_railway_db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
