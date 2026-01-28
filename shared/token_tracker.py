@@ -80,34 +80,34 @@ async def track_gemini_usage_detailed(
 
     try:
         logger.info("🔄 Starting token tracking for session: %s, message: %s, total_tokens: %s", session_id, message_id, total_tokens)
-        db = await get_db_connection()
-        if db and hasattr(db, '_pool') and db._pool is not None:
-            logger.info("✅ Database connection available for token tracking")
-            from shared.servcie.token_service import token_service
-            await token_service.update_llm_provider_tokens(provider, model, prompt_tokens, completion_tokens, total_tokens)
-            
-            # Log detailed usage
-            if session_id or message_id:
-                usage_data = {
-                    "session_id": session_id,
-                    "message_id": message_id,
-                    "provider": provider,
-                    "model": model,
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": candidates_tokens,
-                    "total_tokens": total_tokens,
-                    "cache_read_tokens": cache_read_tokens,
-                    "cache_write_tokens": cache_write_tokens,
-                    "api_call_type": api_call_type
-                }
-                await token_service.log_token_usage(**usage_data)
-                logger.info("✅ Token usage logged successfully")
-            else:
-                logger.warning("⚠️ Skipping token_usage_log insert: neither session_id nor message_id provided")
-
-            logger.info(f"✅ Tracked {provider} detailed usage: {total_tokens} tokens total used, session: {session_id}")
+        
+        # Use TokenDAO directly for proper architecture
+        from shared.dao.token_dao import TokenDAO
+        token_dao = TokenDAO()
+        
+        # Update LLM provider tokens
+        await token_dao.update_llm_provider_tokens('gemini', model, prompt_tokens, candidates_tokens, total_tokens)
+        
+        # Log detailed usage
+        if session_id or message_id:
+            usage_data = {
+                "session_id": session_id,
+                "message_id": message_id,
+                "provider": 'gemini',
+                "model": model,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": candidates_tokens,
+                "total_tokens": total_tokens,
+                "cache_read_tokens": cache_read_tokens,
+                "cache_write_tokens": cache_write_tokens,
+                "api_call_type": api_call_type
+            }
+            await token_dao.log_token_usage(**usage_data)
+            logger.info("✅ Token usage logged successfully")
         else:
-            logger.warning("Database not available for token tracking")
+            logger.warning("⚠️ Skipping token_usage_log insert: neither session_id nor message_id provided")
+
+        logger.info(f"✅ Tracked gemini detailed usage: {total_tokens} tokens total used, session: {session_id}")
     except Exception as e:
         logger.error(f"Error tracking Gemini detailed token usage: {e}", exc_info=True)
 
