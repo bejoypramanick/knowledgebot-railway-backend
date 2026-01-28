@@ -19,7 +19,7 @@ from shared.utils import validate_environment, wait_for_railway_network, service
 from shared.firebase_auth import init_firebase_auth
 
 # Import Core modules
-from services.configuration_service.core.database import init_database_schema
+from services.configuration_service.core.database import validate_database_schema
 
 # Import Routers
 from services.configuration_service.routers import chatbot, widget
@@ -91,12 +91,12 @@ async def lifespan(app: FastAPI):
                 logger.error(f"❌ Failed to initialize database pool: {e}")
                 # Don't fail startup, but log the error
             
-            # Initialize database schema if needed
+            # Validate database schema if needed
             try:
-                await init_database_schema(database_url)
-                logger.info("✅ Database schema initialized/verified")
+                await validate_database_schema(database_url)
+                logger.info("✅ Database schema validated")
             except Exception as e:
-                logger.error(f"❌ Failed to initialize database schema: {e}")
+                logger.error(f"❌ Failed to validate database schema: {e}")
                 # Don't fail startup, but log the error
         else:
             logger.error("❌ DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
