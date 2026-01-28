@@ -6,7 +6,6 @@ from google.genai import types
 
 from ..core.ai import get_genai_client, gemini_model
 from ..schemas.models import SearchResult
-from shared.token_tracker import track_gemini_usage_from_response
 
 logger = logging.getLogger(__name__)
 
@@ -80,12 +79,6 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             
             response_text = response.text if hasattr(response, 'text') else str(response)
             logger.info(f"✅ Generated response: {len(response_text)} characters")
-            
-            # Track token usage
-            try:
-                await track_gemini_usage_from_response(response, session_id=None, message_id=None, api_call_type='rag')
-            except Exception as track_error:
-                logger.warning(f"⚠️ Failed to track token usage: {track_error}")
             
             return [SearchResult(
                 file_name="RAG_Response",
