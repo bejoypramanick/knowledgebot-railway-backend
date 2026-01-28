@@ -50,10 +50,8 @@ async def chat_stream(request: ChatRequest):
         # It generates the prompt string.
         
         system_prompt = get_system_prompt(
-            file_context=None,  # File context will be handled by FileSearch tool
             custom_prompt=request.system_prompt,
-            response_policy=request.response_policy,
-            rag_had_results=True  # Will be determined by FileSearch tool
+            response_policy=request.response_policy
         )
         
         # Prepare tools for the agent

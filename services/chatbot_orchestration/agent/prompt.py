@@ -6,24 +6,16 @@ from ..core.cache import get_cached_system_prompt, cache_system_prompt
 
 logger = logging.getLogger(__name__)
 
-def get_system_prompt(file_context: Optional[List[SearchResult]] = None, custom_prompt: Optional[str] = None, response_policy: Optional[int] = None, rag_had_results: bool = True) -> str:
+def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> str:
     """Generate dynamic system prompt with intelligent data source routing."""
-    
-    # Ensure file_context is a list, not None
-    safe_file_context = file_context if file_context is not None else []
-    
     logger.info(f"🚀 Generating system prompt:")
-    logger.info(f"  - file_context: {len(safe_file_context)} items")
     logger.info(f"  - custom_prompt: '{custom_prompt[:50] if custom_prompt else 'None'}...' (truncated)")
     logger.info(f"  - response_policy: {response_policy}")
-    logger.info(f"  - rag_had_results: {rag_had_results}")
     
     # Create prompt components for caching
     prompt_components = {
-        'file_context': [f.file_name for f in safe_file_context], # Simplify for cache key
         'custom_prompt': custom_prompt,
-        'response_policy': response_policy,
-        'rag_had_results': rag_had_results
+        'response_policy': response_policy
     }
     
     # Check cache first
@@ -72,17 +64,6 @@ RESPONSE FORMATTING:
         else:
             policy_instruction = "\n\nRESPONSE POLICY: STRICT - STRICTLY adhere to information from provided sources."
         base_prompt += policy_instruction
-    
-    # If no results and RAG was attempted, reinforce the "no results" policy
-    if not rag_had_results:
-        base_prompt += "\n\nNOTIFICATION: The previous RAG search yielded no results. You MUST now strictly follow the CRITICAL RAG SECURITY & COMPLIANCE POLICY and offer human agent assistance."
-
-    # Append file context for better relevance (if provided)
-    if safe_file_context:
-        context_section = "\n\nAVAILABLE FILES IN KNOWLEDGE BASE:\n"
-        for idx, result in enumerate(safe_file_context, 1):
-            context_section += f"- {result.file_name}\n"
-        base_prompt += context_section
     
     # Append custom system prompt from configuration
     if custom_prompt:
