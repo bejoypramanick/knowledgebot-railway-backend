@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Form
 from fastapi.responses import JSONResponse
 from typing import Optional
 
-from services.configuration_service.core.database import get_db_connection
-from services.configuration_service.schemas.models import WidgetConfigRequest
-from services.configuration_service.utils.logging_utils import log_configuration_change
-from services.configuration_service.servcie.configuration_service import configuration_service
+from ..core.database import get_db_connection
+from ..schemas.models import WidgetConfigRequest
+from ..utils.logging_utils import log_configuration_change
+from ..servcie.configuration_service import configuration_service
 from shared.auth_middleware import get_current_user
 
 logger = logging.getLogger(__name__)

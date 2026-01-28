@@ -4,23 +4,23 @@ import time
 from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, Form, Header, HTTPException, Query, Request, status
 
-from services.knowledgebase_ingestion.schemas.models import (
+from ..schemas.models import (
     UploadResponse, FileInfo, BatchUploadResponse, BatchDeleteResponse, BatchUploadItem, BatchDeleteItem
 )
-from services.knowledgebase_ingestion.servcie.ingestion import (
+from ..servcie.ingestion import (
     process_single_file_upload, delete_file_logic, process_single_file_delete
 )
-from services.knowledgebase_ingestion.core.database import (
+from ..core.database import (
     get_or_create_user, check_duplicate_file, delete_existing_file_record, record_api_usage
 )
-from services.knowledgebase_ingestion.utils.files import stream_to_temp_file, calculate_sha256
-from services.knowledgebase_ingestion.utils.validation import (
+from ..utils.files import stream_to_temp_file, calculate_sha256
+from ..utils.validation import (
     sanitize_filename, validate_file_extension, validate_mime_type, validate_file_size, detect_mime_type_from_extension
 )
-from services.knowledgebase_ingestion.utils.constants import (
+from ..utils.constants import (
     MAX_FILE_SIZE_BYTES, ALLOWED_FILE_EXTENSIONS, ALLOWED_MIME_TYPES
 )
-from services.knowledgebase_ingestion.core.ai import get_genai_client, genai_client
+from ..core.ai import get_genai_client, genai_client
 from shared.config import settings
 from shared import db
 from shared.utils import log_endpoint_request
@@ -103,7 +103,7 @@ async def upload_document(
         # But process_single_file_upload handles streaming internally.
         # We already streamed it here.
         # Let's import process_with_gemini from services.ingestion
-        from services.knowledgebase_ingestion.servcie.ingestion import process_with_gemini, record_metadata
+        from ..servcie.ingestion import process_with_gemini, record_metadata
         
         detected_mime = detect_mime_type_from_extension(original_filename, file.content_type)
         uploaded_file, final_state, gemini_processed_at = await process_with_gemini(

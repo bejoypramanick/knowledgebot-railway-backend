@@ -11,16 +11,16 @@ from typing import Optional, List, Dict, Any
 from google.genai import types
 from fastapi import UploadFile, HTTPException, status
 
-from services.knowledgebase_ingestion.core.ai import get_genai_client
-from services.knowledgebase_ingestion.core.database import (
+from ..core.ai import get_genai_client
+from ..core.database import (
     record_metadata, delete_existing_file_record, record_api_usage
 )
-from services.knowledgebase_ingestion.utils.validation import (
+from ..utils.validation import (
     detect_mime_type_from_extension, sanitize_filename, 
     validate_file_extension, validate_mime_type, validate_file_size
 )
-from services.knowledgebase_ingestion.utils.files import stream_to_temp_file, calculate_sha256
-from services.knowledgebase_ingestion.schemas.models import FileInfo, BatchUploadItem, BatchDeleteItem
+from ..utils.files import stream_to_temp_file, calculate_sha256
+from ..schemas.models import FileInfo, BatchUploadItem, BatchDeleteItem
 from shared.config import settings
 from shared import db
 
