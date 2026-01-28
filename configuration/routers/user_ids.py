@@ -2,6 +2,7 @@
 User Management Endpoints
 Handles user profiles, roles, and unique IDs for users, agents, and admins.
 """
+import datetime
 import random
 import string
 from typing import List, Optional
@@ -43,8 +44,8 @@ class UserProfileResponse(BaseModel):
     display_name: Optional[str] = None
     photo_url: Optional[str] = None
     role: str
-    created_at: Optional[datetime] = None
-    last_login: Optional[datetime] = None
+    created_at: Optional[datetime.datetime] = None
+    last_login: Optional[datetime.datetime] = None
     preferences: Optional[dict] = None
 
 

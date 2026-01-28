@@ -1,9 +1,11 @@
 """
 Performance Metrics Endpoints
 """
-from fastapi import HTTPException
+from fastapi import APIRouter, HTTPException
 
 from ..service.performance_service import PerformanceService
+
+router = APIRouter(prefix="/api/v1", tags=["performance"])
 
 
 @router.get("/performance/metrics")
