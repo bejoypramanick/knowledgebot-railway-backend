@@ -17,7 +17,7 @@ from ..tools.rag import search_knowledge_base
 from ..tools.general import (
     request_human_agent_connection, query_railway_postgres
 )
-from .prompt import get_system_prompt
+from ..agent.prompt import get_system_prompt
 from shared.config import settings
 from shared.db import railway_db # Import for checking availability
 
