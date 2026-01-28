@@ -1,7 +1,7 @@
 """
 Token Usage Endpoints
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from shared.auth_middleware import get_current_user
 from shared.logging_config import get_railway_logger
