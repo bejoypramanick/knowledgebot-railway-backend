@@ -8,6 +8,7 @@ import logging
 
 from shared.auth_middleware import get_current_user
 from ..servcie.human_agents_service import HumanAgentsService
+from ..dao.chat_dao import ChatDAO
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,9 @@ async def add_human_agents(
 ):
     """Add human agents to the system."""
     try:
-        result = await HumanAgentsService.add_human_agents(request.emails)
+        chat_dao = ChatDAO()
+        service = HumanAgentsService(chat_dao)
+        result = await service.add_human_agents(request.emails)
         
         return {
             "success": True,
@@ -49,7 +52,9 @@ async def get_human_agents(
 ):
     """Get all human agents."""
     try:
-        agents = await HumanAgentsService.get_human_agents()
+        chat_dao = ChatDAO()
+        service = HumanAgentsService(chat_dao)
+        agents = await service.get_human_agents()
         
         return [
             AgentResponse(
@@ -70,7 +75,9 @@ async def get_online_agents(
 ):
     """Get all online human agents."""
     try:
-        agents = await HumanAgentsService.get_online_agents()
+        chat_dao = ChatDAO()
+        service = HumanAgentsService(chat_dao)
+        agents = await service.get_online_agents()
         
         return [
             AgentResponse(
@@ -92,7 +99,9 @@ async def remove_human_agent(
 ):
     """Remove a human agent from the system."""
     try:
-        await HumanAgentsService.delete_human_agent(email)
+        chat_dao = ChatDAO()
+        service = HumanAgentsService(chat_dao)
+        await service.delete_human_agent(email)
         
         return {
             "success": True,
@@ -110,7 +119,9 @@ async def get_agent_status(
 ):
     """Get the online status of a specific agent."""
     try:
-        is_online = await HumanAgentsService.get_agent_online_status(email)
+        chat_dao = ChatDAO()
+        service = HumanAgentsService(chat_dao)
+        is_online = await service.get_agent_online_status(email)
         
         return {
             "email": email,
