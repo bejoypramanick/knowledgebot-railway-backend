@@ -379,8 +379,17 @@ class ConfigurationService:
                 "selected_persona": persona.get('persona_name', 'KnowledgeBot') if persona else "KnowledgeBot"
             }
 
-            # Get all available personas
-            all_personas = await self.get_all_personas()
+            # Get all available personas (with fallback)
+            try:
+                all_personas = await self.get_all_personas()
+            except Exception as e:
+                logger.warning(f"Could not fetch personas from database, using fallback: {e}")
+                all_personas = [{
+                    'persona_name': 'KnowledgeBot',
+                    'persona_description': 'A helpful AI assistant for knowledge management',
+                    'is_active': True,
+                    'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
+                }]
 
             # Build final configuration
             data = {

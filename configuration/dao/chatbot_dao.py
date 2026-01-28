@@ -43,6 +43,26 @@ class ChatbotDAO:
         """Get active chatbot persona from database."""
         try:
             async with get_db_connection() as conn:
+                # Check if table exists first
+                table_exists = await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'public' 
+                        AND table_name = 'chatbot_personas'
+                    )
+                    """
+                )
+                
+                if not table_exists:
+                    logger.warning("chatbot_personas table does not exist, returning fallback persona")
+                    return {
+                        'persona_name': 'KnowledgeBot',
+                        'persona_description': 'A helpful AI assistant for knowledge management',
+                        'is_active': True,
+                        'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
+                    }
+                
                 # Try to get active persona from database
                 persona = await conn.fetchrow(
                     """
@@ -77,6 +97,26 @@ class ChatbotDAO:
         """Get all available personas from database."""
         try:
             async with get_db_connection() as conn:
+                # Check if table exists first
+                table_exists = await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'public' 
+                        AND table_name = 'chatbot_personas'
+                    )
+                    """
+                )
+                
+                if not table_exists:
+                    logger.warning("chatbot_personas table does not exist, returning fallback persona")
+                    return [{
+                        'persona_name': 'KnowledgeBot',
+                        'persona_description': 'A helpful AI assistant for knowledge management',
+                        'is_active': True,
+                        'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
+                    }]
+                
                 personas = await conn.fetch(
                     """
                     SELECT persona_name, persona_description, system_prompt, is_active
