@@ -13,7 +13,7 @@ import json
 
 from shared.auth_middleware import get_current_user
 from .main import get_db_connection
-from .dao.user_dao import UserDAO
+from dao.user_dao import UserDAO
 
 logger = logging.getLogger(__name__)
 

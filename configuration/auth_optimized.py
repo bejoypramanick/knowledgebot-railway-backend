@@ -24,7 +24,7 @@ from shared.firebase_auth import (
 from shared.auth_middleware import get_current_user
 from shared.db import get_db_connection
 from shared.utils import retry_database_operation
-from .dao.auth_dao import AuthDAO
+from dao.auth_dao import AuthDAO
 
 logger = logging.getLogger(__name__)
 

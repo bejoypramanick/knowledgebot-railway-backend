@@ -14,7 +14,7 @@ from datetime import datetime
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.auth_middleware import get_current_user
 from .main import get_db_connection
-from .dao.notifications_dao import NotificationsDAO
+from dao.notifications_dao import NotificationsDAO
 
 logger = logging.getLogger(__name__)
 

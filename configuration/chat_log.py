@@ -34,7 +34,7 @@ from .schemas.chat_log_schemas import (
 )
 from .servcie.chat_log_service import ChatLogService
 from .utils.sse_manager import connection_manager
-from .dao.chat_log_dao import ChatLogDAO
+from dao.chat_log_dao import ChatLogDAO
 
 
 @router.get("/agents/online", response_model=dict)

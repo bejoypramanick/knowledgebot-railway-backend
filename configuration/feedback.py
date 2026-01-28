@@ -11,7 +11,7 @@ from pathlib import Path
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from .main import get_db_connection
-from .dao.feedback_dao import FeedbackDAO
+from dao.feedback_dao import FeedbackDAO
 
 logger = logging.getLogger(__name__)
 

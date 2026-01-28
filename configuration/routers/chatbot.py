@@ -132,7 +132,7 @@ async def save_chatbot_config(
             )
 
         async with get_db_connection() as conn:
-                from .dao.auth_dao import AuthDAO
+                from ..dao.auth_dao import AuthDAO
                 auth_dao = AuthDAO(conn)
 
                 # Handle admin emails
