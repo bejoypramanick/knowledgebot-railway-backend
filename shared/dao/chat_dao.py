@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional
+import time
 
 from shared.db import get_db_connection
 from shared.logging_config import get_railway_logger
@@ -318,3 +319,141 @@ class ChatDAO:
         except Exception as e:
             logger.error(f"Error getting agent chat count: {e}")
             return 0
+
+    async def get_session_db_id(self, session_id: str) -> Optional[int]:
+        """Get database ID for a session by session_id."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval(
+                    "SELECT id FROM chat_sessions WHERE session_id = $1",
+                    session_id
+                )
+        except Exception as e:
+            logger.error(f"Error getting session DB ID: {e}")
+            return None
+
+    async def archive_session(self, session_id: str, archive_status: str = 'archived'):
+        """Archive a session by updating its archive_status."""
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(
+                    """
+                    UPDATE chat_sessions 
+                    SET archive_status = $1, updated_at = NOW()
+                    WHERE session_id = $2
+                    """,
+                    archive_status, session_id
+                )
+                return result == "UPDATE 1"
+        except Exception as e:
+            logger.error(f"Error archiving session {session_id}: {e}")
+            return False
+
+    async def get_all_human_agents(self) -> List[str]:
+        """Get all human agent emails."""
+        try:
+            async with get_db_connection() as conn:
+                agents = await conn.fetch(
+                    "SELECT email FROM human_agents WHERE removed_at IS NULL ORDER BY email"
+                )
+                return [agent['email'] for agent in agents]
+        except Exception as e:
+            logger.error(f"Error getting human agents: {e}")
+            return []
+
+    async def get_all_admins(self) -> List[str]:
+        """Get all admin emails."""
+        try:
+            async with get_db_connection() as conn:
+                admins = await conn.fetch(
+                    "SELECT email FROM admins WHERE status = 'active' ORDER BY email"
+                )
+                return [admin['email'] for admin in admins]
+        except Exception as e:
+            logger.error(f"Error getting admins: {e}")
+            return []
+
+    async def check_user_role(self, user_email: str) -> Dict[str, bool]:
+        """Check if user has specific roles."""
+        try:
+            async with get_db_connection() as conn:
+                # Check admin role
+                admin_check = await conn.fetchval(
+                    "SELECT 1 FROM admins WHERE email = $1 AND status = 'active'",
+                    user_email
+                )
+                
+                # Check human agent role
+                agent_check = await conn.fetchval(
+                    "SELECT 1 FROM human_agents WHERE email = $1 AND removed_at IS NULL",
+                    user_email
+                )
+                
+                return {
+                    "is_admin": admin_check is not None,
+                    "is_agent": agent_check is not None
+                }
+        except Exception as e:
+            logger.error(f"Error checking user role for {user_email}: {e}")
+            return {"is_admin": False, "is_agent": False}
+
+    async def get_messages(self, session_db_id: int) -> List[Dict[str, Any]]:
+        """Get all messages for a session."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetch(
+                    """
+                    SELECT id, content, role, created_at
+                    FROM chat_messages
+                    WHERE session_id = $1
+                    ORDER BY created_at ASC
+                    """,
+                    session_db_id
+                )
+        except Exception as e:
+            logger.error(f"Error getting messages for session {session_db_id}: {e}")
+            return []
+
+    async def create_message(self, session_db_id: int, role: str, content: str) -> str:
+        """Create a new message in a session."""
+        try:
+            async with get_db_connection() as conn:
+                message_id = f"msg_{session_db_id}_{int(time.time() * 1000000)}"
+                await conn.execute(
+                    """
+                    INSERT INTO chat_messages (session_id, message_id, content, role, created_at)
+                    VALUES ($1, $2, $3, $4, NOW())
+                    """,
+                    session_db_id, message_id, content, role
+                )
+                return message_id
+        except Exception as e:
+            logger.error(f"Error creating message: {e}")
+            raise
+
+    async def increment_message_count(self, session_db_id: int):
+        """Increment the message count for a session."""
+        try:
+            async with get_db_connection() as conn:
+                await conn.execute(
+                    "UPDATE chat_sessions SET message_count = message_count + 1 WHERE id = $1",
+                    session_db_id
+                )
+        except Exception as e:
+            logger.error(f"Error incrementing message count: {e}")
+
+    async def create_session_assignment(self, session_db_id: int, agent_email: str, assignee_type: str, status: str = 'active'):
+        """Create a new session assignment."""
+        try:
+            async with get_db_connection() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO agent_session_assignments 
+                    (session_id, agent_email, assignee_type, status, assigned_at)
+                    VALUES ($1, $2, $3, $4, NOW())
+                    """,
+                    session_db_id, agent_email, assignee_type, status
+                )
+        except Exception as e:
+            logger.error(f"Error creating session assignment: {e}")
+            raise
