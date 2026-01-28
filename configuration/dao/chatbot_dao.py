@@ -46,7 +46,8 @@ class ChatbotDAO:
             return {
                 'persona_name': 'KnowledgeBot',
                 'persona_description': 'A helpful AI assistant for knowledge management',
-                'is_active': True
+                'is_active': True,
+                'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
             }
         except Exception as e:
             logger.error(f"Error getting active persona: {e}")

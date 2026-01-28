@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS public.chatbot_personas (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     persona_name varchar(100) NOT NULL,
     persona_description text NULL,
+    system_prompt text NULL,
     is_active boolean DEFAULT true NOT NULL,
     created_at timestamp DEFAULT now() NULL,
     updated_at timestamp DEFAULT now() NULL,
@@ -22,14 +23,16 @@ CREATE INDEX IF NOT EXISTS idx_chatbot_personas_name ON public.chatbot_personas 
 COMMENT ON TABLE public.chatbot_personas IS 'Chatbot personas for different AI personalities and behaviors';
 COMMENT ON COLUMN public.chatbot_personas.persona_name IS 'Display name of the persona';
 COMMENT ON COLUMN public.chatbot_personas.persona_description IS 'Detailed description of the persona behavior and characteristics';
+COMMENT ON COLUMN public.chatbot_personas.system_prompt IS 'System prompt used for the AI persona';
 COMMENT ON COLUMN public.chatbot_personas.is_active IS 'Whether this persona is currently active for use';
 COMMENT ON COLUMN public.chatbot_personas.created_by_email IS 'Email of the admin who created this persona';
 
 -- Insert default persona
-INSERT INTO public.chatbot_personas (persona_name, persona_description, is_active, created_by_email)
+INSERT INTO public.chatbot_personas (persona_name, persona_description, system_prompt, is_active, created_by_email)
 VALUES (
     'KnowledgeBot',
     'A helpful AI assistant specialized in knowledge management and answering questions based on available documents and conversations.',
+    'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.',
     true,
     'system@knowledgebot.com'
 ) ON CONFLICT (persona_name) DO NOTHING;

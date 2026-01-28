@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS public.chatbot_personas (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     persona_name varchar(100) NOT NULL,
     persona_description text NULL,
+    system_prompt text NULL,
     is_active boolean DEFAULT true NOT NULL,
     created_at timestamp DEFAULT now() NULL,
     updated_at timestamp DEFAULT now() NULL,
@@ -67,10 +68,11 @@ CREATE INDEX IF NOT EXISTS idx_chatbot_personas_active ON public.chatbot_persona
 CREATE INDEX IF NOT EXISTS idx_chatbot_personas_name ON public.chatbot_personas USING btree (persona_name);
 
 -- Insert default persona
-INSERT INTO public.chatbot_personas (persona_name, persona_description, is_active, created_by_email)
+INSERT INTO public.chatbot_personas (persona_name, persona_description, system_prompt, is_active, created_by_email)
 VALUES (
     'KnowledgeBot',
     'A helpful AI assistant specialized in knowledge management and answering questions based on available documents and conversations.',
+    'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.',
     true,
     'system@knowledgebot.com'
 ) ON CONFLICT (persona_name) DO NOTHING;
