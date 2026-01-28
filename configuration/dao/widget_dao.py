@@ -23,7 +23,7 @@ class WidgetDAO:
                         display_chatbot, profile_picture_url, chat_icon_url,
                         profile_picture_filename, chat_icon_filename,
                         profile_zoom, chat_icon_zoom, profile_position, chat_icon_position
-                    FROM widget_config
+                    FROM widget_configuration
                     WHERE id = 1
                     """
                 )
@@ -38,9 +38,9 @@ class WidgetDAO:
                 rows = await conn.fetch(
                     """
                     SELECT message_text
-                    FROM suggested_messages
+                    FROM widget_suggested_messages
                     WHERE is_active = true
-                    ORDER BY sort_order
+                    ORDER BY display_order
                     """
                 )
                 return [row["message_text"] for row in rows]
@@ -54,7 +54,7 @@ class WidgetDAO:
             async with get_db_connection() as conn:
                 await conn.execute(
                     """
-                    UPDATE widget_config
+                    UPDATE widget_configuration
                     SET 
                         display_name = $1,
                         initial_message = $2,
@@ -106,13 +106,13 @@ class WidgetDAO:
             async with get_db_connection() as conn:
                 async with conn.transaction():
                     # Clear existing messages
-                    await conn.execute("DELETE FROM suggested_messages")
+                    await conn.execute("DELETE FROM widget_suggested_messages")
                     
                     # Insert new messages
                     for i, message in enumerate(messages):
                         await conn.execute(
                             """
-                            INSERT INTO suggested_messages (message_text, sort_order, is_active)
+                            INSERT INTO widget_suggested_messages (message_text, display_order, is_active)
                             VALUES ($1, $2, true)
                             """,
                             message, i

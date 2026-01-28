@@ -152,3 +152,70 @@ class ChatLogDAO:
         except Exception as e:
             logger.error(f"Error getting session assignment: {e}")
             return None
+
+    async def check_user_role(self, user_email: str) -> Dict[str, bool]:
+        """Check if user is admin and/or human agent."""
+        try:
+            async with get_db_connection() as conn:
+                # Check if user is admin
+                is_admin = await conn.fetchval(
+                    "SELECT 1 FROM admins WHERE email = $1",
+                    user_email
+                ) is not None
+                
+                # Check if user is human agent
+                is_agent = await conn.fetchval(
+                    "SELECT 1 FROM human_agents WHERE email = $1",
+                    user_email
+                ) is not None
+                
+                return {
+                    "is_admin": is_admin,
+                    "is_agent": is_agent
+                }
+        except Exception as e:
+            logger.error(f"Error checking user role: {e}")
+            return {
+                "is_admin": False,
+                "is_agent": False
+            }
+
+    async def get_all_human_agents(self) -> List[str]:
+        """Get all human agent emails."""
+        try:
+            async with get_db_connection() as conn:
+                results = await conn.fetch(
+                    "SELECT email FROM human_agents WHERE is_active = true"
+                )
+                return [row['email'] for row in results]
+        except Exception as e:
+            logger.error(f"Error getting human agents: {e}")
+            return []
+
+    async def get_all_admins(self) -> List[str]:
+        """Get all admin emails."""
+        try:
+            async with get_db_connection() as conn:
+                results = await conn.fetch(
+                    "SELECT email FROM admins WHERE status = 'active'"
+                )
+                return [row['email'] for row in results]
+        except Exception as e:
+            logger.error(f"Error getting admins: {e}")
+            return []
+
+    async def get_agent_chat_count(self, agent_email: str) -> int:
+        """Get number of active chats for an agent."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval(
+                    """
+                    SELECT COUNT(*) 
+                    FROM agent_session_assignments 
+                    WHERE agent_email = $1 AND status = 'active'
+                    """,
+                    agent_email
+                ) or 0
+        except Exception as e:
+            logger.error(f"Error getting agent chat count: {e}")
+            return 0
