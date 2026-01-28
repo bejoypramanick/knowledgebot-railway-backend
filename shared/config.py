@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     
     # Service URLs
     knowledgebase_ingestion_url: str = "http://localhost:8001"
-    website_scraping_url: str = "http://localhost:8002"
+    website_crawling_url: str = "http://localhost:8002"
     chatbot_orchestration_url: str = "http://localhost:8003"
     
     # API Gateway
