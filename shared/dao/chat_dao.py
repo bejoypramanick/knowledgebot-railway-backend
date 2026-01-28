@@ -119,7 +119,7 @@ class ChatDAO:
             return {}
 
     async def get_agent_online_status(self, agent_email: str) -> bool:
-        """Check if an agent is online by checking their last activity timestamp."""
+        """Check if an agent is online by checking if they exist and are not removed."""
         try:
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(
@@ -127,8 +127,7 @@ class ChatDAO:
                     SELECT 1 
                     FROM human_agents ha
                     WHERE ha.email = $1 
-                      AND ha.is_active = true
-                      AND ha.last_activity >= NOW() - INTERVAL '5 minutes'
+                      AND ha.removed_at IS NULL
                     """,
                     agent_email
                 )
