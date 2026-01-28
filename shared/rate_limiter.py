@@ -12,8 +12,9 @@ import hashlib
 import ipaddress
 from fastapi import Request, HTTPException
 from fastapi.security import HTTPException as FastAPIHTTPException
+from shared.logging_config import get_railway_logger
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 @dataclass
 class RateLimitConfig:

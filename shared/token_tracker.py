@@ -9,8 +9,9 @@ from dataclasses import dataclass
 
 from configuration.service.token_usage_service import TokenUsageService
 from shared.token_metrics import track_token_metrics, MetricsContext
+from shared.logging_config import get_railway_logger
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 @dataclass
 class TokenUsageData:

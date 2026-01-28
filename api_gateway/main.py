@@ -11,9 +11,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# Configure Railway-compatible logging
+from shared.logging_config import auto_configure_logging
+logger = auto_configure_logging("api_gateway")
 
 from shared.utils import setup_global_exception_logging, register_fastapi_exception_handlers
 

@@ -10,8 +10,9 @@ from enum import Enum
 import logging
 import json
 from datetime import datetime, timedelta
+from shared.logging_config import get_railway_logger
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class AlertSeverity(Enum):
     """Alert severity levels"""
