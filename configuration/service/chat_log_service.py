@@ -6,14 +6,13 @@ from fastapi import HTTPException
 
 from shared.logging_config import get_railway_logger
 from shared.dao.user_dao import UserDAO
-
-from ..dao.chat_log_dao import ChatLogDAO
+from shared.dao.chat_dao import ChatDAO
 
 logger = get_railway_logger(__name__)
 
 class ChatLogService:
     def __init__(self, connection_manager=None):
-        self.dao = ChatLogDAO()  # Service manages its own DAO
+        self.dao = ChatDAO()  # Use shared ChatDAO
         self.user_dao = UserDAO()  # Use shared UserDAO for user operations
         self.connection_manager = connection_manager
 
