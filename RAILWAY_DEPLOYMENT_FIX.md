@@ -113,7 +113,6 @@ Look for these error patterns in `railway logs`:
 ### Optional (Service Works But Limited Features):
 - `RAILWAY_POSTGRES_URL` - Database connection string
 - `NEON_DB_URL` - Business database connection
-- `TAVILY_API_KEY` - For internet search
 
 ## 🐳 Docker Configuration Issues
 

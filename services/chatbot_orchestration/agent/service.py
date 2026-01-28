@@ -1,0 +1,212 @@
+import logging
+import uuid
+import time
+from datetime import datetime
+from typing import List, Optional, Dict, Any
+
+from pydantic_ai import Agent
+from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+from google import genai
+from google.genai import types
+
+from services.chatbot_orchestration.core.ai import get_genai_client, MODEL_NAME, gemini_model
+from services.chatbot_orchestration.core.database import get_railway_db, get_neon_db
+from services.chatbot_orchestration.core.dependencies import ChatSessionDeps
+from services.chatbot_orchestration.schemas.models import SearchResult
+from services.chatbot_orchestration.tools.rag import search_knowledge_base
+from services.chatbot_orchestration.tools.general import (
+    request_human_agent_connection, query_railway_postgres, query_neon_db
+)
+from services.chatbot_orchestration.agent.prompt import get_system_prompt
+from shared.config import settings
+from shared.db import railway_db, neon_db # Import for checking availability
+
+logger = logging.getLogger(__name__)
+
+class PydanticAIGatewayService:
+    """ Service class for Pydantic AI integration with Gemini FileSearch """
+    
+    def __init__(self):
+        self.genai_client = None
+        self.db = None
+        
+    async def initialize(self):
+        if not self.genai_client:
+            self.genai_client = get_genai_client()
+        if not self.db:
+            db_conn = await get_railway_db()
+            from services.chatbot_orchestration.dao.chat_dao import ChatDAO
+            self.db = ChatDAO(db_conn)
+    
+    async def get_session_metadata(self, session_id: str) -> Dict[str, Any]:
+        logger.info(f"🔍 Retrieving session metadata for session: {session_id}")
+        if not self.db:
+            # Try to init DB if missing
+            await self.initialize()
+            if not self.db:
+                logger.warning(f"❌ DAO not initialized for session metadata retrieval")
+                return {'session_id': session_id, 'is_new_session': True}
+        
+        try:
+            session_data = await self.db.get_session_metadata(session_id)
+            
+            if not session_data:
+                return {'session_id': session_id, 'is_new_session': True}
+            
+            return {
+                'session_id': session_id,
+                'file_search_store_id': session_data['file_search_store_id'],
+                'cached_content_id': session_data['cached_content_id'],
+                'is_new_session': False
+            }
+        except Exception as e:
+            logger.error(f"❌ Error retrieving session metadata: {e}")
+            return {'session_id': session_id, 'is_new_session': True}
+
+    async def get_or_create_file_search_store(self, session_id: str) -> str:
+        if not self.genai_client:
+            raise ValueError("GenAI client not initialized")
+        
+        try:
+            if hasattr(self.genai_client, 'stores'):
+                stores = list(self.genai_client.stores.list())
+                app_store = None
+                for store in stores:
+                    if hasattr(store, 'display_name') and 'knowledgebot_file_search' in store.display_name.lower():
+                        app_store = store
+                        break
+                
+                if app_store:
+                    return app_store.name
+                else:
+                    new_store = self.genai_client.stores.create(
+                        display_name="KnowledgeBot FileSearch Store",
+                        description="Centralized file search store for KnowledgeBot RAG operations"
+                    )
+                    return new_store.name
+            else:
+                return f"knowledgebot_store_{session_id[:8]}"
+        except Exception as e:
+            logger.error(f"❌ Error managing FileSearchStore: {e}")
+            return f"knowledgebot_store_{session_id[:8]}"
+
+    async def get_or_create_cached_content(self, system_prompt: str) -> str:
+        if not self.genai_client:
+            raise ValueError("GenAI client not initialized")
+        
+        try:
+            if not hasattr(self.genai_client, 'caches'):
+                return f"no_cache_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+            
+            cached_content = self.genai_client.caches.create(
+                model=MODEL_NAME,
+                config=types.CreateCachedContentConfig(
+                    display_name=f"system_prompt_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                    contents=[types.Part.from_text(system_prompt)],
+                    ttl="3600s"
+                )
+            )
+            return cached_content.name
+        except Exception as e:
+            logger.error(f"❌ Error creating cached content: {e}")
+            raise
+
+    async def create_optimized_agent(self, session_id: str, system_prompt: str, tools: List[Any]) -> Agent:
+        await self.initialize()
+        session_metadata = await self.get_session_metadata(session_id)
+        
+        file_search_store_id = session_metadata.get('file_search_store_id')
+        if not file_search_store_id:
+            file_search_store_id = await self.get_or_create_file_search_store(session_id)
+        
+        cached_content_id = session_metadata.get('cached_content_id')
+        if not cached_content_id:
+            try:
+                cached_content_id = await self.get_or_create_cached_content(system_prompt)
+            except Exception:
+                cached_content_id = None
+        
+        model_settings = None
+        if cached_content_id and not cached_content_id.startswith('no_cache_'):
+            model_settings = GoogleModelSettings(google_cached_content=cached_content_id)
+        
+        try:
+            if model_settings:
+                google_model = GoogleModel(MODEL_NAME, settings=model_settings)
+            else:
+                google_model = GoogleModel(MODEL_NAME)
+        except Exception:
+            google_model = GoogleModel(MODEL_NAME)
+        
+        agent = Agent(
+            google_model,
+            system_prompt=system_prompt,
+            tools=tools,
+            deps_type=ChatSessionDeps,
+        )
+        
+        # Update metadata asynchronously if DB is available
+        if self.db:
+            try:
+                await self.update_session_metadata(session_id, file_search_store_id, cached_content_id)
+            except Exception as e:
+                logger.warning(f"Failed to update session metadata: {e}")
+
+        return agent
+
+    async def update_session_metadata(self, session_id: str, file_search_store_id: str = None, cached_content_id: str = None):
+         if not self.db: return
+         await self.db.update_session_metadata(session_id, file_search_store_id, cached_content_id)
+
+pydantic_ai_service = PydanticAIGatewayService()
+
+class SessionStateManager:
+    """Manages session state for multi-turn conversational loops."""
+    def __init__(self):
+        self.session_states = {}
+
+    def get_session_state(self, session_id: str) -> Dict[str, Any]:
+        return self.session_states.get(session_id, {
+            'session_id': session_id,
+            'turn_count': 0,
+            'message_history': [],
+            'last_activity': time.time()
+        })
+    
+    def update_session_state(self, session_id: str, result: Any) -> Dict[str, Any]:
+        state = self.get_session_state(session_id)
+        state['turn_count'] += 1
+        if hasattr(result, 'all_messages'):
+            state['message_history'] = result.all_messages()
+        state['last_activity'] = time.time()
+        self.session_states[session_id] = state
+        return state
+
+session_state_manager = SessionStateManager()
+
+def create_agent_legacy(file_context: Optional[List[SearchResult]] = None, custom_system_prompt: Optional[str] = None, response_policy: Optional[int] = None, rag_had_results: bool = True, rag_enabled: bool = False) -> Optional[Agent]:
+    """Create a Pydantic AI agent (legacy method without optimized Gateway service)."""
+    if gemini_model is None:
+        logger.error("Cannot create agent - Gemini API key not configured")
+        return None
+
+    tools = [search_knowledge_base, request_human_agent_connection]
+    
+    # Check if DBs are available (need to access the module-level connection objects or check if they are initialized)
+    # Since this is synchronous-ish factory, we just check if referencing them works.
+    # In shared.db, railway_db starts as None. 
+    # But usually get_railway_db() is called before this.
+    # To be safe, we add them if we think they are available.
+    
+    if settings.railway_postgres_url: 
+         tools.append(query_railway_postgres)
+    if settings.neon_db_url:
+         tools.append(query_neon_db)
+    
+    agent = Agent(
+        gemini_model,
+        system_prompt=get_system_prompt(file_context, custom_system_prompt, response_policy, rag_had_results),
+        tools=tools,
+        deps_type=ChatSessionDeps,
+    )
+    return agent

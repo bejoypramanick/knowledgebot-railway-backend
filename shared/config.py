@@ -42,10 +42,6 @@ class Settings(BaseSettings):
     # Neon DB Configuration (connection URL only)
     neon_db_url: Optional[str] = None
     
-    # Internet Search Configuration (Tavily API)
-    tavily_api_key: Optional[str] = None
-    enable_internet_search: bool = False
-    
     # User Context (for tracking uploads)
     default_user_email: str = "globistaan@gmail.com"
     

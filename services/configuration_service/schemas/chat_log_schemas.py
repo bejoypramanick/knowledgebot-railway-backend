@@ -1,0 +1,40 @@
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict
+from datetime import datetime
+
+class ChatMessageResponse(BaseModel):
+    id: str
+    text: str
+    sender: str
+    timestamp: str
+    session_id: str
+
+class ChatSessionResponse(BaseModel):
+    id: str
+    customer_name: Optional[str] = None
+    customer_email: Optional[str] = None
+    status: str
+    last_message_at: str
+    created_at: Optional[str] = None
+    assigned_agent: Optional[str] = None
+    feedback: Optional[str] = None
+    customer_feedback: Optional[str] = None
+    agent_feedback: Optional[str] = None
+    chat_type: str
+    messages: List[ChatMessageResponse] = []
+
+class ChatSessionsResponse(BaseModel):
+    sessions: List[ChatSessionResponse]
+    total_count: int
+    page: int
+    limit: int
+    total_pages: int
+
+class SendMessageRequest(BaseModel):
+    text: str
+    sender: str = 'agent'
+    agent_id: str
+
+class SendMessageResponse(BaseModel):
+    message_id: str
+    success: bool
