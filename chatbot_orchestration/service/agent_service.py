@@ -6,7 +6,8 @@ from google.genai import types
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 
-from ..dao.chat_dao import ChatDAO
+from shared.dao.chat_dao import ChatDAO as SharedChatDAO
+from ..dao.chat_dao import ChatDAO as LocalChatDAO
 from shared.logging_config import get_railway_logger
 
 from ..core.ai import MODEL_NAME, get_genai_client
@@ -19,25 +20,18 @@ class PydanticAIGatewayService:
     
     def __init__(self):
         self.genai_client = None
-        self.chat_dao = None
+        self.local_chat_dao = LocalChatDAO()  # For orchestration-specific methods
+        self.shared_chat_dao = SharedChatDAO()  # For shared chat sessions methods
         
     async def initialize(self):
         if not self.genai_client:
             self.genai_client = get_genai_client()
-        if not self.chat_dao:
-            self.chat_dao = ChatDAO()
     
     async def get_session_metadata(self, session_id: str) -> Dict[str, Any]:
         logger.info(f"🔍 Retrieving session metadata for session: {session_id}")
-        if not self.chat_dao:
-            # Try to init if missing
-            await self.initialize()
-            if not self.chat_dao:
-                logger.warning(f"❌ DAO not initialized for session metadata retrieval")
-                return {'session_id': session_id, 'is_new_session': True}
         
         try:
-            session_data = await self.chat_dao.get_session_metadata(session_id)
+            session_data = await self.local_chat_dao.get_session_metadata(session_id)
             
             if not session_data:
                 return {'session_id': session_id, 'is_new_session': True}
