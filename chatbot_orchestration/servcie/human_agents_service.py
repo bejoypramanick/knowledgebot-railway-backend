@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class HumanAgentsService:
     """Service layer for human agents management in chatbot orchestration"""
     
-    def __init__(self, chat_dao: ChatDAO):
-        self.chat_dao = chat_dao
+    def __init__(self):
+        self.chat_dao = ChatDAO()  # Service manages its own DAO
     
     async def add_human_agents(self, emails: List[str]) -> Dict[str, Any]:
         """Add multiple human agents"""
