@@ -17,7 +17,7 @@ from shared.database_initializer import database_initializer
 from shared.logging_config import auto_configure_logging
 
 # Import Routers
-from configuration.routers import chatbot, widget
+from configuration.routers import chatbot_router, widget_router
 from configuration.routers.feedback import router as feedback_router
 from configuration.routers.token_usage import router as token_usage_router
 from configuration.routers.performance import router as performance_router
@@ -164,8 +164,8 @@ async def health_check():
     }
 
 # Include Routers
-app.include_router(chatbot.router)
-app.include_router(widget.router)
+app.include_router(chatbot_router)
+app.include_router(widget_router)
 app.include_router(feedback_router)
 app.include_router(token_usage_router)
 app.include_router(admin_management_router)
