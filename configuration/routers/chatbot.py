@@ -130,50 +130,36 @@ async def save_chatbot_config(
                 detail=f"Business logic validation failed: {'; '.join(business_errors)}"
             )
 
-        # Use service instead of direct database access
-        from ..dao.auth_dao import AuthDAO
+        # Use service for admin checks
         from ..servcie.auth_service import AuthService
         auth_service = AuthService()
 
-        async with get_db_connection() as conn:
-            from ..dao.auth_dao import AuthDAO
-            dao = AuthDAO(conn)
+        # Handle admin emails
+        if config.admin_emails is not None:
+            for admin_item in config.admin_emails:
+                email = None
+                if isinstance(admin_item, dict):
+                    email = admin_item.get('email', '')
+                elif hasattr(admin_item, 'email'):
+                    email = admin_item.email
+                elif isinstance(admin_item, str):
+                    email = admin_item
 
-            # Handle admin emails
-            if config.admin_emails is not None:
-                for admin_item in config.admin_emails:
-                    email = None
-                    if isinstance(admin_item, dict):
-                        email = admin_item.get('email', '')
-                    elif hasattr(admin_item, 'email'):
-                        email = admin_item.email
-                    elif isinstance(admin_item, str):
-                        email = admin_item
+                if email:
+                    is_admin = await auth_service.check_admin_exists(email)
+                    if not is_admin:
+                        await auth_service.add_admin(email)
+                        logger.info(f"Admin {email} added to database")
 
-                    if email:
-                        is_admin = await auth_service.check_admin_exists(email)
-                        if not is_admin:
-                        elif hasattr(admin_item, 'email'):
-                            email = admin_item.email
-                        elif isinstance(admin_item, str):
-                            email = admin_item
-                        
-                        if email:
-                            try:
-                                await dao.add_admin(email)
-                                logger.info(f"Admin {email} added to database")
-                            except Exception as e:
-                                logger.error(f"Error adding admin {email}: {e}")
-
-                # Handle human agents
-                if config.human_agents is not None:
-                    for agent_email in config.human_agents:
-                        if agent_email and isinstance(agent_email, str):
-                            try:
-                                await dao.add_human_agent(agent_email)
-                                logger.info(f"Human agent {agent_email} added directly")
-                            except Exception as e:
-                                logger.error(f"Error processing human agent {agent_email}: {e}")
+        # Handle human agents
+        if config.human_agents is not None:
+            for agent_email in config.human_agents:
+                if agent_email and isinstance(agent_email, str):
+                    try:
+                        await configuration_service.add_human_agent(agent_email)
+                        logger.info(f"Human agent {agent_email} added directly")
+                    except Exception as e:
+                        logger.error(f"Error processing human agent {agent_email}: {e}")
 
         # Update configuration metadata
         if any([config.hil_enabled is not None, config.response_policy is not None]):
@@ -356,77 +342,24 @@ async def request_human_agent(
     try:
         log_endpoint_request("configuration_service", "request-agent", None)
         
-        async with get_db_connection() as conn:
-            # Get session details
-            session = await conn.fetchrow(
-                "SELECT * FROM chat_sessions WHERE session_id = $1",
-                session_id
-            )
-            
-            if not session:
-                raise HTTPException(status_code=404, detail="Session not found")
-            
-            # Check if agent is already assigned
-            existing_assignment = await conn.fetchrow(
-                """
-                SELECT ha.* FROM human_agents ha
-                JOIN agent_session_assignments asa ON ha.id = asa.agent_id
-                WHERE asa.session_id = $1 AND asa.status = 'active'
-                """,
-                session_id
-            )
-            
-            if existing_assignment:
-                return {
-                    "status": "already_assigned",
-                    "agent": {
-                        "id": existing_assignment['id'],
-                        "email": existing_assignment['email'],
-                        "name": existing_assignment['name']
-                    }
-                }
-            
-            # Find available agents
-            available_agents = await conn.fetch(
-                """
-                SELECT * FROM human_agents 
-                WHERE is_active = true 
-                AND is_online = true
-                ORDER BY last_activity DESC
-                LIMIT 5
-                """
-            )
-            
-            if not available_agents:
-                return {
-                    "status": "no_agents_available",
-                    "message": "No human agents are currently available"
-                }
-            
-            # Assign first available agent
-            agent = available_agents[0]
-            
-            # Create assignment record
-            await conn.execute(
-                """
-                INSERT INTO agent_session_assignments 
-                (session_id, agent_id, status, assigned_at, assigned_by)
-                VALUES ($1, $2, 'active', NOW(), $3)
-                ON CONFLICT (session_id) DO UPDATE SET 
-                status = 'active', agent_id = $2, assigned_at = NOW()
-                """,
-                session_id, agent['id'], current_user.get('email', 'system')
-            )
-            
+        # Use service for agent assignment
+        from ..servcie.chat_log_service import ChatLogService
+        from ..utils.sse_manager import connection_manager
+        
+        chat_service = ChatLogService(connection_manager)
+        assigned_agent = await chat_service.request_human_agent(session_id)
+        
+        if assigned_agent:
             return {
                 "status": "assigned",
-                "agent": {
-                    "id": agent['id'],
-                    "email": agent['email'],
-                    "name": agent['name']
-                }
+                "agent": assigned_agent
             }
-            
+        else:
+            return {
+                "status": "no_agents_available",
+                "message": "No human agents available"
+            }
+    
     except Exception as e:
         logger.error(f"Error requesting human agent: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error requesting human agent: {str(e)}")
