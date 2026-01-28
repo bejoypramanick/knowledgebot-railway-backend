@@ -20,22 +20,12 @@ class Settings(BaseSettings):
     
     # Chatbot Configuration
     chatbot_model: str = "gemini-2.0-flash-exp"
-    chatbot_temperature: float = 0.7
-    chatbot_max_tokens: int = 2000
-    
-    # Human-in-the-Loop
-    human_in_the_loop_enabled: bool = False
-    human_in_the_loop_webhook_url: Optional[str] = None
-    
-    # Gemini FileSearch
-    gemini_filesearch_project_id: Optional[str] = None
-    gemini_filesearch_location: str = "us-central1"
     
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None
     
     # User Context (for tracking uploads)
-    default_user_email: str = "globistaan@gmail.com"
+    default_user_email: str = "admin"
     
     model_config = {
         'env_file': ".env",
