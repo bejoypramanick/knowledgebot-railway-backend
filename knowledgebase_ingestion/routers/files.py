@@ -7,7 +7,7 @@ from fastapi import APIRouter, UploadFile, File, Form, Header, HTTPException, Qu
 from ..schemas.models import (
     UploadResponse, FileInfo, BatchUploadResponse, BatchDeleteResponse, BatchUploadItem, BatchDeleteItem
 )
-from ..servcie.ingestion import (
+from ..servcie.ingestion_service import (
     process_single_file_upload, delete_file_logic, process_single_file_delete
 )
 from ..utils.files import stream_to_temp_file, calculate_sha256
