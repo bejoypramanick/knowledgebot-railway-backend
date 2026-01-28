@@ -8,7 +8,7 @@ from shared.logging_config import get_railway_logger
 import logging
 
 from shared.auth_middleware import get_current_user
-from ..service.performance_service import PerformanceService
+from ..servce.performance_service import PerformanceService
 
 
 @router.get("/performance/metrics")

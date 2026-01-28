@@ -2,7 +2,7 @@ from shared.logging_config import get_railway_logger
 import logging
 import json
 from datetime import datetime
-from ..service.configuration_service import configuration_service
+from ..servce.configuration_service import configuration_service
 
 logger = get_railway_logger(__name__)
 

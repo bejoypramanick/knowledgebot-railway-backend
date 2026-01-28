@@ -11,7 +11,7 @@ import logging
 
 from shared.firebase_auth import get_user_from_firestore, save_user_to_firestore, update_user_role_in_firestore
 from shared.auth_middleware import get_current_user
-from ..service.auth_service import AuthService
+from ..servce.auth_service import AuthService
 
 logger = get_railway_logger(__name__)
 

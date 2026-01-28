@@ -8,7 +8,7 @@ from typing import Optional
 
 from ..schemas.models import WidgetConfigRequest
 from ..utils.logging_utils import log_configuration_change
-from ..service.configuration_service import configuration_service
+from ..servce.configuration_service import configuration_service
 from shared.auth_middleware import get_current_user
 
 logger = get_railway_logger(__name__)

@@ -7,7 +7,7 @@ import logging
 from ..schemas.models import ChatbotConfigRequest, AdminAccount, ValidatedEmail
 from ..utils.validation import validate_configuration_consistency
 from ..utils.logging_utils import log_configuration_change
-from ..service.configuration_service import configuration_service
+from ..servce.configuration_service import configuration_service
 from shared.auth_middleware import get_current_user
 from shared.utils import log_endpoint_request
 
@@ -48,7 +48,7 @@ async def save_chatbot_config(
             )
 
         # Use service for admin checks
-        from ..service.auth_service import AuthService
+        from ..servce.auth_service import AuthService
         auth_service = AuthService()
 
         # Handle admin emails

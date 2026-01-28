@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 
 from ..schemas.models import ChatRequest
-from ..service.chat_service import chat_service
+from ..servce.chat_service import chat_service
 from shared.utils import log_endpoint_request
 
 logger = get_railway_logger(__name__)

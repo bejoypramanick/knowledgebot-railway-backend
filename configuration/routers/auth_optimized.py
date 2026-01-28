@@ -9,7 +9,7 @@ from shared.logging_config import get_railway_logger
 import logging
 
 from shared.auth_middleware import get_current_user
-from ..service.auth_optimized_service import auth_optimized_service
+from ..servce.auth_optimized_service import auth_optimized_service
 
 logger = get_railway_logger(__name__)
 

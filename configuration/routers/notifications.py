@@ -8,7 +8,7 @@ from typing import List, Optional
 from shared.logging_config import get_railway_logger
 import logging
 from shared.auth_middleware import get_current_user
-from ..service.notifications_service import NotificationsService
+from ..servce.notifications_service import NotificationsService
 
 logger = get_railway_logger(__name__)
 
