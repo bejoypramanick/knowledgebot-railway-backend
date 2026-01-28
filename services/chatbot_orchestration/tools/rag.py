@@ -85,6 +85,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             return [SearchResult(
                 file_name="RAG_Response",
                 content=response_text,
+                # Only real metadata from Gemini API
                 metadata=metadata
             )]
             
