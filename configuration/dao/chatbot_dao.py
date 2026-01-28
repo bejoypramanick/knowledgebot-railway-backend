@@ -54,32 +54,13 @@ class ChatbotDAO:
         async with get_db_connection() as conn:
             return await conn.fetchrow(
                 """
-                SELECT persona_name, system_prompt
-                FROM persona_configurations
+                SELECT persona_name, persona_description, is_active
+                FROM chatbot_personas
                 WHERE is_active = true
+                ORDER BY created_at DESC
                 LIMIT 1
                 """
             )
-
-    async def get_human_agents(self) -> List[str]:
-        async with get_db_connection() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT email FROM human_agents
-                ORDER BY email
-                """
-            )
-            return [r["email"] for r in rows] if rows else []
-
-    async def get_admins(self) -> List[str]:
-        async with get_db_connection() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT email FROM admins
-                ORDER BY email
-                """
-            )
-            return [r["email"] for r in rows] if rows else []
 
     async def update_metadata(self, hil_enabled: bool, response_policy: int):
         async with get_db_connection() as conn:

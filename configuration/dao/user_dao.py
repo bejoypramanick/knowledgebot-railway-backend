@@ -171,3 +171,27 @@ class UserDAO:
         except Exception as e:
             logger.error(f"Error getting admins: {e}")
             return []
+
+    async def check_admin_exists(self, email: str) -> bool:
+        """Check if admin exists for given email."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval(
+                    "SELECT 1 FROM admins WHERE email = $1",
+                    email
+                ) is not None
+        except Exception as e:
+            logger.error(f"Error checking admin existence: {e}")
+            return False
+
+    async def check_human_agent_exists(self, email: str) -> bool:
+        """Check if human agent exists for given email."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval(
+                    "SELECT 1 FROM human_agents WHERE email = $1",
+                    email
+                ) is not None
+        except Exception as e:
+            logger.error(f"Error checking human agent existence: {e}")
+            return False
