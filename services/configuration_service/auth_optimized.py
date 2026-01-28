@@ -229,116 +229,6 @@ async def verify_token_optimized(request_data: Dict[str, Any]):
             message=f"Error: {str(e)}"
         )
 
-# Keep the original endpoint as fallback
-@router.post("/verify-token-original", response_model=TokenVerificationResponse)
-async def verify_token(request: TokenVerificationRequest):
-    """
-    Original Firebase Auth token verification (kept for comparison).
-    This endpoint is used by frontend to verify tokens.
-    """
-    try:
-        decoded_token = verify_firebase_token(request.id_token)
-        
-        if not decoded_token:
-            return TokenVerificationResponse(
-                valid=False,
-                message="Invalid or expired token"
-            )
-        
-        # Get user from Firestore
-        uid = decoded_token.get('uid')
-        email = decoded_token.get('email')
-        user_data = get_user_from_firestore(uid)
-        
-        # If user doesn't exist in Firestore, return Firebase Auth data
-        if not user_data:
-            user_data = {
-                'uid': uid,
-                'email': email,
-                'email_verified': decoded_token.get('email_verified', False),
-                'display_name': decoded_token.get('name'),
-                'photo_url': decoded_token.get('picture'),
-                'role': 'user',
-                'roles': ['user'],
-                'primary_role': 'user',
-                'is_admin': False,
-                'is_human_agent': False
-            }
-        
-        # Helper variables for role check
-        user_roles = user_data.get('roles', [])
-        primary_role = user_data.get('role', 'user')
-        is_admin = user_data.get('is_admin', False)
-        is_human_agent = user_data.get('is_human_agent', False)
-        
-        # Check database for exact roles (source of truth) - REQUIRED, no fallback
-        try:
-            from shared.db import DatabaseManager
-            db_manager = await DatabaseManager.get_instance()
-            if not db_manager._pool:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Database connection unavailable - authentication service is down"
-                )
-        except Exception:
-            raise HTTPException(
-                status_code=503,
-                detail="Database service temporarily unavailable"
-            )
-
-        if not email:
-            raise HTTPException(
-                status_code=400,
-                detail="Email not available from Firebase token"
-            )
-
-        async with get_db_connection() as conn:
-            # Check if user is an admin (status removed)
-            admin = await conn.fetchrow(
-                "SELECT email FROM admins WHERE email = $1",
-                email
-            )
-            if admin:
-                if 'admin' not in user_roles:
-                    user_roles.append('admin')
-                is_admin = True
-                primary_role = 'admin'  # Admin takes precedence
-
-            # Check if user is a human agent (status removed)
-            agent = await conn.fetchrow(
-                "SELECT email FROM human_agents WHERE email = $1",
-                email
-            )
-            if agent:
-                if 'human_agent' not in user_roles:
-                    user_roles.append('human_agent')
-                is_human_agent = True
-                if primary_role == 'user':
-                    primary_role = 'human_agent'
-
-        # Ensure 'user' is in roles
-        if 'user' not in user_roles:
-            user_roles.append('user')
-
-        # Update user_data with latest roles from DB
-        user_data['role'] = primary_role
-        user_data['primary_role'] = primary_role
-        user_data['roles'] = user_roles
-        user_data['is_admin'] = is_admin
-        user_data['is_human_agent'] = is_human_agent
-        
-        return TokenVerificationResponse(
-            valid=True,
-            user=user_data
-        )
-        
-    except Exception as e:
-        logger.error(f"Error verifying token: {e}")
-        return TokenVerificationResponse(
-            valid=False,
-            message=f"Error: {str(e)}"
-        )
-
 
 @router.post("/sync-user")
 async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
@@ -387,9 +277,10 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
                     if primary_role == 'user':
                         primary_role = 'human_agent'
         except Exception as role_error:
-            logger.warning(f"Error determining user roles from database: {role_error}, defaulting to 'user'")
+            logger.error(f"Error determining user roles from database: {role_error}")
+            raise HTTPException(status_code=503, detail="Unable to verify user roles - database service unavailable")
         
-        # Always include 'user' role as fallback
+        # Ensure 'user' role is always present
         if 'user' not in user_roles:
             user_roles.append('user')
         

@@ -125,12 +125,8 @@ async def knowledgebase_upload_constraints_endpoint(request: Request):
                 content=resp.json() if resp.headers.get('content-type', '').startswith('application/json') else resp.text
             )
     except Exception as e:
-        logger.warning(f"Knowledgebase service unavailable for constraints, returning fallback: {e}")
-        fallback_constraints = {
-            "max_file_size_bytes": 5242880,  # 5MB
-            "allowed_extensions": ["pdf", "docx", "txt", "xlsx", "csv", "pptx", "py", "js", "html", "json", "md"],
-        }
-        return JSONResponse(status_code=200, content=fallback_constraints)
+        logger.error(f"Knowledgebase service unavailable for constraints: {e}")
+        raise HTTPException(status_code=503, detail="Knowledgebase service temporarily unavailable")
 
 
 @router.get("/files")

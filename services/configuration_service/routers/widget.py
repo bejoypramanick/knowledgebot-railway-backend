@@ -180,8 +180,6 @@ async def upload_widget_image(
     r2_storage = getattr(request.app.state, 'r2_storage', None)
     
     if not r2_storage:
-        # Fallback if global variable is used (for backward compatibility during migration)
-        # But we aim to use app.state
         raise HTTPException(status_code=503, detail="R2 storage not configured")
 
     if type not in ['profile', 'chatIcon', 'headerIcon']:
@@ -216,8 +214,6 @@ async def upload_widget_image(
             )
             
             if not result or not result.get('url'):
-                # Fallback path if public_url is not configured
-                # In a real system, we'd provide a proxy URL through our API
                 raise HTTPException(status_code=500, detail="Failed to generate public URL for uploaded file")
 
             logger.info(f"Successfully uploaded {type} image: {result['url']}")

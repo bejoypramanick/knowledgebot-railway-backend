@@ -178,46 +178,6 @@ async def get_railway_db():
         railway_db = await DatabaseManager.get_instance()
     return railway_db
 
-# Legacy class for compatibility with existing DAO patterns
-class Database:
-    """Wrapper for DatabaseManager for backward compatibility."""
-    def __init__(self, connection_url: Optional[str] = None):
-        # This will still use the singleton manager internally to avoid multiple pools
-        self._url = connection_url
-
-    async def connect(self, **kwargs):
-        manager = await DatabaseManager.get_instance()
-        if self._url:
-            manager._connection_url = self._url
-        manager.configure(**kwargs)
-        await manager.initialize()
-
-    async def disconnect(self):
-        manager = await DatabaseManager.get_instance()
-        await manager.close()
-
-    @asynccontextmanager
-    async def acquire(self):
-        manager = await DatabaseManager.get_instance()
-        async with manager.connection() as conn:
-            yield conn
-
-    async def execute(self, query: str, *args):
-        manager = await DatabaseManager.get_instance()
-        return await manager.execute(query, *args)
-
-    async def fetch(self, query: str, *args):
-        manager = await DatabaseManager.get_instance()
-        return await manager.fetch(query, *args)
-
-    async def fetchrow(self, query: str, *args):
-        manager = await DatabaseManager.get_instance()
-        return await manager.fetchrow(query, *args)
-
-    async def fetchval(self, query: str, *args):
-        manager = await DatabaseManager.get_instance()
-        return await manager.fetchval(query, *args)
-
 # Compatibility for direct DatabaseConnection usage
 class DatabaseConnection:
     """Legacy context manager for database connections."""

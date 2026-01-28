@@ -19,24 +19,7 @@ router = APIRouter(prefix="/api/v1/admin", tags=["performance"])
 
 # Import the shared get_db_connection from main.py
 # This ensures we use the same connection pattern as other endpoints
-try:
-    from services.configuration_service.main import get_db_connection
-except ImportError:
-    # Fallback if import fails
-    logger.warning("Could not import get_db_connection from main.py, using direct railway_db access")
-    from contextlib import asynccontextmanager
-    
-    @asynccontextmanager
-    async def get_db_connection():
-        """Fallback database connection context manager."""
-        if railway_db is None or not hasattr(railway_db, '_pool') or railway_db._pool is None:
-            logger.error("Performance metrics: Database pool not available")
-            raise HTTPException(
-                status_code=503,
-                detail="Database not available. Please check database connection configuration."
-            )
-        async with railway_db.acquire() as conn:
-            yield conn
+from services.configuration_service.main import get_db_connection
 
 
 @router.get("/performance/metrics")
@@ -159,9 +142,7 @@ async def get_performance_metrics():
 
                 except Exception as e:
                     logger.error(f"Performance metrics: Error calculating AI/human breakdown: {e}")
-                    # Fallback to percentage-based calculation
-                    ai_handled_chats = int(total_interactions * 0.85)
-                    human_agent_handoffs = int(total_interactions * 0.15)
+                    raise HTTPException(status_code=500, detail="Unable to calculate interaction breakdown")
 
                 # Interactions over time (last 6 months) - breakdown by AI vs Human
                 interactions_over_time = []
@@ -271,10 +252,7 @@ async def get_performance_metrics():
 
                 except Exception as satisfaction_error:
                     logger.error(f"Performance metrics: Error in satisfaction query: {satisfaction_error}", exc_info=True)
-                    # Fallback values
-                    total_feedback = 0
-                    satisfaction_score = 4.0
-                    satisfaction_over_time = []
+                    raise HTTPException(status_code=500, detail="Unable to retrieve satisfaction metrics")
 
                 # Ensure satisfaction_over_time is an array of objects with correct structure
                 if not isinstance(satisfaction_over_time, list):
