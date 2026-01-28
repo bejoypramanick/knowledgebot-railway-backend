@@ -1,0 +1,47 @@
+# Requirements for Python 3.9 Compatibility
+# Core FastAPI
+fastapi>=0.124.0
+uvicorn[standard]>=0.38.0
+pydantic>=2.12.0
+httpx>=0.28.0
+python-dotenv>=1.2.0
+
+# Database (compatible with Python 3.9)
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.0
+
+# Common utilities
+pydantic-settings>=2.5.0
+psutil>=6.1.0
+
+# Retry logic (used by shared/db.py)
+tenacity>=8.2.2
+
+# Firebase Admin SDK (for Authentication only, NOT Firestore)
+firebase-admin>=6.0.0
+
+# WebSocket support for API Gateway
+websockets>=12.0
+
+# Enhanced email validation
+email-validator>=2.0.0
+
+# Input sanitization for security
+bleach>=6.0.0
+
+# Google Gemini (compatible versions)
+google-genai>=0.3.0
+google-auth>=2.25.0
+
+# Pydantic AI (compatible with Python 3.9)
+pydantic-ai>=0.8.0
+
+# Web Scraping (compatible versions)
+crawl4ai>=0.3.0
+beautifulsoup4>=4.11.0
+lxml>=4.9.0
+playwright>=1.40.0
+
+# Additional utilities
+aiofiles>=23.0.0
+python-multipart>=0.0.9

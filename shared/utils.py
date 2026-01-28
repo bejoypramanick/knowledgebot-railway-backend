@@ -148,7 +148,7 @@ async def make_service_request(
             raise
 
 
-def dependency_unavailable_error(dependency_name: str, reason: str | None = None) -> HTTPException:
+def dependency_unavailable_error(dependency_name: str, reason: Optional[str] = None) -> HTTPException:
     """Return a standardized HTTPException for missing/unavailable dependencies.
 
     Response JSON format:
