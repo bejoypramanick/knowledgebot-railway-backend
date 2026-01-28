@@ -100,20 +100,19 @@ async def list_admins(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="User email not found in token")
     
     try:
-        async with get_db_connection() as conn:
-            auth_dao = AuthDAO(conn)
-            
-            # Check if current user is an admin
-            is_admin = await auth_dao.check_admin_exists(user_email)
-            
-            if not is_admin or is_admin == 0:
-                raise HTTPException(status_code=403, detail="Only admins can view admin list")
-            
-            # Get all admins
-            admins = await auth_dao.list_all_admins()
-            
-            return {
-                "success": True,
+        auth_service = AuthService()  # Service manages its own DAO
+        
+        # Check if current user is an admin
+        is_admin = await auth_service.check_admin_exists(user_email)
+        
+        if not is_admin or is_admin == 0:
+            raise HTTPException(status_code=403, detail="Only admins can view admin list")
+        
+        # Get all admins
+        admins = await auth_service.list_all_admins()
+        
+        return {
+            "success": True,
                 "admins": [
                     {
                         "email": admin['email'],
@@ -139,30 +138,29 @@ async def remove_admin(email: str, current_user: dict = Depends(get_current_user
         raise HTTPException(status_code=403, detail="User email not found in token")
     
     try:
-        async with get_db_connection() as conn:
-            auth_dao = AuthDAO(conn)
-            
-            # Check if current user is an admin
-            is_admin = await auth_dao.check_admin_exists(user_email)
-            
-            if not is_admin or is_admin == 0:
-                raise HTTPException(status_code=403, detail="Only admins can remove other admins")
-            
-            # Check if admin exists
-            admin = await auth_dao.check_admin_exists(email)
-            
-            if not admin:
-                raise HTTPException(status_code=404, detail="Admin not found")
-            
-            # Remove admin
-            await auth_dao.remove_admin(email)
-            
-            # Admin removed - no email notification sent
-            
-            return {
-                "success": True,
-                "message": "Admin removed successfully"
-            }
+        auth_service = AuthService()  # Service manages its own DAO
+        
+        # Check if current user is an admin
+        is_admin = await auth_service.check_admin_exists(user_email)
+        
+        if not is_admin or is_admin == 0:
+            raise HTTPException(status_code=403, detail="Only admins can remove other admins")
+        
+        # Check if admin exists
+        admin = await auth_dao.check_admin_exists(email)
+        
+        if not admin:
+            raise HTTPException(status_code=404, detail="Admin not found")
+        
+        # Remove admin
+        await auth_dao.remove_admin(email)
+        
+        # Admin removed - no email notification sent
+        
+        return {
+            "success": True,
+            "message": "Admin removed successfully"
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -174,22 +172,20 @@ async def remove_admin(email: str, current_user: dict = Depends(get_current_user
 async def get_user_role(email: str):
     """Get user role (admin, human_agent, or user) for a given email."""
     try:
-        async with get_db_connection() as conn:
-            auth_dao = AuthDAO(conn)
-            
-            # Check if user is an admin
-            admin = await auth_dao.check_admin_exists(email)
-            if admin:
-                return {"role": "admin", "email": email}
-            
-            # Check if user is a human agent
-            agent = await auth_dao.check_human_agent_exists(email)
-            if agent:
-                return {"role": "human_agent", "email": email}
-            
-            # Default to user
-            return {"role": "user", "email": email}
+        auth_dao = AuthDAO()
+        
+        # Check if user is an admin
+        is_admin = await auth_dao.check_admin_exists(email)
+        if is_admin:
+            return {"email": email, "role": "admin"}
+        
+        # Check if user is a human agent
+        is_agent = await auth_dao.check_human_agent_exists(email)
+        if is_agent:
+            return {"email": email, "role": "human_agent"}
+        
+        # Default to user
+        return {"email": email, "role": "user"}
     except Exception as e:
         logger.error(f"Error getting user role: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error getting user role: {str(e)}")
-

@@ -22,9 +22,9 @@ from shared.firebase_auth import (
     update_user_role_in_firestore
 )
 from shared.auth_middleware import get_current_user
-from shared.db import get_db_connection
 from shared.utils import retry_database_operation
-from dao.auth_dao import AuthDAO
+from ..dao.auth_dao import AuthDAO
+from ..servcie.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 
@@ -56,46 +56,44 @@ async def execute_database_operations_with_retry(email: str) -> tuple:
     """
     db_start_time = time.time()
 
-    async with get_db_connection() as conn:
-        # Initialize DAO
-        auth_dao = AuthDAO(conn)
-        
-        # DEBUG: Check admin table for this user
-        admin_check = await auth_dao.check_admin_exists(email)
-        if admin_check:
-            logger.info(f"👑 Admin table entry found for {email}")
-        else:
-            logger.info(f"❌ No admin table entry found for {email}")
+    auth_service = AuthService()  # Service manages its own DAO
+    
+    # DEBUG: Check admin table for this user
+    admin_check = await auth_service.check_admin_exists(email)
+    if admin_check:
+        logger.info(f"👑 Admin table entry found for {email}")
+    else:
+        logger.info(f"❌ No admin table entry found for {email}")
 
-        # DEBUG: Check human_agents table for this user
-        agent_check = await auth_dao.check_human_agent_exists(email)
-        if agent_check:
-            logger.info(f"🤖 Human agent table entry found for {email}")
-        else:
-            logger.info(f"❌ No human agent table entry found for {email}")
+    # DEBUG: Check human_agents table for this user
+    agent_check = await auth_service.check_human_agent_exists(email)
+    if agent_check:
+        logger.info(f"🤖 Human agent table entry found for {email}")
+    else:
+        logger.info(f"❌ No human agent table entry found for {email}")
 
-        # OPTIMIZED: Single query with UNION instead of multiple queries (status removed)
-        role_query = """
-            SELECT role FROM (
-                SELECT 'admin' as role, email FROM admins WHERE email = $1
-                UNION ALL
+    # OPTIMIZED: Single query with UNION instead of multiple queries (status removed)
+    role_query = """
+        SELECT role FROM (
+            SELECT 'admin' as role, email FROM admins WHERE email = $1
+            UNION ALL
                 SELECT 'human_agent' as role, email FROM human_agents WHERE email = $1
             ) user_roles
             WHERE email = $1
         """
 
-        # Execute with retry logic - throws exact error if all retries fail
-        roles_result = await execute_role_query_with_retry(conn, role_query, email)
-        db_time = time.time() - db_start_time
+    # Execute with retry logic - throws exact error if all retries fail
+    roles_result = await auth_service.execute_role_query(role_query, email)
+    db_time = time.time() - db_start_time
 
-        # Log what roles were found in database
-        db_roles = [row['role'] for row in roles_result]
-        logger.info(f"📊 Database roles found for {email}: {db_roles}")
-        if not db_roles:
-            logger.info(f"❌ No roles found in database for {email} - user will default to 'user' role")
-            logger.info(f"💡 To grant admin access, ensure {email} is in the admins table")
+    # Log what roles were found in database
+    db_roles = [row['role'] for row in roles_result]
+    logger.info(f"📊 Database roles found for {email}: {db_roles}")
+    if not db_roles:
+        logger.info(f"❌ No roles found in database for {email} - user will default to 'user' role")
+        logger.info(f"💡 To grant admin access, ensure {email} is in the admins table")
 
-        return roles_result, db_time
+    return roles_result, db_time
 
 @router.post("/verify-token", response_model=TokenVerificationResponse)
 async def verify_token_optimized(request_data: Dict[str, Any]):
@@ -252,25 +250,23 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
         is_human_agent = False
         
         try:
-            # Use new DatabaseManager for connection
-            async with get_db_connection() as conn:
-                # Initialize DAO
-                auth_dao = AuthDAO(conn)
-                
-                # Check if user is an admin (status removed)
-                admin = await auth_dao.check_admin_exists(email)
-                if admin:
-                    user_roles.append('admin')
-                    is_admin = True
-                    primary_role = 'admin'  # Admin takes precedence
-                
-                # Check if user is a human agent (status removed)
-                agent = await auth_dao.check_human_agent_exists(email)
-                if agent:
-                    user_roles.append('human_agent')
-                    is_human_agent = True
-                    if primary_role == 'user':
-                        primary_role = 'human_agent'
+            # Use Service only - Service manages its own DAO
+            auth_service = AuthService()
+            
+            # Check if user is an admin (status removed)
+            admin = await auth_service.check_admin_exists(email)
+            if admin:
+                user_roles.append('admin')
+                is_admin = True
+                primary_role = 'admin'  # Admin takes precedence
+            
+            # Check if user is a human agent (status removed)
+            agent = await auth_service.check_human_agent_exists(email)
+            if agent:
+                user_roles.append('human_agent')
+                is_human_agent = True
+                if primary_role == 'user':
+                    primary_role = 'human_agent'
         except Exception as role_error:
             logger.error(f"Error determining user roles from database: {role_error}")
             raise HTTPException(status_code=503, detail="Unable to verify user roles - database service unavailable")

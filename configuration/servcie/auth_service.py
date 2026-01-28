@@ -11,8 +11,32 @@ logger = logging.getLogger(__name__)
 class AuthService:
     """Service layer for authentication"""
     
-    def __init__(self, auth_dao: AuthDAO):
-        self.auth_dao = auth_dao
+    def __init__(self):
+        self.auth_dao = AuthDAO()  # Service manages its own DAO
+    
+    async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
+        """Check if admin exists for given email."""
+        try:
+            return await self.auth_dao.check_admin_exists(email)
+        except Exception as e:
+            logger.error(f"Error checking admin exists: {e}")
+            raise
+    
+    async def check_human_agent_exists(self, email: str) -> Optional[Dict[str, Any]]:
+        """Check if human agent exists for given email."""
+        try:
+            return await self.auth_dao.check_human_agent_exists(email)
+        except Exception as e:
+            logger.error(f"Error checking human agent exists: {e}")
+            raise
+    
+    async def execute_role_query(self, query: str, email: str) -> List[Dict[str, Any]]:
+        """Execute role query."""
+        try:
+            return await self.auth_dao.execute_role_query(query, email)
+        except Exception as e:
+            logger.error(f"Error executing role query: {e}")
+            raise
     
     async def add_admin(self, email: str) -> bool:
         """Add admin user"""

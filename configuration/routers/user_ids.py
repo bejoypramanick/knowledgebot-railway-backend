@@ -145,30 +145,29 @@ async def get_unique_id(
     Returns 404 if not found.
     """
     try:
-        async with get_db_connection() as conn:
-            user_dao = UserDAO(conn)
-            
-            role = role.lower()
-            if role not in ['customer', 'agent', 'admin']:
-                raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")
-            
-            if not email:
-                raise HTTPException(status_code=400, detail="Email is required for GET request")
-            
-            result = await user_dao.get_unique_id_by_email_role(email, role)
-            
-            if not result:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Unique ID not found for email {email} with role {role}"
-                )
-            
-            return UniqueIdResponse(
-                unique_id=result['unique_id'],
-                email=email,
-                role=role,
-                created=False
+        user_dao = UserDAO()
+        
+        role = role.lower()
+        if role not in ['customer', 'agent', 'admin']:
+            raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")
+        
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required for GET request")
+        
+        result = await user_dao.get_unique_id_by_email_role(email, role)
+        
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unique ID not found for email {email} with role {role}"
             )
+        
+        return UniqueIdResponse(
+            unique_id=result['unique_id'],
+            email=email,
+            role=role,
+            created=False
+        )
             
     except HTTPException:
         raise

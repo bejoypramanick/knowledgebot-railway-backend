@@ -108,6 +108,7 @@ async def track_gemini_usage_detailed(
             logger.warning("⚠️ Skipping token_usage_log insert: neither session_id nor message_id provided")
 
         logger.info(f"✅ Tracked gemini detailed usage: {total_tokens} tokens total used, session: {session_id}")
+            logger.warning("Database not available for token tracking")
     except Exception as e:
         logger.error(f"Error tracking Gemini detailed token usage: {e}", exc_info=True)
 

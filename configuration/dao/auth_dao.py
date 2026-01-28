@@ -150,3 +150,8 @@ class AuthDAO:
                 "SELECT * FROM chat_sessions WHERE session_id = $1",
                 session_id
             )
+
+    async def execute_role_query(self, query: str, email: str) -> List[Dict[str, Any]]:
+        """Execute role query."""
+        async with get_db_connection() as conn:
+            return await conn.fetch(query, email)
