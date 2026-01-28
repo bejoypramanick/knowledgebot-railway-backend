@@ -13,8 +13,7 @@ from datetime import datetime
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.auth_middleware import get_current_user
-from shared.db import get_db_connection
-from dao.notifications_dao import NotificationsDAO
+from ..servcie.service_factory import ServiceFactory
 
 logger = logging.getLogger(__name__)
 
@@ -116,43 +115,31 @@ async def get_notifications(
     Get notifications for a user.
     """
     try:
-        from shared.db import get_db_connection
-        async with get_db_connection() as conn:
-            notifications_dao = NotificationsDAO(conn)
-            
-            target_email = user_email or current_user.get('email')
-            if not target_email:
-                raise HTTPException(status_code=400, detail="User email is required")
-            
-            # Get notifications
-            is_read = None if not unread_only else False
-            notifications = await notifications_dao.get_notifications(
-                target_email, is_read, limit, offset
-            )
-            
-            # Get total count
-            total = await notifications_dao.get_notifications_count(target_email, is_read)
-            
-            # Get unread count
-            unread_count = await notifications_dao.get_unread_count(target_email)
-            
-            return NotificationListResponse(
-                notifications=[
-                    NotificationResponse(
-                        id=str(n['id']),
-                        title=n['title'],
-                        message=n['message'],
-                        type=n['type'],
-                        is_read=n['is_read'],
-                        read_at=n['read_at'].isoformat() if n['read_at'] else None,
-                        metadata=n['metadata'] if n['metadata'] else None,
-                        created_at=n['created_at'].isoformat()
-                    )
-                    for n in notifications
-                ],
-                total=total,
-                unread_count=unread_count
-            )
+        service = await ServiceFactory.create_notifications_service()
+        
+        target_email = user_email or current_user.get('email')
+        if not target_email:
+            raise HTTPException(status_code=400, detail="User email is required")
+        
+        # Get notifications
+        is_read = None if not unread_only else False
+        notifications = await service.get_notifications(limit, offset, unread_only, target_email)
+        
+        return NotificationListResponse(
+            notifications=[
+                NotificationItem(
+                    id=str(notification['id']),
+                    title=notification['title'],
+                    message=notification['message'],
+                    type=notification['type'],
+                    is_read=notification['is_read'],
+                    created_at=notification['created_at'].isoformat() if notification['created_at'] else None
+                )
+                for notification in notifications
+            ],
+            total=len(notifications),
+            unread_count=len([n for n in notifications if not n.get('is_read', False)])
+        )
             
     except HTTPException:
         raise
