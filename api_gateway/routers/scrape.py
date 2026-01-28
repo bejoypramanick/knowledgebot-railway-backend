@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 import httpx
 import logging
 
-from api_gateway.core.config import WEBSITE_SCRAPING_URL
+from api_gateway.core.config import WEBSITE_CRAWLING_URL
 from api_gateway.schemas.models import ScrapeRequest
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ async def scrape_endpoint(scrape_request: ScrapeRequest, request: Request):
 
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                f"{WEBSITE_SCRAPING_URL}/scrape",
+                f"{WEBSITE_CRAWLING_URL}/scrape",
                 json=scrape_request.model_dump(),
                 headers=headers,
                 timeout=60.0

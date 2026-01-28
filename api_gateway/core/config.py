@@ -4,8 +4,8 @@ import os
 KNOWLEDGEBASE_INGESTION_URL = os.getenv(
     "KNOWLEDGEBASE_INGESTION_URL", "http://localhost:8001"
 )
-WEBSITE_SCRAPING_URL = os.getenv(
-    "WEBSITE_SCRAPING_URL", "http://localhost:8002"
+WEBSITE_CRAWLING_URL = os.getenv(
+    "WEBSITE_CRAWLING_URL", "http://localhost:8002"
 )
 CHATBOT_ORCHESTRATION_URL = os.getenv(
     "CHATBOT_ORCHESTRATION_URL", "http://localhost:8003"
