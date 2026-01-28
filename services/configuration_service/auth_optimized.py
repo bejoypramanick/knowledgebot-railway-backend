@@ -24,6 +24,7 @@ from shared.firebase_auth import (
 from shared.auth_middleware import get_current_user
 from shared.db import get_db_connection
 from shared.utils import retry_database_operation
+from services.configuration_service.dao.auth_dao import AuthDAO
 
 logger = logging.getLogger(__name__)
 
@@ -56,21 +57,18 @@ async def execute_database_operations_with_retry(email: str) -> tuple:
     db_start_time = time.time()
 
     async with get_db_connection() as conn:
+        # Initialize DAO
+        auth_dao = AuthDAO(conn)
+        
         # DEBUG: Check admin table for this user
-        admin_check = await conn.fetchrow(
-            "SELECT email FROM admins WHERE email = $1",
-            email
-        )
+        admin_check = await auth_dao.check_admin_exists(email)
         if admin_check:
             logger.info(f"👑 Admin table entry found for {email}")
         else:
             logger.info(f"❌ No admin table entry found for {email}")
 
         # DEBUG: Check human_agents table for this user
-        agent_check = await conn.fetchrow(
-            "SELECT email FROM human_agents WHERE email = $1",
-            email
-        )
+        agent_check = await auth_dao.check_human_agent_exists(email)
         if agent_check:
             logger.info(f"🤖 Human agent table entry found for {email}")
         else:
@@ -256,21 +254,18 @@ async def sync_user(user: Dict[str, Any] = Depends(get_current_user)):
         try:
             # Use new DatabaseManager for connection
             async with get_db_connection() as conn:
+                # Initialize DAO
+                auth_dao = AuthDAO(conn)
+                
                 # Check if user is an admin (status removed)
-                admin = await conn.fetchrow(
-                    "SELECT email FROM admins WHERE email = $1",
-                    email
-                )
+                admin = await auth_dao.check_admin_exists(email)
                 if admin:
                     user_roles.append('admin')
                     is_admin = True
                     primary_role = 'admin'  # Admin takes precedence
                 
                 # Check if user is a human agent (status removed)
-                agent = await conn.fetchrow(
-                    "SELECT email FROM human_agents WHERE email = $1",
-                    email
-                )
+                agent = await auth_dao.check_human_agent_exists(email)
                 if agent:
                     user_roles.append('human_agent')
                     is_human_agent = True

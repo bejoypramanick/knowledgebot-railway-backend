@@ -202,3 +202,66 @@ class ChatbotDAO:
             """,
             name, value, setting_type, description
         )
+
+    # Human Agent Management Methods
+    async def create_human_agent(self, email: str) -> int:
+        """Create a new human agent and return the ID."""
+        return await self.conn.fetchval(
+            """
+            INSERT INTO human_agents (email)
+            VALUES ($1)
+            RETURNING id
+            """,
+            email
+        )
+
+    async def get_all_human_agents(self) -> List[Dict[str, Any]]:
+        """Get all human agents."""
+        return await self.conn.fetch("SELECT email FROM human_agents")
+
+    async def delete_human_agent(self, email: str):
+        """Delete a human agent by email."""
+        await self.conn.execute(
+            "DELETE FROM human_agents WHERE email = $1",
+            email
+        )
+
+    # Session Assignment Methods
+    async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get session details by session ID."""
+        return await self.conn.fetchrow(
+            "SELECT * FROM chat_sessions WHERE session_id = $1",
+            session_id
+        )
+
+    async def get_existing_assignment(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get existing agent assignment for a session."""
+        return await self.conn.fetchrow(
+            """
+            SELECT ha.* FROM human_agents ha
+            JOIN agent_session_assignments asa ON ha.id = asa.agent_id
+            WHERE asa.session_id = $1 AND asa.status = 'active'
+            """,
+            session_id
+        )
+
+    async def get_available_agents(self) -> List[Dict[str, Any]]:
+        """Get all available human agents."""
+        return await self.conn.fetch(
+            """
+            SELECT * FROM human_agents 
+            WHERE is_active = true 
+            ORDER BY created_at ASC
+            """
+        )
+
+    async def create_agent_assignment(self, session_id: str, agent_id: int, assigned_by: str):
+        """Create a new agent assignment."""
+        await self.conn.execute(
+            """
+            INSERT INTO agent_session_assignments 
+            (session_id, agent_id, status, assigned_at, assigned_by)
+            VALUES ($1, $2, 'active', CURRENT_TIMESTAMP, $3)
+            """,
+            session_id, agent_id, assigned_by
+        )

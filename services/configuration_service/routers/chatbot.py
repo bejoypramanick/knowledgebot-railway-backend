@@ -7,6 +7,7 @@ from services.configuration_service.core.database import get_db_connection
 from services.configuration_service.schemas.models import ChatbotConfigRequest, AdminAccount, ValidatedEmail
 from services.configuration_service.utils.validation import validate_configuration_consistency
 from services.configuration_service.utils.logging_utils import log_configuration_change
+from services.configuration_service.dao.chatbot_dao import ChatbotDAO
 from shared.auth_middleware import get_current_user
 from shared.utils import log_endpoint_request
 
