@@ -21,6 +21,16 @@ class ServiceFactory:
             return FeedbackService(feedback_dao)
     
     @staticmethod
+    async def create_token_usage_service():
+        """Create TokenUsageService with TokenDAO"""
+        from ..servcie.token_usage_service import TokenUsageService
+        from shared.dao.token_dao import TokenDAO
+        
+        async with get_db_connection() as conn:
+            token_dao = TokenDAO(conn)
+            return TokenUsageService(token_dao)
+    
+    @staticmethod
     async def create_token_service():
         """Create TokenService with TokenDAO"""
         from shared.servcie.token_service import TokenService
