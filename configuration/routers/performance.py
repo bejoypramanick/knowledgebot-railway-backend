@@ -17,7 +17,6 @@ router = APIRouter(prefix="/api/v1/admin", tags=["performance"])
 
 from shared.auth_middleware import get_current_user
 from ..servcie.performance_service import PerformanceService
-from ..dao.performance_dao import PerformanceDAO
 
 
 @router.get("/performance/metrics")
@@ -26,8 +25,7 @@ async def get_performance_metrics():
     logger.info("Performance metrics endpoint called - starting optimized parallel queries")
 
     try:
-        performance_dao = PerformanceDAO()
-        service = PerformanceService(performance_dao)
+        service = PerformanceService()  # Service manages its own DAO
         metrics = await service.get_performance_metrics()
         
         return metrics
@@ -40,8 +38,7 @@ async def get_performance_metrics():
 async def get_chat_statistics():
     """Get detailed chat statistics."""
     try:
-        performance_dao = PerformanceDAO()
-        service = PerformanceService(performance_dao)
+        service = PerformanceService()  # Service manages its own DAO
         stats = await service.get_chat_statistics()
         
         return stats
@@ -54,8 +51,7 @@ async def get_chat_statistics():
 async def health_check():
     """Health check endpoint for performance service."""
     try:
-        performance_dao = PerformanceDAO()
-        service = PerformanceService(performance_dao)
+        service = PerformanceService()  # Service manages its own DAO
         # Test service health
         await service.get_performance_metrics()
         return {"status": "healthy", "database": "connected"}

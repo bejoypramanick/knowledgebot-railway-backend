@@ -212,5 +212,21 @@ class ConfigurationService:
         except Exception as e:
             logger.error(f"Failed to log configuration change: {e}")
 
+    async def clear_suggested_messages(self):
+        """Clear all suggested messages"""
+        try:
+            await self._widget_dao.clear_suggested_messages()
+        except Exception as e:
+            logger.error(f"Error clearing suggested messages: {e}")
+            raise
+
+    async def add_suggested_message(self, message: str, index: int):
+        """Add a suggested message"""
+        try:
+            await self._widget_dao.add_suggested_message(message, index)
+        except Exception as e:
+            logger.error(f"Error adding suggested message: {e}")
+            raise
+
 # Singleton instance
 configuration_service = ConfigurationService()

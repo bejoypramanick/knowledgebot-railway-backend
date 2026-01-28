@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class FeedbackService:
     """Service layer for feedback management"""
     
-    def __init__(self, feedback_dao: FeedbackDAO):
-        self.feedback_dao = feedback_dao
+    def __init__(self):
+        self.feedback_dao = FeedbackDAO()  # Service manages its own DAO
     
     async def submit_feedback(self, message_id: str, session_id: str, feedback: str, user_email: Optional[str] = None) -> Dict[str, Any]:
         """Submit feedback for a message"""

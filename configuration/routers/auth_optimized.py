@@ -23,7 +23,6 @@ from shared.firebase_auth import (
 )
 from shared.auth_middleware import get_current_user
 from shared.utils import retry_database_operation
-from ..dao.auth_dao import AuthDAO
 from ..servcie.auth_service import AuthService
 
 logger = logging.getLogger(__name__)

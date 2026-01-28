@@ -12,7 +12,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.auth_middleware import get_current_user
 from ..servcie.feedback_service import FeedbackService
-from ..dao.feedback_dao import FeedbackDAO
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +28,7 @@ class FeedbackRequest(BaseModel):
 async def submit_feedback(request: FeedbackRequest, current_user: dict = Depends(get_current_user)):
     """Submit feedback for a chat message."""
     try:
-        feedback_dao = FeedbackDAO()
-        service = FeedbackService(feedback_dao)
+        service = FeedbackService()  # Service manages its own DAO
         result = await service.submit_feedback(
             request.message_id, 
             request.session_id, 

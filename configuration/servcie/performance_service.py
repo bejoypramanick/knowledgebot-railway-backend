@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class PerformanceService:
     """Service layer for performance metrics"""
     
-    def __init__(self, performance_dao: PerformanceDAO):
-        self.performance_dao = performance_dao
+    def __init__(self):
+        self.performance_dao = PerformanceDAO()  # Service manages its own DAO
     
     async def get_performance_metrics(self) -> Dict[str, Any]:
         """Get performance metrics"""

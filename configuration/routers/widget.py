@@ -9,7 +9,6 @@ from ..schemas.models import WidgetConfigRequest
 from ..utils.logging_utils import log_configuration_change
 from ..servcie.configuration_service import configuration_service
 from shared.auth_middleware import get_current_user
-from ..dao.widget_dao import WidgetDAO
 
 logger = logging.getLogger(__name__)
 
@@ -129,11 +128,10 @@ async def save_widget_config(
 
         # Handle suggested_messages
         if config.suggested_messages is not None:
-            dao = await configuration_service._get_widget_dao()
-            await dao.clear_suggested_messages()
+            await configuration_service.clear_suggested_messages()
             for i, message in enumerate(config.suggested_messages):
                 if message and isinstance(message, str):
-                    await dao.add_suggested_message(message, i)
+                    await configuration_service.add_suggested_message(message, i)
 
         if update_data:
             await configuration_service.update_widget_config(update_data)

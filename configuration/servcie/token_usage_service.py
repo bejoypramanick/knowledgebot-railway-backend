@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class TokenUsageService:
     """Service layer for token usage management"""
     
-    def __init__(self, token_dao: TokenDAO):
-        self.token_dao = token_dao
+    def __init__(self):
+        self.token_dao = TokenDAO()  # Service manages its own DAO
     
     async def get_gemini_usage(self) -> dict:
         """Get Gemini API token usage by calculating totals from token_usage_log table."""

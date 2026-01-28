@@ -14,7 +14,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.firebase_auth import get_user_from_firestore, save_user_to_firestore, update_user_role_in_firestore
 from shared.auth_middleware import get_current_user
-from ..dao.auth_dao import AuthDAO
 from ..servcie.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
@@ -44,11 +43,10 @@ async def add_admins(request: AdminRequest, current_user: dict = Depends(get_cur
         raise HTTPException(status_code=403, detail="User email not found in token")
     
     try:
-        auth_dao = AuthDAO()
-        service = AuthService(auth_dao)
+        service = AuthService()  # Service manages its own DAO
         
         # Check if current user is an admin
-        is_admin = await auth_dao.check_admin_exists(user_email)
+        is_admin = await service.check_admin_exists(user_email)
         
         if not is_admin or is_admin == 0:
             raise HTTPException(status_code=403, detail="Only admins can add new admins")
@@ -58,7 +56,7 @@ async def add_admins(request: AdminRequest, current_user: dict = Depends(get_cur
         
         for email in request.emails:
             # Check if admin already exists
-            existing = await auth_dao.check_admin_exists(email)
+            existing = await service.check_admin_exists(email)
 
             if existing:
                 logger.info(f"Admin {email} already exists, skipping")
@@ -66,7 +64,7 @@ async def add_admins(request: AdminRequest, current_user: dict = Depends(get_cur
             
             # Create new admin
             token = generate_confirmation_token()
-            admin_id = await auth_dao.create_admin(email, token, user_email)
+            admin_id = await service.add_admin(email)
             
             # Admin created successfully
             admins_created.append({
@@ -172,15 +170,15 @@ async def remove_admin(email: str, current_user: dict = Depends(get_current_user
 async def get_user_role(email: str):
     """Get user role (admin, human_agent, or user) for a given email."""
     try:
-        auth_dao = AuthDAO()
+        service = AuthService()  # Service manages its own DAO
         
         # Check if user is an admin
-        is_admin = await auth_dao.check_admin_exists(email)
+        is_admin = await service.check_admin_exists(email)
         if is_admin:
             return {"email": email, "role": "admin"}
         
         # Check if user is a human agent
-        is_agent = await auth_dao.check_human_agent_exists(email)
+        is_agent = await service.check_human_agent_exists(email)
         if is_agent:
             return {"email": email, "role": "human_agent"}
         
