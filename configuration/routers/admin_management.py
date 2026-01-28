@@ -44,41 +44,8 @@ async def add_admins(request: AdminRequest, current_user: dict = Depends(get_cur
     
     try:
         service = AuthService()  # Service manages its own DAO
-        
-        # Check if current user is an admin
-        is_admin = await service.check_admin_exists(user_email)
-        
-        if not is_admin or is_admin == 0:
-            raise HTTPException(status_code=403, detail="Only admins can add new admins")
-        
-        # Create admins directly without email confirmation
-        admins_created = []
-        
-        for email in request.emails:
-            # Check if admin already exists
-            existing = await service.check_admin_exists(email)
-
-            if existing:
-                logger.info(f"Admin {email} already exists, skipping")
-                continue
-            
-            # Create new admin
-            token = generate_confirmation_token()
-            admin_id = await service.add_admin(email)
-            
-            # Admin created successfully
-            admins_created.append({
-                "email": email,
-                "status": "active",
-                "confirmation_token": token
-            })
-            logger.info(f"Admin {email} created successfully")
-        
-        return {
-            "success": True,
-            "message": "Admins created successfully",
-            "admins": admins_created
-        }
+        result = await service.add_admins(request.emails, user_email)
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -171,19 +138,7 @@ async def get_user_role(email: str):
     """Get user role (admin, human_agent, or user) for a given email."""
     try:
         service = AuthService()  # Service manages its own DAO
-        
-        # Check if user is an admin
-        is_admin = await service.check_admin_exists(email)
-        if is_admin:
-            return {"email": email, "role": "admin"}
-        
-        # Check if user is a human agent
-        is_agent = await service.check_human_agent_exists(email)
-        if is_agent:
-            return {"email": email, "role": "human_agent"}
-        
-        # Default to user
-        return {"email": email, "role": "user"}
+        return await service.get_user_role(email)
     except Exception as e:
         logger.error(f"Error getting user role: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error getting user role: {str(e)}")
