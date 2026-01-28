@@ -53,7 +53,6 @@ app.start_time = time.time()
 register_fastapi_exception_handlers(app, "api_gateway")
 
 # Middleware
-app.middleware("http")(add_security_headers_middleware)
 app.middleware("http")(log_requests_middleware)
 
 app.add_middleware(
