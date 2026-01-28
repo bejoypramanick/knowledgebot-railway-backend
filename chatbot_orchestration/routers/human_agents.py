@@ -7,7 +7,7 @@ from typing import List, Optional
 import logging
 
 from shared.auth_middleware import get_current_user
-from ..servcie.human_agents_service import HumanAgentsService
+from ..servcie.human_agents_service import HumanAgentsService, AgentResponse
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +16,6 @@ router = APIRouter(prefix="/api/v1/human-agents", tags=["human-agents"])
 
 class HumanAgentsRequest(BaseModel):
     emails: List[EmailStr]
-
-
-class AgentResponse(BaseModel):
-    email: str
-    status: str
-    online: Optional[bool] = None
 
 
 @router.post("/", response_model=dict)
@@ -52,15 +46,7 @@ async def get_human_agents(
     try:
         service = HumanAgentsService()  # Service manages its own DAO
         agents = await service.get_human_agents()
-        
-        return [
-            AgentResponse(
-                email=agent.get("email", ""),
-                status="active",
-                online=agent.get("is_online", False)
-            )
-            for agent in agents
-        ]
+        return agents  # Service returns properly formatted response
     except Exception as e:
         logger.error(f"Error fetching human agents: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching agents: {str(e)}")
@@ -74,18 +60,10 @@ async def get_online_agents(
     try:
         service = HumanAgentsService()  # Service manages its own DAO
         agents = await service.get_online_agents()
-        
-        return [
-            AgentResponse(
-                email=agent.get("email", ""),
-                status="online",
-                online=True
-            )
-            for agent in agents
-        ]
+        return agents  # Service returns properly formatted response
     except Exception as e:
         logger.error(f"Error fetching online agents: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error fetching online agents: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching agents: {str(e)}")
 
 
 @router.delete("/{email}", response_model=dict)
