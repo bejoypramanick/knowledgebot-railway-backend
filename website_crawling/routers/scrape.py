@@ -8,9 +8,9 @@ from fastapi.responses import StreamingResponse
 
 from ..schemas.models import ScrapeRequest, ScrapeResponse
 from ..core.sessions import active_scraping_sessions
-from ..servce.service_factory import ServiceFactory
-from ..servce.crawler import crawl_website
-from ..servce.ingestion_service import upload_scraped_content, record_scraped_metadata
+from ..service.service_factory import ServiceFactory
+from ..service.crawler import crawl_website
+from ..service.ingestion_service import upload_scraped_content, record_scraped_metadata
 from shared.utils import log_endpoint_request
 
 logger = get_railway_logger(__name__)
@@ -79,7 +79,7 @@ async def scrape_website_endpoint(request: ScrapeRequest):
         domain = urlparse(request.url).netloc.replace('www.', '')
         
         # Service handles all business logic
-        from ..servce.scraping_service import ScrapingService
+        from ..service.scraping_service import ScrapingService
         scraping_service = ScrapingService()
         scrape_result = await scraping_service.handle_scrape_request(request, sse_queue)
         

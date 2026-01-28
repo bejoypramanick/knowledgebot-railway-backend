@@ -393,7 +393,7 @@ class ConfigurationService:
     async def request_human_agent(self, session_id: str):
         """Request a human agent for a chat session"""
         try:
-            from ..servce.chat_log_service import ChatLogService
+            from ..service.chat_log_service import ChatLogService
             from ..utils.sse_manager import connection_manager
             
             chat_service = ChatLogService(connection_manager)

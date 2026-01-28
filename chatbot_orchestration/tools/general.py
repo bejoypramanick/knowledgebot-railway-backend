@@ -5,7 +5,7 @@ import httpx
 from typing import Annotated
 from shared.config import settings
 from ..core.dependencies import ChatSessionDeps
-from ..servce.file_service import FileService
+from ..service.file_service import FileService
 
 logger = get_railway_logger(__name__)
 

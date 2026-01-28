@@ -13,7 +13,7 @@ import string
 import json
 
 from shared.auth_middleware import get_current_user
-from ..servce.user_service import UserService
+from ..service.user_service import UserService
 
 logger = get_railway_logger(__name__)
 
