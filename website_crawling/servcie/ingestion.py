@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from google.genai import types
 from ..core.ai import get_genai_client
 from ..schemas.models import ScrapeRequest
-from ..dao.scraping_dao import ScrapingDAO
+from .scraping_service import ScrapingService
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,7 @@ async def record_scraped_metadata(
     version: int = 1
 ):
     try:
-        dao = ScrapingDAO()
+        scraping_service = ScrapingService()
         
         scraping_cfg = {
             "max_depth": request.max_depth,
@@ -138,6 +138,6 @@ async def record_scraped_metadata(
             "version": version
         }
         
-        await dao.insert_scraped_metadata(metadata)
+        await scraping_service.insert_scraped_metadata(metadata)
     except Exception as e:
         logger.error(f"Failed to persist scraped metadata: {e}")

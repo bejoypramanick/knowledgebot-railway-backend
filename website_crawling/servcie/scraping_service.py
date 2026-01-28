@@ -40,3 +40,11 @@ class ScrapingService:
             except Exception as e:
                 logger.warning(f"Failed to delete Gemini file {file_name}: {e}")
                 pass
+
+    async def insert_scraped_metadata(self, metadata: dict):
+        """Insert scraped metadata into database."""
+        try:
+            await self.scraping_dao.insert_scraped_metadata(metadata)
+        except Exception as e:
+            logger.error(f"Error inserting scraped metadata: {e}")
+            raise
