@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from shared.config import settings
 from shared.utils import log_endpoint_request
-from .agent.service import pydantic_ai_service
+from .servcie.agent_service import pydantic_ai_service
 from .routers import chat
 from .core.database import get_railway_db
 
