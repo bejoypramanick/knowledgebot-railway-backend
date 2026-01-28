@@ -5,8 +5,7 @@ Provides business logic for user management operations
 from typing import Any, Dict, Optional
 
 from shared.logging_config import get_railway_logger
-
-from ..dao.user_dao import UserDAO
+from shared.dao.user_dao import UserDAO
 
 logger = get_railway_logger(__name__)
 
@@ -14,7 +13,7 @@ class UserService:
     """Service layer for user management"""
     
     def __init__(self):
-        self.user_dao = UserDAO()  # Service manages its own DAO
+        self.user_dao = UserDAO()  # Use shared UserDAO
     
     async def get_or_create_unique_id(self, email: Optional[str], role: str) -> Dict[str, Any]:
         """Get or create a unique ID for a user."""
