@@ -174,7 +174,7 @@ class ChatLogService:
 
             # Prepare messages
             session_messages = messages_by_session.get(session_db_id, [])
-            from services.configuration_service.schemas.chat_log_schemas import ChatMessageResponse
+            from ..schemas.chat_log_schemas import ChatMessageResponse
             messages = [
                 ChatMessageResponse(
                     id=str(msg['id']),
@@ -231,7 +231,7 @@ class ChatLogService:
                 elif feedback_result['negative_count'] > 0:
                     session_feedback = 'negative'
 
-            from services.configuration_service.schemas.chat_log_schemas import ChatSessionResponse
+            from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(
                 id=session_id,
                 customer_name=metadata.get('customer_name'),

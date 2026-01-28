@@ -1,7 +1,7 @@
 import logging
 import json
 from datetime import datetime
-from services.configuration_service.core.database import get_db_connection
+from ..core.database import get_db_connection
 
 logger = logging.getLogger(__name__)
 

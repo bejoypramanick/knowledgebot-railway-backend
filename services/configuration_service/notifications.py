@@ -116,7 +116,7 @@ async def get_notifications(
     Get notifications for a user.
     """
     try:
-        from services.configuration_service.main import get_db_connection
+        from .main import get_db_connection
         async with get_db_connection() as conn:
             notifications_dao = NotificationsDAO(conn)
             

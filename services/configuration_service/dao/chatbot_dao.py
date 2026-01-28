@@ -1,6 +1,6 @@
 import logging
 from typing import Optional, Dict, Any, List, Union
-from services.configuration_service.schemas.models import ChatbotConfigRequest
+from ..schemas.models import ChatbotConfigRequest
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,7 @@ except ImportError:
         return text.strip() if strip else text
     bleach = type('bleach', (), {'clean': staticmethod(clean)})()
 
-from services.configuration_service.schemas.models import ChatbotConfigRequest
+from ..schemas.models import ChatbotConfigRequest
 
 def sanitize_text_input(text: str, max_length: int = 1000) -> str:
     """Sanitize user input to prevent XSS and other attacks"""
