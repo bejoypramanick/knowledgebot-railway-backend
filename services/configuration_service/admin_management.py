@@ -13,7 +13,6 @@ from pathlib import Path
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.db import railway_db
-from shared.email_service import create_email_service
 from shared.firebase_auth import get_user_from_firestore, save_user_to_firestore, update_user_role_in_firestore
 from shared.auth_middleware import get_current_user
 
@@ -57,8 +56,7 @@ async def add_admins(request: AdminRequest, current_user: dict = Depends(get_cur
             if not is_admin or is_admin == 0:
                 raise HTTPException(status_code=403, detail="Only admins can add new admins")
             
-            # Create email service
-            email_service = create_email_service(conn)
+            # Create admins directly without email confirmation
             admins_created = []
             
             for email in request.emails:
@@ -83,20 +81,17 @@ async def add_admins(request: AdminRequest, current_user: dict = Depends(get_cur
                     email, token, user_email
                 )
                 
-                # Send confirmation email
-                if await email_service.send_admin_confirmation_email(email, token, user_email):
-                    admins_created.append({
-                        "email": email,
-                        "status": "pending",
-                        "confirmation_token": token
-                    })
-                    logger.info(f"Admin confirmation email sent to {email}")
-                else:
-                    logger.warning(f"Failed to send admin confirmation email to {email}")
+                # Admin created successfully
+                admins_created.append({
+                    "email": email,
+                    "status": "active",
+                    "confirmation_token": token
+                })
+                logger.info(f"Admin {email} created successfully")
             
             return {
                 "success": True,
-                "message": "Confirmation emails sent to new admins",
+                "message": "Admins created successfully",
                 "admins": admins_created
             }
     except HTTPException:
@@ -201,9 +196,7 @@ async def remove_admin(email: str, current_user: dict = Depends(get_current_user
             # Note: Admin removal is handled by setting status to 'removed' in admins table
             # No need to update chatbot_configuration - configuration endpoint reads from admins table
             
-            # Send removal email
-            email_service = create_email_service(conn)
-            await email_service.send_admin_removal_email(email)
+            # Admin removed - no email notification sent
             
             return {
                 "success": True,

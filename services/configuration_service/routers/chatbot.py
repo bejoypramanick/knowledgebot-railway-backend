@@ -241,24 +241,13 @@ async def save_chatbot_config(
             # Configuration updates completed using normalized tables
             logger.info("Configuration saved successfully using normalized tables")
             
-            # If human agents are provided, trigger email sending
+            # If human agents are provided, process them
             logger.info(f"Checking human agents: config.human_agents = {config.human_agents}")
             if config.human_agents is not None and len(config.human_agents) > 0:
-                logger.info(f"Processing {len(config.human_agents)} human agent(s) for email sending")
+                logger.info(f"Processing {len(config.human_agents)} human agent(s)")
                 try:
-                    # Import email service and helper functions
-                    from shared.email_service import create_email_service
-                    from services.configuration_service.human_agents import (
-                        generate_confirmation_token,
-                        generate_confirmation_link
-                    )
-                    
-                    logger.info("Email service imports successful, creating email service instance")
-                    # Create email service with database connection
-                    email_service = create_email_service(conn)
                     agents_created = []
                     
-                    logger.info(f"Starting email sending loop for {len(config.human_agents)} agent(s)")
                     for email in config.human_agents:
                         if not email or not email.strip():
                             continue
@@ -272,7 +261,7 @@ async def save_chatbot_config(
                             logger.info(f"Agent {email} already exists, skipping creation")
                             continue
 
-                        # Create new agent (no email/password needed)
+                        # Create new agent
                         logger.info(f"Creating new agent record for {email}")
                         agent_id = await conn.fetchval(
                             """
@@ -288,8 +277,8 @@ async def save_chatbot_config(
                         })
                         logger.info(f"✅ Human agent {email} added directly")
                 except Exception as e:
-                    # Don't fail the entire save if email sending fails
-                    logger.error(f"❌ Error sending human agent emails: {e}", exc_info=True)
+                    # Don't fail the entire save if agent processing fails
+                    logger.error(f"❌ Error processing human agents: {e}", exc_info=True)
                     logger.error(f"Error type: {type(e).__name__}")
             
             # Handle deletion of agents that are no longer in the list
@@ -327,7 +316,7 @@ async def save_chatbot_config(
                     # Don't fail the entire save if deletion fails
                     logger.error(f"❌ Error deleting removed human agents: {e}", exc_info=True)
             else:
-                logger.info("No human agents provided or list is empty, skipping email sending and deletion")
+                logger.info("No human agents provided or list is empty, skipping agent processing")
 
             # Log the configuration change (non-blocking)
             try:

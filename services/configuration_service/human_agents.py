@@ -13,7 +13,6 @@ from pathlib import Path
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.db import railway_db
-from shared.email_service import create_email_service
 
 logger = logging.getLogger(__name__)
 
@@ -44,9 +43,10 @@ def generate_password() -> str:
     return secrets.token_urlsafe(16)
 
 
-def generate_widget_link(agent_id: str, email_service) -> str:
+def generate_widget_link(agent_id: str) -> str:
     """Generate a unique widget link for the agent."""
-    widget_base_url = email_service.widget_base_url
+    import os
+    widget_base_url = os.getenv('WIDGET_BASE_URL', 'https://knowledgebot.vercel.app')
     return f"{widget_base_url}/agent/{agent_id}"
 
 def generate_confirmation_link(token: str) -> str:
@@ -64,8 +64,6 @@ async def add_human_agents(request: HumanAgentsRequest):
     
     try:
         async with railway_db.acquire() as conn:
-            # Create email service with database connection
-            email_service = create_email_service(conn)
             agents_created = []
             
             for email in request.emails:
@@ -96,7 +94,7 @@ async def add_human_agents(request: HumanAgentsRequest):
             
             return {
                 "success": True,
-                "message": "Confirmation emails sent to agents",
+                "message": "Agents added successfully",
                 "agents": agents_created
             }
     except Exception as e:
@@ -135,12 +133,7 @@ async def remove_human_agent(email: str):
                 email
             )
             
-            # Send removal email
-            email_service = create_email_service(conn)
-            if await email_service.send_removal_email(email):
-                logger.info(f"Removal email sent to {email}")
-            else:
-                logger.warning(f"Failed to send removal email to {email}")
+            # Agent removed - no email notification sent
             
             return {
                 "success": True,
