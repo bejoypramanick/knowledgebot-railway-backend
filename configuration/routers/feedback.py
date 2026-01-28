@@ -10,7 +10,9 @@ from pathlib import Path
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from ..servcie.service_factory import ServiceFactory
+from shared.auth_middleware import get_current_user
+from ..servcie.feedback_service import FeedbackService
+from ..dao.feedback_dao import FeedbackDAO
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +26,16 @@ class FeedbackRequest(BaseModel):
 
 
 @router.post("/feedback", response_model=dict)
-async def submit_feedback(request: FeedbackRequest):
+async def submit_feedback(request: FeedbackRequest, current_user: dict = Depends(get_current_user)):
     """Submit feedback for a chat message."""
     try:
-        service = await ServiceFactory.create_feedback_service()
+        feedback_dao = FeedbackDAO()
+        service = FeedbackService(feedback_dao)
         result = await service.submit_feedback(
             request.message_id, 
             request.session_id, 
-            request.feedback
+            request.feedback,
+            current_user.get('email')
         )
         
         return result

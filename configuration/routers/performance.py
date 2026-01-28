@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["performance"])
 
-from ..servcie.service_factory import ServiceFactory
+from shared.auth_middleware import get_current_user
+from ..servcie.performance_service import PerformanceService
+from ..dao.performance_dao import PerformanceDAO
 
 
 @router.get("/performance/metrics")
@@ -24,7 +26,8 @@ async def get_performance_metrics():
     logger.info("Performance metrics endpoint called - starting optimized parallel queries")
 
     try:
-        service = await ServiceFactory.create_performance_service()
+        performance_dao = PerformanceDAO()
+        service = PerformanceService(performance_dao)
         metrics = await service.get_performance_metrics()
         
         return metrics
@@ -37,7 +40,8 @@ async def get_performance_metrics():
 async def get_chat_statistics():
     """Get detailed chat statistics."""
     try:
-        service = await ServiceFactory.create_performance_service()
+        performance_dao = PerformanceDAO()
+        service = PerformanceService(performance_dao)
         stats = await service.get_chat_statistics()
         
         return stats
@@ -50,7 +54,8 @@ async def get_chat_statistics():
 async def health_check():
     """Health check endpoint for performance service."""
     try:
-        service = await ServiceFactory.create_performance_service()
+        performance_dao = PerformanceDAO()
+        service = PerformanceService(performance_dao)
         # Test service health
         await service.get_performance_metrics()
         return {"status": "healthy", "database": "connected"}
