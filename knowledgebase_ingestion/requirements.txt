@@ -12,9 +12,6 @@ google-auth>=2.38.0
 aiofiles>=24.1.0
 python-multipart>=0.0.9
 
-# Retry logic
-tenacity>=8.2.2
-
 # Enhanced email validation
 email-validator>=2.0.0
 

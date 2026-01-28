@@ -13,3 +13,6 @@ psycopg2-binary>=2.9.0
 # Common utilities
 pydantic-settings>=2.5.0
 psutil>=6.1.0
+
+# Retry logic (used by shared/db.py)
+tenacity>=8.2.2
