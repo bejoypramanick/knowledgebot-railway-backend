@@ -1,5 +1,6 @@
 [build]
-dockerfilePath = "Dockerfile"
+dockerfilePath = "website_crawling/Dockerfile"
+rootDirectory = ".."
 
 [deploy]
 restartPolicyType = "ON_FAILURE"
