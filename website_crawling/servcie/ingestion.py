@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from google.genai import types
 from ..core.ai import get_genai_client
 from ..schemas.models import ScrapeRequest
-from shared import db as shared_db
+from shared.db import get_db_connection
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)

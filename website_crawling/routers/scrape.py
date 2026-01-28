@@ -7,7 +7,7 @@ from fastapi.responses import StreamingResponse
 
 from ..schemas.models import ScrapeRequest, ScrapeResponse
 from ..core.sessions import active_scraping_sessions
-from ..core.database import get_existing_website, delete_website_record, delete_gemini_file
+from ..servcie.service_factory import ServiceFactory
 from ..servcie.crawler import crawl_website
 from ..servcie.ingestion import upload_scraped_content, record_scraped_metadata
 from shared.utils import log_endpoint_request
