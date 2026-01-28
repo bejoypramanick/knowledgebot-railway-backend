@@ -1,11 +1,8 @@
-# Knowledgebase Ingestion Requirements
-# Core FastAPI
-fastapi>=0.124.0
-uvicorn[standard]>=0.38.0
-pydantic>=2.12.0
+# Knowledgebase Ingestion Service-Specific Requirements
+# Note: Base dependencies are in requirements-base.txt
+
+# Additional Pydantic features
 pydantic[email]>=2.12.0
-httpx>=0.28.0
-python-dotenv>=1.2.0
 
 # Google Gemini
 google-genai>=0.8.0
@@ -15,13 +12,7 @@ google-auth>=2.38.0
 aiofiles>=24.1.0
 python-multipart>=0.0.9
 
-# Database
-asyncpg>=0.29.0
-psycopg2-binary>=2.9.0
-
-# Utilities
-pydantic-settings>=2.5.0
-psutil>=6.1.0
+# Retry logic
 tenacity>=8.2.2
 
 # Enhanced email validation

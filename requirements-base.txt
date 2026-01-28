@@ -1,0 +1,15 @@
+# Base Requirements - Common across all services
+# Core FastAPI
+fastapi>=0.124.0
+uvicorn[standard]>=0.38.0
+pydantic>=2.12.0
+httpx>=0.28.0
+python-dotenv>=1.2.0
+
+# Database (common for most services)
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.0
+
+# Common utilities
+pydantic-settings>=2.5.0
+psutil>=6.1.0
