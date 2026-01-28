@@ -6,16 +6,11 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Optional, List
 import logging
-import sys
-from pathlib import Path
-from datetime import datetime
 import uuid
 import random
 import string
 import json
 
-# Add shared directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.auth_middleware import get_current_user
 from .main import get_db_connection
 from .dao.user_dao import UserDAO
@@ -151,9 +146,9 @@ async def get_unique_id(
     Returns 404 if not found.
     """
     try:
-        # Use get_db_connection to ensure database is initialized
-        from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
+            user_dao = UserDAO(conn)
+            
             role = role.lower()
             if role not in ['customer', 'agent', 'admin']:
                 raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")
@@ -161,14 +156,7 @@ async def get_unique_id(
             if not email:
                 raise HTTPException(status_code=400, detail="Email is required for GET request")
             
-            result = await conn.fetchrow(
-                """
-                SELECT unique_id, role, created_at
-                FROM user_unique_ids 
-                WHERE email = $1 AND role = $2
-                """,
-                email, role
-            )
+            result = await user_dao.get_unique_id_by_email_role(email, role)
             
             if not result:
                 raise HTTPException(
@@ -201,55 +189,27 @@ async def get_user_profile(
     No user-specific preferences since all changes are global.
     """
     try:
-        # Use get_db_connection to ensure database is initialized
-        from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
-
-            # Check both tables to determine the user's role
-            # Priority: admin > human_agent > user
-
-            # Check admin table
-            admin_exists = await conn.fetchrow(
-                """
-                SELECT email, created_at
-                FROM admins
-                WHERE email = $1
-                """,
-                current_user.get('email')
-            )
-
-            # Check human_agent table
-            agent_exists = await conn.fetchrow(
-                """
-                SELECT email, created_at
-                FROM human_agents
-                WHERE email = $1
-                """,
-                current_user.get('email')
-            )
-
-            # Determine role based on table membership
-            # Admin takes precedence over human_agent
-            if admin_exists:
-                role = 'admin'
-                created_at = admin_exists['created_at']
-                email = admin_exists['email']
+            user_dao = UserDAO(conn)
+            
+            # Get user role with priority: admin > human_agent > user
+            role = await user_dao.get_user_role_priority(current_user.get('email'))
+            
+            if role == 'admin':
+                admin_info = await user_dao.check_admin_exists(current_user.get('email'))
+                created_at = admin_info['created_at']
+                email = admin_info['email']
                 logger.info(f"👑 User {current_user.get('email')} is an admin (created: {created_at})")
-            elif agent_exists:
-                role = 'human_agent'
-                created_at = agent_exists['created_at']
-                email = agent_exists['email']
+            elif role == 'human_agent':
+                agent_info = await user_dao.check_human_agent_exists(current_user.get('email'))
+                created_at = agent_info['created_at']
+                email = agent_info['email']
                 logger.info(f"🤖 User {current_user.get('email')} is a human agent (created: {created_at})")
             else:
                 role = 'user'
-                created_at = datetime.now()
-                email = current_user.get('email')
+                created_at = None
                 logger.info(f"👤 User {current_user.get('email')} is a regular user (no elevated roles)")
-
-            # Note: If user is in both tables, admin role takes precedence
-            # The roles endpoint will still return all available roles for switching
-            if admin_exists and agent_exists:
-                logger.info(f"📋 User {current_user.get('email')} has both admin and human_agent roles - returning admin as primary role")
+                email = current_user.get('email')
 
             return UserProfileResponse(
                 uid=uid,
@@ -278,29 +238,22 @@ async def update_user_profile(
     this endpoint mainly validates that the user exists and has proper permissions.
     """
     try:
-        # Use get_db_connection to ensure database is initialized
-        from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
-
-            # Check if user is admin (status removed)
-            admin_exists = await conn.fetchval(
-                "SELECT 1 FROM admins WHERE email = $1",
-                current_user.get('email')
-            )
-
-            if admin_exists:
+            user_dao = UserDAO(conn)
+            
+            # Check if user is admin
+            is_admin = await user_dao.is_admin(current_user.get('email'))
+            
+            if is_admin:
                 # For admins, we don't update any fields since display_name/photo_url come from Firebase
                 # and there are no user-specific preferences. Just return the current profile.
                 logger.info(f"👑 Admin profile access validated for {current_user.get('email')}")
                 return await get_user_profile(uid, current_user)
 
-            # Check if user is human agent (status removed)
-            agent_exists = await conn.fetchval(
-                "SELECT 1 FROM human_agents WHERE email = $1",
-                current_user.get('email')
-            )
-
-            if agent_exists:
+            # Check if user is human agent
+            is_agent = await user_dao.is_human_agent(current_user.get('email'))
+            
+            if is_agent:
                 # Same as admin - no fields to update
                 logger.info(f"🤖 Human agent profile access validated for {current_user.get('email')}")
                 return await get_user_profile(uid, current_user)
@@ -324,43 +277,18 @@ async def get_user_roles(
     uid: str = Query(..., description="User UID"),
     current_user: dict = Depends(get_current_user)
 ):
-    """
-    Get available roles for a user.
-    This is a simplified implementation that returns basic roles.
-    In a real implementation, this would check user permissions.
-    """
     logger.info(f"🔍 get_user_roles called with uid: {uid}")
     logger.info(f"👤 Current user from auth: {current_user}")
 
     try:
-        # Use get_db_connection to ensure database is initialized
-        from services.configuration_service.main import get_db_connection
         async with get_db_connection() as conn:
-
+            user_dao = UserDAO(conn)
+            
             user_email = current_user.get('email')
             logger.info(f"📊 Checking admin and human_agent tables for email: {user_email}")
 
-            roles = []  # Start with empty list - only add roles user actually has
-
-            # Check admin table (status removed)
-            admin_check = await conn.fetchrow(
-                "SELECT id FROM admins WHERE email = $1",
-                user_email
-            )
-
-            if admin_check:
-                roles.append('admin')
-                logger.info(f"👑 Admin role confirmed for {user_email}")
-
-            # Check human_agent table (status removed)
-            agent_check = await conn.fetchrow(
-                "SELECT id FROM human_agents WHERE email = $1",
-                user_email
-            )
-
-            if agent_check:
-                roles.append('human_agent')
-                logger.info(f"🤖 Human agent role confirmed for {user_email}")
+            # Get all roles for the user
+            roles = await user_dao.get_user_roles(user_email)
 
             # If user has no roles, deny access
             if not roles:
@@ -368,11 +296,6 @@ async def get_user_roles(
                 raise HTTPException(status_code=403, detail="Access denied: No valid roles found")
 
             logger.info(f"📋 Final roles for {user_email}: {roles}")
-            return roles
-
-            # Default to user role
-            roles = ['user']
-            logger.info(f"👤 No elevated roles found for {current_user.get('email')} - returning roles: {roles}")
             return roles
 
     except Exception as e:
