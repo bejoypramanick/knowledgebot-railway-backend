@@ -18,16 +18,16 @@ class UserDAO:
         async with get_db_connection() as conn:
             # Check admin table
             admin_check = await conn.fetchrow(
-                "SELECT id FROM admins WHERE email = $1",
+                "SELECT id FROM admins WHERE email = $1 AND status = 'active'",
                 user_email
             )
             if admin_check:
                 roles.append("admin")
                 logger.info(f"👑 Admin role confirmed for {user_email}")
 
-            # Check human_agent table
+            # Check human_agent table (no status column, check if not removed)
             agent_check = await conn.fetchrow(
-                "SELECT id FROM human_agents WHERE email = $1",
+                "SELECT id FROM human_agents WHERE email = $1 AND removed_at IS NULL",
                 user_email
             )
             if agent_check:
@@ -41,7 +41,7 @@ class UserDAO:
         try:
             async with get_db_connection() as conn:
                 results = await conn.fetch(
-                    "SELECT email FROM human_agents WHERE is_active = true"
+                    "SELECT email FROM human_agents WHERE removed_at IS NULL"
                 )
                 return [row['email'] for row in results]
         except Exception as e:
@@ -77,7 +77,7 @@ class UserDAO:
         try:
             async with get_db_connection() as conn:
                 return await conn.fetchval(
-                    "SELECT 1 FROM human_agents WHERE email = $1",
+                    "SELECT 1 FROM human_agents WHERE email = $1 AND removed_at IS NULL",
                     email
                 ) is not None
         except Exception as e:
@@ -101,7 +101,7 @@ class UserDAO:
         try:
             async with get_db_connection() as conn:
                 return await conn.fetchval(
-                    "SELECT 1 FROM human_agents WHERE email = $1",
+                    "SELECT 1 FROM human_agents WHERE email = $1 AND removed_at IS NULL",
                     email
                 ) is not None
         except Exception as e:
@@ -117,7 +117,7 @@ class UserDAO:
                     """
                     SELECT email, created_at
                     FROM admins
-                    WHERE email = $1
+                    WHERE email = $1 AND status = 'active'
                     """,
                     email
                 )
@@ -130,7 +130,7 @@ class UserDAO:
                     """
                     SELECT email, created_at
                     FROM human_agents
-                    WHERE email = $1
+                    WHERE email = $1 AND removed_at IS NULL
                     """,
                     email
                 )
