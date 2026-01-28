@@ -5,7 +5,7 @@ Tracks and accumulates token usage from Gemini API responses.
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from configuration.service.token_usage_service import TokenUsageService
+from shared.service.token_service import TokenService
 from shared.logging_config import get_railway_logger
 from shared.token_metrics import track_token_metrics
 
@@ -27,13 +27,13 @@ class TokenUsageData:
     request_metadata: Optional[Dict[str, Any]] = None
 
 # Global service instance for connection pooling
-_token_service: Optional[TokenUsageService] = None
+_token_service: Optional[TokenService] = None
 
-def get_token_service() -> TokenUsageService:
+def get_token_service() -> TokenService:
     """Get or create token service instance for connection pooling"""
     global _token_service
     if _token_service is None:
-        _token_service = TokenUsageService()
+        _token_service = TokenService()
     return _token_service
 
 async def log_async(message: str, level: str = "info") -> None:
@@ -52,7 +52,7 @@ async def log_async(message: str, level: str = "info") -> None:
 async def track_token_usage(session_id: str, message_id: str, provider: str, model: str, 
                           prompt_tokens: int, completion_tokens: int, total_tokens: int, 
                           api_call_type: str, request_metadata: Optional[Dict[str, Any]] = None) -> bool:
-    """Track token usage using the TokenUsageService
+    """Track token usage using the TokenService
     
     Returns:
         bool: True if tracking succeeded, False otherwise
@@ -124,7 +124,7 @@ async def track_gemini_usage_detailed(
     api_call_type: str = 'rag',
     model: str = 'gemini-2.5-flash-lite'
 ) -> bool:
-    """Track detailed Gemini token usage using TokenUsageService
+    """Track detailed Gemini token usage using TokenService
     
     Returns:
         bool: True if tracking succeeded, False otherwise
@@ -147,7 +147,7 @@ async def track_gemini_usage_detailed(
         
         token_service = get_token_service()  # Use pooled service instance
         
-        # Use TokenUsageService for both provider updates and detailed logging
+        # Use TokenService for both provider updates and detailed logging
         await token_service.track_token_usage(
             session_id=session_id,
             message_id=message_id,
@@ -285,7 +285,7 @@ async def track_gemini_usage_with_db(run_usage: Any, session_id: Optional[str] =
 
         total_tokens = int(prompt_tokens + completion_tokens + (cache_read_tokens or 0) + (cache_write_tokens or 0))
 
-        # Use TokenUsageService for consistency
+        # Use TokenService for consistency
         token_service = get_token_service()
         
         await token_service.track_token_usage(
