@@ -315,8 +315,8 @@ def validate_environment() -> None:
     required_vars = []
     
     # Check for database URL using the centralized settings
-    if not settings.railway_postgres_url:
-        required_vars.append('DATABASE_URL (via settings.railway_postgres_url)')
+    if not settings.railway_postgres_url and not settings.database_url:
+        required_vars.append('DATABASE_URL or RAILWAY_POSTGRES_URL')
     
     # Check for Gemini API key
     if not settings.gemini_api_key:
@@ -327,7 +327,8 @@ def validate_environment() -> None:
 
     # Log configuration status
     logger.info(f"INFO:main:GEMINI_API_KEY configured: {'YES' if settings.gemini_api_key else 'NO'}")
-    logger.info(f"INFO:main:DATABASE_URL configured: {'YES' if settings.railway_postgres_url else 'NO'}")
+    db_configured = settings.railway_postgres_url or settings.database_url
+    logger.info(f"INFO:main:DATABASE_URL configured: {'YES' if db_configured else 'NO'}")
 
 
 class GracefulShutdown:

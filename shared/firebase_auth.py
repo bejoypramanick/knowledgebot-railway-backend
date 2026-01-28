@@ -5,8 +5,54 @@ Verifies Firebase Auth tokens and manages user data in Firestore.
 import os
 from typing import Any, Dict, Optional
 
-import firebase_admin
-from firebase_admin import auth, credentials, firestore
+# Handle optional firebase_admin import
+try:
+    import firebase_admin
+    from firebase_admin import auth, credentials, firestore
+    FIREBASE_AVAILABLE = True
+except ImportError:
+    FIREBASE_AVAILABLE = False
+    # Create dummy classes to prevent NameError
+    class DummyFirebaseAdmin:
+        class exceptions:
+            class InvalidArgumentError(Exception):
+                pass
+            class ExpiredIdTokenError(Exception):
+                pass
+        class credentials:
+            class Certificate:
+                def __init__(self, *args, **kwargs):
+                    pass
+        @staticmethod
+        def initialize_app(*args, **kwargs):
+            raise RuntimeError("Firebase Admin SDK not available")
+        @staticmethod
+        def get_app():
+            return None
+    
+    class DummyAuth:
+        @staticmethod
+        def verify_id_token(*args, **kwargs):
+            raise RuntimeError("Firebase Auth not available")
+        @staticmethod
+        def get_user(*args, **kwargs):
+            raise RuntimeError("Firebase Auth not available")
+        @staticmethod
+        def get_user_by_email(*args, **kwargs):
+            raise RuntimeError("Firebase Auth not available")
+    
+    class DummyFirestore:
+        class client:
+            def __init__(self):
+                pass
+        @staticmethod
+        def SERVER_TIMESTAMP():
+            return None
+    
+    firebase_admin = DummyFirebaseAdmin()
+    auth = DummyAuth()
+    credentials = DummyFirebaseAdmin.credentials
+    firestore = DummyFirestore()
 
 from shared.logging_config import get_railway_logger
 
@@ -20,6 +66,10 @@ _firestore_db = None
 def init_firebase_auth():
     """Initialize Firebase Admin SDK for Authentication and Firestore."""
     global _firebase_app, _firestore_db
+    
+    if not FIREBASE_AVAILABLE:
+        logger.warning("Firebase Admin SDK not available - Firebase features disabled")
+        return None, None
     
     if _firebase_app is not None:
         logger.info("Firebase Auth and Firestore already initialized")
@@ -59,6 +109,10 @@ def init_firebase_auth():
 
 def get_firestore():
     """Get Firestore database instance."""
+    if not FIREBASE_AVAILABLE:
+        logger.warning("Firebase Firestore not available")
+        return None
+        
     global _firestore_db
     if _firestore_db is None:
         init_firebase_auth()
@@ -75,6 +129,10 @@ def verify_firebase_token(id_token: str) -> Optional[Dict[str, Any]]:
     Returns:
         Decoded token with user info (uid, email, etc.) or None if invalid
     """
+    if not FIREBASE_AVAILABLE:
+        logger.warning("Firebase Auth not available - token verification skipped")
+        return None
+        
     try:
         # Initialize if not already done
         if _firebase_app is None:

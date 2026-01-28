@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None
     
+    # Also support DATABASE_URL for backward compatibility
+    database_url: Optional[str] = None
+    
     model_config = {
         'env_file': ".env",
         'case_sensitive': False
