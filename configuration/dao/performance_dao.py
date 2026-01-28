@@ -22,18 +22,20 @@ class PerformanceDAO:
 
     async def get_active_sessions(self) -> int:
         """Get number of active sessions (last 24 hours)."""
-        return await self.conn.fetchval("""
-            SELECT COUNT(*) FROM chat_sessions
-            WHERE last_activity_at >= NOW() - INTERVAL '24 hours'
-        """)
+        async with get_db_connection() as conn:
+            return await conn.fetchval("""
+                SELECT COUNT(*) FROM chat_sessions
+                WHERE last_activity_at >= NOW() - INTERVAL '24 hours'
+            """)
 
     async def get_average_engagement_time(self) -> Optional[float]:
         """Get average engagement time in minutes."""
-        return await self.conn.fetchval("""
-            SELECT AVG(EXTRACT(EPOCH FROM (last_activity_at - created_at)) / 60)
-            FROM chat_sessions
-            WHERE last_activity_at IS NOT NULL AND created_at IS NOT NULL
-        """)
+        async with get_db_connection() as conn:
+            return await conn.fetchval("""
+                SELECT AVG(EXTRACT(EPOCH FROM (last_activity_at - created_at)) / 60)
+                FROM chat_sessions
+                WHERE last_activity_at IS NOT NULL AND created_at IS NOT NULL
+            """)
 
     async def get_sessions_with_human(self) -> int:
         """Get number of sessions that had human agent involvement."""
