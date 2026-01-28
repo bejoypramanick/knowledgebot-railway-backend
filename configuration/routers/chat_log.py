@@ -34,7 +34,6 @@ from .schemas.chat_log_schemas import (
 )
 from .servcie.chat_log_service import ChatLogService
 from .utils.sse_manager import connection_manager
-from dao.chat_log_dao import ChatLogDAO
 
 
 @router.get("/agents/online", response_model=dict)
@@ -44,12 +43,9 @@ async def get_online_agents(current_user: dict = Depends(get_current_user)):
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found")
 
-    from .main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
-        agents = await service.get_online_agents(user_email)
-        return {"success": True, "agents": agents}
+    service = ChatLogService(connection_manager)  # Service manages its own DAO
+    agents = await service.get_online_agents(user_email)
+    return {"success": True, "agents": agents}
 
 
 @router.post("/agents/heartbeat")
@@ -59,12 +55,9 @@ async def agent_heartbeat(current_user: dict = Depends(get_current_user)):
     if not user_email:
         raise HTTPException(status_code=401, detail="User email not found")
     
-    from .main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
-        await service.record_heartbeat(user_email)
-        return {"success": True, "message": "Heartbeat recorded", "agent_email": user_email}
+    service = ChatLogService(connection_manager)  # Service manages its own DAO
+    await service.record_heartbeat(user_email)
+    return {"success": True, "message": "Heartbeat recorded", "agent_email": user_email}
 
 
 @router.get("/chat-sessions", response_model=ChatSessionsResponse)
@@ -138,21 +131,18 @@ async def archive_chat_session(
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found in token")
 
-    from .main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
-        
-        # Service handles role check internally
-        await service.archive_chat_session(session_id, request.status, user_email)
-        
-        logger.info(f"Session {session_id} marked as {request.status} by {user_email}")
-        return {
-            "success": True,
-            "message": f"Session status changed to {request.status}",
-            "session_id": session_id,
-            "status": request.status
-        }
+    service = ChatLogService(connection_manager)  # Service manages its own DAO
+    
+    # Service handles role check internally
+    await service.archive_chat_session(session_id, request.status, user_email)
+    
+    logger.info(f"Session {session_id} marked as {request.status} by {user_email}")
+    return {
+        "success": True,
+        "message": f"Session status changed to {request.status}",
+        "session_id": session_id,
+        "status": request.status
+    }
 
 
 @router.get("/chat-sessions/{session_id}/messages", response_model=dict)
@@ -165,10 +155,7 @@ async def get_session_messages(
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found")
     
-    from .main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
+    service = ChatLogService(connection_manager)  # Service manages its own DAO
         messages_data = await service.get_session_messages(session_id)
         
         messages = [{
@@ -196,10 +183,7 @@ async def send_agent_message(
     if request.agent_id != user_email:
         raise HTTPException(status_code=403, detail="Agent ID must match authenticated user")
     
-    from .main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
+    service = ChatLogService(connection_manager)  # Service manages its own DAO
         message_id = await service.send_agent_message(session_id, user_email, request.text)
         
         return SendMessageResponse(
@@ -253,10 +237,7 @@ async def assign_chat_session(
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found")
     
-    from .main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
+    service = ChatLogService(connection_manager)  # Service manages its own DAO
         
         roles = await dao.check_user_role(user_email)
         if not roles["is_admin"]:
@@ -286,10 +267,7 @@ async def transfer_chat_session(
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found")
         
-    from .main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
+    service = ChatLogService(connection_manager)  # Service manages its own DAO
         await service.transfer_chat_session(session_id, user_email, target_agent_email)
         
         return {
@@ -313,10 +291,7 @@ async def update_chat_session(
     if not user_email:
         raise HTTPException(status_code=403, detail="User email not found")
     
-    from .main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
+    service = ChatLogService(connection_manager)  # Service manages its own DAO
         await service.update_chat_session(session_id, user_email, status, assigned_agent, feedback, user_type)
         return {'success': True, 'message': 'Session updated successfully'}
 
@@ -331,10 +306,7 @@ async def end_customer_session(
     if not user_email:
         raise HTTPException(status_code=400, detail="User email is required")
 
-    from .main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
+    service = ChatLogService(connection_manager)  # Service manages its own DAO
         await service.end_customer_session(session_id, user_email)
         return {'success': True, 'message': 'Session ended successfully'}
 
@@ -342,10 +314,7 @@ async def end_customer_session(
 @public_chat_router.post("/{session_id}/request-human-agent", response_model=dict)
 async def request_human_agent(session_id: str, request: Request):
     """Request human agent connection for a chat session."""
-    from .main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
+    service = ChatLogService(connection_manager)  # Service manages its own DAO
         assigned_agent = await service.request_human_agent(session_id)
         
         return {
@@ -359,10 +328,7 @@ async def request_human_agent(session_id: str, request: Request):
 @public_chat_router.patch("/{session_id}/end", response_model=dict)
 async def public_end_customer_session(session_id: str, request: Request):
     """End a chat session from the customer side (public)."""
-    from .main import get_db_connection
-    async with get_db_connection() as conn:
-        dao = ChatLogDAO(conn)
-        service = ChatLogService(dao, connection_manager)
+    service = ChatLogService(connection_manager)  # Service manages its own DAO
         await service.public_end_customer_session(session_id)
         return {"success": True, "message": "Session ended successfully"}
 

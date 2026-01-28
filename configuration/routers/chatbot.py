@@ -3,7 +3,6 @@ from fastapi.responses import JSONResponse
 from typing import List, Union
 import logging
 
-from ..core.database import get_db_connection
 from ..schemas.models import ChatbotConfigRequest, AdminAccount, ValidatedEmail
 from ..utils.validation import validate_configuration_consistency
 from ..utils.logging_utils import log_configuration_change
@@ -131,16 +130,29 @@ async def save_chatbot_config(
                 detail=f"Business logic validation failed: {'; '.join(business_errors)}"
             )
 
-        async with get_db_connection() as conn:
-                from ..dao.auth_dao import AuthDAO
-                auth_dao = AuthDAO(conn)
+        # Use service instead of direct database access
+        from ..dao.auth_dao import AuthDAO
+        from ..servcie.auth_service import AuthService
+        auth_service = AuthService()
 
-                # Handle admin emails
-                if config.admin_emails is not None:
-                    for admin_item in config.admin_emails:
-                        email = None
-                        if isinstance(admin_item, dict):
-                            email = admin_item.get('email', '')
+        async with get_db_connection() as conn:
+            from ..dao.auth_dao import AuthDAO
+            dao = AuthDAO(conn)
+
+            # Handle admin emails
+            if config.admin_emails is not None:
+                for admin_item in config.admin_emails:
+                    email = None
+                    if isinstance(admin_item, dict):
+                        email = admin_item.get('email', '')
+                    elif hasattr(admin_item, 'email'):
+                        email = admin_item.email
+                    elif isinstance(admin_item, str):
+                        email = admin_item
+
+                    if email:
+                        is_admin = await auth_service.check_admin_exists(email)
+                        if not is_admin:
                         elif hasattr(admin_item, 'email'):
                             email = admin_item.email
                         elif isinstance(admin_item, str):
