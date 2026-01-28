@@ -1,8 +1,9 @@
 from urllib.parse import urlparse
 from typing import List
+from shared.logging_config import get_railway_logger
 import logging
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 def extract_links_from_result(result, base_url: str) -> List[str]:
     """Extract internal links from crawl result for further crawling."""

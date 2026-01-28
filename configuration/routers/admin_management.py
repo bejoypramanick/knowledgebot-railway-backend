@@ -6,13 +6,14 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 import secrets
+from shared.logging_config import get_railway_logger
 import logging
 
 from shared.firebase_auth import get_user_from_firestore, save_user_to_firestore, update_user_role_in_firestore
 from shared.auth_middleware import get_current_user
 from ..service.auth_service import AuthService
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin-management"])
 

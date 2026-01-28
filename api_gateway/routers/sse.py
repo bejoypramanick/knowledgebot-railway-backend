@@ -1,13 +1,14 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import httpx
+from shared.logging_config import get_railway_logger
 import logging
 import time
 
 from api_gateway.core.config import CONFIGURATION_SERVICE_URL
 from api_gateway.core.sse import sse_manager, sse_generator
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 router = APIRouter()
 

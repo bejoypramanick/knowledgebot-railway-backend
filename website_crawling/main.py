@@ -1,14 +1,13 @@
-import logging
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from shared.logging_config import auto_configure_logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# Configure Railway-compatible logging
+logger = auto_configure_logging("website_crawling")
 
 from shared.config import settings
 from shared import db as shared_db

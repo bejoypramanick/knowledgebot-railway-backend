@@ -1,6 +1,7 @@
 # Append to existing content or rewrite?
 # I will rewrite to include everything.
 
+from shared.logging_config import get_railway_logger
 import logging
 import asyncio
 import os
@@ -21,7 +22,7 @@ from ..utils.files import stream_to_temp_file, calculate_sha256
 from ..schemas.models import FileInfo, BatchUploadItem, BatchDeleteItem
 from shared.config import settings
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 async def record_metadata(*args, **kwargs):
     """Wrapper for record_metadata using FileService"""

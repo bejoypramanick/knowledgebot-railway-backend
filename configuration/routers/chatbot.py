@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from typing import List, Union
+from shared.logging_config import get_railway_logger
 import logging
 
 from ..schemas.models import ChatbotConfigRequest, AdminAccount, ValidatedEmail
@@ -10,7 +11,7 @@ from ..service.configuration_service import configuration_service
 from shared.auth_middleware import get_current_user
 from shared.utils import log_endpoint_request
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["Chatbot Configuration"])
 

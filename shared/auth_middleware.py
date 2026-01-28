@@ -5,11 +5,12 @@ Verifies Firebase Auth tokens and protects endpoints.
 from fastapi import HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, Dict, Any
+from shared.logging_config import get_railway_logger
 import logging
 
 from shared.firebase_auth import verify_firebase_token
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 # HTTP Bearer token security scheme (required auth)
 security = HTTPBearer()

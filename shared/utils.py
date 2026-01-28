@@ -1,6 +1,7 @@
 """Shared utility functions."""
 import httpx
 from typing import Optional, Dict, Any, Callable, TypeVar, Tuple
+from shared.logging_config import get_railway_logger
 import logging
 from fastapi import HTTPException, FastAPI, Request
 from fastapi.responses import JSONResponse

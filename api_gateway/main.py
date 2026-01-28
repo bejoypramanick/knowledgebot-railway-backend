@@ -1,3 +1,4 @@
+from shared.logging_config import get_railway_logger
 import logging
 import os
 import time

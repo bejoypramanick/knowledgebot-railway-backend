@@ -1,3 +1,4 @@
+from shared.logging_config import get_railway_logger
 import logging
 import uuid
 import time
@@ -20,7 +21,7 @@ from ..agent.prompt import get_system_prompt
 from shared.config import settings
 from shared.dao.chat_dao import ChatDAO
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class PydanticAIGatewayService:
     """ Service class for Pydantic AI integration with Gemini FileSearch """

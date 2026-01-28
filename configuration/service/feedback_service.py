@@ -2,11 +2,12 @@
 Feedback Service Layer
 Provides business logic for feedback management operations
 """
+from shared.logging_config import get_railway_logger
 import logging
 from typing import List, Optional, Dict, Any
 from ..dao.feedback_dao import FeedbackDAO
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class FeedbackService:
     """Service layer for feedback management"""

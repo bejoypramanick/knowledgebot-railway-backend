@@ -1,5 +1,6 @@
 import time
 import httpx
+from shared.logging_config import get_railway_logger
 import logging
 from typing import Dict
 from fastapi import APIRouter, HTTPException, Request
@@ -11,7 +12,7 @@ from api_gateway.core.config import (
 )
 from shared.utils import log_endpoint_request
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 router = APIRouter()
 

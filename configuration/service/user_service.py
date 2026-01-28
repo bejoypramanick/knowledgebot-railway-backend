@@ -2,11 +2,12 @@
 User Service Layer
 Provides business logic for user management operations
 """
+from shared.logging_config import get_railway_logger
 import logging
 from typing import Optional, Dict, Any, List
 from ..dao.user_dao import UserDAO
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class UserService:
     """Service layer for user management"""

@@ -1,3 +1,4 @@
+from shared.logging_config import get_railway_logger
 import logging
 from fastapi import APIRouter, HTTPException, Request
 
@@ -5,7 +6,7 @@ from ..schemas.models import ChatRequest
 from ..service.chat_service import chat_service
 from shared.utils import log_endpoint_request
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 router = APIRouter(tags=["Chat"])
 

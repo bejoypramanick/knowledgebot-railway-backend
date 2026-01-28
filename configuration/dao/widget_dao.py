@@ -1,10 +1,11 @@
+from shared.logging_config import get_railway_logger
 import logging
 import json
 from typing import Optional, Dict, Any, List
 import asyncpg
 from shared.db import get_db_connection
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class WidgetDAO:
     def __init__(self):

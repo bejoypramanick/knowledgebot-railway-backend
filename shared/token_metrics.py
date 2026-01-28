@@ -7,6 +7,7 @@ import asyncio
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 from collections import defaultdict, deque
+from shared.logging_config import get_railway_logger
 import logging
 from shared.logging_config import get_railway_logger
 

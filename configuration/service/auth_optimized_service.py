@@ -2,6 +2,7 @@
 Auth Optimized Service Layer for Configuration
 Provides business logic for optimized authentication operations
 """
+from shared.logging_config import get_railway_logger
 import logging
 import time
 from typing import Optional, Dict, Any, List, Tuple
@@ -17,7 +18,7 @@ from shared.firebase_auth import (
 )
 from ..service.auth_service import AuthService
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class AuthOptimizedService:
     """Service layer for optimized authentication operations"""

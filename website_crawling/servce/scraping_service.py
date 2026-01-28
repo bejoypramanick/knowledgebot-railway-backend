@@ -2,12 +2,13 @@
 Scraping Service Layer for Website Crawling
 Provides business logic for website scraping operations
 """
+from shared.logging_config import get_railway_logger
 import logging
 from typing import Optional, Dict, Any
 from ..dao.scraping_dao import ScrapingDAO
 from ..core.ai import get_genai_client
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class ScrapingService:
     """Service layer for website scraping operations"""

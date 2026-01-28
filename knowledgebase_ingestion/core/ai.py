@@ -1,9 +1,10 @@
 import os
+from shared.logging_config import get_railway_logger
 import logging
 from google import genai
 from shared.config import settings
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 # Global clients - initialized lazily
 genai_client = None

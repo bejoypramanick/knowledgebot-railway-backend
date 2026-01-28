@@ -2,6 +2,7 @@
 Centralized Database Initialization Service
 Handles all database initialization logic for the singleton pattern.
 """
+from shared.logging_config import get_railway_logger
 import logging
 import os
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Optional
 
 from .db import init_railway_db, railway_db
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class DatabaseInitializer:
     """Centralized database initialization service using singleton pattern."""

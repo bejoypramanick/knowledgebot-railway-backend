@@ -1,3 +1,4 @@
+from shared.logging_config import get_railway_logger
 import logging
 import os
 import httpx
@@ -6,7 +7,7 @@ from shared.config import settings
 from ..core.dependencies import ChatSessionDeps
 from ..service.file_service import FileService
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 # Tool for requesting human agent connection
 async def request_human_agent_connection(

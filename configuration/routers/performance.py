@@ -4,6 +4,7 @@ Performance Metrics Endpoints
 from fastapi import APIRouter, HTTPException
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
+from shared.logging_config import get_railway_logger
 import logging
 
 from shared.auth_middleware import get_current_user

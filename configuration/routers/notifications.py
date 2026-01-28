@@ -5,11 +5,12 @@ Handles notification history, read/unread status, and preferences.
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import List, Optional
+from shared.logging_config import get_railway_logger
 import logging
 from shared.auth_middleware import get_current_user
 from ..service.notifications_service import NotificationsService
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 

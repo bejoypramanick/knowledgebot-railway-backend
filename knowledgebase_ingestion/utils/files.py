@@ -1,10 +1,11 @@
 import hashlib
 import os
+from shared.logging_config import get_railway_logger
 import logging
 import tempfile
 from fastapi import UploadFile
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 def calculate_sha256(file_path: str) -> str:
     """Calculate SHA256 hash of a file."""

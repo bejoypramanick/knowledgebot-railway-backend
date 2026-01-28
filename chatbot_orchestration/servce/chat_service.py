@@ -2,6 +2,7 @@
 Chat Service Layer for Chatbot Orchestration
 Provides business logic for chat operations
 """
+from shared.logging_config import get_railway_logger
 import logging
 import json
 import uuid
@@ -25,7 +26,7 @@ from shared.token_tracker import track_gemini_usage_from_response
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class ChatService:
     """Service layer for chat operations"""

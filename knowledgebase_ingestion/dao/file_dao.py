@@ -1,9 +1,10 @@
+from shared.logging_config import get_railway_logger
 import logging
 import json
 from typing import Optional, Dict, Any, List
 from shared import db
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class FileDAO:
     def __init__(self, database):

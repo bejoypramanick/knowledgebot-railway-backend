@@ -2,6 +2,7 @@
 Token Usage Tracker
 Tracks and accumulates token usage from Gemini API responses.
 """
+from shared.logging_config import get_railway_logger
 import logging
 import asyncio
 from typing import Optional, Dict, Any, Union

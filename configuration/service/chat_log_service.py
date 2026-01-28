@@ -1,3 +1,4 @@
+from shared.logging_config import get_railway_logger
 import logging
 import json
 import asyncio
@@ -6,7 +7,7 @@ from typing import List, Optional, Dict, Any, Set
 from fastapi import HTTPException
 from ..dao.chat_log_dao import ChatLogDAO
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class ChatLogService:
     def __init__(self, connection_manager=None):

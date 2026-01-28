@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 import os
 import datetime
 import sys
-import logging
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -15,6 +14,7 @@ from shared.db import close_databases, railway_db
 from shared.utils import validate_environment, wait_for_railway_network, service_status
 from shared.firebase_auth import init_firebase_auth
 from shared.database_initializer import database_initializer
+from shared.logging_config import auto_configure_logging
 
 # Import Routers
 from configuration.routers import chatbot, widget
@@ -28,14 +28,8 @@ from configuration.user_ids import router as user_ids_router
 
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler(sys.stdout)],
-    force=True
-)
-logger = logging.getLogger(__name__)
+# Configure Railway-compatible logging
+logger = auto_configure_logging("configuration")
 
 # Log startup diagnostics
 logger.info("="*60)

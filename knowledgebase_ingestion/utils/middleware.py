@@ -1,8 +1,9 @@
 import time
+from shared.logging_config import get_railway_logger
 import logging
 from fastapi import Request
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 async def log_requests_middleware(request: Request, call_next):
     """Middleware to log all incoming requests with timing and status information."""

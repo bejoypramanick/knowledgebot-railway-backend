@@ -1,3 +1,4 @@
+from shared.logging_config import get_railway_logger
 import logging
 import asyncio
 import os
@@ -11,7 +12,7 @@ from ..schemas.models import ScrapeRequest
 from .scraping_service import ScrapingService
 from fastapi import HTTPException
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 async def upload_scraped_content(
     content: str, 

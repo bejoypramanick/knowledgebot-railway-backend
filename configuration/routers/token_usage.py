@@ -4,13 +4,14 @@ Token Usage Endpoints
 from fastapi import APIRouter, HTTPException
 import httpx
 import os
+from shared.logging_config import get_railway_logger
 import logging
 from typing import Optional
 
 from shared.auth_middleware import get_current_user
 from ..service.token_usage_service import TokenUsageService
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["token-usage"])
 

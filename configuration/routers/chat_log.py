@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Set
+from shared.logging_config import get_railway_logger
 import logging
 from datetime import datetime, timedelta
 import uuid
@@ -16,7 +17,7 @@ import asyncio
 
 from shared.auth_middleware import get_current_user
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["chat-log"])
 

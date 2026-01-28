@@ -1,18 +1,17 @@
 import os
 import sys
-import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from shared.config import settings
 from shared.utils import log_endpoint_request
+from shared.logging_config import auto_configure_logging
 from chatbot_orchestration.service.agent_service import pydantic_ai_service
 from chatbot_orchestration.routers import chat, human_agents
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Configure Railway-compatible logging
+logger = auto_configure_logging("chatbot_orchestration")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

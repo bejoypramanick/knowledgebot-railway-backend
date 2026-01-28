@@ -1,8 +1,9 @@
+from shared.logging_config import get_railway_logger
 import logging
 import asyncio
 from typing import Dict, Set
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class SSEConnectionManager:
     """Manages SSE connections for real-time chat between agents and customers."""

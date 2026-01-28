@@ -2,11 +2,12 @@
 File Service Layer for Knowledgebase Ingestion
 Provides business logic for file operations
 """
+from shared.logging_config import get_railway_logger
 import logging
 from typing import Optional, Dict, Any
 from ..dao.file_dao import FileDAO
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class FileService:
     """Service layer for file operations"""

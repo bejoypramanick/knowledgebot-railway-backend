@@ -1,3 +1,4 @@
+from shared.logging_config import get_railway_logger
 import logging
 import asyncio
 import time
@@ -24,7 +25,7 @@ from shared import db
 from shared.utils import log_endpoint_request
 import os
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 router = APIRouter()
 

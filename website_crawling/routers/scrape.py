@@ -1,3 +1,4 @@
+from shared.logging_config import get_railway_logger
 import logging
 import asyncio
 import json
@@ -12,7 +13,7 @@ from ..service.crawler import crawl_website
 from ..service.ingestion_service import upload_scraped_content, record_scraped_metadata
 from shared.utils import log_endpoint_request
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 router = APIRouter()
 

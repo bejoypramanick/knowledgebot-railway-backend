@@ -2,11 +2,12 @@
 Token Service for Token Tracking
 Provides business logic layer for token operations
 """
+from shared.logging_config import get_railway_logger
 import logging
 from typing import Dict, Any, Optional
 from shared.dao.token_dao import TokenDAO
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class TokenService:
     """Service layer for token operations"""

@@ -1,6 +1,7 @@
 import time
 import hashlib
 import json
+from shared.logging_config import get_railway_logger
 import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -9,7 +10,7 @@ from datetime import datetime
 # The original code used MODEL_NAME global variable. 
 # I will pass it as an argument or import settings.
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 CACHE_TTL_SECONDS = 3600  # 1 hour TTL
 context_cache = {}

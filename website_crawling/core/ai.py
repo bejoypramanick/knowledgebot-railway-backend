@@ -1,9 +1,10 @@
 import os
+from shared.logging_config import get_railway_logger
 import logging
 from google import genai
 from shared.config import settings
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 

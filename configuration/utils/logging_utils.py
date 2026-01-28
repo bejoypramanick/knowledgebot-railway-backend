@@ -1,9 +1,10 @@
+from shared.logging_config import get_railway_logger
 import logging
 import json
 from datetime import datetime
 from ..service.configuration_service import configuration_service
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 async def log_configuration_change(user_email: str, action: str, details: dict, ip_address: str = None):
     """Log configuration changes for audit purposes"""

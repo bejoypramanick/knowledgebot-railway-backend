@@ -1,3 +1,4 @@
+from shared.logging_config import get_railway_logger
 import logging
 import asyncio
 from typing import List, Tuple
@@ -7,7 +8,7 @@ from ..schemas.models import ScrapeRequest
 from ..utils.links import extract_links_from_result
 from fastapi import HTTPException
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 async def crawl_website(request: ScrapeRequest, sse_queue: asyncio.Queue = None) -> Tuple[str, List[str]]:
     """Crawl website and return aggregated content and list of URLs."""

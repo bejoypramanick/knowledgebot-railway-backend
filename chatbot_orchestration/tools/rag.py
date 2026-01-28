@@ -1,3 +1,4 @@
+from shared.logging_config import get_railway_logger
 import logging
 import uuid
 import os
@@ -8,7 +9,7 @@ from google.genai import types
 from ..core.ai import get_genai_client
 from ..schemas.models import SearchResult
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 async def search_knowledge_base(query: Annotated[str, "The search query to find relevant information in uploaded documents"]) -> List[SearchResult]:
     """

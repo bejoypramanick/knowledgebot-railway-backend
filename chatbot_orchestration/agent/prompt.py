@@ -1,10 +1,11 @@
+from shared.logging_config import get_railway_logger
 import logging
 from typing import List, Optional, Dict, Any, Union
 from ..schemas.models import SearchResult
 from ..core.ai import MODEL_NAME
 from ..core.cache import get_cached_system_prompt, cache_system_prompt
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> str:
     """Generate dynamic system prompt with intelligent data source routing."""

@@ -1,12 +1,13 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 import httpx
+from shared.logging_config import get_railway_logger
 import logging
 
 from api_gateway.core.config import WEBSITE_CRAWLING_URL
 from api_gateway.schemas.models import ScrapeRequest
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 router = APIRouter()
 

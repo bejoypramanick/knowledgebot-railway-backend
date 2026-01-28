@@ -2,11 +2,12 @@
 Performance Service Layer
 Provides business logic for performance metrics operations
 """
+from shared.logging_config import get_railway_logger
 import logging
 from typing import List, Optional, Dict, Any
 from ..dao.performance_dao import PerformanceDAO
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class PerformanceService:
     """Service layer for performance metrics"""

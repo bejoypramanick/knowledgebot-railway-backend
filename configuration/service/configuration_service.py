@@ -2,6 +2,7 @@
 Configuration Service for Configuration Management
 Provides business logic layer between routers and DAO
 """
+from shared.logging_config import get_railway_logger
 import logging
 from typing import List, Dict, Any, Optional
 from ..dao.chatbot_dao import ChatbotDAO
@@ -9,7 +10,7 @@ from ..dao.widget_dao import WidgetDAO
 from ..dao.performance_dao import PerformanceDAO
 from ..dao.auth_dao import AuthDAO
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 
 class ConfigurationService:
     """Service layer for configuration operations"""
