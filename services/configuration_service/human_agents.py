@@ -12,7 +12,9 @@ from pathlib import Path
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from shared.db import railway_db
+from shared.auth_middleware import get_current_user
+from .main import get_db_connection
+from .dao.auth_dao import AuthDAO
 
 logger = logging.getLogger(__name__)
 
@@ -59,33 +61,21 @@ def generate_confirmation_link(token: str) -> str:
 @router.post("/human-agents", response_model=dict)
 async def add_human_agents(request: HumanAgentsRequest):
     """Add human agents and send confirmation emails."""
-    if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
-        raise HTTPException(status_code=503, detail="Database not initialized")
-    
     try:
-        async with railway_db.acquire() as conn:
+        async with get_db_connection() as conn:
+            auth_dao = AuthDAO(conn)
             agents_created = []
             
             for email in request.emails:
                 # Check if agent already exists
-                existing = await conn.fetchrow(
-                    "SELECT id FROM human_agents WHERE email = $1",
-                    email
-                )
+                existing = await auth_dao.check_human_agent_exists(email)
                 
                 if existing:
                     logger.info(f"Agent {email} already exists, skipping")
                     continue
 
-                # Create new agent (no email/password needed)
-                agent_id = await conn.fetchval(
-                    """
-                    INSERT INTO human_agents (email)
-                    VALUES ($1)
-                    RETURNING id::text
-                    """,
-                    email
-                )
+                # Create new agent
+                agent_id = await auth_dao.create_human_agent(email)
 
                 agents_created.append({
                     "email": email
@@ -108,30 +98,18 @@ async def add_human_agents(request: HumanAgentsRequest):
 @router.delete("/human-agents/{email}", response_model=dict)
 async def remove_human_agent(email: str):
     """Remove human agent and send removal notification."""
-    if not railway_db or not hasattr(railway_db, '_pool') or railway_db._pool is None:
-        raise HTTPException(status_code=503, detail="Database not initialized")
-    
     try:
-        async with railway_db.acquire() as conn:
+        async with get_db_connection() as conn:
+            auth_dao = AuthDAO(conn)
+            
             # Check if agent exists
-            agent = await conn.fetchrow(
-                "SELECT id, email FROM human_agents WHERE email = $1",
-                email
-            )
+            agent = await auth_dao.check_human_agent_exists(email)
             
             if not agent:
                 raise HTTPException(status_code=404, detail="Agent not found")
             
-            # Update agent status
-            await conn.execute(
-                """
-                UPDATE human_agents 
-                SET status = 'removed',
-                    removed_at = NOW()
-                WHERE email = $1
-                """,
-                email
-            )
+            # Remove agent
+            await auth_dao.remove_human_agent(email)
             
             # Agent removed - no email notification sent
             
