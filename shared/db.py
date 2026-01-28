@@ -366,7 +366,6 @@ class DatabaseConnection:
 
 # Global database instances
 railway_db: Optional[Database] = None
-neon_db: Optional[Database] = None
 
 
 @retry(
@@ -429,19 +428,9 @@ async def init_railway_db(connection_url: str):
         raise
 
 
-async def init_neon_db(connection_url: str):
-    """Initialize Neon DB connection."""
-    global neon_db
-    neon_db = Database(connection_url=connection_url)
-    await neon_db.connect()
-    return neon_db
-
-
 async def close_databases():
     """Close all database connections."""
-    global railway_db, neon_db
+    global railway_db
     if railway_db:
         await railway_db.disconnect()
-    if neon_db:
-        await neon_db.disconnect()
 

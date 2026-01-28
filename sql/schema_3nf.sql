@@ -325,7 +325,6 @@ CREATE TABLE chat_messages (
     content TEXT NOT NULL,
     used_rag BOOLEAN DEFAULT false,
     used_postgres BOOLEAN DEFAULT false,
-    used_neon_db BOOLEAN DEFAULT false,
     used_internet_search BOOLEAN DEFAULT false,
     confidence_score NUMERIC(3,2),
     sources JSONB DEFAULT '[]'::jsonb,

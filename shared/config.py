@@ -39,9 +39,6 @@ class Settings(BaseSettings):
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None
     
-    # Neon DB Configuration (connection URL only)
-    neon_db_url: Optional[str] = None
-    
     # User Context (for tracking uploads)
     default_user_email: str = "globistaan@gmail.com"
     

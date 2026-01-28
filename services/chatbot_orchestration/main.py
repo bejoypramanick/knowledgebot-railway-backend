@@ -9,7 +9,7 @@ from shared.config import settings
 from shared.utils import log_endpoint_request
 from services.chatbot_orchestration.agent.service import pydantic_ai_service
 from services.chatbot_orchestration.routers import chat
-from services.chatbot_orchestration.core.database import get_railway_db, get_neon_db
+from services.chatbot_orchestration.core.database import get_railway_db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +33,6 @@ async def lifespan(app: FastAPI):
     # Trigger lazy DB init to ensure connections are warm
     try:
         await get_railway_db()
-        await get_neon_db()
         logger.info("🗄️ Database connections initialized")
     except Exception as e:
         logger.warning(f"⚠️ Initial database connection check failed: {e}")

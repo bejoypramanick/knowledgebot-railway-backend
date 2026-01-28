@@ -10,16 +10,16 @@ from google import genai
 from google.genai import types
 
 from services.chatbot_orchestration.core.ai import get_genai_client, MODEL_NAME, gemini_model
-from services.chatbot_orchestration.core.database import get_railway_db, get_neon_db
+from services.chatbot_orchestration.core.database import get_railway_db
 from services.chatbot_orchestration.core.dependencies import ChatSessionDeps
 from services.chatbot_orchestration.schemas.models import SearchResult
 from services.chatbot_orchestration.tools.rag import search_knowledge_base
 from services.chatbot_orchestration.tools.general import (
-    request_human_agent_connection, query_railway_postgres, query_neon_db
+    request_human_agent_connection, query_railway_postgres
 )
 from services.chatbot_orchestration.agent.prompt import get_system_prompt
 from shared.config import settings
-from shared.db import railway_db, neon_db # Import for checking availability
+from shared.db import railway_db # Import for checking availability
 
 logger = logging.getLogger(__name__)
 
@@ -200,8 +200,6 @@ def create_agent_legacy(file_context: Optional[List[SearchResult]] = None, custo
     
     if settings.railway_postgres_url: 
          tools.append(query_railway_postgres)
-    if settings.neon_db_url:
-         tools.append(query_neon_db)
     
     agent = Agent(
         gemini_model,

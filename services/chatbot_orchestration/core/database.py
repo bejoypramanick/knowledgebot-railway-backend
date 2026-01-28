@@ -1,7 +1,7 @@
 import logging
 import asyncio
 from shared.config import settings
-from shared.db import init_railway_db, init_neon_db, railway_db, neon_db
+from shared.db import init_railway_db, railway_db
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ async def get_railway_db():
     
     # Let's see how init_railway_db works. It likely uses a singleton pattern or global in shared.db.
     # To be safe, we will rely on init_railway_db to return the connection.
-
+ 
     try:
         # Check if already initialized? 
         # shared.db.railway_db is the source of truth if we import the module
@@ -42,23 +42,5 @@ async def get_railway_db():
             return db
     except Exception as e:
         logger.error(f"❌ Failed to initialize Railway PostgreSQL database: {e}")
-        raise
-    return None
-
-async def get_neon_db():
-    """Get Neon database connection, initializing if needed."""
-    import shared.db as db_module
-    
-    try:
-        if db_module.neon_db is not None:
-            return db_module.neon_db
-
-        if settings.neon_db_url:
-            logger.info("🔄 Lazy initializing Neon database...")
-            db = await init_neon_db(settings.neon_db_url)
-            logger.info("✅ Neon database initialized")
-            return db
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize Neon database: {e}")
         raise
     return None
