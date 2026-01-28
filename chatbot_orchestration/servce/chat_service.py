@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 
 from ..core.dependencies import ChatSessionDeps
-from ..servcie.agent_service import (
+from ..service.agent_service import (
     pydantic_ai_service, session_state_manager
 )
 from ..tools.rag import search_knowledge_base

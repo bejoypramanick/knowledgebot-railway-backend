@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import logging
 
 from shared.auth_middleware import get_current_user
-from ..servcie.performance_service import PerformanceService
+from ..service.performance_service import PerformanceService
 
 
 @router.get("/performance/metrics")

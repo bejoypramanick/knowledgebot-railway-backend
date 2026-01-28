@@ -7,7 +7,7 @@ from typing import Literal, Optional
 import logging
 
 from shared.auth_middleware import get_current_user
-from ..servcie.feedback_service import FeedbackService
+from ..service.feedback_service import FeedbackService
 
 logger = logging.getLogger(__name__)
 

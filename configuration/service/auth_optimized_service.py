@@ -15,7 +15,7 @@ from shared.firebase_auth import (
     save_user_to_firestore,
     update_user_role_in_firestore
 )
-from ..servcie.auth_service import AuthService
+from ..service.auth_service import AuthService
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ import string
 import json
 
 from shared.auth_middleware import get_current_user
-from ..servcie.user_service import UserService
+from ..service.user_service import UserService
 
 logger = logging.getLogger(__name__)
 

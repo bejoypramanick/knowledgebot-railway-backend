@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from shared.config import settings
 from shared.utils import log_endpoint_request
-from chatbot_orchestration.servcie.agent_service import pydantic_ai_service
+from chatbot_orchestration.service.agent_service import pydantic_ai_service
 from chatbot_orchestration.routers import chat, human_agents
 
 # Configure logging

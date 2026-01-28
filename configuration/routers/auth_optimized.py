@@ -8,7 +8,7 @@ from typing import Optional, Dict, Any
 import logging
 
 from shared.auth_middleware import get_current_user
-from ..servcie.auth_optimized_service import auth_optimized_service
+from ..service.auth_optimized_service import auth_optimized_service
 
 logger = logging.getLogger(__name__)
 

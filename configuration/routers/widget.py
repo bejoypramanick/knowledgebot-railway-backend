@@ -7,7 +7,7 @@ from typing import Optional
 
 from ..schemas.models import WidgetConfigRequest
 from ..utils.logging_utils import log_configuration_change
-from ..servcie.configuration_service import configuration_service
+from ..service.configuration_service import configuration_service
 from shared.auth_middleware import get_current_user
 
 logger = logging.getLogger(__name__)

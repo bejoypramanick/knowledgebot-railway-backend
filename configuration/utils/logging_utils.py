@@ -1,7 +1,7 @@
 import logging
 import json
 from datetime import datetime
-from ..servcie.configuration_service import configuration_service
+from ..service.configuration_service import configuration_service
 
 logger = logging.getLogger(__name__)
 

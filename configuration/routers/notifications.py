@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import logging
 from shared.auth_middleware import get_current_user
-from ..servcie.notifications_service import NotificationsService
+from ..service.notifications_service import NotificationsService
 
 logger = logging.getLogger(__name__)
 

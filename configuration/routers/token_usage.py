@@ -8,7 +8,7 @@ import logging
 from typing import Optional
 
 from shared.auth_middleware import get_current_user
-from ..servcie.token_usage_service import TokenUsageService
+from ..service.token_usage_service import TokenUsageService
 
 logger = logging.getLogger(__name__)
 

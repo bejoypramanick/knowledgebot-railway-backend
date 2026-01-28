@@ -7,7 +7,7 @@ from typing import List, Optional
 import logging
 
 from shared.auth_middleware import get_current_user
-from ..servcie.human_agents_service import HumanAgentsService, AgentResponse
+from ..service.human_agents_service import HumanAgentsService, AgentResponse
 
 logger = logging.getLogger(__name__)
 

@@ -28,7 +28,7 @@ from .schemas.chat_log_schemas import (
     ChatMessageResponse, ChatSessionResponse, ChatSessionsResponse,
     SendMessageRequest, SendMessageResponse
 )
-from .servcie.chat_log_service import ChatLogService
+from .service.chat_log_service import ChatLogService
 from .utils.sse_manager import connection_manager
 
 

@@ -2,7 +2,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request
 
 from ..schemas.models import ChatRequest
-from ..servcie.chat_service import chat_service
+from ..service.chat_service import chat_service
 from shared.utils import log_endpoint_request
 
 logger = logging.getLogger(__name__)
