@@ -84,7 +84,9 @@ async def upload_document(
         sha256_hash = calculate_sha256(tmp_path)
         
         # Check duplicates
-        existing_file = await check_duplicate_file(sha256_hash, original_filename)
+        from ..servcie.file_service import FileService
+        file_service = FileService()
+        existing_file = await file_service.check_duplicate_file(sha256_hash, original_filename)
         if existing_file:
             match_type = existing_file.get("match_type", "unknown")
             if match_type == "hash":
@@ -109,8 +111,8 @@ async def upload_document(
         )
         
         # Record metadata
-        user_id = await get_or_create_user(email)
-        db_id = await record_metadata(
+        user_id = await file_service.get_or_create_user(email)
+        db_id = await file_service.record_metadata(
             user_id, original_filename, display_name or original_filename,
             os.path.splitext(original_filename)[1], uploaded_file, file_size, sha256_hash,
             final_state, gemini_processed_at, detected_mime

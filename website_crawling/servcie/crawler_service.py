@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class CrawlerService:
     """Service layer for website crawling"""
     
-    def __init__(self, scraping_dao: ScrapingDAO):
-        self.scraping_dao = scraping_dao
+    def __init__(self):
+        self.scraping_dao = ScrapingDAO()  # Service manages its own DAO
     
     async def get_existing_website(self, url: str) -> Optional[Dict[str, Any]]:
         """Get existing website record"""

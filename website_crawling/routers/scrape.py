@@ -78,7 +78,9 @@ async def scrape_website_endpoint(request: ScrapeRequest):
         domain = urlparse(request.url).netloc.replace('www.', '')
         
         # Check existing
-        existing = await get_existing_website(request.url, domain)
+        from ..servcie.scraping_service import ScrapingService
+        scraping_service = ScrapingService()
+        existing = await scraping_service.get_existing_website(request.url, domain)
         version = 1
         
         if existing:
@@ -92,8 +94,8 @@ async def scrape_website_endpoint(request: ScrapeRequest):
             else:
                 version = existing['version'] + 1
                 if existing['gemini_file_name']:
-                    await delete_gemini_file(existing['gemini_file_name'])
-                await delete_website_record(existing['id'])
+                    await scraping_service.delete_gemini_file(existing['gemini_file_name'])
+                await scraping_service.delete_website_record(existing['id'])
                 
         # Crawl
         content, scraped_urls = await crawl_website(request, sse_queue)

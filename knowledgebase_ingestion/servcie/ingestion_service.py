@@ -11,14 +11,16 @@ logger = logging.getLogger(__name__)
 class IngestionService:
     """Service layer for file ingestion"""
     
-    def __init__(self, file_dao: FileDAO):
-        self.file_dao = file_dao
+    def __init__(self):
+        self.file_dao = FileDAO()  # Service manages its own DAO
     
     async def process_file_upload(self, file_data: Dict[str, Any], user_email: str) -> Dict[str, Any]:
         """Process single file upload"""
         try:
             # Check for duplicate file
-            duplicate = await self.file_dao.check_duplicate_file(file_data['sha256'], user_email)
+            from .file_service import FileService
+            file_service = FileService()
+            duplicate = await file_service.check_duplicate_file(file_data['sha256'], user_email)
             if duplicate:
                 return {"success": False, "message": "Duplicate file", "file_id": duplicate['id']}
             
