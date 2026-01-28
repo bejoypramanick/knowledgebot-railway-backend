@@ -15,10 +15,10 @@ class ConfigurationService:
     """Service layer for configuration operations"""
     
     def __init__(self):
-        self._chatbot_dao = None
-        self._widget_dao = None
-        self._performance_dao = None
-        self._auth_dao = None
+        self._chatbot_dao = ChatbotDAO()  # Service manages its own DAO
+        self._widget_dao = WidgetDAO()    # Service manages its own DAO
+        self._performance_dao = PerformanceDAO()  # Service manages its own DAO
+        self._auth_dao = AuthDAO()  # Service manages its own DAO
     
     async def _get_chatbot_dao(self) -> ChatbotDAO:
         """Get ChatbotDAO instance with database connection"""
@@ -52,8 +52,7 @@ class ConfigurationService:
     async def get_metadata(self) -> Optional[Dict[str, Any]]:
         """Get chatbot metadata"""
         try:
-            dao = await self._get_chatbot_dao()
-            return await dao.get_metadata()
+            return await self._chatbot_dao.get_metadata()
         except Exception as e:
             logger.error(f"Error getting metadata: {e}")
             return None
@@ -61,8 +60,7 @@ class ConfigurationService:
     async def update_metadata(self, **kwargs):
         """Update chatbot metadata"""
         try:
-            dao = await self._get_chatbot_dao()
-            await dao.update_metadata(**kwargs)
+            await self._chatbot_dao.update_metadata(**kwargs)
         except Exception as e:
             logger.error(f"Error updating metadata: {e}")
             raise

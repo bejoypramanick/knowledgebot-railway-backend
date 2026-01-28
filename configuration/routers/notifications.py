@@ -13,8 +13,7 @@ from datetime import datetime
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.auth_middleware import get_current_user
-from ..service.notifications_service import NotificationsService
-from ..dao.notifications_dao import NotificationsDAO
+from ..servcie.notifications_service import NotificationsService
 
 logger = logging.getLogger(__name__)
 
@@ -60,43 +59,42 @@ async def create_notification(
     If user_email is not provided, uses the current authenticated user's email.
     """
     try:
-        async with get_db_connection() as conn:
-            notifications_dao = NotificationsDAO(conn)
-            
-            # Use provided email or current user's email
-            target_email = user_email or current_user.get('email')
-            if not target_email:
-                raise HTTPException(status_code=400, detail="User email is required")
-            
-            # Validate notification type
-            if notification.type not in ['info', 'success', 'warning', 'error']:
-                notification.type = 'info'
-            
-            # Create notification
-            notification_id = await notifications_dao.create_notification(
-                target_email,
-                notification.title,
-                notification.message,
-                notification.type,
-                notification.metadata or {}
-            )
-            
-            # Fetch the created notification
-            result = await notifications_dao.get_notification_by_id(notification_id)
-            
-            logger.info(f"Created notification {notification_id} for {target_email}")
-            
-            return NotificationResponse(
-                id=str(result['id']),
-                title=result['title'],
-                message=result['message'],
-                type=result['type'],
-                is_read=result['is_read'],
-                read_at=result['read_at'].isoformat() if result['read_at'] else None,
-                metadata=result['metadata'] if result['metadata'] else None,
-                created_at=result['created_at'].isoformat()
-            )
-            
+        service = NotificationsService()  # Service manages its own DAO
+        
+        # Use provided email or current user's email
+        target_email = user_email or current_user.get('email')
+        if not target_email:
+            raise HTTPException(status_code=400, detail="User email is required")
+        
+        # Validate notification type
+        if notification.type not in ['info', 'success', 'warning', 'error']:
+            notification.type = 'info'
+        
+        # Create notification
+        notification_id = await service.create_notification(
+            target_email,
+            notification.title,
+            notification.message,
+            notification.type,
+            notification.metadata or {}
+        )
+        
+        # Fetch the created notification
+        result = await service.get_notification_by_id(notification_id)
+        
+        logger.info(f"Created notification {notification_id} for {target_email}")
+        
+        return NotificationResponse(
+            id=str(result['id']),
+            title=result['title'],
+            message=result['message'],
+            type=result['type'],
+            is_read=result['is_read'],
+            read_at=result['read_at'].isoformat() if result['read_at'] else None,
+            metadata=result['metadata'] if result['metadata'] else None,
+            created_at=result['created_at'].isoformat()
+        )
+    
     except HTTPException:
         raise
     except Exception as e:
