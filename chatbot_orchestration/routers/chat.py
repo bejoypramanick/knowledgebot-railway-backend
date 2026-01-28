@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
 from shared.logging_config import get_railway_logger
 from shared.utils import log_endpoint_request
@@ -11,12 +11,12 @@ logger = get_railway_logger(__name__)
 router = APIRouter(tags=["Chat"])
 
 @router.post("/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(fastapi_request: Request, request: ChatRequest):
     """
     Handle chat request with streaming response using optimized Pydantic AI Gateway Service.
     """
     try:
-        log_endpoint_request("chatbot_orchestration", "chat_stream", None)
+        log_endpoint_request("chatbot_orchestration", "chat_stream", fastapi_request)
         
         # Service handles all business logic
         return await chat_service.handle_chat_stream(request)

@@ -168,3 +168,110 @@ class ChatLogDAO:
         except Exception as e:
             logger.error(f"Error getting agent chat count: {e}")
             return 0
+
+    async def get_sessions_for_agent(self, agent_email: str, archive_status: str, limit: int, offset: int) -> List[Dict[str, Any]]:
+        """Get chat sessions assigned to a specific agent."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetch(
+                    """
+                    SELECT cs.id, cs.session_id, cs.metadata, cs.created_at, cs.updated_at,
+                           sa.agent_email, sa.status as assignment_status, sa.assigned_at
+                    FROM chat_sessions cs
+                    LEFT JOIN agent_session_assignments sa ON cs.id = sa.session_id
+                    WHERE sa.agent_email = $1 
+                      AND sa.status = 'active'
+                      AND ($2 = 'active' OR cs.status = $2)
+                    ORDER BY cs.updated_at DESC
+                    LIMIT $3 OFFSET $4
+                    """,
+                    agent_email, archive_status, limit, offset
+                )
+        except Exception as e:
+            logger.error(f"Error getting sessions for agent {agent_email}: {e}")
+            return []
+
+    async def count_sessions_for_agent(self, agent_email: str, archive_status: str) -> int:
+        """Count chat sessions assigned to a specific agent."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval(
+                    """
+                    SELECT COUNT(*)
+                    FROM chat_sessions cs
+                    LEFT JOIN agent_session_assignments sa ON cs.id = sa.session_id
+                    WHERE sa.agent_email = $1 
+                      AND sa.status = 'active'
+                      AND ($2 = 'active' OR cs.status = $2)
+                    """,
+                    agent_email, archive_status
+                ) or 0
+        except Exception as e:
+            logger.error(f"Error counting sessions for agent {agent_email}: {e}")
+            return 0
+
+    async def get_all_sessions(self, archive_status: str, limit: int, offset: int) -> List[Dict[str, Any]]:
+        """Get all chat sessions."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetch(
+                    """
+                    SELECT cs.id, cs.session_id, cs.metadata, cs.created_at, cs.updated_at,
+                           sa.agent_email, sa.status as assignment_status, sa.assigned_at
+                    FROM chat_sessions cs
+                    LEFT JOIN agent_session_assignments sa ON cs.id = sa.session_id
+                    WHERE ($1 = 'active' OR cs.status = $1)
+                    ORDER BY cs.updated_at DESC
+                    LIMIT $2 OFFSET $3
+                    """,
+                    archive_status, limit, offset
+                )
+        except Exception as e:
+            logger.error(f"Error getting all sessions: {e}")
+            return []
+
+    async def count_all_sessions(self, archive_status: str) -> int:
+        """Count all chat sessions."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval(
+                    """
+                    SELECT COUNT(*)
+                    FROM chat_sessions cs
+                    WHERE ($1 = 'active' OR cs.status = $1)
+                    """,
+                    archive_status
+                ) or 0
+        except Exception as e:
+            logger.error(f"Error counting all sessions: {e}")
+            return 0
+
+    async def get_messages_for_sessions(self, session_db_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
+        """Get messages for multiple sessions, organized by session ID."""
+        try:
+            async with get_db_connection() as conn:
+                if not session_db_ids:
+                    return {}
+                
+                messages = await conn.fetch(
+                    """
+                    SELECT id, session_id, content, role, created_at
+                    FROM chat_messages
+                    WHERE session_id = ANY($1)
+                    ORDER BY created_at ASC
+                    """,
+                    session_db_ids
+                )
+                
+                # Organize messages by session_id
+                messages_by_session = {}
+                for msg in messages:
+                    session_id = msg['session_id']
+                    if session_id not in messages_by_session:
+                        messages_by_session[session_id] = []
+                    messages_by_session[session_id].append(dict(msg))
+                
+                return messages_by_session
+        except Exception as e:
+            logger.error(f"Error getting messages for sessions: {e}")
+            return {}
