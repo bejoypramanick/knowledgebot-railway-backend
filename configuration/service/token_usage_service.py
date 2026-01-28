@@ -28,7 +28,16 @@ class TokenUsageService:
         """Get detailed token usage log with correlations to specific requests."""
         logger.info(" get_detailed_token_usage called")
         try:
-            return await self.token_dao.get_detailed_token_usage(limit, provider, api_call_type)
+            records = await self.token_dao.get_detailed_token_usage(limit, provider, api_call_type)
+            # Convert records to list of dicts and wrap in response dict
+            usage_data = [dict(record) for record in records]
+            return {
+                "data": usage_data,
+                "total": len(usage_data),
+                "limit": limit,
+                "provider": provider,
+                "api_call_type": api_call_type
+            }
         except Exception as e:
             logger.error(f"Error getting detailed token usage: {e}")
             raise
