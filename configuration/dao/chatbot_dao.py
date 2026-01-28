@@ -51,6 +51,94 @@ class ChatbotDAO:
                 """
             )
 
+    async def get_human_agents(self) -> List[str]:
+        """Get human agents for this service."""
+        async with get_db_connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT email FROM human_agents
+                WHERE is_active = true
+                ORDER BY email
+                """
+            )
+            return [r["email"] for r in rows] if rows else []
+
+    async def get_admins(self) -> List[str]:
+        """Get admins for this service."""
+        async with get_db_connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT email FROM admins
+                WHERE status = 'active'
+                ORDER BY email
+                """
+            )
+            return [r["email"] for r in rows] if rows else []
+
+    async def get_llm_providers(self) -> List[Dict[str, Any]]:
+        """Get LLM providers for this service."""
+        async with get_db_connection() as conn:
+            return await conn.fetch(
+                """
+                SELECT provider_name, token_used, token_limit
+                FROM llm_providers
+                WHERE is_active = true
+                ORDER BY provider_name
+                """
+            )
+
+    async def add_llm_provider(self, provider: str, limit: int):
+        """Add LLM provider for this service."""
+        async with get_db_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO llm_providers (provider_name, token_limit, is_active)
+                VALUES ($1, $2, true)
+                ON CONFLICT (provider_name) DO UPDATE SET
+                token_limit = EXCLUDED.token_limit, updated_at = NOW()
+                """,
+                provider, limit
+            )
+
+    async def update_llm_used_tokens(self, provider: str, used: int):
+        """Update LLM token usage for this service."""
+        async with get_db_connection() as conn:
+            await conn.execute("UPDATE llm_providers SET token_used = $1 WHERE provider_name = $2", used, provider)
+
+    async def add_admin(self, email: str):
+        """Add admin for this service."""
+        async with get_db_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO admins (email)
+                VALUES ($1)
+                ON CONFLICT (email) DO NOTHING
+                """,
+                email
+            )
+
+    async def remove_admin(self, email: str):
+        """Remove admin for this service."""
+        async with get_db_connection() as conn:
+            await conn.execute("DELETE FROM admins WHERE email = $1", email)
+
+    async def add_human_agent(self, email: str):
+        """Add human agent for this service."""
+        async with get_db_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO human_agents (email)
+                VALUES ($1)
+                ON CONFLICT (email) DO NOTHING
+                """,
+                email
+            )
+
+    async def remove_human_agent(self, email: str):
+        """Remove human agent for this service."""
+        async with get_db_connection() as conn:
+            await conn.execute("DELETE FROM human_agents WHERE email = $1", email)
+
     async def update_metadata(self, hil_enabled: bool, response_policy: int):
         async with get_db_connection() as conn:
             await conn.execute(

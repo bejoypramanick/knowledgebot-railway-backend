@@ -7,14 +7,12 @@ from fastapi import HTTPException
 from shared.logging_config import get_railway_logger
 
 from ..dao.chat_log_dao import ChatLogDAO
-from ..dao.user_dao import UserDAO
 
 logger = get_railway_logger(__name__)
 
 class ChatLogService:
     def __init__(self, connection_manager=None):
         self.dao = ChatLogDAO()  # Service manages its own DAO
-        self.user_dao = UserDAO()  # Use UserDAO for role checking
         self.connection_manager = connection_manager
 
     async def get_agent_online_status(self, agent_email: str) -> bool:
@@ -91,13 +89,13 @@ class ChatLogService:
     async def get_online_agents(self, user_email: str):
         """Get all online human agents and admins with their active session counts."""
         try:
-            # Use UserDAO for role checking
-            roles = await self.user_dao.get_user_roles(user_email)
-            if "admin" not in roles and "human_agent" not in roles:
+            # Use this service's DAO for role checking
+            roles = await self.dao.check_user_role(user_email)
+            if not roles["is_agent"] and not roles["is_admin"]:
                 raise HTTPException(status_code=403, detail="Access denied")
 
             online_users = []
-            agent_emails = await self.user_dao.get_all_human_agents()
+            agent_emails = await self.dao.get_all_human_agents()
             for email in agent_emails:
                 if await self.get_agent_online_status(email):
                     chat_count = await self.get_agent_chat_count(email)
@@ -105,7 +103,7 @@ class ChatLogService:
                         "email": email, "role": "agent", "is_online": True, "active_sessions": chat_count
                     })
 
-            admin_emails = await self.user_dao.get_all_admins()
+            admin_emails = await self.dao.get_all_admins()
             for email in admin_emails:
                 if await self.get_agent_online_status(email):
                     chat_count = await self.get_agent_chat_count(email)

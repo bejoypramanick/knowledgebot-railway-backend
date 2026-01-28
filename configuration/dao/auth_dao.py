@@ -86,12 +86,24 @@ class AuthDAO:
                 email
             )
 
-    async def delete_human_agent(self, email: str) -> None:
-        """Delete a human agent completely."""
+    async def remove_human_agent(self, email: str) -> None:
+        """Remove a human agent by setting status to removed."""
         async with get_db_connection() as conn:
             await conn.execute(
-                "DELETE FROM human_agents WHERE email = $1",
+                """
+                UPDATE human_agents 
+                SET status = 'removed',
+                    removed_at = NOW()
+                WHERE email = $1
+                """,
                 email
+            )
+
+    async def get_all_human_agents(self) -> List[Dict[str, Any]]:
+        """Get all human agents for this service."""
+        async with get_db_connection() as conn:
+            return await conn.fetch(
+                "SELECT email FROM human_agents WHERE is_active = true"
             )
 
     async def get_available_agents(self) -> List[Dict[str, Any]]:
