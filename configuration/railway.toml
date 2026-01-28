@@ -1,5 +1,5 @@
 [build]
-dockerfilePath = "services/configuration_service/Dockerfile"
+dockerfilePath = "configuration/Dockerfile"
 rootDirectory = "."
 
 [deploy]

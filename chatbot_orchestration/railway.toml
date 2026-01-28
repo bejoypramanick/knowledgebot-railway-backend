@@ -1,5 +1,5 @@
 [build]
-dockerfilePath = "services/chatbot_orchestration/Dockerfile"
+dockerfilePath = "chatbot_orchestration/Dockerfile"
 rootDirectory = "."
 
 [deploy]
