@@ -140,6 +140,8 @@ async def knowledgebase_files_endpoint(request: Request):
         if query_params:
             url += f"?{query_params}"
 
+        logger.info(f"📁 Routing to knowledgebase service: {url}")
+
         headers = dict(request.headers)
         hop_by_hop_headers = [
             'connection', 'keep-alive', 'proxy-authenticate',
@@ -149,6 +151,16 @@ async def knowledgebase_files_endpoint(request: Request):
 
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, headers=headers, timeout=30.0)
+            
+            logger.info(f"📁 Knowledgebase service response: {resp.status_code}")
+            
+            if resp.status_code == 404:
+                logger.error(f"❌ Knowledgebase service not found at: {KNOWLEDGEBASE_INGESTION_URL}")
+                return JSONResponse(
+                    status_code=503,
+                    content={"error": "Knowledgebase service unavailable", "service_url": KNOWLEDGEBASE_INGESTION_URL}
+                )
+            
             return JSONResponse(
                 status_code=resp.status_code,
                 content=resp.json() if resp.headers.get('content-type', '').startswith('application/json') else resp.text
