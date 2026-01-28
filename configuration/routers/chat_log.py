@@ -25,12 +25,12 @@ router = APIRouter(prefix="/api/v1/admin", tags=["chat-log"])
 public_chat_router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
 
-from .schemas.chat_log_schemas import (
+from ..schemas.chat_log_schemas import (
     ChatMessageResponse, ChatSessionResponse, ChatSessionsResponse,
     SendMessageRequest, SendMessageResponse
 )
-from .service.chat_log_service import ChatLogService
-from .utils.sse_manager import connection_manager
+from ..service.chat_log_service import ChatLogService
+from ..utils.sse_manager import connection_manager
 
 
 @router.get("/agents/online", response_model=dict)
