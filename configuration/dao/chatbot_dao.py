@@ -40,16 +40,17 @@ class ChatbotDAO:
             )
 
     async def get_active_persona(self) -> Optional[Dict[str, Any]]:
-        async with get_db_connection() as conn:
-            return await conn.fetchrow(
-                """
-                SELECT persona_name, persona_description, is_active
-                FROM chatbot_personas
-                WHERE is_active = true
-                ORDER BY created_at DESC
-                LIMIT 1
-                """
-            )
+        """Get active chatbot persona (fallback to default since chatbot_personas table doesn't exist)."""
+        try:
+            # Return default persona since chatbot_personas table doesn't exist
+            return {
+                'persona_name': 'KnowledgeBot',
+                'persona_description': 'A helpful AI assistant for knowledge management',
+                'is_active': True
+            }
+        except Exception as e:
+            logger.error(f"Error getting active persona: {e}")
+            return None
 
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
         """Get LLM providers for this service."""
@@ -198,6 +199,30 @@ class ChatbotDAO:
                 "DELETE FROM human_agents WHERE email = $1",
                 email
             )
+
+    async def get_human_agents(self) -> List[str]:
+        """Get all human agent emails."""
+        try:
+            async with get_db_connection() as conn:
+                results = await conn.fetch(
+                    "SELECT email FROM human_agents WHERE removed_at IS NULL"
+                )
+                return [row['email'] for row in results]
+        except Exception as e:
+            logger.error(f"Error getting human agents: {e}")
+            return []
+
+    async def get_admins(self) -> List[str]:
+        """Get all admin emails."""
+        try:
+            async with get_db_connection() as conn:
+                results = await conn.fetch(
+                    "SELECT email FROM admins WHERE status = 'active'"
+                )
+                return [row['email'] for row in results]
+        except Exception as e:
+            logger.error(f"Error getting admins: {e}")
+            return []
 
     # Session Assignment Methods
     async def get_existing_assignment(self, session_id: str) -> Optional[Dict[str, Any]]:

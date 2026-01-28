@@ -110,3 +110,34 @@ class TokenDAO:
         except Exception as e:
             logger.error(f"Error getting daily token usage: {e}")
             return []
+
+    async def get_detailed_token_usage(self, limit: int = 50, provider: str = None, api_call_type: str = None) -> List[Dict[str, Any]]:
+        """Get detailed token usage records."""
+        try:
+            async with get_db_connection() as conn:
+                query = """
+                    SELECT user_id, provider, model, prompt_tokens, completion_tokens, 
+                           total_tokens, api_call_type, request_metadata, created_at
+                    FROM token_usage_log
+                    WHERE 1=1
+                """
+                params = []
+                param_counter = 1
+                
+                if provider:
+                    query += f" AND provider = ${param_counter}"
+                    params.append(provider)
+                    param_counter += 1
+                    
+                if api_call_type:
+                    query += f" AND api_call_type = ${param_counter}"
+                    params.append(api_call_type)
+                    param_counter += 1
+                
+                query += f" ORDER BY created_at DESC LIMIT ${param_counter}"
+                params.append(limit)
+                
+                return await conn.fetch(query, *params)
+        except Exception as e:
+            logger.error(f"Error getting detailed token usage: {e}")
+            return []
