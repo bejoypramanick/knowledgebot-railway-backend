@@ -9,7 +9,7 @@ from ..schemas.models import ScrapeRequest, ScrapeResponse
 from ..core.sessions import active_scraping_sessions
 from ..servcie.service_factory import ServiceFactory
 from ..servcie.crawler import crawl_website
-from ..servcie.ingestion import upload_scraped_content, record_scraped_metadata
+from ..servcie.ingestion_service import upload_scraped_content, record_scraped_metadata
 from shared.utils import log_endpoint_request
 
 logger = logging.getLogger(__name__)
