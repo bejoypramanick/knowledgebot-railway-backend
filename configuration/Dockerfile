@@ -39,7 +39,7 @@ RUN echo "🐍 Installing Python dependencies..." && \
 
 # Copy application code
 COPY configuration/ ./configuration/
-COPY shared ./shared/
+COPY ../shared ./shared/
 RUN echo "📁 Application code copied"
 
 # Set working directory

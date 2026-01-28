@@ -1,6 +1,6 @@
 [build]
 dockerfilePath = "chatbot_orchestration/Dockerfile"
-rootDirectory = ".."
+rootDirectory = "."
 
 [deploy]
 restartPolicyType = "ON_FAILURE"

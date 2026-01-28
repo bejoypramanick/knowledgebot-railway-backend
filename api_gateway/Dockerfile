@@ -41,7 +41,7 @@ RUN echo "🐍 Installing Python dependencies..." && \
 
 # Copy application code with logging
 COPY api_gateway/ ./api_gateway/
-COPY shared ./shared/
+COPY ../shared ./shared/
 RUN echo "📁 Application code copied" && \
     ls -la api_gateway/ && \
     echo "📄 Main application file:" && \

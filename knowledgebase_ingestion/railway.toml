@@ -1,6 +1,6 @@
 [build]
 dockerfilePath = "knowledgebase_ingestion/Dockerfile"
-rootDirectory = ".."
+rootDirectory = "."
 # Force rebuild to pick up logging changes
 
 [deploy]

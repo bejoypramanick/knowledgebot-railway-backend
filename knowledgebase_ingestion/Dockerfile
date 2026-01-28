@@ -43,7 +43,7 @@ RUN echo "🐍 Installing Python dependencies..." && \
 
 # Copy application code with logging
 COPY knowledgebase_ingestion/ ./knowledgebase_ingestion/
-COPY shared ./shared/
+COPY ../shared ./shared/
 RUN echo "📁 Application code copied" && \
     ls -la knowledgebase_ingestion/ && \
     echo "📄 Main application file:" && \
