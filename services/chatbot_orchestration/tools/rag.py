@@ -65,9 +65,19 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             response_text = response.text if hasattr(response, 'text') else str(response)
             logger.info(f"✅ Generated response: {len(response_text)} characters")
             
+            # Extract metadata from Gemini response
+            metadata = {}
+            if hasattr(response, 'candidates'):
+                metadata['candidates_count'] = len(response.candidates)
+            if hasattr(response, 'prompt_feedback'):
+                metadata['prompt_feedback'] = response.prompt_feedback
+            if hasattr(response, 'usage_metadata'):
+                metadata['usage_metadata'] = response.usage_metadata._asdict() if hasattr(response.usage_metadata, '_asdict') else str(response.usage_metadata)
+            
             return [SearchResult(
                 file_name="RAG_Response",
-                content=response_text
+                content=response_text,
+                metadata=metadata
             )]
             
         except Exception as generation_error:
