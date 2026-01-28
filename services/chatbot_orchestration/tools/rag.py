@@ -49,8 +49,8 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         try:
             cached_content = genai_client.cached_content.create(
                 model=gemini_model,
-                contents=[retrieval_prompt],
-                tools=[gemini_model],
+                contents=[retrieval_prompt]
+                # Gemini will automatically search all available files
             )
             logger.info("✅ Cached content created successfully")
         except Exception as cache_error:
