@@ -26,11 +26,18 @@ from shared import db
 
 logger = logging.getLogger(__name__)
 
-async def process_with_gemini(tmp_path: str, file_display_name: str, original_filename: str, mime_type: str):
+async def process_with_gemini(tmp_path: str, file_display_name: str, original_filename: str, mime_type: str, user_email: Optional[str] = None):
     """Upload to Gemini FileSearch and poll for processing completion."""
     genai_client = get_genai_client()
     if not genai_client:
         raise Exception("Gemini client not initialized")
+
+    # Get the file search store from environment
+    file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME")
+    if file_search_store_name:
+        logger.info(f"🔍 Using File Search store: {file_search_store_name}")
+    else:
+        logger.warning("⚠️ No File Search store configured - uploading to general file storage")
 
     # Double-check MIME type is not generic (fallback safety)
     final_mime_type = detect_mime_type_from_extension(original_filename, mime_type)
@@ -46,37 +53,77 @@ async def process_with_gemini(tmp_path: str, file_display_name: str, original_fi
     
     logger.info(f"🤖 [GEMINI] Uploading to FileSearch - Display: {gemini_display_name}, Original: {original_filename}, MIME: {final_mime_type}...")
     
-    uploaded_file = genai_client.files.upload(
-        file=tmp_path,
-        config=types.UploadFileConfig(
-            display_name=gemini_display_name,
-            mime_type=final_mime_type
+    if file_search_store_name:
+        # Upload directly to the specified FileSearch store
+        logger.info(f"📂 Uploading to FileSearch store: {file_search_store_name}")
+        operation = genai_client.file_search_stores.upload_to_file_search_store(
+            file=tmp_path,
+            file_search_store_name=file_search_store_name,
+            config={
+                'display_name': gemini_display_name,
+                'custom_metadata': [
+                    {'key': 'original_filename', 'string_value': original_filename},
+                    {'key': 'user_email', 'string_value': user_email or 'admin'}
+                ]
+            }
         )
-    )
-    
-    logger.info(f"✅ [GEMINI] Upload complete. File ID: {uploaded_file.name}, State: {uploaded_file.state.name}")
-    logger.info(f"🔗 [GEMINI] URI: {getattr(uploaded_file, 'uri', 'N/A')}")
-    
-    final_state = uploaded_file.state.name
-    gemini_processed_at = None
-    
-    try:
-        for i in range(15):  # Poll for up to 30 seconds
-            current_file = genai_client.files.get(name=uploaded_file.name)
-            final_state = current_file.state.name
-            logger.info(f"🔄 [GEMINI] Polling state (Attempt {i+1}/15): {final_state}")
+        
+        # Wait for the upload operation to complete
+        start_time = time.time()
+        max_wait_time = 300  # 5 minutes
+        
+        while not operation.done:
+            elapsed = time.time() - start_time
+            if elapsed > max_wait_time:
+                logger.error(f"❌ Timeout waiting for file upload to complete")
+                raise Exception("File upload timeout")
             
-            if final_state == "ACTIVE":
+            await asyncio.sleep(5)
+            operation = genai_client.operations.get(operation)
+            
+        if operation.done:
+            if hasattr(operation, 'result') and operation.result:
+                uploaded_file = operation.result
+                final_state = "ACTIVE"
                 gemini_processed_at = datetime.utcnow()
-                logger.info("⚡ [GEMINI] Processing complete - File is now ACTIVE")
-                break
-            elif final_state == "FAILED":
-                logger.error(f"❌ [GEMINI] Processing FAILED for {uploaded_file.name}")
-                break
+                logger.info(f"✅ [GEMINI] Upload complete to FileSearch store. File: {uploaded_file.name}")
+            else:
+                logger.error(f"❌ [GEMINI] Upload failed: {operation}")
+                raise Exception("File upload failed")
+        else:
+            raise Exception("File upload incomplete")
+    else:
+        # Fallback to general file upload (old method)
+        logger.warning("⚠️ No File Search store configured - using general file upload")
+        uploaded_file = genai_client.files.upload(
+            file=tmp_path,
+            config=types.UploadFileConfig(
+                display_name=gemini_display_name,
+                mime_type=final_mime_type
+            )
+        )
+        
+        # Poll for processing completion (old method)
+        final_state = uploaded_file.state.name
+        gemini_processed_at = None
+        
+        try:
+            for i in range(15):  # Poll for up to 30 seconds
+                current_file = genai_client.files.get(name=uploaded_file.name)
+                final_state = current_file.state.name
+                logger.info(f"🔄 [GEMINI] Polling state (Attempt {i+1}/15): {final_state}")
                 
-            await asyncio.sleep(2)
-    except Exception as e:
-        logger.warning(f"⚠️ [GEMINI] Error during polling: {e}")
+                if final_state == "ACTIVE":
+                    gemini_processed_at = datetime.utcnow()
+                    logger.info("⚡ [GEMINI] Processing complete - File is now ACTIVE")
+                    break
+                elif final_state == "FAILED":
+                    logger.error(f"❌ [GEMINI] Processing FAILED for {uploaded_file.name}")
+                    break
+                    
+                await asyncio.sleep(2)
+        except Exception as e:
+            logger.warning(f"⚠️ [GEMINI] Error during polling: {e}")
         
     return uploaded_file, final_state, gemini_processed_at
 
@@ -90,7 +137,7 @@ async def process_single_file_upload(
     start_time = time.perf_counter()
     original_filename = sanitize_filename(file.filename or "unknown_file")
     file_display_name = display_name or original_filename
-    email = user_email or settings.default_user_email
+    email = user_email or "admin"
     
     log_context = {"upload_file_name": original_filename, "user_email": email}
     tmp_path = None
@@ -135,7 +182,7 @@ async def process_single_file_upload(
         
         # Process with Gemini
         uploaded_file, final_state, gemini_processed_at = await process_with_gemini(
-            tmp_path, file_display_name, original_filename, detected_mime_type
+            tmp_path, file_display_name, original_filename, detected_mime_type, user_email
         )
         
         if final_state != "ACTIVE":

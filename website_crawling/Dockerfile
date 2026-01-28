@@ -16,11 +16,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY services/website_scraping/ ./services/website_scraping/
+COPY website_scraping/ ./website_scraping/
 COPY shared ./shared/
 
 # Set working directory
-WORKDIR /app/services/website_scraping
+WORKDIR /app/website_scraping
 
 # Set the PYTHONPATH environment variable to include the /app directory
 ENV PYTHONPATH="/app"

@@ -24,9 +24,6 @@ class Settings(BaseSettings):
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None
     
-    # User Context (for tracking uploads)
-    default_user_email: str = "admin"
-    
     model_config = {
         'env_file': ".env",
         'case_sensitive': False

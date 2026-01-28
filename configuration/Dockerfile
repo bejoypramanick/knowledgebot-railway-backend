@@ -38,12 +38,12 @@ RUN echo "🐍 Installing Python dependencies..." && \
     echo "✅ Python dependencies installed"
 
 # Copy application code
-COPY services/configuration_service/ ./services/configuration_service/
+COPY configuration/ ./configuration/
 COPY shared ./shared/
 RUN echo "📁 Application code copied"
 
 # Set working directory
-WORKDIR /app/services/configuration_service
+WORKDIR /app/configuration
 
 # Create logs directory
 RUN mkdir -p /app/logs && \
@@ -51,8 +51,8 @@ RUN mkdir -p /app/logs && \
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
-    CMD sh -c 'curl -f http://localhost:${CONFIGURATION_SERVICE_PORT:-${PORT:-8004}}/health || exit 1'
+    CMD sh -c 'curl -f http://localhost:${configuration_PORT:-${PORT:-8004}}/health || exit 1'
 
 # Run the application
-CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${CONFIGURATION_SERVICE_PORT:-${PORT:-8004}} --log-level info --access-log"]
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${configuration_PORT:-${PORT:-8004}} --log-level info --access-log"]
 

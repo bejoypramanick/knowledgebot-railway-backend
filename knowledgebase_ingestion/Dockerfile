@@ -42,15 +42,15 @@ RUN echo "🐍 Installing Python dependencies..." && \
     pip list | grep -E "(fastapi|uvicorn|google-genai|boto3)"
 
 # Copy application code with logging
-COPY services/knowledgebase_ingestion/ ./services/knowledgebase_ingestion/
+COPY knowledgebase_ingestion/ ./knowledgebase_ingestion/
 COPY shared ./shared/
 RUN echo "📁 Application code copied" && \
-    ls -la services/knowledgebase_ingestion/ && \
+    ls -la knowledgebase_ingestion/ && \
     echo "📄 Main application file:" && \
-    head -n 10 services/knowledgebase_ingestion/main.py
+    head -n 10 knowledgebase_ingestion/main.py
 
 # Set working directory
-WORKDIR /app/services/knowledgebase_ingestion
+WORKDIR /app/knowledgebase_ingestion
 
 # Create logs directory
 RUN mkdir -p /app/logs && \

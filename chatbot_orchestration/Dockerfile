@@ -22,12 +22,12 @@ RUN echo "✅ Python Dependencies installed successfully"
 
 # Build Stage 3: Application Code
 RUN echo "📂 --- Copying Application Code ---"
-COPY services/chatbot_orchestration/ ./services/chatbot_orchestration/
+COPY chatbot_orchestration/ ./chatbot_orchestration/
 COPY shared ./shared/
 RUN echo "✅ Code copied"
 
 # Set working directory and environment
-WORKDIR /app/services/chatbot_orchestration
+WORKDIR /app/chatbot_orchestration
 ENV PYTHONPATH="/app"
 ENV PYTHONUNBUFFERED=1
 

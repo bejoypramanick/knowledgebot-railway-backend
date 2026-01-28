@@ -66,7 +66,7 @@ async def upload_document(
         raise HTTPException(status_code=503, detail="Gemini client not configured")
         
     original_filename = sanitize_filename(file.filename or "unknown_file")
-    email = user_email or settings.default_user_email
+    email = user_email or "admin"
     
     # 1. Validation
     valid, msg = validate_file_extension(original_filename)
@@ -107,7 +107,7 @@ async def upload_document(
         
         detected_mime = detect_mime_type_from_extension(original_filename, file.content_type)
         uploaded_file, final_state, gemini_processed_at = await process_with_gemini(
-            tmp_path, display_name or original_filename, original_filename, detected_mime
+            tmp_path, display_name or original_filename, original_filename, detected_mime, email
         )
         
         # Record metadata
