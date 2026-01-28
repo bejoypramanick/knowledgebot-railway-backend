@@ -49,5 +49,75 @@ class TokenDAO:
             usage_data['total_tokens'],
             usage_data.get('cache_read_tokens', 0),
             usage_data.get('cache_write_tokens', 0),
-            usage_data.get('api_call_type')
+            usage_data['api_call_type']
+        )
+
+    async def get_gemini_usage_from_log(self) -> int:
+        """Get total Gemini usage from token_usage_log table."""
+        result = await self.conn.fetchrow(
+            """
+            SELECT COALESCE(SUM(total_tokens), 0) as total_used
+            FROM token_usage_log
+            WHERE provider = 'gemini'
+            """
+        )
+        return result['total_used'] or 0
+
+    async def get_gemini_limit(self) -> int:
+        """Get Gemini token limit from llm_providers table."""
+        result = await self.conn.fetchrow(
+            """
+            SELECT token_limit as limit_value
+            FROM llm_providers
+            WHERE provider_name = 'gemini' AND is_active = true
+            """
+        )
+        return result['limit_value'] if result else 20000
+
+    async def get_detailed_token_usage(self, start_date: Optional[str] = None, end_date: Optional[str] = None,
+                                    session_id: Optional[str] = None, model: Optional[str] = None,
+                                    api_call_type: Optional[str] = None, limit: int = 100) -> list:
+        """Get detailed token usage with filtering."""
+        query = """
+            SELECT session_id, message_id, provider, model, api_call_type,
+                   prompt_tokens, completion_tokens, total_tokens,
+                   cache_read_tokens, cache_write_tokens, created_at
+            FROM token_usage_log
+            WHERE 1=1
+        """
+        params = []
+        
+        if start_date:
+            query += " AND created_at >= $" + str(len(params) + 1)
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND created_at <= $" + str(len(params) + 1)
+            params.append(end_date)
+        
+        if session_id:
+            query += " AND session_id = $" + str(len(params) + 1)
+            params.append(session_id)
+        
+        if model:
+            query += " AND model = $" + str(len(params) + 1)
+            params.append(model)
+        
+        if api_call_type:
+            query += " AND api_call_type = $" + str(len(params) + 1)
+            params.append(api_call_type)
+        
+        query += " ORDER BY created_at DESC LIMIT $" + str(len(params) + 1)
+        params.append(limit)
+        
+        return await self.conn.fetch(query, *params)
+
+    async def initialize_gemini_provider(self) -> None:
+        """Initialize Gemini provider in llm_providers table."""
+        await self.conn.execute(
+            """
+            INSERT INTO llm_providers (provider_name, token_limit, token_used, is_active)
+            VALUES ('gemini', 20000, 0, true)
+            ON CONFLICT (provider_name) DO NOTHING
+            """
         )

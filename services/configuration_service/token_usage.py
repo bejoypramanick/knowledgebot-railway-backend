@@ -11,82 +11,34 @@ from typing import Optional
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from shared.db import railway_db, init_railway_db
+from .main import get_db_connection
+from shared.dao.token_dao import TokenDAO
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["token-usage"])
 
 
-async def get_db_connection():
-    """Get database connection, initializing if needed."""
-    global railway_db  # Explicitly declare railway_db as global
-
-    logger.info(f"🔍 Checking database connection: railway_db={railway_db is not None}, has_pool={hasattr(railway_db, '_pool') if railway_db else False}, pool_not_none={railway_db._pool is not None if railway_db and hasattr(railway_db, '_pool') else False}")
-
-    if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
-        logger.info("✅ Using existing database connection")
-        return railway_db
-
-    # Initialize database if not already initialized
-    database_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
-    logger.info(f"🔍 Database URL available: {database_url is not None}")
-    if database_url:
-        logger.info("🔄 Initializing database connection...")
-        db_instance = await init_railway_db(database_url)
-        logger.info(f"✅ Database initialized: db_instance={db_instance is not None}, railway_db={railway_db is not None}")
-        # Use the returned instance, but also ensure global variable is set
-        if db_instance and not railway_db:
-            railway_db = db_instance
-        return db_instance or railway_db
-
-    logger.warning("❌ No database connection available")
-    return None
-
-
 async def get_gemini_usage() -> dict:
     """Get Gemini API token usage by calculating totals from token_usage_log table."""
-    logger.info("🔍 get_gemini_usage called")
+    logger.info(" get_gemini_usage called")
     try:
-        db = await get_db_connection()
-        if db and hasattr(db, '_pool') and db._pool is not None:
-            logger.info("✅ Database connection available for Gemini usage")
-            async with db.acquire() as conn:
-                # Calculate total used tokens from log table
-                query = """
-                    SELECT
-                        COALESCE(SUM(total_tokens), 0) as total_used
-                    FROM token_usage_log
-                    WHERE provider = 'gemini'
-                """
-                logger.info(f"🔍 Calculating Gemini usage from token_usage_log: {query.strip()}")
-                result = await conn.fetchrow(query)
-                used = result['total_used'] or 0
-
-                # Get limit from llm_providers table
-                limit_query = """
-                    SELECT COALESCE(token_limit, 20000) as limit_value
-                    FROM llm_providers
-                    WHERE provider_name = 'gemini' AND is_active = true
-                """
-                limit_result = await conn.fetchrow(limit_query)
-                limit = limit_result['limit_value'] if limit_result else 20000
-                available = max(0, limit - used)
-
-                logger.info(f"✅ Gemini usage calculated: used={used}, available={available}, limit={limit}")
-                return {
-                    "used": used,
-                    "available": available,
-                    "limit": limit
-                }
-
-        # Default values if no data found
-        logger.warning("No database connection available, returning defaults")
-        return {
-            "used": 0,
-            "available": 20000,
-            "limit": 20000
-        }
+        async with get_db_connection() as conn:
+            token_dao = TokenDAO(conn)
+            
+            # Get total used tokens from log table
+            used = await token_dao.get_gemini_usage_from_log()
+            
+            # Get limit from llm_providers table
+            limit = await token_dao.get_gemini_limit()
+            available = max(0, limit - used)
+            
+            return {
+                'used': used,
+                'limit': limit,
+                'available': available,
+                'percentage': round((used / limit * 100), 2) if limit > 0 else 0
+            }
     except Exception as e:
         logger.error(f"❌ Exception in get_gemini_usage: {e}", exc_info=True)
         import traceback
@@ -99,21 +51,10 @@ async def get_gemini_usage() -> dict:
 async def initialize_token_usage_if_needed():
     """Initialize token usage in llm_providers table if not set."""
     try:
-        db = await get_db_connection()
-        if db and hasattr(db, '_pool') and db._pool is not None:
-            async with db.acquire() as conn:
-                # Initialize Gemini provider
-                await conn.execute(
-                    """
-                    INSERT INTO llm_providers (provider_name, token_limit, token_used, is_active)
-                    VALUES ('gemini', 20000, 0, true)
-                    ON CONFLICT (provider_name) DO UPDATE SET
-                        token_limit = COALESCE(llm_providers.token_limit, 20000),
-                        is_active = true
-                    """
-                )
-
-                logger.info("Ensured token usage limits are initialized in llm_providers table")
+        async with get_db_connection() as conn:
+            token_dao = TokenDAO(conn)
+            await token_dao.initialize_gemini_provider()
+            logger.info("Ensured token usage limits are initialized in llm_providers table")
     except Exception as e:
         logger.error(f"Error initializing token usage: {e}", exc_info=True)
 
@@ -122,99 +63,38 @@ async def initialize_token_usage_if_needed():
 async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_call_type: str = None):
     """Get detailed token usage log with correlations to specific requests."""
     try:
-        db = await get_db_connection()
-        if db and hasattr(db, '_pool') and db._pool is not None:
-            async with db.acquire() as conn:
-                # Build query with optional filters
-                # Since system only uses admins and human_agents (no users table),
-                # return token usage without customer information
-                logger.info("🔍 System uses admins/human_agents only - returning token usage without customer info")
-                query = """
-                    SELECT
-                        tul.id,
-                        tul.provider,
-                        tul.model,
-                        tul.prompt_tokens,
-                        tul.completion_tokens,
-                        tul.total_tokens,
-                        tul.api_call_type,
-                        tul.created_at,
-                        NULL as customer_name,
-                        NULL as customer_email,
-                        cm.content as message_preview
-                    FROM token_usage_log tul
-                    LEFT JOIN chat_sessions cs ON tul.session_id = cs.id
-                    LEFT JOIN chat_messages cm ON tul.message_id = cm.id AND cm.role = 'user'
-                    WHERE 1=1
-                """
-
-                params = []
-                param_count = 0
-
-                if provider:
-                    param_count += 1
-                    query += f" AND tul.provider = ${param_count}"
-                    params.append(provider)
-
-                if api_call_type:
-                    param_count += 1
-                    query += f" AND tul.api_call_type = ${param_count}"
-                    params.append(api_call_type)
-
-                query += f" ORDER BY tul.created_at DESC LIMIT ${param_count + 1}"
-                params.append(limit)
-
-                logger.info(f"🔍 Executing detailed token usage query: {query.strip()} | Params: {params}")
-                rows = await conn.fetch(query, *params)
-
-                # Format the results
-                detailed_usage = []
-                for row in rows:
-                    usage_entry = {
-                        "id": str(row['id']),
-                        "provider": row['provider'],
-                        "model": row['model'],
-                        "api_call_type": row['api_call_type'],
-                        "created_at": row['created_at'].isoformat() if row['created_at'] else None,
-                        "session_info": {
-                            "customer_name": row['customer_name'],
-                            "customer_email": row['customer_email']
-                        } if row['customer_name'] or row['customer_email'] else None,
-                        "message_preview": row['message_preview'][:100] + "..." if row['message_preview'] and len(row['message_preview']) > 100 else row['message_preview']
-                    }
-
-                    # Add provider-specific token fields
-                    if row['provider'] == 'gemini':
-                        usage_entry.update({
-                            "promptTokenCount": row['prompt_tokens'] or 0,
-                            "candidatesTokenCount": row['completion_tokens'] or 0,
-                            "totalTokenCount": row['total_tokens'] or 0,
-                            "cache_read_tokens": row.get('cache_read_tokens', 0) or 0,
-                            "cache_write_tokens": row.get('cache_write_tokens', 0) or 0,
-                        })
-
-                    detailed_usage.append(usage_entry)
-
-                return {
-                    "detailed_usage": detailed_usage,
-                    "total_count": len(detailed_usage),
-                    "filters_applied": {
-                        "provider": provider,
-                        "api_call_type": api_call_type,
-                        "limit": limit
-                    }
-                }
-        else:
+        async with get_db_connection() as conn:
+            token_dao = TokenDAO(conn)
+            
+            # Get detailed usage
+            rows = await token_dao.get_detailed_token_usage(
+                provider=provider,
+                api_call_type=api_call_type,
+                limit=limit
+            )
+            
+            # Format the results
+            detailed_usage = []
+            for row in rows:
+                detailed_usage.append({
+                    'id': str(row['id']),
+                    'provider': row['provider'],
+                    'model': row['model'],
+                    'api_call_type': row['api_call_type'],
+                    'prompt_tokens': row['prompt_tokens'],
+                    'completion_tokens': row['completion_tokens'],
+                    'total_tokens': row['total_tokens'],
+                    'cache_read_tokens': row['cache_read_tokens'],
+                    'cache_write_tokens': row['cache_write_tokens'],
+                    'created_at': row['created_at'].isoformat() if row['created_at'] else None
+                })
+            
             return {
-                "detailed_usage": [],
-                "total_count": 0,
-                "error": "Database not available"
+                'success': True,
+                'usage': detailed_usage,
+                'count': len(detailed_usage)
             }
     except Exception as e:
-        logger.error(f"Error fetching detailed token usage: {e}", exc_info=True)
-        return {
-            "detailed_usage": [],
-            "total_count": 0,
-            "error": str(e)
-        }
+        logger.error(f"Error getting detailed token usage: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching detailed token usage: {str(e)}")
 
