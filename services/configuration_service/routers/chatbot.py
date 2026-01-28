@@ -7,7 +7,7 @@ from services.configuration_service.core.database import get_db_connection
 from services.configuration_service.schemas.models import ChatbotConfigRequest, AdminAccount, ValidatedEmail
 from services.configuration_service.utils.validation import validate_configuration_consistency
 from services.configuration_service.utils.logging_utils import log_configuration_change
-from services.configuration_service.dao.chatbot_dao import ChatbotDAO
+from services.configuration_service.services.configuration_service import configuration_service
 from shared.auth_middleware import get_current_user
 from shared.utils import log_endpoint_request
 
@@ -19,55 +19,51 @@ router = APIRouter(prefix="/api/v1", tags=["Chatbot Configuration"])
 async def get_chatbot_config():
     """Get chatbot configuration"""
     try:
-        async with get_db_connection() as conn:
-            from services.configuration_service.dao.chatbot_dao import ChatbotDAO
-            dao = ChatbotDAO(conn)
+        # Read from new normalized tables
+        # Get configuration metadata
+        metadata = await configuration_service.get_metadata()
 
-            # Read from new normalized tables
-            # Get configuration metadata
-            metadata = await dao.get_metadata()
+        # Get notification settings
+        notification_rows = await configuration_service.get_notification_settings()
 
-            # Get notification settings
-            notification_rows = await dao.get_notification_settings()
+        # Get security settings
+        security_rows = await configuration_service.get_security_settings()
 
-            # Get security settings
-            security_rows = await dao.get_security_settings()
+        # Get LLM providers
+        llm_rows = await configuration_service.get_llm_providers()
 
-            # Get LLM providers
-            llm_rows = await dao.get_llm_providers()
+        # Get active persona
+        persona = await configuration_service.get_active_persona()
 
-            # Get active persona
-            persona = await dao.get_active_persona()
+        # Fetch human agents
+        human_agents_list = await configuration_service.get_human_agents()
+        logger.info(f"Fetched {len(human_agents_list)} human agent(s)")
 
-            # Fetch human agents
-            human_agents_list = await dao.get_human_agents()
-            logger.info(f"Fetched {len(human_agents_list)} human agent(s)")
+        # Fetch admins
+        admin_emails_list = await configuration_service.get_admins()
+        logger.info(f"Fetched {len(admin_emails_list)} admin(s)")
 
-            # Fetch admins
-            admin_emails_list = await dao.get_admins()
-            logger.info(f"Fetched {len(admin_emails_list)} admin(s)")
-
-            # Build notification settings dict
-            notifications = {
-                "user_interactions_enabled": False,
-                "error_alerts_enabled": False,
-                "feedback_requests_enabled": True
-            }
-            for row in notification_rows:
-                if row['setting_name'] == 'user_interactions_enabled':
-                    notifications['user_interactions_enabled'] = row['is_enabled']
-                elif row['setting_name'] == 'error_alerts_enabled':
-                    notifications['error_alerts_enabled'] = row['is_enabled']
+        # Build notification settings dict
+        notifications = {
+            "user_interactions_enabled": False,
+            "error_alerts_enabled": False,
+            "feedback_requests_enabled": True
+        }
+        for row in notification_rows:
+            if row['setting_name'] == 'user_interactions_enabled':
+                notifications['user_interactions_enabled'] = row['is_enabled']
+            elif row['setting_name'] == 'error_alerts_enabled':
+                notifications['error_alerts_enabled'] = row['is_enabled']
                 elif row['setting_name'] == 'feedback_requests_enabled':
-                    notifications['feedback_requests_enabled'] = row['is_enabled']
+                notifications['feedback_requests_enabled'] = row['is_enabled']
 
-            # Build security settings dict
-            security = {
-                "response_timeout": 30,
-                "remove_pii": False,
-                "restrict_config": False
-            }
-            for row in security_rows:
+        # Build security settings dict
+        security = {
+            "response_timeout": 30,
+            "remove_pii": False,
+            "restrict_config": False
+        }
+        for row in security_rows:
                 if row['setting_name'] == 'response_timeout':
                     security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
                 elif row['setting_name'] == 'remove_pii':

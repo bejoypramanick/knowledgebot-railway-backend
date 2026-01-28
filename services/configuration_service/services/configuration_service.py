@@ -170,6 +170,89 @@ class ConfigurationService:
         except Exception as e:
             logger.error(f"Error checking human agent exists: {e}")
             return None
+    
+    # Widget Configuration Methods
+    async def get_widget_config(self) -> Optional[Dict[str, Any]]:
+        """Get widget configuration"""
+        try:
+            dao = await self._get_widget_dao()
+            return await dao.get_widget_config()
+        except Exception as e:
+            logger.error(f"Error getting widget config: {e}")
+            return None
+    
+    async def get_suggested_messages(self) -> List[Dict[str, Any]]:
+        """Get suggested messages"""
+        try:
+            dao = await self._get_widget_dao()
+            return await dao.get_suggested_messages()
+        except Exception as e:
+            logger.error(f"Error getting suggested messages: {e}")
+            return []
+    
+    async def update_widget_config(self, config_data: Dict[str, Any]):
+        """Update widget configuration"""
+        try:
+            dao = await self._get_widget_dao()
+            await dao.update_widget_config(config_data)
+        except Exception as e:
+            logger.error(f"Error updating widget config: {e}")
+            raise
+    
+    # Chatbot Configuration Methods
+    async def get_notification_settings(self) -> List[Dict[str, Any]]:
+        """Get notification settings"""
+        try:
+            dao = await self._get_chatbot_dao()
+            return await dao.get_notification_settings()
+        except Exception as e:
+            logger.error(f"Error getting notification settings: {e}")
+            return []
+    
+    async def get_security_settings(self) -> List[Dict[str, Any]]:
+        """Get security settings"""
+        try:
+            dao = await self._get_chatbot_dao()
+            return await dao.get_security_settings()
+        except Exception as e:
+            logger.error(f"Error getting security settings: {e}")
+            return []
+    
+    async def get_llm_providers(self) -> List[Dict[str, Any]]:
+        """Get LLM providers"""
+        try:
+            dao = await self._get_chatbot_dao()
+            return await dao.get_llm_providers()
+        except Exception as e:
+            logger.error(f"Error getting LLM providers: {e}")
+            return []
+    
+    async def get_active_persona(self) -> Optional[Dict[str, Any]]:
+        """Get active persona"""
+        try:
+            dao = await self._get_chatbot_dao()
+            return await dao.get_active_persona()
+        except Exception as e:
+            logger.error(f"Error getting active persona: {e}")
+            return None
+    
+    async def get_human_agents(self) -> List[Dict[str, Any]]:
+        """Get human agents"""
+        try:
+            dao = await self._get_chatbot_dao()
+            return await dao.get_human_agents()
+        except Exception as e:
+            logger.error(f"Error getting human agents: {e}")
+            return []
+    
+    async def get_admins(self) -> List[Dict[str, Any]]:
+        """Get admins"""
+        try:
+            dao = await self._get_chatbot_dao()
+            return await dao.get_admins()
+        except Exception as e:
+            logger.error(f"Error getting admins: {e}")
+            return []
 
 # Singleton instance
 configuration_service = ConfigurationService()

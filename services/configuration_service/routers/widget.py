@@ -10,6 +10,7 @@ from typing import Optional
 from services.configuration_service.core.database import get_db_connection
 from services.configuration_service.schemas.models import WidgetConfigRequest
 from services.configuration_service.utils.logging_utils import log_configuration_change
+from services.configuration_service.services.configuration_service import configuration_service
 from shared.auth_middleware import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -20,40 +21,36 @@ router = APIRouter(prefix="/api/v1", tags=["Widget Configuration"])
 async def get_widget_config():
     """Get widget configuration"""
     try:
-        async with get_db_connection() as conn:
-            from services.configuration_service.dao.widget_dao import WidgetDAO
-            dao = WidgetDAO(conn)
+        # Get main widget configuration
+        row = await configuration_service.get_widget_config()
 
-            # Get main widget configuration
-            row = await dao.get_widget_config()
+        # Get suggested messages
+        suggested_messages = await configuration_service.get_suggested_messages()
 
-            # Get suggested messages
-            suggested_messages = await dao.get_suggested_messages()
-
-            if not row:
-                # Return default configuration
-                data = {
-                    "display_name": "GLOBISTAAN",
-                    "initial_message": "Hi! What can I help you with?",
-                    "auto_show_duration": 4,
-                    "suggested_messages": [],
-                    "keep_showing_suggested": True,
-                    "theme": "light",
-                    "primary_color": "#3B81F6",
-                    "use_primary_for_header": True,
-                    "chat_bubble_color": "#3B81F6",
-                    "align_bubble": "right",
-                    "display_chatbot": True,
-                    "profile_picture_url": None,
-                    "chat_icon_url": None,
-                    "profile_zoom": 1.0,
-                    "chat_icon_zoom": 1.0,
-                    "profile_position": {"x": 0, "y": 0},
-                    "chat_icon_position": {"x": 0, "y": 0}
-                }
-                response = JSONResponse(content=data)
-                response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
-                return response
+        if not row:
+            # Return default configuration
+            data = {
+                "display_name": "GLOBISTAAN",
+                "initial_message": "Hi! What can I help you with?",
+                "auto_show_duration": 4,
+                "suggested_messages": [],
+                "keep_showing_suggested": True,
+                "theme": "light",
+                "primary_color": "#3B81F6",
+                "use_primary_for_header": True,
+                "chat_bubble_color": "#3B81F6",
+                "align_bubble": "right",
+                "display_chatbot": True,
+                "profile_picture_url": None,
+                "chat_icon_url": None,
+                "profile_zoom": 1.0,
+                "chat_icon_zoom": 1.0,
+                "profile_position": {"x": 0, "y": 0},
+                "chat_icon_position": {"x": 0, "y": 0}
+            }
+            response = JSONResponse(content=data)
+            response.headers["Cache-Control"] = "public, max-age=5, must-revalidate"
+            return response
 
             # Build data object
             data = {
@@ -97,58 +94,51 @@ async def save_widget_config(
 ):
     """Save widget configuration"""
     try:
-        async with get_db_connection() as conn:
-            from services.configuration_service.dao.widget_dao import WidgetDAO
-            dao = WidgetDAO(conn)
+        # Build update map
+        update_data = {}
+        fields_map = {
+            "display_name": "display_name",
+            "initial_message": "initial_message",
+            "auto_show_duration": "auto_show_duration",
+            "keep_showing_suggested": "keep_showing_suggested",
+            "theme": "theme",
+            "primary_color": "primary_color",
+            "use_primary_for_header": "use_primary_for_header",
+            "chat_bubble_color": "chat_bubble_color",
+            "align_bubble": "align_bubble",
+            "display_chatbot": "display_chatbot",
+            "profile_picture_url": "profile_picture_url",
+            "chat_icon_url": "chat_icon_url",
+            "profile_zoom": "profile_zoom",
+            "chat_icon_zoom": "chat_icon_zoom",
+            "profile_position": "profile_position",
+            "chat_icon_position": "chat_icon_position",
+            "profile_picture_filename": "profile_picture_filename",
+            "chat_icon_filename": "chat_icon_filename"
+        }
 
-            # Build update map
-            update_data = {}
-            fields_map = {
-                "display_name": "display_name",
-                "initial_message": "initial_message",
-                "auto_show_duration": "auto_show_duration",
-                "keep_showing_suggested": "keep_showing_suggested",
-                "theme": "theme",
-                "primary_color": "primary_color",
-                "use_primary_for_header": "use_primary_for_header",
-                "chat_bubble_color": "chat_bubble_color",
-                "align_bubble": "align_bubble",
-                "display_chatbot": "display_chatbot",
-                "profile_picture_url": "profile_picture_url",
-                "chat_icon_url": "chat_icon_url",
-                "profile_zoom": "profile_zoom",
-                "chat_icon_zoom": "chat_icon_zoom",
-                "profile_position": "profile_position",
-                "chat_icon_position": "chat_icon_position",
-                "profile_picture_filename": "profile_picture_filename",
-                "chat_icon_filename": "chat_icon_filename"
-            }
+        for field, db_field in fields_map.items():
+            value = getattr(config, field, None)
+            if value is not None:
+                if field in ['profile_position', 'chat_icon_position']:
+                    if hasattr(value, 'dict'):
+                        value = json.dumps(value.dict())
+                    elif isinstance(value, dict):
+                        value = json.dumps(value)
+                    else:
+                        value = json.dumps({"x": 0, "y": 0})
+                update_data[db_field] = value
 
-            for field, db_field in fields_map.items():
-                value = getattr(config, field, None)
-                if value is not None:
-                    if field in ['profile_position', 'chat_icon_position']:
-                        if hasattr(value, 'dict'):
-                            value = json.dumps(value.dict())
-                        elif isinstance(value, dict):
-                            value = json.dumps(value)
-                        else:
-                            value = json.dumps({"x": 0, "y": 0})
-                    update_data[db_field] = value
+        # Handle suggested_messages
+        if config.suggested_messages is not None:
+            dao = await configuration_service._get_widget_dao()
+            await dao.clear_suggested_messages()
+            for i, message in enumerate(config.suggested_messages):
+                if message and isinstance(message, str):
+                    await dao.add_suggested_message(message, i)
 
-            # Handle suggested_messages
-            if config.suggested_messages is not None:
-                await dao.clear_suggested_messages()
-                for i, message in enumerate(config.suggested_messages):
-                    if message and isinstance(message, str):
-                        await dao.add_suggested_message(message, i)
-
-            if update_data:
-                existing_id = await dao.get_existing_id()
-                if existing_id:
-                    await dao.update_widget_config(existing_id, update_data)
-                else:
-                    await dao.insert_widget_config(update_data)
+        if update_data:
+            await configuration_service.update_widget_config(update_data)
 
             # Log the configuration change (non-blocking)
             try:
