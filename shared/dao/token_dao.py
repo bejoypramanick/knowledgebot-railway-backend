@@ -116,7 +116,7 @@ class TokenDAO:
         try:
             async with get_db_connection() as conn:
                 query = """
-                    SELECT user_id, provider, model, prompt_tokens, completion_tokens, 
+                    SELECT session_id, provider, model, prompt_tokens, completion_tokens, 
                            total_tokens, api_call_type, request_metadata, created_at
                     FROM token_usage_log
                     WHERE 1=1

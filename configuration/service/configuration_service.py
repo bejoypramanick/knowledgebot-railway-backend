@@ -375,8 +375,8 @@ class ConfigurationService:
 
             # Build persona dict
             persona_config = {
-                "system_prompt": persona['system_prompt'] if persona else "",
-                "selected_persona": persona['persona_name'] if persona else "friendly-receptionist"
+                "system_prompt": persona.get('system_prompt', '') if persona else "",
+                "selected_persona": persona.get('persona_name', 'KnowledgeBot') if persona else "friendly-receptionist"
             }
 
             # Build final configuration
