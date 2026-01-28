@@ -40,20 +40,5 @@ class ChatDAO:
         except Exception as e:
             logger.error(f"Error updating session metadata: {e}")
 
-    async def get_session_metadata(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Retrieve metadata for a chat session."""
-        try:
-            async with get_db_connection() as conn:
-                return await conn.fetchrow("""
-                    SELECT file_search_store_id, cached_content_id, created_at, updated_at
-                    FROM chat_sessions 
-                    WHERE session_id = $1
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """, session_id)
-        except Exception as e:
-            logger.error(f"Error getting session metadata: {e}")
-            return None
-
     
     

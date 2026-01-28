@@ -11,26 +11,16 @@ class FileDAO:
         pass  # No connection parameter - DAO manages its own connection
 
     async def get_user_by_email(self, email: str) -> Optional[str]:
-        """Get user identifier from admins or human_agents table."""
+        """Get user identifier - delegates to UserDAO for user table access."""
         try:
-            async with get_db_connection() as conn:
-                # Check if user exists in admins table
-                admin_user = await conn.fetchrow(
-                    "SELECT email FROM admins WHERE email = $1",
-                    email
-                )
-                if admin_user:
-                    return email
-                
-                # Check if user exists in human_agents table
-                agent_user = await conn.fetchrow(
-                    "SELECT email FROM human_agents WHERE email = $1",
-                    email
-                )
-                if agent_user:
-                    return email
-                    
-                return None
+            from .user_dao import UserDAO
+            user_dao = UserDAO()
+            
+            # Check if user exists in admins or human_agents tables
+            roles = await user_dao.get_user_roles(email)
+            if roles:
+                return email
+            return None
         except Exception as e:
             logger.error(f"Error checking user tables for email {email}: {e}")
             return None
