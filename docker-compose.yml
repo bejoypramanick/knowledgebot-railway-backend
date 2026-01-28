@@ -4,7 +4,7 @@ services:
   api-gateway:
     build:
       context: .
-      dockerfile: api-gateway/Dockerfile
+      dockerfile: api_gateway/Dockerfile
     ports:
       - "8000:8000"
     environment:
@@ -24,7 +24,7 @@ services:
   knowledgebase-ingestion:
     build:
       context: .
-      dockerfile: services/knowledgebase_ingestion/Dockerfile
+      dockerfile: knowledgebase_ingestion/Dockerfile
     ports:
       - "8001:8001"
     env_file:
@@ -35,7 +35,7 @@ services:
   website-scraping:
     build:
       context: .
-      dockerfile: services/website_scraping/Dockerfile
+      dockerfile: website_crawling/Dockerfile
     ports:
       - "8002:8002"
     env_file:
@@ -46,7 +46,7 @@ services:
   chatbot-orchestration:
     build:
       context: .
-      dockerfile: services/chatbot_orchestration/Dockerfile
+      dockerfile: chatbot_orchestration/Dockerfile
     ports:
       - "8003:8003"
     env_file:

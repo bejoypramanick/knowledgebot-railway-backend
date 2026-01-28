@@ -15,7 +15,7 @@ services:
   configuration-service:
     build:
       context: .
-      dockerfile: services/configuration_service/Dockerfile
+      dockerfile: configuration/Dockerfile
     ports:
       - "8004:8004"
     environment:
