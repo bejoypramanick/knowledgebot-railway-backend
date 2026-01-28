@@ -168,20 +168,3 @@ class PerformanceDAO:
                 GROUP BY TO_CHAR(recorded_at, 'Mon'), DATE_TRUNC('month', recorded_at)
                 ORDER BY DATE_TRUNC('month', recorded_at)
             """)
-
-    # Admin and Human Agent Checks
-    async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
-        """Check if admin exists for given email."""
-        async with get_db_connection() as conn:
-            return await conn.fetchrow(
-                "SELECT email FROM admins WHERE email = $1",
-                email
-            )
-
-    async def check_human_agent_exists(self, email: str) -> Optional[Dict[str, Any]]:
-        """Check if human agent exists for given email."""
-        async with get_db_connection() as conn:
-            return await conn.fetchrow(
-                "SELECT email FROM human_agents WHERE email = $1",
-                email
-            )

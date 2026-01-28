@@ -205,14 +205,6 @@ class ChatbotDAO:
             )
 
     # Session Assignment Methods
-    async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Get session details by session ID."""
-        async with get_db_connection() as conn:
-            return await conn.fetchrow(
-                "SELECT * FROM chat_sessions WHERE session_id = $1",
-                session_id
-            )
-
     async def get_existing_assignment(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get existing agent assignment for a session."""
         async with get_db_connection() as conn:

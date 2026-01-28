@@ -40,66 +40,20 @@ class ChatDAO:
         except Exception as e:
             logger.error(f"Error updating session metadata: {e}")
 
-    async def find_file_by_name(self, gemini_file_name: str) -> Optional[Dict[str, Any]]:
-        """Find file metadata by Gemini file name."""
+    async def get_session_metadata(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve metadata for a chat session."""
         try:
             async with get_db_connection() as conn:
                 return await conn.fetchrow("""
-                    SELECT id, original_filename, display_name,
-                           mime_type, size_bytes, metadata, created_at, gemini_file_name
-                    FROM file_uploads
-                    WHERE gemini_file_name = $1
+                    SELECT file_search_store_id, cached_content_id, created_at, updated_at
+                    FROM chat_sessions 
+                    WHERE session_id = $1
                     ORDER BY created_at DESC
                     LIMIT 1
-                """, gemini_file_name)
+                """, session_id)
         except Exception as e:
-            logger.error(f"Error finding file by name: {e}")
+            logger.error(f"Error getting session metadata: {e}")
             return None
 
-    async def find_file_by_original_name(self, original_filename: str) -> Optional[Dict[str, Any]]:
-        """Find file metadata by original filename."""
-        try:
-            async with get_db_connection() as conn:
-                return await conn.fetchrow("""
-                    SELECT id, original_filename, display_name,
-                           mime_type, size_bytes, metadata, created_at, gemini_file_name
-                    FROM file_uploads
-                    WHERE original_filename = $1
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """, original_filename)
-        except Exception as e:
-            logger.error(f"Error finding file by original name: {e}")
-            return None
-
-    async def find_file_by_partial_name(self, partial_name: str) -> Optional[Dict[str, Any]]:
-        """Partial match lookup for files."""
-        try:
-            async with get_db_connection() as conn:
-                return await conn.fetchrow("""
-                    SELECT id, original_filename, display_name,
-                           mime_type, size_bytes, metadata, created_at, gemini_file_name
-                    FROM file_uploads
-                    WHERE gemini_file_name LIKE $1
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """, f"%{partial_name}%")
-        except Exception as e:
-            logger.error(f"Error finding file by partial name: {e}")
-            return None
-
-    async def find_file_by_basename(self, base_name: str) -> Optional[Dict[str, Any]]:
-        """Fuzzy match by base name or display name."""
-        try:
-            async with get_db_connection() as conn:
-                return await conn.fetchrow("""
-                    SELECT id, original_filename, display_name,
-                           mime_type, size_bytes, metadata, created_at, gemini_file_name
-                    FROM file_uploads
-                    WHERE original_filename LIKE $1 OR display_name LIKE $1
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """, f"%{base_name}%")
-        except Exception as e:
-            logger.error(f"Error finding file by basename: {e}")
-            return None
+    
+    

@@ -9,22 +9,6 @@ class AuthDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
-        """Check if admin exists for given email."""
-        async with get_db_connection() as conn:
-            return await conn.fetchrow(
-                "SELECT email FROM admins WHERE email = $1",
-                email
-            )
-
-    async def check_human_agent_exists(self, email: str) -> Optional[Dict[str, Any]]:
-        """Check if human agent exists for given email."""
-        async with get_db_connection() as conn:
-            return await conn.fetchrow(
-                "SELECT email FROM human_agents WHERE email = $1",
-                email
-            )
-
     async def create_admin(self, email: str, token: str, created_by_email: str) -> str:
         """Create a new admin with pending status."""
         async with get_db_connection() as conn:
@@ -146,14 +130,6 @@ class AuthDAO:
                 JOIN agent_session_assignments asa ON ha.id = asa.agent_id
                 WHERE asa.session_id = $1 AND asa.status = 'active'
                 """,
-                session_id
-            )
-
-    async def get_chat_session(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Get chat session details."""
-        async with get_db_connection() as conn:
-            return await conn.fetchrow(
-                "SELECT * FROM chat_sessions WHERE session_id = $1",
                 session_id
             )
 
