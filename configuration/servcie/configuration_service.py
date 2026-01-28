@@ -20,34 +20,6 @@ class ConfigurationService:
         self._performance_dao = PerformanceDAO()  # Service manages its own DAO
         self._auth_dao = AuthDAO()  # Service manages its own DAO
     
-    async def _get_chatbot_dao(self) -> ChatbotDAO:
-        """Get ChatbotDAO instance with database connection"""
-        if self._chatbot_dao is None:
-            async with get_db_connection() as conn:
-                self._chatbot_dao = ChatbotDAO(conn)
-        return self._chatbot_dao
-    
-    async def _get_widget_dao(self) -> WidgetDAO:
-        """Get WidgetDAO instance with database connection"""
-        if self._widget_dao is None:
-            async with get_db_connection() as conn:
-                self._widget_dao = WidgetDAO(conn)
-        return self._widget_dao
-    
-    async def _get_performance_dao(self) -> PerformanceDAO:
-        """Get PerformanceDAO instance with database connection"""
-        if self._performance_dao is None:
-            async with get_db_connection() as conn:
-                self._performance_dao = PerformanceDAO(conn)
-        return self._performance_dao
-    
-    async def _get_auth_dao(self) -> AuthDAO:
-        """Get AuthDAO instance with database connection"""
-        if self._auth_dao is None:
-            async with get_db_connection() as conn:
-                self._auth_dao = AuthDAO(conn)
-        return self._auth_dao
-    
     # Chatbot Configuration Methods
     async def get_metadata(self) -> Optional[Dict[str, Any]]:
         """Get chatbot metadata"""
@@ -69,8 +41,7 @@ class ConfigurationService:
     async def create_human_agent(self, email: str) -> int:
         """Create a new human agent"""
         try:
-            dao = await self._get_chatbot_dao()
-            return await dao.create_human_agent(email)
+            return await self._chatbot_dao.create_human_agent(email)
         except Exception as e:
             logger.error(f"Error creating human agent: {e}")
             raise
@@ -78,8 +49,7 @@ class ConfigurationService:
     async def get_all_human_agents(self) -> List[Dict[str, Any]]:
         """Get all human agents"""
         try:
-            dao = await self._get_chatbot_dao()
-            return await dao.get_all_human_agents()
+            return await self._chatbot_dao.get_all_human_agents()
         except Exception as e:
             logger.error(f"Error getting human agents: {e}")
             return []
@@ -87,8 +57,7 @@ class ConfigurationService:
     async def delete_human_agent(self, email: str):
         """Delete a human agent"""
         try:
-            dao = await self._get_chatbot_dao()
-            await dao.delete_human_agent(email)
+            await self._chatbot_dao.delete_human_agent(email)
         except Exception as e:
             logger.error(f"Error deleting human agent: {e}")
             raise
@@ -97,8 +66,7 @@ class ConfigurationService:
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
         """Get widget configuration"""
         try:
-            dao = await self._get_widget_dao()
-            return await dao.get_widget_config()
+            return await self._widget_dao.get_widget_config()
         except Exception as e:
             logger.error(f"Error getting widget config: {e}")
             return None
@@ -106,8 +74,7 @@ class ConfigurationService:
     async def update_widget_config(self, config_data: Dict[str, Any]):
         """Update widget configuration"""
         try:
-            dao = await self._get_widget_dao()
-            await dao.update_widget_config(config_data)
+            await self._widget_dao.update_widget_config(config_data)
         except Exception as e:
             logger.error(f"Error updating widget config: {e}")
             raise
@@ -116,8 +83,7 @@ class ConfigurationService:
     async def get_total_interactions(self) -> int:
         """Get total interactions"""
         try:
-            dao = await self._get_performance_dao()
-            return await dao.get_total_interactions() or 0
+            return await self._performance_dao.get_total_interactions() or 0
         except Exception as e:
             logger.error(f"Error getting total interactions: {e}")
             return 0
@@ -125,8 +91,7 @@ class ConfigurationService:
     async def get_total_sessions(self) -> int:
         """Get total sessions"""
         try:
-            dao = await self._get_performance_dao()
-            return await dao.get_total_sessions() or 0
+            return await self._performance_dao.get_total_sessions() or 0
         except Exception as e:
             logger.error(f"Error getting total sessions: {e}")
             return 0
@@ -134,8 +99,7 @@ class ConfigurationService:
     async def get_active_sessions(self) -> int:
         """Get active sessions"""
         try:
-            dao = await self._get_performance_dao()
-            return await dao.get_active_sessions() or 0
+            return await self._performance_dao.get_active_sessions() or 0
         except Exception as e:
             logger.error(f"Error getting active sessions: {e}")
             return 0
@@ -143,8 +107,7 @@ class ConfigurationService:
     async def get_average_engagement_time(self) -> Optional[float]:
         """Get average engagement time"""
         try:
-            dao = await self._get_performance_dao()
-            return await dao.get_average_engagement_time()
+            return await self._performance_dao.get_average_engagement_time()
         except Exception as e:
             logger.error(f"Error getting average engagement time: {e}")
             return None
@@ -153,8 +116,7 @@ class ConfigurationService:
     async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
         """Check if admin exists"""
         try:
-            dao = await self._get_auth_dao()
-            return await dao.check_admin_exists(email)
+            return await self._auth_dao.check_admin_exists(email)
         except Exception as e:
             logger.error(f"Error checking admin exists: {e}")
             return None
@@ -162,8 +124,7 @@ class ConfigurationService:
     async def check_human_agent_exists(self, email: str) -> Optional[Dict[str, Any]]:
         """Check if human agent exists"""
         try:
-            dao = await self._get_auth_dao()
-            return await dao.check_human_agent_exists(email)
+            return await self._auth_dao.check_human_agent_exists(email)
         except Exception as e:
             logger.error(f"Error checking human agent exists: {e}")
             return None
@@ -172,8 +133,7 @@ class ConfigurationService:
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
         """Get widget configuration"""
         try:
-            dao = await self._get_widget_dao()
-            return await dao.get_widget_config()
+            return await self._widget_dao.get_widget_config()
         except Exception as e:
             logger.error(f"Error getting widget config: {e}")
             return None
@@ -181,8 +141,7 @@ class ConfigurationService:
     async def get_suggested_messages(self) -> List[Dict[str, Any]]:
         """Get suggested messages"""
         try:
-            dao = await self._get_widget_dao()
-            return await dao.get_suggested_messages()
+            return await self._widget_dao.get_suggested_messages()
         except Exception as e:
             logger.error(f"Error getting suggested messages: {e}")
             return []
@@ -190,8 +149,7 @@ class ConfigurationService:
     async def update_widget_config(self, config_data: Dict[str, Any]):
         """Update widget configuration"""
         try:
-            dao = await self._get_widget_dao()
-            await dao.update_widget_config(config_data)
+            await self._widget_dao.update_widget_config(config_data)
         except Exception as e:
             logger.error(f"Error updating widget config: {e}")
             raise
@@ -200,8 +158,7 @@ class ConfigurationService:
     async def get_notification_settings(self) -> List[Dict[str, Any]]:
         """Get notification settings"""
         try:
-            dao = await self._get_chatbot_dao()
-            return await dao.get_notification_settings()
+            return await self._chatbot_dao.get_notification_settings()
         except Exception as e:
             logger.error(f"Error getting notification settings: {e}")
             return []
@@ -209,8 +166,7 @@ class ConfigurationService:
     async def get_security_settings(self) -> List[Dict[str, Any]]:
         """Get security settings"""
         try:
-            dao = await self._get_chatbot_dao()
-            return await dao.get_security_settings()
+            return await self._chatbot_dao.get_security_settings()
         except Exception as e:
             logger.error(f"Error getting security settings: {e}")
             return []
@@ -218,8 +174,7 @@ class ConfigurationService:
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
         """Get LLM providers"""
         try:
-            dao = await self._get_chatbot_dao()
-            return await dao.get_llm_providers()
+            return await self._chatbot_dao.get_llm_providers()
         except Exception as e:
             logger.error(f"Error getting LLM providers: {e}")
             return []
@@ -227,8 +182,7 @@ class ConfigurationService:
     async def get_active_persona(self) -> Optional[Dict[str, Any]]:
         """Get active persona"""
         try:
-            dao = await self._get_chatbot_dao()
-            return await dao.get_active_persona()
+            return await self._chatbot_dao.get_active_persona()
         except Exception as e:
             logger.error(f"Error getting active persona: {e}")
             return None
@@ -236,8 +190,7 @@ class ConfigurationService:
     async def get_human_agents(self) -> List[Dict[str, Any]]:
         """Get human agents"""
         try:
-            dao = await self._get_chatbot_dao()
-            return await dao.get_human_agents()
+            return await self._chatbot_dao.get_human_agents()
         except Exception as e:
             logger.error(f"Error getting human agents: {e}")
             return []
@@ -245,11 +198,19 @@ class ConfigurationService:
     async def get_admins(self) -> List[Dict[str, Any]]:
         """Get admins"""
         try:
-            dao = await self._get_chatbot_dao()
-            return await dao.get_admins()
+            return await self._chatbot_dao.get_admins()
         except Exception as e:
             logger.error(f"Error getting admins: {e}")
             return []
+
+    async def log_audit_change(self, user_email: str, action: str, details: dict, ip_address: str = None):
+        """Log configuration change for audit purposes"""
+        try:
+            # This should be implemented in the DAO layer
+            # For now, just log the change
+            logger.info(f"Configuration change logged: {action} by {user_email}")
+        except Exception as e:
+            logger.error(f"Failed to log configuration change: {e}")
 
 # Singleton instance
 configuration_service = ConfigurationService()
