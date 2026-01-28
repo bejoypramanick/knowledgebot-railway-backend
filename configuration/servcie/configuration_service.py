@@ -308,5 +308,109 @@ class ConfigurationService:
             logger.error(f"Error deleting human agent: {e}")
             raise
 
+    async def get_chatbot_config(self):
+        """Get complete chatbot configuration with all data transformations"""
+        try:
+            # Get all raw data
+            metadata = await self.get_metadata()
+            notification_rows = await self.get_notification_settings()
+            security_rows = await self.get_security_settings()
+            llm_rows = await self.get_llm_providers()
+            persona = await self.get_active_persona()
+            human_agents_list = await self.get_human_agents()
+            admin_emails_list = await self.get_admins()
+
+            # Build notification settings dict
+            notifications = {
+                "user_interactions_enabled": False,
+                "error_alerts_enabled": False,
+                "feedback_requests_enabled": True
+            }
+            for row in notification_rows:
+                if row['setting_name'] == 'user_interactions_enabled':
+                    notifications['user_interactions_enabled'] = row['is_enabled']
+                elif row['setting_name'] == 'error_alerts_enabled':
+                    notifications['error_alerts_enabled'] = row['is_enabled']
+                elif row['setting_name'] == 'feedback_requests_enabled':
+                    notifications['feedback_requests_enabled'] = row['is_enabled']
+
+            # Build security settings dict
+            security = {
+                "response_timeout": 30,
+                "remove_pii": False,
+                "restrict_config": False
+            }
+            for row in security_rows:
+                if row['setting_name'] == 'response_timeout':
+                    security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
+                elif row['setting_name'] == 'remove_pii':
+                    security['remove_pii'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
+                elif row['setting_name'] == 'restrict_config':
+                    security['restrict_config'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
+
+            # Build LLM tokens dict
+            llm_tokens = {
+                "gemini": {"used": 0, "available": 20000, "limit": 20000}
+            }
+            for row in llm_rows:
+                provider = row['provider_name']
+                if provider == 'gemini':
+                    llm_tokens['gemini'] = {
+                        "used": row['token_used'] or 0,
+                        "available": (row['token_limit'] or 0) - (row['token_used'] or 0),
+                        "limit": row['token_limit'] or 0
+                    }
+
+            # Build persona dict
+            persona_config = {
+                "system_prompt": persona['system_prompt'] if persona else "",
+                "selected_persona": persona['persona_name'] if persona else "friendly-receptionist"
+            }
+
+            # Build final configuration
+            data = {
+                "admin_user": "GLOBISTAAN",
+                "admin_emails": admin_emails_list,
+                "admin_password": "**********",
+                "human_agents": human_agents_list,
+                "hil_enabled": metadata['hil_enabled'] if metadata else True,
+                "notifications": notifications,
+                "security": security,
+                "response_policy": metadata['response_policy'] if metadata else 30,
+                "data_management": {
+                    "backup_logs": False  # This was removed from old schema, keeping default
+                },
+                "persona": persona_config,
+                "llm_tokens": llm_tokens
+            }
+
+            return data
+        except Exception as e:
+            logger.error(f"Error getting chatbot configuration: {e}")
+            raise
+
+    async def request_human_agent(self, session_id: str):
+        """Request a human agent for a chat session"""
+        try:
+            from ..servcie.chat_log_service import ChatLogService
+            from ..utils.sse_manager import connection_manager
+            
+            chat_service = ChatLogService(connection_manager)
+            assigned_agent = await chat_service.request_human_agent(session_id)
+            
+            if assigned_agent:
+                return {
+                    "status": "assigned",
+                    "agent": assigned_agent
+                }
+            else:
+                return {
+                    "status": "no_agents_available",
+                    "message": "No human agents available"
+                }
+        except Exception as e:
+            logger.error(f"Error requesting human agent: {e}")
+            raise
+
 # Singleton instance
 configuration_service = ConfigurationService()
