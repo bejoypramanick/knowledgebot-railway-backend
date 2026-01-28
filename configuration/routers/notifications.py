@@ -159,25 +159,24 @@ async def mark_notifications_read(
     Mark one or more notifications as read.
     """
     try:
-        async with get_db_connection() as conn:
-            notifications_dao = NotificationsDAO(conn)
-            
-            target_email = user_email or current_user.get('email')
-            if not target_email:
-                raise HTTPException(status_code=400, detail="User email is required")
-            
-            # Mark notifications as read
-            updated = await notifications_dao.mark_multiple_notifications_read(
-                request.notification_ids, target_email
-            )
-            
-            logger.info(f"Marked {len(request.notification_ids)} notifications as read for {target_email}")
-            
-            return {
-                'success': True,
-                'updated_count': updated
-            }
-            
+        service = NotificationsService()  # Service manages its own DAO
+        
+        target_email = user_email or current_user.get('email')
+        if not target_email:
+            raise HTTPException(status_code=400, detail="User email is required")
+        
+        # Mark notifications as read
+        updated = await service.mark_multiple_notifications_read(
+            request.notification_ids, target_email
+        )
+        
+        logger.info(f"Marked {len(request.notification_ids)} notifications as read for {target_email}")
+        
+        return {
+            'success': True,
+            'updated_count': updated
+        }
+    
     except HTTPException:
         raise
     except Exception as e:
@@ -194,23 +193,22 @@ async def mark_all_notifications_read(
     Mark all notifications as read for a user.
     """
     try:
-        async with get_db_connection() as conn:
-            notifications_dao = NotificationsDAO(conn)
-            
-            target_email = user_email or current_user.get('email')
-            if not target_email:
-                raise HTTPException(status_code=400, detail="User email is required")
-            
-            # Mark all notifications as read
-            updated = await notifications_dao.mark_all_notifications_read(target_email)
-            
-            logger.info(f"Marked all notifications as read for {target_email}")
-            
-            return {
-                'success': True,
-                'updated_count': updated
-            }
-            
+        service = NotificationsService()  # Service manages its own DAO
+        
+        target_email = user_email or current_user.get('email')
+        if not target_email:
+            raise HTTPException(status_code=400, detail="User email is required")
+        
+        # Mark all notifications as read
+        updated = await service.mark_all_notifications_read(target_email)
+        
+        logger.info(f"Marked all notifications as read for {target_email}")
+        
+        return {
+            'success': True,
+            'updated_count': updated
+        }
+    
     except HTTPException:
         raise
     except Exception as e:
@@ -228,25 +226,24 @@ async def delete_notification(
     Delete a notification.
     """
     try:
-        async with get_db_connection() as conn:
-            notifications_dao = NotificationsDAO(conn)
-            
-            target_email = user_email or current_user.get('email')
-            if not target_email:
-                raise HTTPException(status_code=400, detail="User email is required")
-            
-            # Delete notification
-            deleted = await notifications_dao.delete_notification(notification_id, target_email)
-            
-            if deleted == 0:
-                raise HTTPException(status_code=404, detail="Notification not found")
-            
-            logger.info(f"Deleted notification {notification_id} for {target_email}")
-            
-            return {
-                'success': True,
-                'message': 'Notification deleted successfully'
-            }
+        service = NotificationsService()  # Service manages its own DAO
+        
+        target_email = user_email or current_user.get('email')
+        if not target_email:
+            raise HTTPException(status_code=400, detail="User email is required")
+        
+        # Delete notification
+        deleted = await service.delete_notification(notification_id, target_email)
+        
+        if deleted == 0:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        
+        logger.info(f"Deleted notification {notification_id} for {target_email}")
+        
+        return {
+            'success': True,
+            'message': 'Notification deleted successfully'
+        }
     except HTTPException:
         raise
     except Exception as e:
