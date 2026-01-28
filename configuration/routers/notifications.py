@@ -13,7 +13,8 @@ from datetime import datetime
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from shared.auth_middleware import get_current_user
-from ..servcie.service_factory import ServiceFactory
+from ..service.notifications_service import NotificationsService
+from ..dao.notifications_dao import NotificationsDAO
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,8 @@ async def get_notifications(
     Get notifications for a user.
     """
     try:
-        service = await ServiceFactory.create_notifications_service()
+        notifications_dao = NotificationsDAO()
+        service = NotificationsService(notifications_dao)
         
         target_email = user_email or current_user.get('email')
         if not target_email:
@@ -127,20 +129,21 @@ async def get_notifications(
         
         return NotificationListResponse(
             notifications=[
-                NotificationItem(
+                NotificationResponse(
                     id=str(notification['id']),
                     title=notification['title'],
                     message=notification['message'],
                     type=notification['type'],
                     is_read=notification['is_read'],
+                    read_at=notification['read_at'].isoformat() if notification['read_at'] else None,
+                    metadata=notification['metadata'] if notification['metadata'] else None,
                     created_at=notification['created_at'].isoformat() if notification['created_at'] else None
                 )
                 for notification in notifications
             ],
             total=len(notifications),
             unread_count=len([n for n in notifications if not n.get('is_read', False)])
-        )
-            
+        )          
     except HTTPException:
         raise
     except Exception as e:
