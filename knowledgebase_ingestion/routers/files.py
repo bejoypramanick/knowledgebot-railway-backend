@@ -102,8 +102,8 @@ async def upload_document(
         # We need to re-open the file OR re-use process_with_gemini logic.
         # But process_single_file_upload handles streaming internally.
         # We already streamed it here.
-        # Let's import process_with_gemini from services.ingestion
-        from ..servcie.ingestion import process_with_gemini, record_metadata
+        # Let's import process_with_gemini from services.ingestion_service
+        from ..servcie.ingestion_service import process_with_gemini, record_metadata
         
         detected_mime = detect_mime_type_from_extension(original_filename, file.content_type)
         uploaded_file, final_state, gemini_processed_at = await process_with_gemini(

@@ -10,17 +10,17 @@ from typing import Optional
 
 # Add shared directory to path
 sys.path.insert(0, str(Path(__file__).parent))
-from shared.dao.token_dao import TokenDAO
+from configuration.servcie.token_usage_service import TokenUsageService
 
 logger = logging.getLogger(__name__)
 
 async def track_token_usage(session_id: str, message_id: str, provider: str, model: str, 
                           prompt_tokens: int, completion_tokens: int, total_tokens: int, 
                           api_call_type: str, request_metadata: Optional[dict] = None):
-    """Track token usage using the TokenDAO"""
+    """Track token usage using the TokenUsageService"""
     try:
-        token_dao = TokenDAO()
-        await token_dao.log_token_usage(
+        token_service = TokenUsageService()  # Service manages its own DAO
+        await token_service.track_token_usage(
             session_id, message_id, provider, model,
             prompt_tokens, completion_tokens, total_tokens,
             api_call_type, request_metadata
