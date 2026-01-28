@@ -8,8 +8,8 @@ from fastapi.responses import StreamingResponse
 from ..schemas.models import ScrapeRequest, ScrapeResponse
 from ..core.sessions import active_scraping_sessions
 from ..core.database import get_existing_website, delete_website_record, delete_gemini_file
-from ..services.crawler import crawl_website
-from ..services.ingestion import upload_scraped_content, record_scraped_metadata
+from ..servcie.crawler import crawl_website
+from ..servcie.ingestion import upload_scraped_content, record_scraped_metadata
 from shared.utils import log_endpoint_request
 
 logger = logging.getLogger(__name__)

@@ -32,7 +32,7 @@ from .schemas.chat_log_schemas import (
     ChatMessageResponse, ChatSessionResponse, ChatSessionsResponse,
     SendMessageRequest, SendMessageResponse
 )
-from .services.chat_log_service import ChatLogService
+from .servcie.chat_log_service import ChatLogService
 from .utils.sse_manager import connection_manager
 from .dao.chat_log_dao import ChatLogDAO
 

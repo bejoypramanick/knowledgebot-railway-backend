@@ -63,7 +63,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         # Since user is on paid tier and files should exist, let's try a direct approach
         # Try to get files from database as backup
         try:
-            from services.chatbot_orchestration.services.chat_service import chat_service
+            from services.chatbot_orchestration.servcie.chat_service import chat_service
             db_files = await chat_service.get_recent_files(limit=5)
             if db_files:
                 logger.info(f"📊 Found {len(db_files)} files in database that should be in Gemini:")

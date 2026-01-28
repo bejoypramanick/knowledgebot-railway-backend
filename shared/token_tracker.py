@@ -83,7 +83,7 @@ async def track_gemini_usage_detailed(
         db = await get_db_connection()
         if db and hasattr(db, '_pool') and db._pool is not None:
             logger.info("✅ Database connection available for token tracking")
-            from shared.services.token_service import token_service
+            from shared.servcie.token_service import token_service
             await token_service.update_llm_provider_tokens(provider, model, prompt_tokens, completion_tokens, total_tokens)
             
             # Log detailed usage
@@ -183,7 +183,7 @@ async def track_gemini_usage_with_db(run_usage, session_id: str = None, message_
         total_tokens = prompt_tokens + candidates_tokens + (cache_read_tokens or 0) + (cache_write_tokens or 0)
 
         if db_connection:
-            from shared.services.token_service import token_service
+            from shared.servcie.token_service import token_service
             
             # Update llm_providers table
             await token_service.update_llm_provider_tokens('gemini', model, prompt_tokens, candidates_tokens, total_tokens)

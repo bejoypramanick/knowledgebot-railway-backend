@@ -7,7 +7,7 @@ from fastapi import APIRouter, UploadFile, File, Form, Header, HTTPException, Qu
 from services.knowledgebase_ingestion.schemas.models import (
     UploadResponse, FileInfo, BatchUploadResponse, BatchDeleteResponse, BatchUploadItem, BatchDeleteItem
 )
-from services.knowledgebase_ingestion.services.ingestion import (
+from services.knowledgebase_ingestion.servcie.ingestion import (
     process_single_file_upload, delete_file_logic, process_single_file_delete
 )
 from services.knowledgebase_ingestion.core.database import (
@@ -103,7 +103,7 @@ async def upload_document(
         # But process_single_file_upload handles streaming internally.
         # We already streamed it here.
         # Let's import process_with_gemini from services.ingestion
-        from services.knowledgebase_ingestion.services.ingestion import process_with_gemini, record_metadata
+        from services.knowledgebase_ingestion.servcie.ingestion import process_with_gemini, record_metadata
         
         detected_mime = detect_mime_type_from_extension(original_filename, file.content_type)
         uploaded_file, final_state, gemini_processed_at = await process_with_gemini(
