@@ -12,8 +12,8 @@ import string
 import json
 
 from shared.auth_middleware import get_current_user
-from .main import get_db_connection
-from dao.user_dao import UserDAO
+from ..servcie.service_factory import ServiceFactory
+from ..dao.user_dao import UserDAO
 
 logger = logging.getLogger(__name__)
 
@@ -77,31 +77,31 @@ async def get_or_create_unique_id(
     If email is None (anonymous user), creates a temporary ID.
     """
     try:
-        async with get_db_connection() as conn:
-            user_dao = UserDAO(conn)
-            
-            role = request.role.lower()
-            if role not in ['customer', 'agent', 'admin']:
-                raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")
-            
-            # For anonymous users (no email), generate temporary ID
-            if not request.email:
-                temp_id = f"TEMP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
-                return UniqueIdResponse(
-                    unique_id=temp_id,
-                    email=None,
-                    role=role,
-                    created=True
-                )
-            
-            # Check if unique ID already exists for this email and role
-            existing = await user_dao.get_unique_id_by_email_role(request.email, role)
-            
-            if existing:
-                logger.info(f"Found existing unique ID for {request.email} ({role})")
-                return UniqueIdResponse(
-                    unique_id=existing['unique_id'],
-                    email=request.email,
+        service = await ServiceFactory.create_user_ids_service()
+        
+        role = request.role.lower()
+        if role not in ['customer', 'agent', 'admin']:
+            raise HTTPException(status_code=400, detail="Role must be 'customer', 'agent', or 'admin'")
+        
+        # For anonymous users (no email), generate temporary ID
+        if not request.email:
+            temp_id = f"TEMP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{''.join(random.choices(string.ascii_uppercase + string.digits, k=6))}"
+            return UniqueIdResponse(
+                unique_id=temp_id,
+                email=None,
+                role=role,
+                created=True
+            )
+        
+        # Use service to get or create user ID
+        result = await service.get_or_create_user_id(request.email, role)
+        
+        return UniqueIdResponse(
+            unique_id=result["user_id"],
+            email=result["email"],
+            role=result["role"],
+            created=True  # Service always creates new for now
+        )
                     role=role,
                     created=False
                 )
