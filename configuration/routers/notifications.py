@@ -114,8 +114,7 @@ async def get_notifications(
     Get notifications for a user.
     """
     try:
-        notifications_dao = NotificationsDAO()
-        service = NotificationsService(notifications_dao)
+        service = NotificationsService()  # Service manages its own DAO
         
         target_email = user_email or current_user.get('email')
         if not target_email:
