@@ -2,7 +2,7 @@ import logging
 import json
 from typing import Optional, Dict, Any
 from shared import db
-from services.knowledgebase_ingestion.dao.file_dao import FileDAO
+from ..dao.file_dao import FileDAO
 
 logger = logging.getLogger(__name__)
 
