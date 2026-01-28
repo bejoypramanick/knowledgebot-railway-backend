@@ -16,3 +16,6 @@ psutil>=6.1.0
 
 # Retry logic (used by shared/db.py)
 tenacity>=8.2.2
+
+# Firebase Admin SDK (used by shared/firebase_auth.py)
+firebase-admin>=6.0.0
