@@ -16,9 +16,9 @@ from shared.config import settings
 from shared import db
 from shared.utils import register_fastapi_exception_handlers, setup_global_exception_logging, log_endpoint_request
 
-from .routers import files
-from .utils.middleware import log_requests_middleware
-from .core.ai import get_genai_client
+from knowledgebase_ingestion.routers import files
+from knowledgebase_ingestion.utils.middleware import log_requests_middleware
+from knowledgebase_ingestion.core.ai import get_genai_client
 
 setup_global_exception_logging("knowledgebase_ingestion")
 

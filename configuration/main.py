@@ -17,15 +17,15 @@ from shared.firebase_auth import init_firebase_auth
 from shared.database_initializer import database_initializer
 
 # Import Routers
-from .routers import chatbot, widget
-from .human_agents import router as human_agents_router
-from .feedback import router as feedback_router
-from .token_usage import router as token_usage_router
-from .performance import router as performance_router
-from .admin_management import router as admin_management_router
-from .auth_optimized import router as auth_router
-from .chat_log import router as chat_log_router, public_chat_router
-from .user_ids import router as user_ids_router
+from configuration.routers import chatbot, widget
+from configuration.human_agents import router as human_agents_router
+from configuration.feedback import router as feedback_router
+from configuration.token_usage import router as token_usage_router
+from configuration.performance import router as performance_router
+from configuration.admin_management import router as admin_management_router
+from configuration.auth_optimized import router as auth_router
+from configuration.chat_log import router as chat_log_router, public_chat_router
+from configuration.user_ids import router as user_ids_router
 
 load_dotenv()
 

@@ -7,9 +7,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from shared.config import settings
 from shared.utils import log_endpoint_request
-from .servcie.agent_service import pydantic_ai_service
-from .routers import chat
-from .core.database import get_railway_db
+from chatbot_orchestration.servcie.agent_service import pydantic_ai_service
+from chatbot_orchestration.routers import chat
+from chatbot_orchestration.core.database import get_railway_db
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
