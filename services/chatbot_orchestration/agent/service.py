@@ -110,49 +110,104 @@ class PydanticAIGatewayService:
             logger.error(f"❌ Error creating cached content: {e}")
             raise
 
-    async def create_agent(self, session_id: str, system_prompt: str, tools: List[Any]) -> Agent:
-        """Create a Pydantic AI agent using optimized Gateway service features."""
-        await self.initialize()
+    async def get_cached_content_id(self, session_id: str) -> str:
         session_metadata = await self.get_session_metadata(session_id)
-        
-        file_search_store_id = session_metadata.get('file_search_store_id')
-        if not file_search_store_id:
-            file_search_store_id = await self.get_or_create_file_search_store(session_id)
-        
-        cached_content_id = session_metadata.get('cached_content_id')
-        if not cached_content_id:
-            try:
-                cached_content_id = await self.get_or_create_cached_content(system_prompt)
-            except Exception:
-                cached_content_id = None
-        
-        model_settings = None
-        if cached_content_id and not cached_content_id.startswith('no_cache_'):
-            model_settings = GoogleModelSettings(google_cached_content=cached_content_id)
+        return session_metadata.get('cached_content_id')
+
+    async def run_agent_with_fallback(self, agent: Agent, user_message: str, session_deps: ChatSessionDeps) -> Any:
+        """Run agent with proper error handling for cache expiration and fallback."""
+        try:
+            logger.info("Running agent with cached content")
+            result = await agent.run(user_message, deps=session_deps)
+            logger.info("Agent run completed successfully")
+            return result
+        except Exception as e:
+            logger.error(f"Agent run failed with cached content: {e}")
+            
+            # Check if it's a cache-related error
+            if "cached_content" in str(e).lower() or "cache" in str(e).lower():
+                logger.warning("Cache error detected, falling back to no cache")
+                
+                # Create fallback agent without cache
+                try:
+                    fallback_model = GoogleModel(MODEL_NAME)
+                    fallback_agent = Agent(
+                        fallback_model,
+                        system_prompt=agent.system_prompt,
+                        tools=agent.tools,
+                        deps_type=ChatSessionDeps,
+                    )
+                    
+                    logger.info("Running fallback agent without cache")
+                    result = await fallback_agent.run(user_message, deps=session_deps)
+                    logger.info("Fallback agent run completed successfully")
+                    return result
+                    
+                except Exception as fallback_error:
+                    logger.error(f"Fallback agent also failed: {fallback_error}")
+                    raise fallback_error
+            else:
+                # Non-cache related error, re-raise
+                raise e
+
+    async def create_agent(self, session_id: str, system_prompt: str, tools: List[Any], user_email: str) -> Agent:
+        """Create an agent instance with proper Pydantic AI settings and caching."""
+        logger.info(f"Creating agent for session {session_id} for user {user_email}")
         
         try:
-            if model_settings:
-                google_model = GoogleModel(MODEL_NAME, settings=model_settings)
-            else:
-                google_model = GoogleModel(MODEL_NAME)
-        except Exception:
-            google_model = GoogleModel(MODEL_NAME)
-        
-        agent = Agent(
-            google_model,
-            system_prompt=system_prompt,
-            tools=tools,
-            deps_type=ChatSessionDeps,
-        )
-        
-        # Update metadata asynchronously if DB is available
-        if self.db:
+            # Get or create file search store for this session
+            file_search_store_id = await self.get_or_create_file_search_store(session_id)
+            
+            # Get cached content ID from session metadata
+            cached_content_id = await self.get_cached_content_id(session_id)
+            if not cached_content_id:
+                try:
+                    cached_content_id = await self.get_or_create_cached_content(system_prompt)
+                except Exception as e:
+                    logger.warning(f"Failed to create cached content: {e}")
+                    cached_content_id = None
+            
+            # Prepare model settings following Pydantic AI best practices
+            model_settings = None
+            if cached_content_id and not cached_content_id.startswith('no_cache_'):
+                model_settings = GoogleModelSettings(google_cached_content=cached_content_id)
+                logger.info(f"Using cached content ID: {cached_content_id}")
+            
+            # Initialize model with proper settings handling
             try:
-                await self.update_session_metadata(session_id, file_search_store_id, cached_content_id)
+                google_model = GoogleModel(MODEL_NAME, settings=model_settings)
+                logger.info("GoogleModel initialized with settings")
             except Exception as e:
-                logger.warning(f"Failed to update session metadata: {e}")
-
-        return agent
+                logger.error(f"Failed to initialize GoogleModel with settings: {e}")
+                # Fallback to model without settings
+                google_model = GoogleModel(MODEL_NAME)
+                logger.warning("Falling back to GoogleModel without settings")
+        
+            # Create agent with proper Pydantic AI initialization
+            try:
+                agent = Agent(
+                    google_model,
+                    system_prompt=system_prompt,
+                    tools=tools,
+                    deps_type=ChatSessionDeps,
+                )
+                logger.info("Agent created successfully with proper settings")
+            except Exception as e:
+                logger.error(f"Failed to create agent: {e}")
+                raise e
+            
+            # Update session metadata asynchronously if DB is available
+            if self.db:
+                try:
+                    await self.update_session_metadata(session_id, file_search_store_id, cached_content_id)
+                except Exception as e:
+                    logger.warning(f"Failed to update session metadata: {e}")
+            
+            return agent
+            
+        except Exception as e:
+            logger.error(f"Error creating agent: {e}")
+            raise e
 
     async def update_session_metadata(self, session_id: str, file_search_store_id: str = None, cached_content_id: str = None):
          if not self.db: return

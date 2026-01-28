@@ -113,10 +113,10 @@ async def chat_stream(request: ChatRequest):
                     if attempt == 0:
                         yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
                     
-                    result = await agent.run(
+                    result = await pydantic_ai_service.run_agent_with_fallback(
+                        agent,
                         request.message,
-                        message_history=message_history,
-                        deps=session_dep
+                        session_dep
                     )
                     
                     session_state_manager.update_session_state(session_id, result)
