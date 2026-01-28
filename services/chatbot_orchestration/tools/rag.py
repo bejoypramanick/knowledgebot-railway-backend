@@ -21,12 +21,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         logger.warning("❌ Gemini API client not configured")
         return [SearchResult(
             file_name="System_Error",
-            content="Gemini API client not configured - cannot search knowledge base",
-            relevance_score=0.0,
-            similarity_score=0.0,
-            element_type="error",
-            hierarchy_level=0,
-            page_number=0
+            content="Gemini API client not configured - cannot search knowledge base"
         )]
 
     try:
@@ -56,17 +51,7 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             logger.error(f"❌ Failed to create cached content: {cache_error}")
             return [SearchResult(
                 file_name="System_Error",
-                content=f"Error creating cached content: {str(cache_error)}",
-                relevance_score=0.1,
-                similarity_score=0.1,
-                chunk_id=f"error_{uuid.uuid4().hex[:16]}",
-                element_type="error",
-                hierarchy_level=0,
-                page_number=0,
-                metadata={
-                    "error_type": "cache_creation_failed",
-                    "error_message": str(cache_error)
-                }
+                content=f"Error creating cached content: {str(cache_error)}"
             )]
         
         # Generate response using the cached content
@@ -82,50 +67,19 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             
             return [SearchResult(
                 file_name="RAG_Response",
-                content=response_text,
-                relevance_score=0.9,
-                similarity_score=0.9,
-                chunk_id=f"rag_{uuid.uuid4().hex[:16]}",
-                element_type="text",
-                hierarchy_level=0,
-                page_number=0,
-                metadata={
-                    "source": "gemini_filesearch",
-                    "query": query,
-                    "response_length": len(response_text)
-                }
+                content=response_text
             )]
             
         except Exception as generation_error:
             logger.error(f"❌ Failed to generate response: {generation_error}")
             return [SearchResult(
                 file_name="System_Error",
-                content=f"Error generating response: {str(generation_error)}",
-                relevance_score=0.1,
-                similarity_score=0.1,
-                chunk_id=f"error_{uuid.uuid4().hex[:16]}",
-                element_type="error",
-                hierarchy_level=0,
-                page_number=0,
-                metadata={
-                    "error_type": "generation_failed",
-                    "error_message": str(generation_error)
-                }
+                content=f"Error generating response: {str(generation_error)}"
             )]
             
     except Exception as e:
         logger.error(f"Error searching knowledge base: {e}", exc_info=True)
         return [SearchResult(
             file_name="System_Error",
-            content=f"Error performing semantic search: {str(e)}",
-            relevance_score=0.1,
-            similarity_score=0.1,
-            chunk_id=f"error_{uuid.uuid4().hex[:16]}",
-            element_type="error",
-            hierarchy_level=0,
-            page_number=0,
-            metadata={
-                "error_type": "search_failed",
-                "error_message": str(e)
-            }
+            content=f"Error performing semantic search: {str(e)}"
         )]
