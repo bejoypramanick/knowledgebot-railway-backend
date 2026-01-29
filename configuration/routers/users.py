@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 
 from configuration.core.logging_config import get_railway_logger
-from configuration.core.auth_middleware import require_auth, get_user_from_token
 
 from ..service.auth_service import AuthService
 
@@ -19,32 +18,25 @@ router = APIRouter(prefix="/api/v1/users", tags=["users-management"])
 
 
 @router.get("/profile", response_model=dict)
-@require_auth()
 async def get_user_profile(request: Request):
-    """Get user profile by verifying Firebase token and looking up in database."""
+    """Get user profile from headers (set by API Gateway)."""
     try:
-        # Get user data from request state (set by middleware)
-        user_data = request.state.user
-        
-        # Get user roles from database using email
-        service = AuthService()
-        result = await service.get_user_role(user_data['email'])
-        roles = result.get('roles', [])
-        
-        # Determine highest priority role
-        current_role = 'user'  # default
-        if 'admin' in roles:
-            current_role = 'admin'
-        elif 'human_agent' in roles:
-            current_role = 'human_agent'
+        # Get user data from headers (set by API Gateway)
+        uid = request.headers.get("X-User-UID", "")
+        email = request.headers.get("X-User-Email", "")
+        display_name = request.headers.get("X-User-Display-Name", "")
+        photo_url = request.headers.get("X-User-Photo-URL", "")
+        role = request.headers.get("X-User-Role", "user")
+        roles_header = request.headers.get("X-User-Roles", "user")
+        roles = roles_header.split(",") if roles_header else ["user"]
         
         return {
-            "uid": user_data.get('uid', ''),
-            "email": user_data.get('email', ''),
-            "displayName": user_data.get('displayName', ''),
-            "photoURL": user_data.get('photoURL', ''),
-            "role": current_role,  # Highest priority role
-            "roles": roles  # All available roles
+            "uid": uid,
+            "email": email,
+            "displayName": display_name,
+            "photoURL": photo_url,
+            "role": role,  # Primary role from gateway
+            "roles": roles  # All roles from gateway
         }
             
     except Exception as e:
@@ -78,17 +70,13 @@ async def switch_user_role(uid: str, request_data: dict):
 
 
 @router.get("/roles", response_model=list)
-@require_auth()
 async def get_user_roles(request: Request):
-    """Get user roles by verifying Firebase token and looking up in database."""
+    """Get user roles from headers (set by API Gateway)."""
     try:
-        # Get user data from request state (set by middleware)
-        user_data = request.state.user
-        
-        # Get user roles from database using email
-        service = AuthService()
-        result = await service.get_user_role(user_data['email'])
-        return result.get('roles', [])  # Return roles array directly
+        # Get roles from headers (set by API Gateway)
+        roles_header = request.headers.get("X-User-Roles", "user")
+        roles = roles_header.split(",") if roles_header else ["user"]
+        return roles  # Return roles array directly
             
     except Exception as e:
         logger.error(f"Error getting user roles: {e}", exc_info=True)
