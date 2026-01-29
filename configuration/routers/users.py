@@ -19,34 +19,28 @@ router = APIRouter(prefix="/api/v1/users", tags=["users-management"])
 
 @router.get("/profile", response_model=dict)
 async def get_user_profile(uid: str):
-    """Get user profile by Firebase UID."""
+    """Get user profile by Firebase UID from database."""
     try:
-        # Get user email from Firebase UID
-        import httpx
-        
-        api_gateway_url = os.getenv("API_GATEWAY_URL", "http://localhost:8080")
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{api_gateway_url}/firebase/user/{uid}"
-            )
-            
-            if response.status_code != 200:
-                # Return empty profile for frontend compatibility instead of 404
-                return {"uid": uid, "email": "", "displayName": "", "photoURL": ""}
-            
-            user_data = response.json()
-            
-            if not user_data or 'user' not in user_data:
-                # Return empty profile for frontend compatibility
-                return {"uid": uid, "email": "", "displayName": "", "photoURL": ""}
-            
-            return user_data['user']
+        # For now, we don't have UID mapping in database, so return basic profile
+        # TODO: Implement UID to email mapping in database and fetch from users table
+        return {
+            "uid": uid, 
+            "email": "", 
+            "displayName": "", 
+            "photoURL": "",
+            "role": "user"
+        }
             
     except Exception as e:
         logger.error(f"Error getting user profile: {e}", exc_info=True)
-        # Return empty profile for frontend compatibility instead of 500
-        return {"uid": uid, "email": "", "displayName": "", "photoURL": ""}
+        # Return basic profile for frontend compatibility
+        return {
+            "uid": uid, 
+            "email": "", 
+            "displayName": "", 
+            "photoURL": "",
+            "role": "user"
+        }
 
 
 @router.put("/profile", response_model=dict)
@@ -73,45 +67,27 @@ async def switch_user_role(uid: str, request_data: dict):
         raise HTTPException(status_code=500, detail=f"Error switching user role: {str(e)}")
 
 
-@router.get("/roles", response_model=dict)
+@router.get("/roles", response_model=list)
 async def get_user_roles(uid: str = None, email: str = None):
-    """Get user roles by Firebase UID or email."""
+    """Get user roles by Firebase UID or email from database."""
     try:
         service = AuthService()  # Service manages its own DAO
         
         if uid:
-            # Get user email from Firebase UID
-            import httpx
-            
-            api_gateway_url = os.getenv("API_GATEWAY_URL", "http://localhost:8080")
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{api_gateway_url}/firebase/user/{uid}"
-                )
-                
-                if response.status_code != 200:
-                    return {"roles": []}  # Return dict with roles array for frontend compatibility
-                
-                user_data = response.json()
-                
-                if not user_data or 'user' not in user_data or 'email' not in user_data['user']:
-                    return {"roles": []}  # Return dict with roles array for frontend compatibility
-                
-                email = user_data['user']['email']
-                result = await service.get_user_role(email)
-                return {"roles": result.get('roles', [])}  # Return dict with roles array
+            # For now, we don't have UID mapping in database, so return empty array
+            # TODO: Implement UID to email mapping in database
+            return []  # Return empty array for frontend compatibility
         
         elif email:
             result = await service.get_user_role(email)
-            return {"roles": result.get('roles', [])}  # Return dict with roles array
+            return result.get('roles', [])  # Return roles array directly
         
         else:
-            return {"roles": []}  # Return dict with roles array
+            return []  # Return empty array for frontend compatibility
             
     except Exception as e:
         logger.error(f"Error getting user roles: {e}", exc_info=True)
-        return {"roles": []}  # Return dict with roles array for frontend compatibility
+        return []  # Return empty array for frontend compatibility
 
 
 @router.post("/unique-id", response_model=dict)
