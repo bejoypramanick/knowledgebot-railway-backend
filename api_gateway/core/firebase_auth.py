@@ -32,13 +32,21 @@ def init_firebase_auth():
         # Option 1: Service account JSON file
         credentials_path = os.getenv('FIREBASE_CREDENTIALS_PATH')
         if credentials_path and os.path.exists(credentials_path):
+            import json
+            with open(credentials_path, 'r') as f:
+                cred_dict = json.load(f)
+            
+            # Extract project ID from credentials if not explicitly set
+            if not project_id:
+                project_id = cred_dict.get('project_id')
+            
             cred = credentials.Certificate(credentials_path)
             if project_id:
                 _firebase_app = firebase_admin.initialize_app(cred, {'projectId': project_id})
             else:
                 _firebase_app = firebase_admin.initialize_app(cred)
             _firestore_db = firestore.client()
-            logger.info("Firebase Auth and Firestore initialized from service account file")
+            logger.info(f"Firebase Auth and Firestore initialized from service account file (Project: {project_id})")
             return _firebase_app, _firestore_db
         
         # Option 2: JSON string from environment variable
@@ -46,13 +54,18 @@ def init_firebase_auth():
         if credentials_json:
             import json
             cred_dict = json.loads(credentials_json)
+            
+            # Extract project ID from credentials if not explicitly set
+            if not project_id:
+                project_id = cred_dict.get('project_id')
+            
             cred = credentials.Certificate(cred_dict)
             if project_id:
                 _firebase_app = firebase_admin.initialize_app(cred, {'projectId': project_id})
             else:
                 _firebase_app = firebase_admin.initialize_app(cred)
             _firestore_db = firestore.client()
-            logger.info("Firebase Auth and Firestore initialized from environment variable")
+            logger.info(f"Firebase Auth and Firestore initialized from environment variable (Project: {project_id})")
             return _firebase_app, _firestore_db
         
         # Option 3: Default credentials (for Google Cloud environments)
