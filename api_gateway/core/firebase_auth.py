@@ -26,11 +26,17 @@ def init_firebase_auth():
         return _firebase_app, _firestore_db
     
     try:
+        # Get project ID from environment or use default
+        project_id = os.getenv('FIREBASE_PROJECT_ID') or os.getenv('GOOGLE_CLOUD_PROJECT')
+        
         # Option 1: Service account JSON file
         credentials_path = os.getenv('FIREBASE_CREDENTIALS_PATH')
         if credentials_path and os.path.exists(credentials_path):
             cred = credentials.Certificate(credentials_path)
-            _firebase_app = firebase_admin.initialize_app(cred)
+            if project_id:
+                _firebase_app = firebase_admin.initialize_app(cred, {'projectId': project_id})
+            else:
+                _firebase_app = firebase_admin.initialize_app(cred)
             _firestore_db = firestore.client()
             logger.info("Firebase Auth and Firestore initialized from service account file")
             return _firebase_app, _firestore_db
@@ -41,13 +47,19 @@ def init_firebase_auth():
             import json
             cred_dict = json.loads(credentials_json)
             cred = credentials.Certificate(cred_dict)
-            _firebase_app = firebase_admin.initialize_app(cred)
+            if project_id:
+                _firebase_app = firebase_admin.initialize_app(cred, {'projectId': project_id})
+            else:
+                _firebase_app = firebase_admin.initialize_app(cred)
             _firestore_db = firestore.client()
             logger.info("Firebase Auth and Firestore initialized from environment variable")
             return _firebase_app, _firestore_db
         
         # Option 3: Default credentials (for Google Cloud environments)
-        _firebase_app = firebase_admin.initialize_app()
+        if project_id:
+            _firebase_app = firebase_admin.initialize_app(options={'projectId': project_id})
+        else:
+            _firebase_app = firebase_admin.initialize_app()
         _firestore_db = firestore.client()
         logger.info("Firebase Auth and Firestore initialized with default credentials")
         return _firebase_app, _firestore_db
