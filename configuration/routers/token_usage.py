@@ -1,14 +1,9 @@
 """
 Token Usage Endpoints
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from configuration.core.logging_config import get_railway_logger
-
-# Placeholder for authentication since it's handled at API Gateway level
-def get_current_user():
-    """Placeholder function - authentication is handled at API Gateway level"""
-    return {"email": "system@example.com"}
 
 from ..service.token_usage_service import TokenUsageService
 
@@ -18,7 +13,7 @@ router = APIRouter(prefix="/api/v1/admin", tags=["token-usage"])
 
 
 @router.get("/token-usage", response_model=dict)
-async def get_token_usage(current_user: dict = Depends(get_current_user)):
+async def get_token_usage(request: Request):
     """Get token usage statistics."""
     try:
         service = TokenUsageService()
@@ -31,10 +26,10 @@ async def get_token_usage(current_user: dict = Depends(get_current_user)):
 
 @router.get("/token-usage/detailed", response_model=dict)
 async def get_detailed_token_usage(
+    request: Request,
     limit: int = Query(50, ge=1, le=200),
     provider: str = Query(None),
-    api_call_type: str = Query(None),
-    current_user: dict = Depends(get_current_user)
+    api_call_type: str = Query(None)
 ):
     """Get detailed token usage with filtering options."""
     try:
