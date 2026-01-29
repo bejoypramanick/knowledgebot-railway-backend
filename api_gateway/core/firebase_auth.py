@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 import firebase_admin
 from firebase_admin import auth, credentials, firestore
 
-from shared.logging_config import get_railway_logger
+from api_gateway.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 
