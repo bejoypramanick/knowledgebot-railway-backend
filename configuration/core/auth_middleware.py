@@ -78,4 +78,4 @@ def require_admin():
 
 def require_human_agent():
     """Decorator to require human_agent role"""
-    return require_role("human_agent")
+    return require_role("human_agent") or require_role("admin")
