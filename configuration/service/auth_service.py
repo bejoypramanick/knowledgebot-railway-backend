@@ -67,39 +67,6 @@ class AuthService:
             "admins": admins_created
         }
 
-    async def get_user_roles_from_token(self, token: str) -> dict:
-        """Get user roles by extracting email from Firebase token"""
-        try:
-            # Import here to avoid circular imports
-            import httpx
-            import os
-            
-            # Get user email from Firebase token via API Gateway
-            api_gateway_url = os.getenv("API_GATEWAY_URL", "http://localhost:8080")
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{api_gateway_url}/firebase/verify-token",
-                    json={"token": token}
-                )
-                
-                if response.status_code != 200:
-                    return {"roles": ["user"], "error": "Invalid token"}
-                
-                token_data = response.json()
-                
-                if not token_data or 'email' not in token_data:
-                    return {"roles": ["user"], "error": "Token missing email"}
-                
-                email = token_data['email']
-                
-                # Get roles using email
-                result = await self.get_user_role(email)
-                return result
-        except Exception as e:
-            logger.error(f"Error getting user roles from token: {e}")
-            return {"roles": ["user"], "error": str(e)}
-
     async def get_user_role(self, email: str) -> dict:
         """Get user role (admin, human_agent, or user) for a given email"""
         try:

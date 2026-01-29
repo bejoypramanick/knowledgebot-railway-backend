@@ -100,44 +100,11 @@ async def get_user_role(email: str):
 
 
 @router.get("/users/roles", response_model=dict)
-async def get_user_roles(uid: str = None, token: str = None):
-    """Get user roles by extracting email from Firebase token or UID."""
+async def get_user_roles(email: str):
+    """Get user roles by email ID."""
     try:
         service = AuthService()  # Service manages its own DAO
-        
-        if uid:
-            # Get user email from Firebase UID
-            import httpx
-            import os
-            
-            api_gateway_url = os.getenv("API_GATEWAY_URL", "http://localhost:8080")
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{api_gateway_url}/firebase/user/{uid}"
-                )
-                
-                if response.status_code != 200:
-                    return {"roles": ["user"], "error": "User not found"}
-                
-                user_data = response.json()
-                
-                if not user_data or 'user' not in user_data or 'email' not in user_data['user']:
-                    return {"roles": ["user"], "error": "User email not found"}
-                
-                email = user_data['user']['email']
-                
-                # Get roles using email
-                result = await service.get_user_role(email)
-                return result
-        
-        elif token:
-            # Get user roles from token
-            return await service.get_user_roles_from_token(token)
-        
-        else:
-            return {"roles": ["user"], "error": "Either uid or token parameter is required"}
-            
+        return await service.get_user_role(email)
     except Exception as e:
         logger.error(f"Error getting user roles: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error getting user roles: {str(e)}")
