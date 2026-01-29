@@ -355,9 +355,8 @@ def add_user_headers_to_request(request: Request, headers: dict) -> dict:
                 'X-User-UID': user_data.get('uid', ''),
                 'X-User-Email': user_data.get('email', ''),
                 'X-User-Display-Name': user_data.get('displayName', ''),
-                'X-User-Photo-URL': user_data.get('photoURL', ''),
-                'X-User-Roles': ','.join(user_data.get('roles', [])),
-                'X-User-Role': user_data.get('roles', ['user'])[0]  # Primary role
+                'X-User-Photo-URL': user_data.get('photoURL', '')
+                # Note: Not including role headers - microservices fetch roles from DB if needed
             })
     except Exception as e:
         logger.error(f"Error adding user headers: {e}")

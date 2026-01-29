@@ -22,7 +22,7 @@ async def chat_stream(request: Request, fastapi_request: Request, chat_request: 
             'email': request.headers.get('X-User-Email', ''),
             'displayName': request.headers.get('X-User-Display-Name', ''),
             'photoURL': request.headers.get('X-User-Photo-URL', ''),
-            'role': request.headers.get('X-User-Role', 'user')
+            'role': 'user'  # Default role - service can fetch roles from DB if needed
         }
         
         log_endpoint_request("chatbot_orchestration", "chat_stream", fastapi_request)
