@@ -290,3 +290,23 @@ async def request_human_agent(session_id: str):
     except Exception as e:
         logger.error(f"Error requesting human agent: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error requesting human agent: {str(e)}")
+
+
+# Admin chat session request-agent endpoint (authenticated)
+@router.post("/chat-sessions/{session_id}/request-agent", response_model=dict)
+async def admin_request_human_agent(
+    session_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Request human agent assistance for a chat session (admin endpoint)."""
+    user_email = current_user.get('email')
+    if not user_email:
+        raise HTTPException(status_code=400, detail="User email required")
+    
+    try:
+        service = ChatLogService()
+        result = await service.request_human_agent(session_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error requesting human agent: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error requesting human agent: {str(e)}")

@@ -15,6 +15,7 @@ from configuration.routers import chatbot_router, widget_router
 from configuration.routers.admin_management import \
     router as admin_management_router
 from configuration.routers.users import router as users_router
+from configuration.routers.personas import router as personas_router
 from configuration.routers.chat_log import public_chat_router
 from configuration.routers.chat_log import router as chat_log_router
 from configuration.routers.feedback import router as feedback_router
@@ -163,6 +164,7 @@ app.include_router(chatbot_router)
 app.include_router(widget_router)
 app.include_router(admin_management_router)
 app.include_router(users_router)
+app.include_router(personas_router)
 app.include_router(feedback_router)
 app.include_router(token_usage_router)
 app.include_router(notifications_router)
