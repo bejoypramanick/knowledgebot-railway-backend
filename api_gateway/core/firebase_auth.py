@@ -107,14 +107,17 @@ def verify_firebase_token(id_token: str) -> Optional[Dict[str, Any]]:
         logger.debug(f"Token verified for user: {decoded_token.get('uid')}")
         return decoded_token
         
-    except firebase_admin.exceptions.InvalidArgumentError:
-        logger.warning("Invalid Firebase token format")
-        return None
-    except firebase_admin.exceptions.InvalidIdTokenError:
-        logger.warning("Invalid Firebase token")
-        return None
     except Exception as e:
-        logger.error(f"Error verifying Firebase token: {e}")
+        # Handle all Firebase exceptions generically since specific ones may not exist
+        error_msg = str(e).lower()
+        if "invalid" in error_msg or "malformed" in error_msg:
+            logger.warning("Invalid Firebase token format")
+        elif "expired" in error_msg or "token is expired" in error_msg:
+            logger.warning("Firebase token expired")
+        elif "project id" in error_msg:
+            logger.error("Firebase project ID not configured")
+        else:
+            logger.error(f"Error verifying Firebase token: {e}")
         return None
 
 
