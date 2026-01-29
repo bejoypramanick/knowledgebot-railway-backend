@@ -4,7 +4,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, File, Form, Uplo
 from fastapi.responses import JSONResponse
 
 from configuration.core.logging_config import get_railway_logger
-from configuration.core.auth_middleware import require_auth
 
 from ..schemas.models import WidgetConfigRequest
 from ..service.configuration_service import configuration_service
@@ -15,8 +14,7 @@ logger = get_railway_logger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["Widget Configuration"])
 
 @router.get("/configuration/widget")
-@require_auth()
-async def get_widget_config(request):
+async def get_widget_config(request: Request):
     """Get widget configuration"""
     try:
         # Service handles all data transformation
@@ -30,7 +28,6 @@ async def get_widget_config(request):
         raise HTTPException(status_code=500, detail=f"Error fetching widget configuration: {str(e)}")
 
 @router.post("/configuration/widget")
-@require_auth()
 async def save_widget_config(
     config: WidgetConfigRequest,
     request: Request
