@@ -5,7 +5,7 @@ Handles user profile and role management.
 import os
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 
 from configuration.core.logging_config import get_railway_logger
@@ -18,29 +18,40 @@ router = APIRouter(prefix="/api/v1/users", tags=["users-management"])
 
 
 @router.get("/profile", response_model=dict)
-async def get_user_profile(uid: str):
-    """Get user profile by Firebase UID from database."""
+async def get_user_profile(request: Request):
+    """Get user profile by verifying Firebase token and looking up in database."""
     try:
-        # For now, we don't have UID mapping in database, so return basic profile
-        # TODO: Implement UID to email mapping in database and fetch from users table
+        # Extract Firebase token from Authorization header
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return {"uid": "", "email": "", "displayName": "", "photoURL": "", "role": "user"}
+        
+        token = auth_header.split(" ")[1]
+        
+        # Verify Firebase token and extract user data
+        from api_gateway.core.firebase_auth import verify_firebase_token
+        user_data = verify_firebase_token(token)
+        
+        if not user_data:
+            return {"uid": "", "email": "", "displayName": "", "photoURL": "", "role": "user"}
+        
+        # Get user roles from database using email
+        service = AuthService()
+        result = await service.get_user_role(user_data['email'])
+        roles = result.get('roles', [])
+        
         return {
-            "uid": uid, 
-            "email": "", 
-            "displayName": "", 
-            "photoURL": "",
-            "role": "user"
+            "uid": user_data.get('uid', ''),
+            "email": user_data.get('email', ''),
+            "displayName": user_data.get('displayName', ''),
+            "photoURL": user_data.get('photoURL', ''),
+            "role": roles[0] if roles else 'user'
         }
             
     except Exception as e:
         logger.error(f"Error getting user profile: {e}", exc_info=True)
         # Return basic profile for frontend compatibility
-        return {
-            "uid": uid, 
-            "email": "", 
-            "displayName": "", 
-            "photoURL": "",
-            "role": "user"
-        }
+        return {"uid": "", "email": "", "displayName": "", "photoURL": "", "role": "user"}
 
 
 @router.put("/profile", response_model=dict)
@@ -68,22 +79,27 @@ async def switch_user_role(uid: str, request_data: dict):
 
 
 @router.get("/roles", response_model=list)
-async def get_user_roles(uid: str = None, email: str = None):
-    """Get user roles by Firebase UID or email from database."""
+async def get_user_roles(request: Request):
+    """Get user roles by verifying Firebase token and looking up in database."""
     try:
-        service = AuthService()  # Service manages its own DAO
+        # Extract Firebase token from Authorization header
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return []  # Return empty array for unauthenticated requests
         
-        if uid:
-            # For now, we don't have UID mapping in database, so return empty array
-            # TODO: Implement UID to email mapping in database
-            return []  # Return empty array for frontend compatibility
+        token = auth_header.split(" ")[1]
         
-        elif email:
-            result = await service.get_user_role(email)
-            return result.get('roles', [])  # Return roles array directly
+        # Verify Firebase token and extract user data
+        from api_gateway.core.firebase_auth import verify_firebase_token
+        user_data = verify_firebase_token(token)
         
-        else:
-            return []  # Return empty array for frontend compatibility
+        if not user_data:
+            return []  # Return empty array for invalid token
+        
+        # Get user roles from database using email
+        service = AuthService()
+        result = await service.get_user_role(user_data['email'])
+        return result.get('roles', [])  # Return roles array directly
             
     except Exception as e:
         logger.error(f"Error getting user roles: {e}", exc_info=True)
