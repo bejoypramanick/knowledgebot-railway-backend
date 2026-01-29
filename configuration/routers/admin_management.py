@@ -4,11 +4,10 @@ Handles admin user creation, verification, and role management.
 """
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 
 from configuration.core.logging_config import get_railway_logger
-from configuration.core.auth_middleware import require_admin, get_user_from_token
 
 from ..service.auth_service import AuthService
 
@@ -18,8 +17,7 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin-management"])
 
 
 @router.get("/user-role/{email}", response_model=dict)
-@require_admin()
-async def get_user_role(request, email: str):
+async def get_user_role(request: Request, email: str):
     """Get user roles (admin, human_agent, or user) for a given email."""
     try:
         service = AuthService()  # Service manages its own DAO

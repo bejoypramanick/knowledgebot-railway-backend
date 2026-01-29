@@ -12,12 +12,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from configuration.core.logging_config import get_railway_logger
-from configuration.core.auth_middleware import require_auth, require_human_agent, get_user_from_token
-
-# Placeholder for authentication since it's handled at API Gateway level
-def get_current_user():
-    """Placeholder function - authentication is handled at API Gateway level"""
-    return {"email": "system@example.com"}
 
 from ..service.chat_log_service import ChatLogService
 
@@ -55,9 +49,8 @@ async def agent_heartbeat(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/chat-sessions")
-@require_human_agent()
 async def get_chat_sessions(
-    request,
+    request: Request,
     agent_id: Optional[str] = Query(None),
     role: str = Query("human_agent"),
     archive_status: Optional[str] = Query("active", description="Filter by archive status: active, closed, archived, transferred"),
