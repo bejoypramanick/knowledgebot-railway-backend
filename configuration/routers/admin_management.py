@@ -72,7 +72,7 @@ async def list_admins():
 
 @router.delete("/admins/{email}", response_model=dict)
 async def remove_admin(email: str):
-    """Remove an admin. Only admins can remove other admins."""
+    """Remove admin user."""
     # Note: Authentication should be handled at the API Gateway level
     try:
         # For now, we'll use a placeholder email - in production, this should come from the authenticated user
@@ -86,101 +86,3 @@ async def remove_admin(email: str):
     except Exception as e:
         logger.error(f"Error removing admin: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error removing admin: {str(e)}")
-
-
-@router.get("/users/profile", response_model=dict)
-async def get_user_profile(uid: str):
-    """Get user profile by Firebase UID."""
-    try:
-        # Get user email from Firebase UID
-        import httpx
-        import os
-        
-        api_gateway_url = os.getenv("API_GATEWAY_URL", "http://localhost:8080")
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{api_gateway_url}/firebase/user/{uid}"
-            )
-            
-            if response.status_code != 200:
-                raise HTTPException(status_code=404, detail="User not found")
-            
-            user_data = response.json()
-            
-            if not user_data or 'user' not in user_data:
-                raise HTTPException(status_code=404, detail="User profile not found")
-            
-            return user_data['user']
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting user profile: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error getting user profile: {str(e)}")
-
-
-@router.put("/users/profile", response_model=dict)
-async def update_user_profile(uid: str, request_data: dict):
-    """Update user profile data."""
-    try:
-        # For now, just return success - user profile updates can be implemented later
-        # This endpoint exists for frontend compatibility
-        return {"success": True, "message": "User profile updated successfully"}
-    except Exception as e:
-        logger.error(f"Error updating user profile: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error updating user profile: {str(e)}")
-
-
-@router.post("/users/switch-role", response_model=dict)
-async def switch_user_role(uid: str, request_data: dict):
-    """Switch user role."""
-    try:
-        # For now, just return success - role switching can be implemented later
-        # This endpoint exists for frontend compatibility
-        return {"success": True, "message": "User role switched successfully"}
-    except Exception as e:
-        logger.error(f"Error switching user role: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error switching user role: {str(e)}")
-
-
-@router.get("/users/roles", response_model=dict)
-async def get_user_roles(uid: str = None, email: str = None):
-    """Get user roles by Firebase UID or email."""
-    try:
-        service = AuthService()  # Service manages its own DAO
-        
-        if uid:
-            # Get user email from Firebase UID
-            import httpx
-            import os
-            
-            api_gateway_url = os.getenv("API_GATEWAY_URL", "http://localhost:8080")
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{api_gateway_url}/firebase/user/{uid}"
-                )
-                
-                if response.status_code != 200:
-                    return []  # Return empty array for frontend compatibility
-                
-                user_data = response.json()
-                
-                if not user_data or 'user' not in user_data or 'email' not in user_data['user']:
-                    return []  # Return empty array for frontend compatibility
-                
-                email = user_data['user']['email']
-                result = await service.get_user_role(email)
-                return result.get('roles', [])  # Return just the roles array for frontend compatibility
-        
-        elif email:
-            result = await service.get_user_role(email)
-            return result.get('roles', [])  # Return just the roles array for frontend compatibility
-        
-        else:
-            return []  # Return empty array for frontend compatibility
-            
-    except Exception as e:
-        logger.error(f"Error getting user roles: {e}", exc_info=True)
-        return []  # Return empty array for frontend compatibility
