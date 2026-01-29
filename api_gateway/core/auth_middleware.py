@@ -55,12 +55,12 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Security(security)
 ) -> Dict[str, Any]:
     """
-    Dependency to get current authenticated user from Firebase token with roles.
+    Dependency to get current authenticated user from Firebase token.
     
     Usage:
         @router.get("/protected")
         async def protected_route(user: dict = Depends(get_current_user)):
-            return {"user_id": user["uid"], "roles": user["roles"]}
+            return {"user_id": user["uid"], "email": user["email"]}
     """
     token = credentials.credentials
     correlation_id = get_correlation_id()
@@ -72,11 +72,11 @@ async def get_current_user(
             detail="Invalid or expired authentication token"
         )
     
-    # Add user roles
-    decoded_token["roles"] = await get_user_roles(decoded_token["email"])
+    # Don't fetch roles here - let the microservices handle it
+    # This avoids circular dependency when proxying to configuration service
     
     if correlation_id:
-        logger.info(f"🔍 [{correlation_id}] Authenticated user {decoded_token['email']} with roles {decoded_token['roles']}")
+        logger.info(f"🔍 [{correlation_id}] Authenticated user {decoded_token['email']}")
     
     return decoded_token
 

@@ -19,24 +19,33 @@ router = APIRouter(prefix="/api/v1/users", tags=["users-management"])
 
 @router.get("/profile", response_model=dict)
 async def get_user_profile(request: Request):
-    """Get user profile from headers (set by API Gateway)."""
+    """Get user profile with roles from database."""
     try:
         # Get user data from headers (set by API Gateway)
         uid = request.headers.get("X-User-UID", "")
         email = request.headers.get("X-User-Email", "")
         display_name = request.headers.get("X-User-Display-Name", "")
         photo_url = request.headers.get("X-User-Photo-URL", "")
-        role = request.headers.get("X-User-Role", "user")
-        roles_header = request.headers.get("X-User-Roles", "user")
-        roles = roles_header.split(",") if roles_header else ["user"]
+        
+        # Fetch roles from database
+        service = AuthService()
+        result = await service.get_user_role(email)
+        roles = result.get('roles', [])
+        
+        # Determine primary role based on priority
+        current_role = 'user'
+        if 'admin' in roles:
+            current_role = 'admin'
+        elif 'human_agent' in roles:
+            current_role = 'human_agent'
         
         return {
             "uid": uid,
             "email": email,
             "displayName": display_name,
             "photoURL": photo_url,
-            "role": role,  # Primary role from gateway
-            "roles": roles  # All roles from gateway
+            "role": current_role,  # Primary role from database
+            "roles": roles  # All roles from database
         }
             
     except Exception as e:
@@ -71,11 +80,16 @@ async def switch_user_role(uid: str, request_data: dict):
 
 @router.get("/roles", response_model=list)
 async def get_user_roles(request: Request):
-    """Get user roles from headers (set by API Gateway)."""
+    """Get user roles from database."""
     try:
-        # Get roles from headers (set by API Gateway)
-        roles_header = request.headers.get("X-User-Roles", "user")
-        roles = roles_header.split(",") if roles_header else ["user"]
+        # Get user email from headers (set by API Gateway)
+        email = request.headers.get("X-User-Email", "")
+        
+        # Fetch roles from database
+        service = AuthService()
+        result = await service.get_user_role(email)
+        roles = result.get('roles', [])
+        
         return roles  # Return roles array directly
             
     except Exception as e:
