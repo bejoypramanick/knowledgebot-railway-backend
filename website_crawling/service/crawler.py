@@ -5,7 +5,7 @@ from crawl4ai import AsyncWebCrawler
 from crawl4ai.async_configs import BrowserConfig, CrawlerRunConfig
 from fastapi import HTTPException
 
-from shared.logging_config import get_railway_logger
+from website_crawling.core.logging_config import get_railway_logger
 
 from ..schemas.models import ScrapeRequest
 from ..utils.links import extract_links_from_result

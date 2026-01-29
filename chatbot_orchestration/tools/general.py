@@ -3,7 +3,7 @@ from typing import Annotated
 
 import httpx
 
-from shared.logging_config import get_railway_logger
+from chatbot_orchestration.core.logging_config import get_railway_logger
 
 from ..core.dependencies import ChatSessionDeps
 from ..service.file_service import FileService

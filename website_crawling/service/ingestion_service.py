@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from fastapi import HTTPException
 from google.genai import types
 
-from shared.logging_config import get_railway_logger
+from website_crawling.core.logging_config import get_railway_logger
 
 from ..core.ai import get_genai_client
 from ..schemas.models import ScrapeRequest
@@ -24,7 +24,7 @@ async def upload_scraped_content(
     
     genai_client = get_genai_client()
     if not genai_client:
-        from shared.utils import dependency_unavailable_error
+        from website_crawling.core.utils import dependency_unavailable_error
         raise dependency_unavailable_error("gemini", "client not configured")
 
     # Save to temp file

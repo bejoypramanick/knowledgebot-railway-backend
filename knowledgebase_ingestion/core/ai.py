@@ -2,8 +2,8 @@ import os
 
 from google import genai
 
-from shared.config import settings
-from shared.logging_config import get_railway_logger
+from knowledgebase_ingestion.core.config import settings
+from knowledgebase_ingestion.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

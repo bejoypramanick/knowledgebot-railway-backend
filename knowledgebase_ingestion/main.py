@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from shared.logging_config import auto_configure_logging
+from knowledgebase_ingestion.core.logging_config import auto_configure_logging
 
 # Configure Railway-compatible logging
 logger = auto_configure_logging("knowledgebase_ingestion")
@@ -14,9 +14,9 @@ logger = auto_configure_logging("knowledgebase_ingestion")
 from knowledgebase_ingestion.core.ai import get_genai_client
 from knowledgebase_ingestion.routers import files
 from knowledgebase_ingestion.utils.middleware import log_requests_middleware
-from shared import db
-from shared.config import settings
-from shared.utils import (log_endpoint_request,
+from knowledgebase_ingestion.core import db
+from knowledgebase_ingestion.core.config import settings
+from knowledgebase_ingestion.core.utils import (log_endpoint_request,
                           register_fastapi_exception_handlers,
                           setup_global_exception_logging)
 
@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize database using centralized initializer
         if settings.railway_postgres_url:
-            from shared.database_initializer import database_initializer
+            from knowledgebase_ingestion.core.database_initializer import database_initializer
             await database_initializer.initialize_and_validate(settings.railway_postgres_url)
             logger.info("✅ Railway PostgreSQL database initialized and validated")
         

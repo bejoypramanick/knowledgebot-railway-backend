@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 
-from shared.logging_config import get_railway_logger
-from shared.utils import log_endpoint_request
+from chatbot_orchestration.core.logging_config import get_railway_logger
+from chatbot_orchestration.core.utils import log_endpoint_request
 
 from ..schemas.models import ChatRequest
 from ..service.chat_service import chat_service

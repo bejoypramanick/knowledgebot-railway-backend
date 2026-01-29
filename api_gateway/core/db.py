@@ -7,7 +7,7 @@ from typing import Optional
 import asyncpg
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from shared.logging_config import get_railway_logger
+from api_gateway.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

@@ -6,8 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from chatbot_orchestration.routers import chat_router, human_agents_router
 from chatbot_orchestration.service.agent_service import pydantic_ai_service
-from shared.logging_config import auto_configure_logging
-from shared.utils import log_endpoint_request
+from chatbot_orchestration.core.logging_config import auto_configure_logging
+from chatbot_orchestration.core.utils import log_endpoint_request
 
 # Configure Railway-compatible logging
 logger = auto_configure_logging("chatbot_orchestration")
@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     
     # Initialize database using centralized initializer
     try:
-        from shared.database_initializer import database_initializer
+        from chatbot_orchestration.core.database_initializer import database_initializer
         await database_initializer.initialize_database()
         logger.info("🗄️ Database connections initialized (singleton)")
     except Exception as e:

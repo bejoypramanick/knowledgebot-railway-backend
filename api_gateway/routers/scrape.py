@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 
 from api_gateway.core.config import WEBSITE_CRAWLING_URL
 from api_gateway.schemas.models import ScrapeRequest
-from shared.logging_config import get_railway_logger
+from api_gateway.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

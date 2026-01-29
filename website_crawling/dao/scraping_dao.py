@@ -1,8 +1,8 @@
 import json
 from typing import Any, Dict, Optional
 
-from shared.db import get_db_connection
-from shared.logging_config import get_railway_logger
+from website_crawling.core.db import get_db_connection
+from website_crawling.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

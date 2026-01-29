@@ -6,8 +6,8 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
 
-from shared.auth_middleware import get_current_user
-from shared.logging_config import get_railway_logger
+from chatbot_orchestration.core.auth_middleware import get_current_user
+from chatbot_orchestration.core.logging_config import get_railway_logger
 
 from ..service.human_agents_service import AgentResponse, HumanAgentsService
 

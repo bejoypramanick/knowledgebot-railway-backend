@@ -4,7 +4,7 @@ Provides business logic for website crawling operations
 """
 from typing import Any, Dict, Optional
 
-from shared.logging_config import get_railway_logger
+from website_crawling.core.logging_config import get_railway_logger
 
 from ..dao.scraping_dao import ScrapingDAO
 

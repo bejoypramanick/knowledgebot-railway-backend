@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 load_dotenv()
 
 # Configure Railway-compatible logging
-from shared.logging_config import auto_configure_logging
+from api_gateway.core.logging_config import auto_configure_logging
 
 logger = auto_configure_logging("api_gateway")
 
@@ -23,7 +23,7 @@ from api_gateway.routers import (chat_router, config_router, health_router,
                                  sse_router)
 from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
-from shared.utils import (register_fastapi_exception_handlers,
+from api_gateway.core.utils import (register_fastapi_exception_handlers,
                           setup_global_exception_logging)
 
 setup_global_exception_logging("api_gateway")

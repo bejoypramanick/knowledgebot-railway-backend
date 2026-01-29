@@ -6,14 +6,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from shared.logging_config import auto_configure_logging
+from website_crawling.core.logging_config import auto_configure_logging
 
 # Configure Railway-compatible logging
 logger = auto_configure_logging("website_crawling")
 
-from shared import db as shared_db
-from shared.config import settings
-from shared.utils import (register_fastapi_exception_handlers,
+from website_crawling.core import db
+from website_crawling.core.config import settings
+from website_crawling.core.utils import (register_fastapi_exception_handlers,
                           setup_global_exception_logging)
 from website_crawling.core.ai import get_genai_client
 from website_crawling.routers.scrape import router
@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize database using centralized initializer
         if settings.railway_postgres_url:
-            from shared.database_initializer import database_initializer
+            from website_crawling.core.database_initializer import database_initializer
             await database_initializer.initialize_and_validate(settings.railway_postgres_url)
             logger.info("✅ Railway Postgres DB initialized and validated")
 

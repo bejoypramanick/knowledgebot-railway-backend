@@ -1,8 +1,8 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from shared.db import get_db_connection
-from shared.logging_config import get_railway_logger
+from chatbot_orchestration.core.db import get_db_connection
+from chatbot_orchestration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

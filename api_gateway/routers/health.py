@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException, Request
 from api_gateway.core.config import (CHATBOT_ORCHESTRATION_URL,
                                      KNOWLEDGEBASE_INGESTION_URL,
                                      WEBSITE_CRAWLING_URL)
-from shared.logging_config import get_railway_logger
-from shared.utils import log_endpoint_request
+from api_gateway.core.logging_config import get_railway_logger
+from api_gateway.core.utils import log_endpoint_request
 
 logger = get_railway_logger(__name__)
 

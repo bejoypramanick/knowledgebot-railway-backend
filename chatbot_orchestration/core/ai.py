@@ -3,8 +3,8 @@ import os
 from google import genai
 from pydantic_ai.models.google import GoogleModel
 
-from shared.config import settings
-from shared.logging_config import get_railway_logger
+from chatbot_orchestration.core.config import settings
+from chatbot_orchestration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

@@ -8,8 +8,8 @@ import uuid
 
 from fastapi.responses import StreamingResponse
 
-from shared.logging_config import get_railway_logger
-from shared.token_tracker import track_gemini_usage_from_response
+from chatbot_orchestration.core.logging_config import get_railway_logger
+from chatbot_orchestration.core.token_tracker import track_gemini_usage_from_response
 
 from ..agent.prompt import get_system_prompt
 from ..core.dependencies import ChatSessionDeps

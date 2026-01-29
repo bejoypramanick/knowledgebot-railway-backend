@@ -7,8 +7,8 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from shared.firebase_auth import verify_firebase_token
-from shared.logging_config import get_railway_logger
+from chatbot_orchestration.core.firebase_auth import verify_firebase_token
+from chatbot_orchestration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

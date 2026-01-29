@@ -6,10 +6,10 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
-from shared.logging_config import get_railway_logger
+from chatbot_orchestration.core.logging_config import get_railway_logger
 
-from shared.dao.chat_dao import ChatDAO as SharedChatDAO
-from shared.dao.user_dao import UserDAO
+from chatbot_orchestration.dao.chat_dao import ChatDAO as SharedChatDAO
+from chatbot_orchestration.dao.user_dao import UserDAO
 from ..dao.chat_dao import ChatDAO as LocalChatDAO
 
 logger = get_railway_logger(__name__)

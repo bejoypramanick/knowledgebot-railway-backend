@@ -4,8 +4,8 @@ Provides business logic for file operations
 """
 from typing import Any, Dict, Optional
 
-from shared import db
-from shared.logging_config import get_railway_logger
+from knowledgebase_ingestion.core import db
+from knowledgebase_ingestion.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

@@ -5,8 +5,8 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from shared.logging_config import get_railway_logger
-from shared.utils import log_endpoint_request
+from website_crawling.core.logging_config import get_railway_logger
+from website_crawling.core.utils import log_endpoint_request
 
 from ..core.sessions import active_scraping_sessions
 from ..schemas.models import ScrapeRequest, ScrapeResponse

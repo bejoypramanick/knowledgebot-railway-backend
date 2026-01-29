@@ -6,8 +6,8 @@ from typing import List, Optional
 from fastapi import (APIRouter, File, Form, Header, HTTPException, Query,
                      UploadFile)
 
-from shared import db
-from shared.logging_config import get_railway_logger
+from knowledgebase_ingestion.core import db
+from knowledgebase_ingestion.core.logging_config import get_railway_logger
 
 from ..core.ai import get_genai_client
 from ..schemas.models import (BatchDeleteItem, BatchDeleteResponse,

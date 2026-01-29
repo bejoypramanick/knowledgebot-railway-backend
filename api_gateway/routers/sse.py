@@ -6,7 +6,7 @@ from fastapi.responses import StreamingResponse
 
 from api_gateway.core.config import CONFIGURATION_SERVICE_URL
 from api_gateway.core.sse import sse_generator, sse_manager
-from shared.logging_config import get_railway_logger
+from api_gateway.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

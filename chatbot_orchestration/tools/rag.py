@@ -3,7 +3,7 @@ from typing import Annotated, List
 
 from google.genai import types
 
-from shared.logging_config import get_railway_logger
+from chatbot_orchestration.core.logging_config import get_railway_logger
 
 from ..core.ai import get_genai_client
 from ..schemas.models import SearchResult

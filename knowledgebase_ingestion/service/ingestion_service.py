@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional
 from fastapi import HTTPException, UploadFile
 from google.genai import types
 
-from shared.logging_config import get_railway_logger
+from knowledgebase_ingestion.core.logging_config import get_railway_logger
 
 from ..core.ai import get_genai_client
 from ..schemas.models import BatchDeleteItem, BatchUploadItem, FileInfo
