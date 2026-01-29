@@ -32,20 +32,21 @@ async def get_user_profile(uid: str):
             )
             
             if response.status_code != 200:
-                raise HTTPException(status_code=404, detail="User not found")
+                # Return empty profile for frontend compatibility instead of 404
+                return {"uid": uid, "email": "", "displayName": "", "photoURL": ""}
             
             user_data = response.json()
             
             if not user_data or 'user' not in user_data:
-                raise HTTPException(status_code=404, detail="User profile not found")
+                # Return empty profile for frontend compatibility
+                return {"uid": uid, "email": "", "displayName": "", "photoURL": ""}
             
             return user_data['user']
             
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error getting user profile: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error getting user profile: {str(e)}")
+        # Return empty profile for frontend compatibility instead of 500
+        return {"uid": uid, "email": "", "displayName": "", "photoURL": ""}
 
 
 @router.put("/profile", response_model=dict)
@@ -90,27 +91,27 @@ async def get_user_roles(uid: str = None, email: str = None):
                 )
                 
                 if response.status_code != 200:
-                    return []  # Return empty array for frontend compatibility
+                    return {"roles": []}  # Return dict with roles array for frontend compatibility
                 
                 user_data = response.json()
                 
                 if not user_data or 'user' not in user_data or 'email' not in user_data['user']:
-                    return []  # Return empty array for frontend compatibility
+                    return {"roles": []}  # Return dict with roles array for frontend compatibility
                 
                 email = user_data['user']['email']
                 result = await service.get_user_role(email)
-                return result.get('roles', [])  # Return just the roles array for frontend compatibility
+                return {"roles": result.get('roles', [])}  # Return dict with roles array
         
         elif email:
             result = await service.get_user_role(email)
-            return result.get('roles', [])  # Return just the roles array for frontend compatibility
+            return {"roles": result.get('roles', [])}  # Return dict with roles array
         
         else:
-            return []  # Return empty array for frontend compatibility
+            return {"roles": []}  # Return dict with roles array
             
     except Exception as e:
         logger.error(f"Error getting user roles: {e}", exc_info=True)
-        return []  # Return empty array for frontend compatibility
+        return {"roles": []}  # Return dict with roles array for frontend compatibility
 
 
 @router.post("/unique-id", response_model=dict)
