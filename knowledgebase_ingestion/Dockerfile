@@ -35,16 +35,14 @@ RUN echo "📦 Installing system dependencies..." && \
     echo "🧹 Cleaned up apt cache"
 
 # Copy and install Python dependencies
-COPY requirements-base.txt ./requirements-base.txt
 COPY knowledgebase_ingestion/requirements.txt ./requirements.txt
 RUN echo "🐍 Installing Python dependencies..." && \
-    pip install --no-cache-dir -r requirements-base.txt -r requirements.txt && \
+    pip install --no-cache-dir -r requirements.txt && \
     echo "✅ Python dependencies installed" && \
     pip list | grep -E "(fastapi|uvicorn|google-genai|boto3)"
 
 # Copy application code with logging
 COPY knowledgebase_ingestion/ ./knowledgebase_ingestion/
-COPY shared ./shared/
 RUN echo "📁 Application code copied" && \
     ls -la knowledgebase_ingestion/ && \
     echo "📄 Main application file:" && \

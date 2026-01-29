@@ -14,9 +14,8 @@ RUN echo "✅ System Packages installed successfully"
 
 # Build Stage 2: Python Dependencies
 RUN echo "🐍 --- Installing Python Dependencies ---"
-COPY requirements-base.txt ./requirements-base.txt
 COPY chatbot_orchestration/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements-base.txt -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 RUN echo "📦 --- Installed Python Packages ---"
 RUN pip list
 RUN echo "✅ Python Dependencies installed successfully"
@@ -24,7 +23,6 @@ RUN echo "✅ Python Dependencies installed successfully"
 # Build Stage 3: Application Code
 RUN echo "📂 --- Copying Application Code ---"
 COPY chatbot_orchestration/ ./chatbot_orchestration/
-COPY shared ./shared/
 RUN echo "✅ Code copied"
 
 # Set working directory and environment

@@ -12,13 +12,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxslt1-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements-base.txt ./requirements-base.txt
 COPY website_crawling/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements-base.txt -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY website_crawling/ ./website_crawling/
-COPY shared ./shared/
 
 # Set working directory
 WORKDIR /app/website_crawling
