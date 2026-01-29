@@ -375,6 +375,93 @@ async def proxy_feedback_submit(request: Request):
                 status_code=response.status_code,
                 headers=dict(response.headers)
             )
-    except Exception as e:
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Configuration service timeout")
+    except httpx.RequestError as e:
         logger.error(f"Error proxying feedback to configuration service: {e}")
+        raise HTTPException(status_code=503, detail=f"Configuration service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in feedback proxy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@router.post("/feedback/submit")
+async def proxy_feedback_submit_alt(request: Request):
+    """Proxy feedback submission to configuration service - alternative endpoint for frontend compatibility"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Route to the same backend endpoint as /feedback
+            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/feedback"
+            
+            body = await request.body()
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.post(
+                url=url,
+                content=body,
+                headers=headers
+            )
+            
+            return JSONResponse(
+                content=response.json() if "application/json" in response.headers.get("content-type", "") else response.text,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Configuration service timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Error proxying feedback to configuration service: {e}")
+        raise HTTPException(status_code=503, detail="Configuration service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in feedback proxy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+# Notifications API endpoints - proxy to configuration service
+@router.api_route("/notifications/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_notifications_routes(request: Request, path: str):
+    """Proxy notifications API requests to configuration service"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            method = request.method
+            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/notifications/{path}"
+            
+            query_string = str(request.url.query)
+            if query_string:
+                url += f"?{query_string}"
+            
+            body = None
+            if method in ["POST", "PUT", "PATCH"]:
+                body = await request.body()
+            
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.request(
+                method=method,
+                url=url,
+                content=body,
+                headers=headers
+            )
+            
+            if "application/json" in response.headers.get("content-type", ""):
+                return JSONResponse(
+                    content=response.json(),
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
+                )
+            else:
+                return JSONResponse(
+                    content=response.text,
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
+                )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Configuration service timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Error proxying notifications route to configuration service: {e}")
+        raise HTTPException(status_code=503, detail="Configuration service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in notifications proxy: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
