@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr
 
 from configuration.core.logging_config import get_railway_logger
+from configuration.core.auth_middleware import require_auth, get_user_from_token
 
 from ..service.auth_service import AuthService
 
@@ -18,22 +19,12 @@ router = APIRouter(prefix="/api/v1/users", tags=["users-management"])
 
 
 @router.get("/profile", response_model=dict)
+@require_auth()
 async def get_user_profile(request: Request):
     """Get user profile by verifying Firebase token and looking up in database."""
     try:
-        # Extract Firebase token from Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            return {"uid": "", "email": "", "displayName": "", "photoURL": "", "role": "user", "roles": ["user"]}
-        
-        token = auth_header.split(" ")[1]
-        
-        # Verify Firebase token and extract user data
-        from api_gateway.core.firebase_auth import verify_firebase_token
-        user_data = verify_firebase_token(token)
-        
-        if not user_data:
-            return {"uid": "", "email": "", "displayName": "", "photoURL": "", "role": "user", "roles": ["user"]}
+        # Get user data from request state (set by middleware)
+        user_data = request.state.user
         
         # Get user roles from database using email
         service = AuthService()
@@ -87,22 +78,12 @@ async def switch_user_role(uid: str, request_data: dict):
 
 
 @router.get("/roles", response_model=list)
+@require_auth()
 async def get_user_roles(request: Request):
     """Get user roles by verifying Firebase token and looking up in database."""
     try:
-        # Extract Firebase token from Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            return []  # Return empty array for unauthenticated requests
-        
-        token = auth_header.split(" ")[1]
-        
-        # Verify Firebase token and extract user data
-        from api_gateway.core.firebase_auth import verify_firebase_token
-        user_data = verify_firebase_token(token)
-        
-        if not user_data:
-            return []  # Return empty array for invalid token
+        # Get user data from request state (set by middleware)
+        user_data = request.state.user
         
         # Get user roles from database using email
         service = AuthService()
