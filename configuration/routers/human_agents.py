@@ -26,6 +26,43 @@ class AgentResponse(BaseModel):
     created_at: str = None
 
 
+@router.get("/admin/human-agents", response_model=dict)
+async def get_all_human_agents_admin():
+    """Get all human agents - admin endpoint for frontend compatibility."""
+    try:
+        agents = await configuration_service.get_human_agents()
+        
+        # Extract just the emails for frontend compatibility
+        human_agents = [agent.get("email", "") for agent in agents if agent.get("email")]
+        
+        return {"human_agents": human_agents}
+    except Exception as e:
+        logger.error(f"Error fetching human agents: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching agents: {str(e)}")
+
+
+@router.get("/admin/agents/online", response_model=dict)
+async def get_online_agents_admin():
+    """Get all online agents - admin endpoint for frontend compatibility."""
+    try:
+        agents = await configuration_service.get_online_human_agents()
+        
+        # Format for frontend compatibility
+        formatted_agents = []
+        for agent in agents:
+            formatted_agents.append({
+                "email": agent.get("email", ""),
+                "role": "human_agent",
+                "is_online": True,
+                "active_sessions": 0  # TODO: Get actual session count
+            })
+        
+        return {"agents": formatted_agents}
+    except Exception as e:
+        logger.error(f"Error fetching online agents: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching online agents: {str(e)}")
+
+
 @router.post("/", response_model=dict)
 async def add_human_agents(request: HumanAgentsRequest):
     """Add human agents to the system."""
