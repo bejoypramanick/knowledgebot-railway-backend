@@ -18,9 +18,6 @@ psutil>=6.1.0
 # Retry logic (used by core/db.py)
 tenacity>=8.2.2
 
-# Firebase Admin SDK (used by core/firebase_auth.py)
-firebase-admin>=6.0.0
-
 # Website Crawling Service-Specific Requirements
 # Web Scraping
 crawl4ai>=0.7.0

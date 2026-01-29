@@ -14,16 +14,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from configuration.routers import chatbot_router, widget_router
 from configuration.routers.admin_management import \
     router as admin_management_router
-from configuration.routers.auth_optimized import router as auth_router
 from configuration.routers.chat_log import public_chat_router
 from configuration.routers.chat_log import router as chat_log_router
 from configuration.routers.feedback import router as feedback_router
 from configuration.routers.performance import router as performance_router
 from configuration.routers.token_usage import router as token_usage_router
-from configuration.routers.user_ids import router as user_ids_router
 from configuration.core.database_initializer import database_initializer
 from configuration.core.db import close_databases, railway_db
-from configuration.core.firebase_auth import init_firebase_auth
 from configuration.core.logging_config import auto_configure_logging
 from configuration.core.utils import (service_status, validate_environment,
                           wait_for_railway_network)
@@ -85,14 +82,6 @@ async def lifespan(app: FastAPI):
             app.state.database_url = None
             service_status.set_status("error")
             raise ValueError("Database URL not configured")
-
-        # Initialize Firebase Auth and Firestore
-        try:
-            init_firebase_auth()
-            logger.info("✅ Firebase Auth and Firestore initialized")
-        except Exception as e:
-            logger.warning(f"⚠️ Firebase Auth/Firestore not initialized: {e}")
-            logger.warning("Authentication endpoints will not work without Firebase")
 
         service_status.set_status("running")
         logger.info(f"🚀 Configuration service started successfully on port {PORT}")
@@ -173,10 +162,8 @@ app.include_router(widget_router)
 app.include_router(feedback_router)
 app.include_router(token_usage_router)
 app.include_router(admin_management_router)
-app.include_router(auth_router)
 app.include_router(performance_router)
 app.include_router(chat_log_router)
-app.include_router(user_ids_router)
 app.include_router(public_chat_router)
 
 logger.info("✅ All endpoints loaded successfully")
