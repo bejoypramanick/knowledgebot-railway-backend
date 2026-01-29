@@ -6,7 +6,7 @@ from functools import wraps
 from typing import Callable, Optional
 
 from fastapi import HTTPException, Request, status
-from api_gateway.core.firebase_auth import verify_firebase_token
+from knowledgebase_ingestion.core.firebase_auth import verify_firebase_token
 from knowledgebase_ingestion.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
