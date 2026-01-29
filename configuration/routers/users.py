@@ -40,12 +40,19 @@ async def get_user_profile(request: Request):
         result = await service.get_user_role(user_data['email'])
         roles = result.get('roles', [])
         
+        # Determine highest priority role
+        current_role = 'user'  # default
+        if 'admin' in roles:
+            current_role = 'admin'
+        elif 'human_agent' in roles:
+            current_role = 'human_agent'
+        
         return {
             "uid": user_data.get('uid', ''),
             "email": user_data.get('email', ''),
             "displayName": user_data.get('displayName', ''),
             "photoURL": user_data.get('photoURL', ''),
-            "role": roles[0] if roles else 'user',  # Highest priority role
+            "role": current_role,  # Highest priority role
             "roles": roles  # All available roles
         }
             
