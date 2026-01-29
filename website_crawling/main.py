@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from website_crawling.core.logging_config import auto_configure_logging
+from website_crawling.core.correlation_middleware import CorrelationIDMiddleware
 
 # Configure Railway-compatible logging
 logger = auto_configure_logging("website_crawling")
@@ -58,6 +59,7 @@ register_fastapi_exception_handlers(app, "website_scraping")
 
 # Middleware
 app.middleware("http")(log_requests_middleware)
+app.add_middleware(CorrelationIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

@@ -7,8 +7,8 @@ from typing import Optional
 import asyncpg
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from website_crawling.core.logging_config import get_railway_logger
-from website_crawling.core.correlation_id import get_correlation_id
+from configuration.core.logging_config import get_railway_logger
+from configuration.core.correlation_id import get_correlation_id
 
 logger = get_railway_logger(__name__)
 

@@ -8,6 +8,7 @@ from chatbot_orchestration.routers import chat_router, human_agents_router
 from chatbot_orchestration.service.agent_service import pydantic_ai_service
 from chatbot_orchestration.core.logging_config import auto_configure_logging
 from chatbot_orchestration.core.utils import log_endpoint_request
+from chatbot_orchestration.core.correlation_middleware import CorrelationIDMiddleware
 
 # Configure Railway-compatible logging
 logger = auto_configure_logging("chatbot_orchestration")
@@ -61,6 +62,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add Correlation ID Middleware
+app.add_middleware(CorrelationIDMiddleware)
 
 # Include Routers
 app.include_router(chat_router)

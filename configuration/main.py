@@ -21,12 +21,13 @@ from configuration.routers.feedback import router as feedback_router
 from configuration.routers.performance import router as performance_router
 from configuration.routers.token_usage import router as token_usage_router
 from configuration.routers.user_ids import router as user_ids_router
-from shared.database_initializer import database_initializer
-from shared.db import close_databases, railway_db
-from shared.firebase_auth import init_firebase_auth
-from shared.logging_config import auto_configure_logging
-from shared.utils import (service_status, validate_environment,
+from configuration.core.database_initializer import database_initializer
+from configuration.core.db import close_databases, railway_db
+from configuration.core.firebase_auth import init_firebase_auth
+from configuration.core.logging_config import auto_configure_logging
+from configuration.core.utils import (service_status, validate_environment,
                           wait_for_railway_network)
+from configuration.core.correlation_middleware import CorrelationIDMiddleware
 
 load_dotenv()
 
@@ -114,6 +115,7 @@ app = FastAPI(
 )
 
 # CORS middleware
+app.add_middleware(CorrelationIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

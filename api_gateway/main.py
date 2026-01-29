@@ -23,6 +23,7 @@ from api_gateway.routers import (chat_router, config_router, health_router,
                                  sse_router)
 from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
+from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
 from api_gateway.core.utils import (register_fastapi_exception_handlers,
                           setup_global_exception_logging)
 
@@ -54,6 +55,7 @@ register_fastapi_exception_handlers(app, "api_gateway")
 
 # Middleware
 app.middleware("http")(log_requests_middleware)
+app.add_middleware(CorrelationIDMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

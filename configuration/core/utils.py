@@ -16,8 +16,8 @@ from fastapi.responses import JSONResponse
 from starlette.status import HTTP_503_SERVICE_UNAVAILABLE
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from knowledgebase_ingestion.core.logging_config import get_railway_logger
-from knowledgebase_ingestion.core.correlation_id import get_correlation_id, add_correlation_id_headers
+from configuration.core.logging_config import get_railway_logger
+from configuration.core.correlation_id import get_correlation_id, add_correlation_id_headers
 
 logger = get_railway_logger(__name__)
 
@@ -329,7 +329,7 @@ async def wait_for_railway_network() -> None:
 def validate_environment() -> None:
     """Validate required environment variables."""
     # Import here to avoid circular imports
-    from knowledgebase_ingestion.core.config import settings
+    from api_gateway.core.config import settings
     
     required_vars = []
     
