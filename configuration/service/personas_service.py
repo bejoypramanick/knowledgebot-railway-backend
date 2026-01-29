@@ -1,0 +1,100 @@
+"""
+Personas Service Layer
+Provides business logic for persona management operations
+"""
+from typing import Any, Dict, List, Optional
+
+from configuration.core.logging_config import get_railway_logger
+
+from ..dao.personas_dao import PersonasDAO
+
+logger = get_railway_logger(__name__)
+
+class PersonasService:
+    """Service layer for personas management"""
+    
+    def __init__(self):
+        self.personas_dao = PersonasDAO()  # Service manages its own DAO
+    
+    async def get_personas(self) -> Dict[str, Any]:
+        """Get all available personas with business logic"""
+        try:
+            personas = await self.personas_dao.get_all_personas()
+            
+            # Filter to only active personas for general use
+            active_personas = [p for p in personas if p.get('is_active', False)]
+            
+            return {
+                "success": True,
+                "data": {
+                    "all_personas": personas,
+                    "active_personas": active_personas,
+                    "total_count": len(personas),
+                    "active_count": len(active_personas)
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error fetching personas: {e}")
+            raise
+    
+    async def activate_persona(self, persona_name: str, user_email: str) -> Dict[str, Any]:
+        """Activate a specific persona with business logic"""
+        try:
+            # Check if persona exists first
+            existing_persona = await self.personas_dao.get_persona_by_name(persona_name)
+            if not existing_persona:
+                return {
+                    "success": False,
+                    "error": f"Persona '{persona_name}' not found"
+                }
+            
+            # If already active, return early
+            if existing_persona.get('is_active', False):
+                return {
+                    "success": True,
+                    "message": f"Persona '{persona_name}' is already active",
+                    "data": existing_persona
+                }
+            
+            # Activate the persona
+            activated_persona = await self.personas_dao.activate_persona(persona_name, user_email)
+            
+            return {
+                "success": True,
+                "message": f"Persona '{persona_name}' activated successfully",
+                "data": activated_persona
+            }
+        except Exception as e:
+            logger.error(f"Error activating persona: {e}")
+            raise
+    
+    async def deactivate_persona(self, persona_name: str, user_email: str) -> Dict[str, Any]:
+        """Deactivate a specific persona with business logic"""
+        try:
+            # Check if persona exists first
+            existing_persona = await self.personas_dao.get_persona_by_name(persona_name)
+            if not existing_persona:
+                return {
+                    "success": False,
+                    "error": f"Persona '{persona_name}' not found"
+                }
+            
+            # If already inactive, return early
+            if not existing_persona.get('is_active', False):
+                return {
+                    "success": True,
+                    "message": f"Persona '{persona_name}' is already inactive",
+                    "data": existing_persona
+                }
+            
+            # Deactivate the persona
+            deactivated_persona = await self.personas_dao.deactivate_persona(persona_name, user_email)
+            
+            return {
+                "success": True,
+                "message": f"Persona '{persona_name}' deactivated successfully",
+                "data": deactivated_persona
+            }
+        except Exception as e:
+            logger.error(f"Error deactivating persona: {e}")
+            raise

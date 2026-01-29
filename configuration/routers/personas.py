@@ -2,7 +2,7 @@
 Personas Endpoints
 Handles chatbot persona management and activation.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 
 from configuration.core.logging_config import get_railway_logger
 
