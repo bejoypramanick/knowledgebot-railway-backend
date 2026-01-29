@@ -119,7 +119,7 @@ class AuthDAO:
                 """
                 SELECT email, status, created_at, created_by_email
                 FROM admins 
-                WHERE email = $1 AND status = 'active'
+                WHERE email = $1 
                 """,
                 email
             )
@@ -131,7 +131,7 @@ class AuthDAO:
                 """
                 SELECT EXISTS(
                     SELECT 1 FROM human_agents 
-                    WHERE email = $1 AND status = 'active'
+                    WHERE email = $1 
                 )
                 """,
                 email
