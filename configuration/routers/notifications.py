@@ -7,8 +7,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from shared.auth_middleware import get_current_user
-from shared.logging_config import get_railway_logger
+from configuration.core.logging_config import get_railway_logger
 
 from ..service.notifications_service import NotificationsService
 

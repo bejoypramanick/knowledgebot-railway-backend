@@ -4,8 +4,7 @@ Provides business logic layer between routers and DAO
 """
 from typing import Any, Dict, List, Optional
 
-from shared.logging_config import get_railway_logger
-from shared.dao.user_dao import UserDAO
+from configuration.core.logging_config import get_railway_logger
 
 from ..dao.auth_dao import AuthDAO
 from ..dao.chatbot_dao import ChatbotDAO
@@ -19,10 +18,9 @@ class ConfigurationService:
     
     def __init__(self):
         self._chatbot_dao = ChatbotDAO()  # Service manages its own DAO
-        self._user_dao = UserDAO()  # Use shared UserDAO for user operations
+        self._auth_dao = AuthDAO()  # Service manages its own DAO
         self._widget_dao = WidgetDAO()    # Service manages its own DAO
         self._performance_dao = PerformanceDAO()  # Service manages its own DAO
-        self._auth_dao = AuthDAO()  # Service manages its own DAO
     
     # Chatbot Configuration Methods
     async def get_metadata(self) -> Optional[Dict[str, Any]]:
@@ -53,7 +51,9 @@ class ConfigurationService:
     async def get_all_human_agents(self) -> List[str]:
         """Get all human agents"""
         try:
-            return await self._user_dao.get_all_human_agents()
+            # Use auth_dao to get human agents since user_dao doesn't exist locally
+            agents = await self._auth_dao.get_available_agents()
+            return [agent['email'] for agent in agents]
         except Exception as e:
             logger.error(f"Error getting human agents: {e}")
             return []

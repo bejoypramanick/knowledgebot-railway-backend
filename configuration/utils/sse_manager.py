@@ -1,7 +1,7 @@
 import asyncio
 from typing import Dict, Set
 
-from shared.logging_config import get_railway_logger
+from configuration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

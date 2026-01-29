@@ -4,7 +4,7 @@ Provides business logic for feedback management operations
 """
 from typing import Any, Dict, Optional
 
-from shared.logging_config import get_railway_logger
+from configuration.core.logging_config import get_railway_logger
 
 from ..dao.feedback_dao import FeedbackDAO
 

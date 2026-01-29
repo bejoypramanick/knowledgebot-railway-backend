@@ -32,7 +32,7 @@ def generate_confirmation_token() -> str:
 
 @router.post("/admins", response_model=dict)
 async def add_admins(request: AdminRequest):
-    """Add admin users and send confirmation emails. Only existing admins can add new admins."""
+    """Add admin users. Only existing admins can add new admins."""
     # Note: Authentication should be handled at the API Gateway level
     # This endpoint assumes the caller is already authenticated
     try:

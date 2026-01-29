@@ -4,7 +4,7 @@ Provides business logic for performance metrics operations
 """
 from typing import Any, Dict
 
-from shared.logging_config import get_railway_logger
+from configuration.core.logging_config import get_railway_logger
 
 from ..dao.performance_dao import PerformanceDAO
 

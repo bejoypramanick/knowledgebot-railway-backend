@@ -4,8 +4,8 @@ Provides business logic for token usage management operations
 """
 from typing import Optional
 
-from shared.dao.token_dao import TokenDAO
-from shared.logging_config import get_railway_logger
+from configuration.dao.token_dao import TokenDAO
+from configuration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 

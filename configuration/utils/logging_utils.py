@@ -1,4 +1,4 @@
-from shared.logging_config import get_railway_logger
+from configuration.core.logging_config import get_railway_logger
 
 from ..service.configuration_service import configuration_service
 

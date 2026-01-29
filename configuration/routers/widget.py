@@ -3,8 +3,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from shared.auth_middleware import get_current_user
-from shared.logging_config import get_railway_logger
+from configuration.core.logging_config import get_railway_logger
 
 from ..schemas.models import WidgetConfigRequest
 from ..service.configuration_service import configuration_service

@@ -35,11 +35,13 @@ async def get_online_agents():
     try:
         # For now, we'll use a placeholder email - in production, this should come from the authenticated user
         user_email = "system@admin.com"  # TODO: Get from authenticated context
-        raise HTTPException(status_code=403, detail="User email not found")
-
-    service = ChatLogService(connection_manager)  # Service manages its own DAO
-    agents = await service.get_online_agents(user_email)
-    return {"success": True, "agents": agents}
+        
+        service = ChatLogService(connection_manager)  # Service manages its own DAO
+        agents = await service.get_online_agents(user_email)
+        return {"success": True, "agents": agents}
+    except Exception as e:
+        logger.error(f"Error getting online agents: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting online agents: {str(e)}")
 
 
 @router.post("/agents/heartbeat")

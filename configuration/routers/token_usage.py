@@ -3,8 +3,7 @@ Token Usage Endpoints
 """
 from fastapi import APIRouter, Depends, HTTPException
 
-from shared.auth_middleware import get_current_user
-from shared.logging_config import get_railway_logger
+from configuration.core.logging_config import get_railway_logger
 
 from ..service.token_usage_service import TokenUsageService
 

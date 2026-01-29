@@ -4,7 +4,7 @@ Provides business logic for notifications management operations
 """
 from typing import Any, Dict, List
 
-from shared.logging_config import get_railway_logger
+from configuration.core.logging_config import get_railway_logger
 
 from ..dao.notifications_dao import NotificationsDAO
 

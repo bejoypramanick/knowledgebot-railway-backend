@@ -4,7 +4,7 @@ Provides business logic for authentication operations
 """
 from typing import Any, Dict, List, Optional
 
-from shared.logging_config import get_railway_logger
+from configuration.core.logging_config import get_railway_logger
 
 from ..dao.auth_dao import AuthDAO
 
