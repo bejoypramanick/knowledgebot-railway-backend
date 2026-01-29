@@ -21,6 +21,7 @@ from api_gateway.core.config import SERVICE_IDENTITY
 from api_gateway.routers import (chat_router, config_router, health_router,
                                  knowledgebase_router, scrape_router,
                                  sse_router)
+from api_gateway.routers.firebase import firebase_router
 from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
 from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
@@ -105,6 +106,7 @@ app.include_router(scrape_router, prefix="/api/v1")
 app.include_router(chat_router) # Chat router has mixed prefixes, so we include it directly
 app.include_router(config_router, prefix="/api/v1")
 app.include_router(sse_router)
+app.include_router(firebase_router)
 
 if __name__ == "__main__":
     import uvicorn

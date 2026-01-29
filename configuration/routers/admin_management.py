@@ -112,10 +112,21 @@ async def remove_admin(email: str, current_user: dict = Depends(get_current_user
 
 @router.get("/user-role/{email}", response_model=dict)
 async def get_user_role(email: str):
-    """Get user role (admin, human_agent, or user) for a given email."""
+    """Get user roles (admin, human_agent, or user) for a given email."""
     try:
         service = AuthService()  # Service manages its own DAO
         return await service.get_user_role(email)
     except Exception as e:
         logger.error(f"Error getting user role: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error getting user role: {str(e)}")
+
+
+@router.get("/users/roles", response_model=dict)
+async def get_user_roles(token: str):
+    """Get user roles by extracting email from Firebase token."""
+    try:
+        service = AuthService()  # Service manages its own DAO
+        return await service.get_user_roles_from_token(token)
+    except Exception as e:
+        logger.error(f"Error getting user roles from token: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting user roles: {str(e)}")
