@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import HTTPException
 
 from configuration.core.logging_config import get_railway_logger
-from configuration.dao.chat_dao import ChatDAO
+from configuration.dao.chat_log_dao import ChatDAO
 from configuration.dao.auth_dao import AuthDAO
 
 logger = get_railway_logger(__name__)

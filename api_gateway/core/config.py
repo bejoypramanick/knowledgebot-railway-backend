@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # Also support DATABASE_URL for backward compatibility
     database_url: Optional[str] = None
     
+    # Service Identity
+    service_identity: str = "api-gateway"
+    
+    # Service URLs for routing
+    configuration_service_url: str = "http://localhost:8001"
+    
     model_config = {
         'env_file': ".env",
         'case_sensitive': False
@@ -35,3 +41,9 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Service Identity for logging and identification
+SERVICE_IDENTITY = settings.service_identity
+
+# Service URLs
+CONFIGURATION_SERVICE_URL = settings.configuration_service_url
