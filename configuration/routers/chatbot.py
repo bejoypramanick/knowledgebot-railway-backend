@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 
 from configuration.core.logging_config import get_railway_logger
 from configuration.core.utils import log_endpoint_request
+from configuration.core.auth_middleware import require_admin
 
 from ..schemas.models import ChatbotConfigRequest
 from ..service.configuration_service import configuration_service
@@ -14,7 +15,8 @@ logger = get_railway_logger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["Chatbot Configuration"])
 
 @router.get("/configuration/chatbot")
-async def get_chatbot_config():
+@require_admin()
+async def get_chatbot_config(request):
     """Get chatbot configuration"""
     try:
         config = await configuration_service.get_chatbot_config()
@@ -25,9 +27,10 @@ async def get_chatbot_config():
 
 
 @router.post("/configuration/chatbot")
+@require_admin()
 async def save_chatbot_config(
     config: ChatbotConfigRequest,
-    request: Request = None
+    request: Request
 ):
     """Save chatbot configuration"""
     try:

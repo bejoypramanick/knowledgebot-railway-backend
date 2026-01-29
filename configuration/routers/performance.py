@@ -5,6 +5,7 @@ Handles system performance monitoring and analytics.
 from fastapi import APIRouter, HTTPException
 
 from configuration.core.logging_config import get_railway_logger
+from configuration.core.auth_middleware import require_admin
 
 logger = get_railway_logger(__name__)
 
@@ -12,7 +13,8 @@ router = APIRouter(prefix="/api/v1/admin", tags=["performance"])
 
 
 @router.get("/performance/metrics")
-async def get_performance_metrics():
+@require_admin()
+async def get_performance_metrics(request):
     """Get system performance metrics."""
     try:
         # For now, return placeholder metrics - in production, this would collect real metrics

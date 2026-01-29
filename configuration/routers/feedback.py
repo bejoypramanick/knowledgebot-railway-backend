@@ -7,11 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from configuration.core.logging_config import get_railway_logger
-
-# Placeholder for authentication since it's handled at API Gateway level
-def get_current_user():
-    """Placeholder function - authentication is handled at API Gateway level"""
-    return {"email": "system@example.com"}
+from configuration.core.auth_middleware import require_auth
 
 from ..service.feedback_service import FeedbackService
 
