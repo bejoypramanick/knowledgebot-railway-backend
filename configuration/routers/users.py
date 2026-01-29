@@ -24,7 +24,7 @@ async def get_user_profile(request: Request):
         # Extract Firebase token from Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            return {"uid": "", "email": "", "displayName": "", "photoURL": "", "role": "user"}
+            return {"uid": "", "email": "", "displayName": "", "photoURL": "", "role": "user", "roles": ["user"]}
         
         token = auth_header.split(" ")[1]
         
@@ -33,7 +33,7 @@ async def get_user_profile(request: Request):
         user_data = verify_firebase_token(token)
         
         if not user_data:
-            return {"uid": "", "email": "", "displayName": "", "photoURL": "", "role": "user"}
+            return {"uid": "", "email": "", "displayName": "", "photoURL": "", "role": "user", "roles": ["user"]}
         
         # Get user roles from database using email
         service = AuthService()
@@ -45,13 +45,14 @@ async def get_user_profile(request: Request):
             "email": user_data.get('email', ''),
             "displayName": user_data.get('displayName', ''),
             "photoURL": user_data.get('photoURL', ''),
-            "role": roles[0] if roles else 'user'
+            "role": roles[0] if roles else 'user',  # Highest priority role
+            "roles": roles  # All available roles
         }
             
     except Exception as e:
         logger.error(f"Error getting user profile: {e}", exc_info=True)
         # Return basic profile for frontend compatibility
-        return {"uid": "", "email": "", "displayName": "", "photoURL": "", "role": "user"}
+        return {"uid": "", "email": "", "displayName": "", "photoURL": "", "role": "user", "roles": ["user"]}
 
 
 @router.put("/profile", response_model=dict)
