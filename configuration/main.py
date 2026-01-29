@@ -19,6 +19,7 @@ from configuration.routers.chat_log import router as chat_log_router
 from configuration.routers.feedback import router as feedback_router
 from configuration.routers.performance import router as performance_router
 from configuration.routers.token_usage import router as token_usage_router
+from configuration.routers.human_agents import router as human_agents_router
 from configuration.core.database_initializer import database_initializer
 from configuration.core.db import close_databases, railway_db
 from configuration.core.logging_config import auto_configure_logging
@@ -162,6 +163,7 @@ app.include_router(widget_router)
 app.include_router(feedback_router)
 app.include_router(token_usage_router)
 app.include_router(admin_management_router)
+app.include_router(human_agents_router)
 app.include_router(performance_router)
 app.include_router(chat_log_router)
 app.include_router(public_chat_router)

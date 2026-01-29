@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from chatbot_orchestration.routers import chat_router, human_agents_router
+from chatbot_orchestration.routers import chat_router
 from chatbot_orchestration.service.agent_service import pydantic_ai_service
 from chatbot_orchestration.core.logging_config import auto_configure_logging
 from chatbot_orchestration.core.utils import log_endpoint_request
@@ -68,7 +68,6 @@ app.add_middleware(CorrelationIDMiddleware)
 
 # Include Routers
 app.include_router(chat_router)
-app.include_router(human_agents_router)
 
 @app.get("/")
 async def root_diagnostic(request: Request):

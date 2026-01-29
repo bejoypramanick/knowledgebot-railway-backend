@@ -225,6 +225,44 @@ async def proxy_auth_routes(request: Request, path: str):
         logger.error(f"Unexpected error in auth proxy: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
+# Human Agents API endpoints - proxy to configuration service
+@router.api_route("/human-agents/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def proxy_human_agents_routes(request: Request, path: str):
+    """Proxy human agents API requests to configuration service"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            method = request.method
+            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/human-agents/{path}"
+            
+            query_string = str(request.url.query)
+            if query_string:
+                url += f"?{query_string}"
+            
+            body = None
+            if method in ["POST", "PUT", "PATCH"]:
+                body = await request.body()
+            
+            response = await client.request(
+                method=method,
+                url=url,
+                content=body,
+                headers=dict(request.headers)
+            )
+            
+            return JSONResponse(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Configuration service timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Error proxying human agents route to configuration service: {e}")
+        raise HTTPException(status_code=503, detail="Configuration service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in human agents proxy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
 # Users API endpoints - proxy to configuration service
 @router.api_route("/users/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy_users_routes(request: Request, path: str):
