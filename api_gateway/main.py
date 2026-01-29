@@ -21,7 +21,7 @@ from api_gateway.core.config import SERVICE_IDENTITY
 from api_gateway.routers import (chat_router, config_router, health_router,
                                  knowledgebase_router, scrape_router,
                                  sse_router)
-from api_gateway.routers.firebase import firebase_router
+from api_gateway.routers.firebase import router as firebase_router
 from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
 from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
