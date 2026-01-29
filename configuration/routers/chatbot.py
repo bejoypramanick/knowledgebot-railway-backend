@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from shared.auth_middleware import get_current_user
-from shared.logging_config import get_railway_logger
-from shared.utils import log_endpoint_request
+from configuration.core.logging_config import get_railway_logger
+from configuration.core.utils import log_endpoint_request
 
 from ..schemas.models import ChatbotConfigRequest
 from ..service.configuration_service import configuration_service
@@ -15,7 +14,7 @@ logger = get_railway_logger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["Chatbot Configuration"])
 
 @router.get("/personas", response_model=dict)
-async def get_all_personas(current_user: dict = Depends(get_current_user)):
+async def get_all_personas():
     """Get all available chatbot personas."""
     try:
         service = ConfigurationService()
@@ -30,7 +29,7 @@ async def get_all_personas(current_user: dict = Depends(get_current_user)):
 
 
 @router.post("/personas/{persona_name}/activate", response_model=dict)
-async def activate_persona(persona_name: str, current_user: dict = Depends(get_current_user)):
+async def activate_persona(persona_name: str):
     """Activate a specific persona."""
     try:
         service = ConfigurationService()
@@ -63,10 +62,10 @@ async def get_chatbot_config():
 @router.post("/configuration/chatbot")
 async def save_chatbot_config(
     config: ChatbotConfigRequest,
-    current_user: dict = Depends(get_current_user),
     request: Request = None
 ):
     """Save chatbot configuration"""
+    # Note: Authentication should be handled at the API Gateway level
     try:
         # Validate business logic
         business_errors = validate_configuration_consistency(config)
@@ -269,10 +268,10 @@ async def save_chatbot_config(
 
 @router.post("/admin/chat-sessions/{session_id}/request-agent")
 async def request_human_agent(
-    session_id: str,
-    current_user: dict = Depends(get_current_user)
+    session_id: str
 ):
     """Request a human agent for a chat session."""
+    # Note: Authentication should be handled at the API Gateway level
     try:
         log_endpoint_request("configuration_service", "request-agent", None)
         result = await configuration_service.request_human_agent(session_id)
