@@ -1,8 +1,9 @@
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse
 
 from api_gateway.core.config import CONFIGURATION_SERVICE_URL
+from api_gateway.core.auth_middleware import get_current_user
 from api_gateway.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
@@ -291,9 +292,12 @@ async def proxy_human_agents_routes(request: Request, path: str):
 
 # Users API endpoints - proxy to configuration service
 @router.api_route("/users/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-async def proxy_users_routes(request: Request, path: str):
+async def proxy_users_routes(request: Request, path: str, user: dict = Depends(get_current_user)):
     """Proxy users API requests to configuration service (unique-id, etc.)"""
     try:
+        # Set user data in request state for header forwarding
+        request.state.user = user
+        
         async with httpx.AsyncClient(timeout=30.0) as client:
             method = request.method
             url = f"{CONFIGURATION_SERVICE_URL}/api/v1/users/{path}"

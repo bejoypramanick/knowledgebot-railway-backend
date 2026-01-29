@@ -1,10 +1,11 @@
 import asyncio
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from api_gateway.core.config import CHATBOT_ORCHESTRATION_URL
+from api_gateway.core.auth_middleware import get_current_user
 from api_gateway.routers.config import add_user_headers_to_request
 from api_gateway.schemas.models import (DeleteSessionResponse,
                                         ListSessionsResponse,
@@ -17,9 +18,12 @@ logger = get_railway_logger(__name__)
 router = APIRouter()
 
 @router.post("/chat/stream")
-async def chat_stream_endpoint(request: Request):
+async def chat_stream_endpoint(request: Request, user: dict = Depends(get_current_user)):
     """Route streaming chat requests to chatbot orchestration service."""
     try:
+        # Set user data in request state for header forwarding
+        request.state.user = user
+        
         # Get request body
         body = await request.body()
         
