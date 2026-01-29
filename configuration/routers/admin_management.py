@@ -1,6 +1,7 @@
 """
 Admin Management Endpoints
 Handles admin user creation, verification, and role management.
+Updated: Fixed auth middleware imports - now uses API Gateway authentication
 """
 from typing import List
 
