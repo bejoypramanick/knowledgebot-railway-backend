@@ -5,6 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from configuration.core.logging_config import get_railway_logger
 
+# Placeholder for authentication since it's handled at API Gateway level
+def get_current_user():
+    """Placeholder function - authentication is handled at API Gateway level"""
+    return {"email": "system@example.com"}
+
 from ..service.token_usage_service import TokenUsageService
 
 logger = get_railway_logger(__name__)

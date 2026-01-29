@@ -30,7 +30,6 @@ async def get_widget_config():
 @router.post("/configuration/widget")
 async def save_widget_config(
     config: WidgetConfigRequest,
-    current_user: dict = Depends(get_current_user),
     request: Request = None
 ):
     """Save widget configuration"""
@@ -83,7 +82,7 @@ async def save_widget_config(
             # Log the configuration change (non-blocking)
             try:
                 await log_configuration_change(
-                    user_email=current_user.get('email'),
+                    user_email=request.headers.get('X-User-Email', 'system'),
                     action='widget_config_update',
                     details=config.dict(exclude_unset=True),
                     ip_address=request.client.host if request else None

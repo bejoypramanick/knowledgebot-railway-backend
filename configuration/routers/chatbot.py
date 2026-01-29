@@ -252,7 +252,7 @@ async def save_chatbot_config(
         # Log the configuration change (non-blocking)
         try:
             await log_configuration_change(
-                user_email=current_user.get('email'),
+                user_email=request.headers.get('X-User-Email', 'system'),
                 action='chatbot_config_update',
                 details=config.dict(exclude_unset=True),
                 ip_address=request.client.host if request else None
