@@ -112,7 +112,44 @@ class AuthDAO:
                 session_id
             )
 
-    async def execute_role_query(self, query: str, email: str) -> List[Dict[str, Any]]:
-        """Execute role query."""
+    async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
+        """Check if admin exists for given email."""
         async with get_db_connection() as conn:
-            return await conn.fetch(query, email)
+            return await conn.fetchrow(
+                """
+                SELECT email, status, created_at, created_by_email
+                FROM admins 
+                WHERE email = $1 AND status = 'active'
+                """,
+                email
+            )
+
+    async def check_human_agent_exists(self, email: str) -> bool:
+        """Check if human agent exists"""
+        async with get_db_connection() as conn:
+            result = await conn.fetchval(
+                """
+                SELECT EXISTS(
+                    SELECT 1 FROM human_agents 
+                    WHERE email = $1 AND status = 'active'
+                )
+                """,
+                email
+            )
+            return bool(result)
+
+    async def get_admins(self) -> List[Dict[str, Any]]:
+        """Get all admins"""
+        return await self.list_all_admins()
+
+    async def get_human_agents(self) -> List[Dict[str, Any]]:
+        """Get all human agents"""
+        async with get_db_connection() as conn:
+            return await conn.fetch(
+                """
+                SELECT id, email, status, created_at
+                FROM human_agents 
+                WHERE status = 'active'
+                ORDER BY created_at DESC
+                """
+            )
