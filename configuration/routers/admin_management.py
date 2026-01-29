@@ -88,6 +88,38 @@ async def remove_admin(email: str):
         raise HTTPException(status_code=500, detail=f"Error removing admin: {str(e)}")
 
 
+@router.get("/users/profile", response_model=dict)
+async def get_user_profile(uid: str):
+    """Get user profile by Firebase UID."""
+    try:
+        # Get user email from Firebase UID
+        import httpx
+        import os
+        
+        api_gateway_url = os.getenv("API_GATEWAY_URL", "http://localhost:8080")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{api_gateway_url}/firebase/user/{uid}"
+            )
+            
+            if response.status_code != 200:
+                raise HTTPException(status_code=404, detail="User not found")
+            
+            user_data = response.json()
+            
+            if not user_data or 'user' not in user_data:
+                raise HTTPException(status_code=404, detail="User profile not found")
+            
+            return user_data['user']
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting user profile: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting user profile: {str(e)}")
+
+
 @router.get("/users/roles", response_model=dict)
 async def get_user_roles(email: str):
     """Get user roles by email ID."""

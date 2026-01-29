@@ -41,8 +41,8 @@ async def lifespan(app: FastAPI):
         logger.info("🚀 Website scraping service started successfully")
         yield
         
-        if shared_db.railway_db:
-             await shared_db.railway_db.disconnect()
+        if db.railway_db:
+             await db.railway_db.disconnect()
         logger.info("🛑 Website scraping service shutdown complete")
         
     except Exception as e:
