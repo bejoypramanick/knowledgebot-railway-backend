@@ -328,25 +328,26 @@ async def wait_for_railway_network() -> None:
 
 def validate_environment() -> None:
     """Validate required environment variables."""
-    # Import here to avoid circular imports
-    from api_gateway.core.config import settings
+    # Use local configuration instead of importing from api_gateway
+    import os
     
     required_vars = []
     
-    # Check for database URL using the centralized settings
-    if not settings.railway_postgres_url and not settings.database_url:
+    # Check for database URL
+    if not os.getenv('RAILWAY_POSTGRES_URL') and not os.getenv('DATABASE_URL'):
         required_vars.append('DATABASE_URL or RAILWAY_POSTGRES_URL')
     
     # Check for Gemini API key
-    if not settings.gemini_api_key:
+    if not os.getenv('GEMINI_API_KEY'):
         required_vars.append('GEMINI_API_KEY')
 
     if required_vars:
         raise ValueError(f"Missing required environment variables: {', '.join(required_vars)}")
 
     # Log configuration status
-    logger.info(f"INFO:main:GEMINI_API_KEY configured: {'YES' if settings.gemini_api_key else 'NO'}")
-    db_configured = settings.railway_postgres_url or settings.database_url
+    gemini_configured = os.getenv('GEMINI_API_KEY') is not None
+    db_configured = os.getenv('RAILWAY_POSTGRES_URL') or os.getenv('DATABASE_URL')
+    logger.info(f"INFO:main:GEMINI_API_KEY configured: {'YES' if gemini_configured else 'NO'}")
     logger.info(f"INFO:main:DATABASE_URL configured: {'YES' if db_configured else 'NO'}")
 
 

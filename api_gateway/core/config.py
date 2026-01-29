@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     # Service URLs for routing
     configuration_service_url: str = "http://localhost:8001"
     chatbot_orchestration_url: str = "http://localhost:8003"
+    knowledgebase_ingestion_url: str = "http://localhost:8002"
+    website_crawling_url: str = "http://localhost:8004"
     
     model_config = {
         'env_file': ".env",
@@ -49,3 +51,5 @@ SERVICE_IDENTITY = settings.service_identity
 # Service URLs
 CONFIGURATION_SERVICE_URL = settings.configuration_service_url
 CHATBOT_ORCHESTRATION_URL = settings.chatbot_orchestration_url
+KNOWLEDGEBASE_INGESTION_URL = settings.knowledgebase_ingestion_url
+WEBSITE_CRAWLING_URL = settings.website_crawling_url
