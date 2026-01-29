@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from configuration.core.logging_config import get_railway_logger
+from configuration.core.auth_middleware import require_auth, require_human_agent, get_user_from_token
 
 # Placeholder for authentication since it's handled at API Gateway level
 def get_current_user():
@@ -54,18 +55,22 @@ async def agent_heartbeat(current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/chat-sessions")
+@require_human_agent()
 async def get_chat_sessions(
+    request,
     agent_id: Optional[str] = Query(None),
     role: str = Query("human_agent"),
     archive_status: Optional[str] = Query("active", description="Filter by archive status: active, closed, archived, transferred"),
     page: int = Query(1, ge=1, description="Page number for pagination"),
-    limit: int = Query(50, ge=1, le=200, description="Number of sessions per page"),
-    current_user: dict = Depends(get_current_user)
+    limit: int = Query(50, ge=1, le=200, description="Number of sessions per page")
 ):
     """
-    Get chat sessions.
+    Get chat sessions for human agents.
     """
     try:
+        # Get user data from request state (set by middleware)
+        user_data = request.state.user
+        
         service = ChatLogService()
         result = await service.get_chat_sessions(
             agent_id=agent_id,
