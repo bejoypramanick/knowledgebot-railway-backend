@@ -52,15 +52,12 @@ class AuthService:
                 continue
             
             # Create new admin
-            import secrets
-            token = secrets.token_urlsafe(32)
             admin_id = await self.add_admin(email)
             
             # Admin created successfully
             admins_created.append({
                 "email": email,
-                "status": "active",
-                "confirmation_token": token
+                "status": "active"
             })
             logger.info(f"Admin {email} created successfully")
         

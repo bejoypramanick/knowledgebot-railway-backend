@@ -9,16 +9,15 @@ class AuthDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def create_admin(self, email: str, token: str, created_by_email: str) -> str:
-        """Create a new admin with pending status."""
+    async def add_admin(self, email: str) -> None:
+        """Add a new admin."""
         async with get_db_connection() as conn:
-            return await conn.fetchval(
+            await conn.execute(
                 """
-                INSERT INTO admins (email, status, confirmation_token, created_by_email)
-                VALUES ($1, 'active', $2, $3)
-                RETURNING id::text
+                INSERT INTO admins (email, status, created_by_email)
+                VALUES ($1, 'active', $2)
                 """,
-                email, token, created_by_email
+                email, 'system'
             )
 
     async def remove_admin(self, email: str) -> None:
@@ -53,19 +52,6 @@ class AuthDAO:
                 INSERT INTO human_agents (email)
                 VALUES ($1)
                 RETURNING id::text
-                """,
-                email
-            )
-
-    async def remove_human_agent(self, email: str) -> None:
-        """Remove a human agent by setting status to removed."""
-        async with get_db_connection() as conn:
-            await conn.execute(
-                """
-                UPDATE human_agents 
-                SET status = 'removed',
-                    removed_at = NOW()
-                WHERE email = $1
                 """,
                 email
             )

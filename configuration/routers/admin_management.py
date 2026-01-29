@@ -2,7 +2,6 @@
 Admin Management Endpoints
 Handles admin user creation, verification, and role management.
 """
-import secrets
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,15 +18,6 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin-management"])
 
 class AdminRequest(BaseModel):
     emails: List[EmailStr]
-
-
-class ConfirmAdminRequest(BaseModel):
-    token: str
-
-
-def generate_confirmation_token() -> str:
-    """Generate a secure confirmation token."""
-    return secrets.token_urlsafe(32)
 
 
 @router.post("/admins", response_model=dict)
