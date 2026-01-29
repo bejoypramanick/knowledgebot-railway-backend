@@ -56,13 +56,19 @@ def init_firebase_auth():
             return _firebase_app, _firestore_db
         
         # Option 3: Default credentials (for Google Cloud environments)
-        if project_id:
-            _firebase_app = firebase_admin.initialize_app(options={'projectId': project_id})
-        else:
-            _firebase_app = firebase_admin.initialize_app()
-        _firestore_db = firestore.client()
-        logger.info("Firebase Auth and Firestore initialized with default credentials")
-        return _firebase_app, _firestore_db
+        # This will fail in Railway, so we need to handle it gracefully
+        try:
+            if project_id:
+                _firebase_app = firebase_admin.initialize_app(options={'projectId': project_id})
+            else:
+                _firebase_app = firebase_admin.initialize_app()
+            _firestore_db = firestore.client()
+            logger.info("Firebase Auth and Firestore initialized with default credentials")
+            return _firebase_app, _firestore_db
+        except Exception as e:
+            logger.error(f"Failed to initialize Firebase with default credentials: {e}")
+            # Don't raise RuntimeError here, we'll handle it in verify_firebase_token
+            return None, None
         
     except Exception as e:
         logger.error(f"Failed to initialize Firebase Auth and Firestore: {e}")
@@ -79,18 +85,21 @@ def get_firestore():
 
 def verify_firebase_token(id_token: str) -> Optional[Dict[str, Any]]:
     """
-    Verify Firebase Auth ID token and return decoded token.
+    Verify Firebase ID token and return decoded user information.
     
     Args:
-        id_token: Firebase Auth ID token from client
+        id_token: Firebase ID token string
         
     Returns:
-        Decoded token with user info (uid, email, etc.) or None if invalid
+        Decoded token dictionary or None if verification fails
     """
     try:
         # Initialize if not already done
         if _firebase_app is None:
-            init_firebase_auth()
+            result = init_firebase_auth()
+            if result is None:
+                logger.error("Firebase initialization failed - cannot verify token")
+                return None
         
         # Verify and decode the token
         decoded_token = auth.verify_id_token(id_token)
@@ -101,8 +110,8 @@ def verify_firebase_token(id_token: str) -> Optional[Dict[str, Any]]:
     except firebase_admin.exceptions.InvalidArgumentError:
         logger.warning("Invalid Firebase token format")
         return None
-    except firebase_admin.exceptions.ExpiredIdTokenError:
-        logger.warning("Firebase token expired")
+    except firebase_admin.exceptions.InvalidIdTokenError:
+        logger.warning("Invalid Firebase token")
         return None
     except Exception as e:
         logger.error(f"Error verifying Firebase token: {e}")
