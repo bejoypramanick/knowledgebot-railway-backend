@@ -142,26 +142,3 @@ class UserDAO:
         except Exception as e:
             logger.error(f"Error getting user role priority: {e}")
             return None
-
-    async def get_unique_id_by_email_role(self, email: str, role: str) -> Optional[str]:
-        """Get unique ID for user by email and role."""
-        try:
-            async with get_db_connection() as conn:
-                if role == 'admin':
-                    return await conn.fetchval(
-                        "SELECT unique_id FROM user_unique_ids WHERE email = $1 AND role = 'admin'",
-                        email
-                    )
-                elif role == 'human_agent':
-                    return await conn.fetchval(
-                        "SELECT unique_id FROM user_unique_ids WHERE email = $1 AND role = 'human_agent'",
-                        email
-                    )
-                else:
-                    return await conn.fetchval(
-                        "SELECT unique_id FROM user_unique_ids WHERE email = $1 AND role = 'user'",
-                        email
-                    )
-        except Exception as e:
-            logger.error(f"Error getting unique ID for {email} ({role}): {e}")
-            return None
