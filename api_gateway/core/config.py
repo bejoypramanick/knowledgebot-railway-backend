@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     
     # Service URLs for routing
     configuration_service_url: str = "http://localhost:8001"
+    chatbot_orchestration_url: str = "http://localhost:8003"
     
     model_config = {
         'env_file': ".env",
@@ -47,3 +48,4 @@ SERVICE_IDENTITY = settings.service_identity
 
 # Service URLs
 CONFIGURATION_SERVICE_URL = settings.configuration_service_url
+CHATBOT_ORCHESTRATION_URL = settings.chatbot_orchestration_url

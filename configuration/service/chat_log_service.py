@@ -5,14 +5,14 @@ from typing import Optional
 from fastapi import HTTPException
 
 from configuration.core.logging_config import get_railway_logger
-from configuration.dao.chat_log_dao import ChatDAO
+from configuration.dao.chat_log_dao import ChatLogDAO
 from configuration.dao.auth_dao import AuthDAO
 
 logger = get_railway_logger(__name__)
 
 class ChatLogService:
     def __init__(self, connection_manager=None):
-        self.dao = ChatDAO()  # Use local ChatDAO
+        self.dao = ChatLogDAO()  # Use local ChatLogDAO
         self.auth_dao = AuthDAO()  # Use local AuthDAO for user operations
         self.connection_manager = connection_manager
 
