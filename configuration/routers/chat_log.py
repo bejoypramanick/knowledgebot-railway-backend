@@ -33,9 +33,10 @@ class ArchiveSessionRequest(BaseModel):
 
 
 @router.post("/agents/heartbeat")
-async def agent_heartbeat(current_user: dict = Depends(get_current_user)):
+async def agent_heartbeat(request: Request):
     """Heartbeat endpoint for agents."""
-    user_email = current_user.get('email')
+    # Get user email from headers (set by API Gateway)
+    user_email = request.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
@@ -82,10 +83,11 @@ async def get_chat_sessions(
 async def archive_chat_session(
     session_id: str,
     request: ArchiveSessionRequest,
-    current_user: dict = Depends(get_current_user)
+    request_obj: Request
 ):
     """Archive or change status of a chat session."""
-    user_email = current_user.get('email')
+    # Get user email from headers (set by API Gateway)
+    user_email = request_obj.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
@@ -105,10 +107,11 @@ async def archive_chat_session(
 @router.get("/chat-sessions/{session_id}/messages", response_model=dict)
 async def get_session_messages(
     session_id: str,
-    current_user: dict = Depends(get_current_user)
+    request: Request
 ):
     """Get all messages for a specific chat session."""
-    user_email = current_user.get('email')
+    # Get user email from headers (set by API Gateway)
+    user_email = request.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
@@ -125,10 +128,11 @@ async def get_session_messages(
 async def send_agent_message(
     session_id: str,
     request: SendMessageRequest,
-    current_user: dict = Depends(get_current_user)
+    request_obj: Request
 ):
     """Send a message from an agent to a customer."""
-    user_email = current_user.get('email')
+    # Get user email from headers (set by API Gateway)
+    user_email = request_obj.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
@@ -147,9 +151,10 @@ async def send_agent_message(
 
 
 @router.get("/chat-sessions/{session_id}/events")
-async def agent_chat_sse(session_id: str, request: Request, current_user: dict = Depends(get_current_user)):
+async def agent_chat_sse(session_id: str, request: Request):
     """SSE endpoint for agent chat events."""
-    user_email = current_user.get('email')
+    # Get user email from headers (set by API Gateway)
+    user_email = request.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
@@ -163,11 +168,12 @@ async def agent_chat_sse(session_id: str, request: Request, current_user: dict =
 
 @router.post("/chat-sessions/assign")
 async def assign_chat_session(
-    session_id: str = Query(..., description="Customer chat session ID"),
-    current_user: dict = Depends(get_current_user)
+    request: Request,
+    session_id: str = Query(..., description="Customer chat session ID")
 ):
     """Assign a chat session to an available agent using load balancing."""
-    user_email = current_user.get('email')
+    # Get user email from headers (set by API Gateway)
+    user_email = request.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
@@ -182,12 +188,13 @@ async def assign_chat_session(
 
 @router.post("/chat-sessions/{session_id}/transfer")
 async def transfer_chat_session(
+    request: Request,
     session_id: str,
-    target_agent_email: str = Query(..., description="Email of the agent or admin to transfer to"),
-    current_user: dict = Depends(get_current_user)
+    target_agent_email: str = Query(..., description="Email of the agent or admin to transfer to")
 ):
     """Transfer a chat session to another agent or admin."""
-    user_email = current_user.get('email')
+    # Get user email from headers (set by API Gateway)
+    user_email = request.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
@@ -206,14 +213,15 @@ async def transfer_chat_session(
 
 @router.put("/chat-sessions/{session_id}/update")
 async def update_chat_session(
+    request: Request,
     session_id: str,
     assigned_agent: Optional[str] = Query(None, description="Assigned agent email"),
     feedback: Optional[str] = Query(None, description="Session feedback: 'positive' or 'negative'"),
-    user_type: Optional[str] = Query(None, description="User type providing feedback: 'customer' or 'agent'"),
-    current_user: dict = Depends(get_current_user)
+    user_type: Optional[str] = Query(None, description="User type providing feedback: 'customer' or 'agent'")
 ):
     """Update a chat session."""
-    user_email = current_user.get('email')
+    # Get user email from headers (set by API Gateway)
+    user_email = request.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
@@ -234,11 +242,12 @@ async def update_chat_session(
 
 @router.post("/chat-sessions/{session_id}/end-agent", response_model=dict)
 async def end_agent_session(
-    session_id: str,
-    current_user: dict = Depends(get_current_user)
+    request: Request,
+    session_id: str
 ):
     """End agent session."""
-    user_email = current_user.get('email')
+    # Get user email from headers (set by API Gateway)
+    user_email = request.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
@@ -252,14 +261,15 @@ async def end_agent_session(
 
 
 @router.put("/chat-sessions/{session_id}/feedback", response_model=dict)
-async def update_session_feedback(
+async def update_chat_session_feedback(
+    request: Request,
     session_id: str,
     feedback: str = Query(..., description="Session feedback: 'positive' or 'negative'"),
-    user_type: str = Query("customer", description="User type providing feedback: 'customer' or 'agent'"),
-    current_user: dict = Depends(get_current_user)
+    user_type: str = Query("customer", description="User type providing feedback: 'customer' or 'agent'")
 ):
     """Update chat session feedback."""
-    user_email = current_user.get('email')
+    # Get user email from headers (set by API Gateway)
+    user_email = request.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
@@ -293,11 +303,12 @@ async def request_human_agent(session_id: str):
 # Admin chat session request-agent endpoint (authenticated)
 @router.post("/chat-sessions/{session_id}/request-agent", response_model=dict)
 async def admin_request_human_agent(
-    session_id: str,
-    current_user: dict = Depends(get_current_user)
+    request: Request,
+    session_id: str
 ):
     """Request human agent assistance for a chat session (admin endpoint)."""
-    user_email = current_user.get('email')
+    # Get user email from headers (set by API Gateway)
+    user_email = request.headers.get("X-User-Email", "")
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
