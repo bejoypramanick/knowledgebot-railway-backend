@@ -234,23 +234,49 @@ async def update_chat_session(
         raise HTTPException(status_code=500, detail=f"Error updating chat session: {str(e)}")
 
 
-@router.post("/chat-sessions/{session_id}/end-customer", response_model=dict)
-async def end_customer_session(
+@router.post("/chat-sessions/{session_id}/end-agent", response_model=dict)
+async def end_agent_session(
     session_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """End a chat session from the customer side."""
+    """End agent session."""
     user_email = current_user.get('email')
     if not user_email:
         raise HTTPException(status_code=400, detail="User email required")
     
     try:
         service = ChatLogService()
-        result = await service.end_customer_session(session_id, user_email)
+        result = await service.end_agent_session(session_id, user_email)
         return result
     except Exception as e:
-        logger.error(f"Error ending customer session: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error ending customer session: {str(e)}")
+        logger.error(f"Error ending agent session: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error ending agent session: {str(e)}")
+
+
+@router.put("/chat-sessions/{session_id}/feedback", response_model=dict)
+async def update_session_feedback(
+    session_id: str,
+    feedback: str = Query(..., description="Session feedback: 'positive' or 'negative'"),
+    user_type: str = Query("customer", description="User type providing feedback: 'customer' or 'agent'"),
+    current_user: dict = Depends(get_current_user)
+):
+    """Update chat session feedback."""
+    user_email = current_user.get('email')
+    if not user_email:
+        raise HTTPException(status_code=400, detail="User email required")
+    
+    try:
+        service = ChatLogService()
+        result = await service.update_session_feedback(
+            session_id=session_id,
+            feedback=feedback,
+            user_type=user_type,
+            user_email=user_email
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error updating session feedback: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error updating session feedback: {str(e)}")
 
 
 # Public chat endpoints (no authentication required)

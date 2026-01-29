@@ -47,36 +47,6 @@ async def proxy_chatbot_config(request: Request):
         logger.error(f"Unexpected error in configuration proxy: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-@router.get("/configuration/widget")
-@router.post("/configuration/widget")
-async def proxy_widget_config(request: Request):
-    """Proxy widget configuration requests to configuration service"""
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            method = request.method
-            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/configuration/widget"
-            
-            body = None
-            if method == "POST":
-                body = await request.body()
-            
-            headers = dict(request.headers)
-            headers.pop("host", None)
-            
-            response = await client.request(
-                method=method,
-                url=url,
-                content=body,
-                headers=headers
-            )
-            
-            return JSONResponse(
-                content=response.json(),
-                status_code=response.status_code,
-                headers=dict(response.headers)
-            )
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Configuration service timeout")
     except httpx.RequestError as e:
         logger.error(f"Error proxying to configuration service: {e}")
         raise HTTPException(status_code=503, detail=f"Configuration service unavailable: {str(e)}")
@@ -352,45 +322,12 @@ async def proxy_widget_routes(request: Request, path: str):
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 # Feedback API endpoints - proxy to configuration service
-@router.post("/feedback")
-async def proxy_feedback_submit(request: Request):
-    """Proxy feedback submission to configuration service"""
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Note: Both /feedback and /feedback/submit hit the same backend endpoint /api/v1/feedback
-            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/feedback"
-            
-            body = await request.body()
-            headers = dict(request.headers)
-            headers.pop("host", None)
-            
-            response = await client.post(
-                url=url,
-                content=body,
-                headers=headers
-            )
-            
-            return JSONResponse(
-                content=response.json() if "application/json" in response.headers.get("content-type", "") else response.text,
-                status_code=response.status_code,
-                headers=dict(response.headers)
-            )
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Configuration service timeout")
-    except httpx.RequestError as e:
-        logger.error(f"Error proxying feedback to configuration service: {e}")
-        raise HTTPException(status_code=503, detail=f"Configuration service unavailable: {str(e)}")
-    except Exception as e:
-        logger.error(f"Unexpected error in feedback proxy: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-
 @router.post("/feedback/submit")
-async def proxy_feedback_submit_alt(request: Request):
-    """Proxy feedback submission to configuration service - alternative endpoint for frontend compatibility"""
+async def proxy_feedback_submit(request: Request):
+    """Proxy feedback submission to configuration service - frontend endpoint"""
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # Route to the same backend endpoint as /feedback
+            # Route to the backend endpoint
             url = f"{CONFIGURATION_SERVICE_URL}/api/v1/feedback"
             
             body = await request.body()

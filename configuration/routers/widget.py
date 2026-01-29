@@ -130,5 +130,60 @@ async def upload_image(file: UploadFile = File(...), type: str = Form(...)):
         raise HTTPException(status_code=500, detail=f"Error uploading image: {str(e)}")
 
 
+@router.post("/embed-script")
+async def generate_widget_script(request_data: dict):
+    """Generate widget embed script for frontend."""
+    try:
+        # Extract configuration from request
+        config = request_data.get('config', {})
+        
+        # Generate a simple embed script
+        script = f"""
+(function() {{
+    const config = {json.dumps(config)};
+    
+    // Create widget container
+    const container = document.createElement('div');
+    container.id = 'knowledgebot-widget';
+    container.style.position = 'fixed';
+    container.style.bottom = config.position?.bottom || '20px';
+    container.style.right = config.position?.right || '20px';
+    container.style.zIndex = config.position?.zIndex || '9999';
+    
+    // Create widget button
+    const button = document.createElement('button');
+    button.innerHTML = config.display_name || 'Chat with us';
+    button.style.backgroundColor = config.button_color || '#007bff';
+    button.style.color = config.button_text_color || '#ffffff';
+    button.style.border = 'none';
+    button.style.borderRadius = config.border_radius || '5px';
+    button.style.padding = '10px 15px';
+    button.style.cursor = 'pointer';
+    button.style.fontSize = '14px';
+    
+    // Add click handler
+    button.addEventListener('click', function() {{
+        // Open chat window
+        window.open('{config.get("chat_url", "/chat")}', '_blank', 'width=400,height=600');
+    }});
+    
+    container.appendChild(button);
+    document.body.appendChild(container);
+    
+    console.log('Knowledgebot widget loaded successfully');
+}})();
+"""
+        
+        return {{
+            "success": True,
+            "script": script,
+            "config": config
+        }}
+        
+    except Exception as e:
+        logger.error(f"Error generating widget script: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error generating widget script: {str(e)}")
+
+
 # Images are now persisted directly in PostgreSQL database
 # No R2 storage upload needed

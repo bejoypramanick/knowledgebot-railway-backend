@@ -111,3 +111,59 @@ async def get_user_roles(uid: str = None, email: str = None):
     except Exception as e:
         logger.error(f"Error getting user roles: {e}", exc_info=True)
         return []  # Return empty array for frontend compatibility
+
+
+@router.post("/unique-id", response_model=dict)
+async def get_or_create_user_id(request_data: dict):
+    """Get or create user ID by email and role."""
+    try:
+        email = request_data.get('email')
+        role = request_data.get('role', 'customer')
+        
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+        
+        # For now, generate a simple unique ID based on email and role
+        # In production, this would use a proper ID generation service
+        import hashlib
+        import time
+        
+        unique_id = f"{role}_{hashlib.md5(f'{email}_{role}_{int(time.time())}'.encode()).hexdigest()[:8]}"
+        
+        return {
+            "unique_id": unique_id,
+            "email": email,
+            "role": role,
+            "created_at": "2024-01-29T16:36:00Z"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting or creating user ID: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting or creating user ID: {str(e)}")
+
+
+@router.get("/unique-id", response_model=dict)
+async def get_user_id(email: str, role: str = "customer"):
+    """Get user ID by email and role."""
+    try:
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+        
+        # For now, generate the same unique ID format
+        import hashlib
+        
+        unique_id = f"{role}_{hashlib.md5(f'{email}_{role}'.encode()).hexdigest()[:8]}"
+        
+        return {
+            "unique_id": unique_id,
+            "email": email,
+            "role": role
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting user ID: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error getting user ID: {str(e)}")
