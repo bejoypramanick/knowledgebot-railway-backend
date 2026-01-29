@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from api_gateway.core.config import CHATBOT_ORCHESTRATION_URL
+from api_gateway.routers.config import add_user_headers_to_request
 from api_gateway.schemas.models import (DeleteSessionResponse,
                                         ListSessionsResponse,
                                         SuggestedMessagesRequest,
@@ -29,13 +30,19 @@ async def chat_stream_endpoint(request: Request):
         for attempt in range(max_retries):
             try:
                 async with httpx.AsyncClient(timeout=60.0) as client:
+                    # Prepare headers with user information
+                    headers = {
+                        "Content-Type": request.headers.get("content-type", "application/json"),
+                        "Accept": request.headers.get("accept", "text/plain"),
+                    }
+                    
+                    # Add user headers if user is authenticated
+                    headers = add_user_headers_to_request(request, headers)
+                    
                     response = await client.post(
                         f"{CHATBOT_ORCHESTRATION_URL}/chat/stream",
                         content=body,
-                        headers={
-                            "Content-Type": request.headers.get("content-type", "application/json"),
-                            "Accept": request.headers.get("accept", "text/plain"),
-                        }
+                        headers=headers
                     )
                     
                     if response.status_code == 200:

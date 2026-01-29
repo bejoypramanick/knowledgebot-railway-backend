@@ -29,6 +29,9 @@ async def proxy_personas_routes(request: Request, path: str):
             headers = dict(request.headers)
             headers.pop("host", None)
             
+            # Add user headers if user is authenticated
+            headers = add_user_headers_to_request(request, headers)
+            
             response = await client.request(
                 method=method,
                 url=url,
@@ -74,6 +77,9 @@ async def proxy_chatbot_config(request: Request):
             
             headers = dict(request.headers)
             headers.pop("host", None)
+            
+            # Add user headers if user is authenticated
+            headers = add_user_headers_to_request(request, headers)
             
             response = await client.request(
                 method=method,
@@ -123,6 +129,9 @@ async def proxy_chat_routes(request: Request, path: str):
             headers = dict(request.headers)
             headers.pop("host", None)
             
+            # Add user headers if user is authenticated
+            headers = add_user_headers_to_request(request, headers)
+            
             response = await client.request(
                 method=method,
                 url=url,
@@ -163,6 +172,9 @@ async def proxy_admin_routes(request: Request, path: str):
             
             headers = dict(request.headers)
             headers.pop("host", None)
+            
+            # Add user headers if user is authenticated
+            headers = add_user_headers_to_request(request, headers)
             
             response = await client.request(
                 method=method,
@@ -207,6 +219,9 @@ async def proxy_auth_routes(request: Request, path: str):
             
             headers = dict(request.headers)
             headers.pop("host", None)
+            
+            # Add user headers if user is authenticated
+            headers = add_user_headers_to_request(request, headers)
             
             response = await client.request(
                 method=method,
@@ -294,6 +309,9 @@ async def proxy_users_routes(request: Request, path: str):
             headers = dict(request.headers)
             headers.pop("host", None)
             
+            # Add user headers if user is authenticated
+            headers = add_user_headers_to_request(request, headers)
+            
             response = await client.request(
                 method=method,
                 url=url,
@@ -322,6 +340,26 @@ async def proxy_users_routes(request: Request, path: str):
         logger.error(f"Unexpected error in users proxy: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
+
+def add_user_headers_to_request(request: Request, headers: dict) -> dict:
+    """Add user information headers to downstream service requests"""
+    try:
+        # Check if user is authenticated (user data set by auth middleware)
+        if hasattr(request.state, 'user') and request.state.user:
+            user_data = request.state.user
+            headers.update({
+                'X-User-UID': user_data.get('uid', ''),
+                'X-User-Email': user_data.get('email', ''),
+                'X-User-Display-Name': user_data.get('displayName', ''),
+                'X-User-Photo-URL': user_data.get('photoURL', ''),
+                'X-User-Roles': ','.join(user_data.get('roles', [])),
+                'X-User-Role': user_data.get('roles', ['user'])[0]  # Primary role
+            })
+    except Exception as e:
+        logger.error(f"Error adding user headers: {e}")
+    
+    return headers
+
 # Widget API endpoints - proxy to configuration service
 @router.api_route("/widget/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy_widget_routes(request: Request, path: str):
@@ -341,6 +379,9 @@ async def proxy_widget_routes(request: Request, path: str):
             
             headers = dict(request.headers)
             headers.pop("host", None)
+            
+            # Add user headers if user is authenticated
+            headers = add_user_headers_to_request(request, headers)
             
             response = await client.request(
                 method=method,
@@ -383,6 +424,9 @@ async def proxy_feedback_submit(request: Request):
             headers = dict(request.headers)
             headers.pop("host", None)
             
+            # Add user headers if user is authenticated
+            headers = add_user_headers_to_request(request, headers)
+            
             response = await client.post(
                 url=url,
                 content=body,
@@ -423,6 +467,9 @@ async def proxy_notifications_routes(request: Request, path: str):
             
             headers = dict(request.headers)
             headers.pop("host", None)
+            
+            # Add user headers if user is authenticated
+            headers = add_user_headers_to_request(request, headers)
             
             response = await client.request(
                 method=method,
