@@ -1,5 +1,29 @@
-# Configuration Service-Specific Requirements
-# Note: Base dependencies are in requirements-base.txt
+# Configuration Service - Complete Requirements
+# Base Requirements - Common across all services
+# Core FastAPI
+fastapi>=0.124.0
+uvicorn[standard]>=0.38.0
+pydantic[email]>=2.12.0
+httpx>=0.28.0
+python-dotenv>=1.2.0
 
-# Firebase Admin SDK (for Authentication)
+# Database (common for most services)
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.0
+
+# Common utilities
+pydantic-settings>=2.5.0
+psutil>=6.1.0
+
+# Retry logic (used by core/db.py)
+tenacity>=8.2.2
+
+# Firebase Admin SDK (used by core/firebase_auth.py)
 firebase-admin>=6.0.0
+
+# Configuration Service-Specific Requirements
+# Enhanced email validation
+email-validator>=2.0.0
+
+# Input sanitization for security
+bleach>=6.0.0
