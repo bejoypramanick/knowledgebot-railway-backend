@@ -3,7 +3,7 @@ Consolidated Configuration Router
 All configuration endpoints in one file for easier debugging
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from typing import Dict, List, Any, Optional
 import logging
 import json
@@ -16,6 +16,7 @@ from ..service.notifications_service import NotificationsService
 from ..service.performance_service import PerformanceService
 from ..service.feedback_service import FeedbackService
 from ..service.token_usage_service import TokenUsageService
+from ..core.auth_middleware import get_current_user
 from ..schemas.models import (
     ChatbotConfigRequest, 
     AdminManagementRequest,
@@ -258,70 +259,6 @@ async def get_feedback():
         logger.error(f"Error getting feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# =================================
-# USER ENDPOINTS
-# =================================
-
-@router.get("/users/profile")
-async def get_user_profile():
-    """Get user profile information"""
-    try:
-        # Return default profile since no auth
-        profile = {
-            "email": "admin@example.com",
-            "name": "Administrator",
-            "role": "admin",
-            "preferences": {
-                "theme": "light",
-                "notifications": True
-            }
-        }
-        return {"success": True, "data": profile}
-    except Exception as e:
-        logger.error(f"Error getting user profile: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.put("/users/profile")
-async def update_user_profile(profile_data: Dict[str, Any]):
-    """Update user profile information"""
-    try:
-        # Mock update since no auth
-        return {"success": True, "message": "Profile updated successfully"}
-    except Exception as e:
-        logger.error(f"Error updating user profile: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/users")
-async def get_all_users():
-    """Get all users"""
-    try:
-        # Return mock users since no auth
-        users = [
-            {
-                "email": "admin@example.com",
-                "name": "Administrator",
-                "role": "admin",
-                "status": "active"
-            }
-        ]
-        return {"success": True, "data": users}
-    except Exception as e:
-        logger.error(f"Error getting users: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =================================
-# TOKEN USAGE ENDPOINTS
-# =================================
-
-@router.get("/token-usage")
-async def get_token_usage():
-    """Get token usage statistics"""
-    try:
-        usage = await token_usage_service.get_usage_stats()
-        return {"success": True, "data": usage}
-    except Exception as e:
-        logger.error(f"Error getting token usage: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
 # HEALTH ENDPOINTS

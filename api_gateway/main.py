@@ -17,6 +17,7 @@ from api_gateway.core.logging_config import auto_configure_logging
 logger = auto_configure_logging("api_gateway")
 
 from api_gateway.core.config import get_settings
+from api_gateway.core.auth_middleware import get_current_user
 # Import routers and config
 from api_gateway.routers import router as api_router
 try:
@@ -50,11 +51,56 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Knowledge Bot API Gateway",
     version="1.0.0",
-    lifespan=lifespan
+    description="API Gateway for Knowledge Bot microservices",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
-# Store start time
-app.start_time = time.time()
+# Add Firebase authentication middleware
+class FirebaseAuthMiddleware(BaseHTTPMiddleware):
+    """Firebase Authentication Middleware"""
+    def __init__(self, app, exclude_paths=None):
+        super().__init__(app)
+        self.exclude_paths = exclude_paths or [
+            "/health",
+            "/",
+            "/docs", 
+            "/redoc",
+            "/openapi.json",
+            "/favicon.ico",
+            "/auth/login",
+            "/auth/verify"
+        ]
+    
+    async def dispatch(self, request, call_next):
+        # Skip auth for excluded paths
+        if request.url.path in self.exclude_paths or request.method == "OPTIONS":
+            return await call_next(request)
+        
+        # Get token from Authorization header
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail="Missing or invalid authorization header",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+        
+        # Verify token and add user to request state
+        token = auth_header.split(" ")[1]
+        try:
+            from api_gateway.core.firebase_auth import verify_firebase_token
+            user_data = verify_firebase_token(token)
+            if not user_data:
+                raise HTTPException(status_code=401, detail="Invalid token")
+            request.state.user = user_data
+        except Exception as e:
+            raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+        
+        return await call_next(request)
+
+# Add middleware to app
+app.add_middleware(FirebaseAuthMiddleware)
 
 register_fastapi_exception_handlers(app, "api_gateway")
 
