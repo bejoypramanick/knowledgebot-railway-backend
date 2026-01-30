@@ -47,8 +47,8 @@ def validate_configuration_consistency(config: ChatbotConfigRequest):
     # Validate admin email domains (optional business rule)
     # Allow common email providers and specific domains
     allowed_domains = [
-        'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
-        'globistaan.com', 'pramanick.com', 'company.com', 'trusted-domain.org'
+        'gmail.com',
+        'globistaan.com'
     ]
     
     if config.admin_emails:
