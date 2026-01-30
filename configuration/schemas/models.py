@@ -209,6 +209,25 @@ class WidgetConfigRequest(BaseModel):
     display_name: Optional[str] = Field(None, min_length=2, max_length=50)
     initial_message: Optional[str] = Field(None, min_length=5, max_length=200)
     auto_show_duration: Optional[int] = Field(None, ge=0, le=30)
+
+# Additional request models for router endpoints
+class AdminManagementRequest(BaseModel):
+    email: ValidatedEmail
+
+class PersonaRequest(BaseModel):
+    persona_name: str = Field(..., min_length=1, max_length=50)
+    system_prompt: str = Field(..., min_length=10, max_length=5000)
+    description: Optional[str] = Field(None, max_length=500)
+
+class NotificationRequest(BaseModel):
+    user_interactions_enabled: bool = True
+    error_alerts_enabled: bool = True
+    feedback_requests_enabled: bool = True
+
+class FeedbackRequest(BaseModel):
+    rating: int = Field(..., ge=1, le=5)
+    comment: Optional[str] = Field(None, max_length=1000)
+    session_id: Optional[str] = Field(None, max_length=100)
     suggested_messages: Optional[List[str]] = Field(None, max_items=5)
     keep_showing_suggested: Optional[bool] = None
     theme: Optional[str] = Field(None, pattern=r'^(light|dark)$')
