@@ -25,7 +25,7 @@ file_service = FileService()
 # FILE UPLOAD ENDPOINTS
 # =================================
 
-@router.post("/files/upload")
+@router.post("/knowledgebase/files/upload")
 async def upload_file(file: UploadFile = File(...), request: Request = None):
     """Upload a file to the knowledgebase"""
     try:
@@ -60,7 +60,7 @@ async def upload_file(file: UploadFile = File(...), request: Request = None):
         logger.error(f"Error uploading file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/files")
+@router.get("/knowledgebase/files")
 async def list_files():
     """List all files"""
     try:
@@ -74,7 +74,7 @@ async def list_files():
         logger.error(f"Error listing files: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/files/{file_id}")
+@router.delete("/knowledgebase/files/{file_id}")
 async def delete_file(file_id: str):
     """Delete a file"""
     try:
@@ -98,7 +98,7 @@ async def delete_file(file_id: str):
 # HEALTH ENDPOINTS
 # =================================
 
-@router.get("/health")
+@router.get("/knowledgebase/health")
 async def health_check():
     """Health check endpoint"""
     try:

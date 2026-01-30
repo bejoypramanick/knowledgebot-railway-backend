@@ -23,7 +23,7 @@ router = APIRouter()
 # FIREBASE AUTHENTICATION ENDPOINTS
 # =================================
 
-@router.post("/auth/verify")
+@router.post("/gateway/auth/verify")
 async def verify_auth_token(request: Request):
     """Verify Firebase authentication token"""
     try:
@@ -48,7 +48,7 @@ async def verify_auth_token(request: Request):
         logger.error(f"Error verifying token: {e}")
         raise HTTPException(status_code=500, detail=f"Error verifying token: {str(e)}")
 
-@router.get("/auth/user/{uid}")
+@router.get("/gateway/auth/user/{uid}")
 async def get_user_by_uid(uid: str):
     """Get user information by Firebase UID."""
     try:
@@ -67,7 +67,7 @@ async def get_user_by_uid(uid: str):
         logger.error(f"Error getting user by UID {uid}: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting user: {str(e)}")
 
-@router.post("/auth/login")
+@router.post("/gateway/auth/login")
 async def login_user(request: Request):
     """Login user with Firebase token"""
     try:
@@ -98,7 +98,7 @@ async def login_user(request: Request):
 # CONFIGURATION SERVICE PROXY ENDPOINTS
 # =================================
 
-@router.get("/api/v1/users/profile")
+@router.get("/api/v1/configuration/users/profile")
 async def proxy_user_profile(request: Request):
     """Proxy user profile requests to configuration service"""
     try:
@@ -123,7 +123,7 @@ async def proxy_user_profile(request: Request):
         logger.error(f"❌ User profile proxy error: {e}")
         raise HTTPException(status_code=500, detail="User profile proxy error")
 
-@router.put("/api/v1/users/profile")
+@router.put("/api/v1/configuration/users/profile")
 async def proxy_update_user_profile(request: Request):
     """Proxy update user profile requests to configuration service"""
     try:
@@ -149,7 +149,7 @@ async def proxy_update_user_profile(request: Request):
         logger.error(f"❌ Update user profile proxy error: {e}")
         raise HTTPException(status_code=500, detail="Update user profile proxy error")
 
-@router.get("/api/v1/users")
+@router.get("/api/v1/configuration/users")
 async def proxy_get_users(request: Request):
     """Proxy get users requests to configuration service"""
     try:
@@ -178,7 +178,7 @@ async def proxy_get_users(request: Request):
 # CONFIGURATION ENDPOINTS
 # =================================
 
-@router.get("/config/settings")
+@router.get("/gateway/config/settings")
 async def get_api_settings():
     """Get API configuration settings"""
     try:
@@ -199,7 +199,7 @@ async def get_api_settings():
 # HEALTH AND MONITORING ENDPOINTS
 # =================================
 
-@router.get("/health")
+@router.get("/gateway/health")
 async def health_check():
     """Comprehensive health check for API Gateway"""
     try:
@@ -220,7 +220,7 @@ async def health_check():
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/status")
+@router.get("/gateway/status")
 async def get_service_status():
     """Get detailed service status"""
     try:
@@ -245,7 +245,7 @@ async def get_service_status():
 # RATE LIMITING ENDPOINTS
 # =================================
 
-@router.get("/rate-limit/status")
+@router.get("/gateway/rate-limit/status")
 async def get_rate_limit_status():
     """Get rate limiting status"""
     try:
@@ -272,7 +272,7 @@ async def get_rate_limit_status():
 # LOGGING ENDPOINTS
 # =================================
 
-@router.get("/logs/recent")
+@router.get("/gateway/logs/recent")
 async def get_recent_logs(limit: int = 50):
     """Get recent API logs"""
     try:
@@ -290,7 +290,7 @@ async def get_recent_logs(limit: int = 50):
         logger.error(f"Error getting recent logs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/logs/error")
+@router.post("/gateway/logs/error")
 async def log_error(error_data: Dict[str, Any]):
     """Log an error from client"""
     try:
@@ -304,7 +304,7 @@ async def log_error(error_data: Dict[str, Any]):
 # METRICS ENDPOINTS
 # =================================
 
-@router.get("/metrics/overview")
+@router.get("/gateway/metrics/overview")
 async def get_metrics_overview():
     """Get API metrics overview"""
     try:
@@ -341,7 +341,7 @@ async def get_metrics_overview():
 # MIDDLEWARE ENDPOINTS
 # =================================
 
-@router.get("/middleware/cors")
+@router.get("/gateway/middleware/cors")
 async def get_cors_status():
     """Get CORS configuration status"""
     try:
@@ -357,7 +357,7 @@ async def get_cors_status():
         logger.error(f"Error getting CORS status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/middleware/auth")
+@router.get("/gateway/middleware/auth")
 async def get_auth_status():
     """Get authentication middleware status"""
     try:
@@ -376,7 +376,7 @@ async def get_auth_status():
 # SSE ENDPOINTS
 # =================================
 
-@router.get("/ws/events")
+@router.get("/gateway/ws/events")
 async def websocket_sse_endpoint():
     """SSE endpoint to replace WebSocket functionality."""
     queue = await sse_manager.connect()
@@ -397,7 +397,7 @@ async def websocket_sse_endpoint():
         await sse_manager.disconnect(queue)
         raise HTTPException(status_code=500, detail="SSE connection failed")
 
-@router.post("/ws/messages")
+@router.post("/gateway/ws/messages")
 async def websocket_message_endpoint(request: Request):
     """HTTP endpoint to receive messages and broadcast via SSE."""
     try:
@@ -418,7 +418,7 @@ async def websocket_message_endpoint(request: Request):
         logger.error(f"Error processing message: {e}")
         raise HTTPException(status_code=500, detail="Failed to process message")
 
-@router.get("/api/v1/chat/{session_id}/events")
+@router.get("/api/v1/configuration/chat/{session_id}/events")
 async def proxy_customer_sse(session_id: str, request: Request):
     """Proxy customer SSE connections to configuration service"""
     try:
@@ -447,7 +447,7 @@ async def proxy_customer_sse(session_id: str, request: Request):
         logger.error(f"❌ SSE proxy error: {e}")
         raise HTTPException(status_code=500, detail="SSE proxy error")
 
-@router.get("/api/v1/admin/chat-sessions/{session_id}/events")
+@router.get("/api/v1/configuration/admin/chat-sessions/{session_id}/events")
 async def proxy_agent_sse(session_id: str, request: Request):
     """Proxy agent SSE connections to configuration service"""
     try:
@@ -480,7 +480,7 @@ async def proxy_agent_sse(session_id: str, request: Request):
 # CHAT PROXY ENDPOINTS
 # =================================
 
-@router.post("/chat/stream")
+@router.post("/api/v1/chatbot/chat/stream")
 async def chat_stream_proxy(request: Request):
     """Proxy chat stream requests to chatbot orchestration service"""
     try:
@@ -562,7 +562,7 @@ async def chat_stream_proxy(request: Request):
         logger.error(f"Chat stream endpoint error: {e}")
         raise HTTPException(status_code=500, detail=f"Chat stream service error: {str(e)}")
 
-@router.post("/api/v1/suggested-messages")
+@router.post("/api/v1/chatbot/suggested-messages")
 async def suggested_messages_endpoint(request: Request):
     """Route suggested messages requests to chatbot orchestration service."""
     try:
@@ -597,7 +597,7 @@ async def suggested_messages_endpoint(request: Request):
         logger.error(f"Error routing suggested messages request: {e}")
         raise HTTPException(status_code=500, detail=f"Suggested messages service error: {str(e)}")
 
-@router.get("/api/v1/sessions")
+@router.get("/api/v1/chatbot/sessions")
 async def list_sessions_endpoint(request: Request):
     """Route list sessions requests to chatbot orchestration service."""
     try:
@@ -621,7 +621,7 @@ async def list_sessions_endpoint(request: Request):
         logger.error(f"Error routing list sessions request: {e}")
         raise HTTPException(status_code=500, detail=f"Chat service error: {str(e)}")
 
-@router.delete("/api/v1/sessions/{session_id}")
+@router.delete("/api/v1/chatbot/sessions/{session_id}")
 async def delete_session_endpoint(session_id: str, request: Request):
     """Route delete session requests to chatbot orchestration service."""
     try:

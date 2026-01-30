@@ -21,7 +21,7 @@ crawler_service = CrawlerService()
 # WEB SCRAPING ENDPOINTS
 # =================================
 
-@router.post("/scrape")
+@router.post("/webcrawl/scrape")
 async def scrape_website(request: Request):
     """Scrape a single website"""
     try:
@@ -51,7 +51,7 @@ async def scrape_website(request: Request):
         logger.error(f"Error scraping website: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/scrape/jobs")
+@router.get("/webcrawl/scrape/jobs")
 async def get_scraping_jobs():
     """Get all scraping jobs"""
     try:
@@ -65,7 +65,7 @@ async def get_scraping_jobs():
         logger.error(f"Error getting scraping jobs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/scrape/jobs/{job_id}")
+@router.get("/webcrawl/scrape/jobs/{job_id}")
 async def get_scraping_job_details(job_id: str):
     """Get details of a specific scraping job"""
     try:
@@ -84,7 +84,7 @@ async def get_scraping_job_details(job_id: str):
         logger.error(f"Error getting job details: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/scrape/jobs/{job_id}")
+@router.delete("/webcrawl/scrape/jobs/{job_id}")
 async def delete_scraping_job(job_id: str):
     """Delete a scraping job"""
     try:
@@ -102,7 +102,7 @@ async def delete_scraping_job(job_id: str):
 # WEB CRAWLING ENDPOINTS
 # =================================
 
-@router.post("/crawl")
+@router.post("/webcrawl/crawl")
 async def start_crawl_session(request: Request):
     """Start a crawl session for multiple websites"""
     try:
@@ -144,7 +144,7 @@ async def start_crawl_session(request: Request):
         logger.error(f"Error starting crawl session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/crawl/sessions")
+@router.get("/webcrawl/crawl/sessions")
 async def get_crawl_sessions():
     """Get all crawl sessions"""
     try:
@@ -158,7 +158,7 @@ async def get_crawl_sessions():
         logger.error(f"Error getting crawl sessions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/crawl/sessions/{session_id}")
+@router.get("/webcrawl/crawl/sessions/{session_id}")
 async def get_crawl_session_details(session_id: str):
     """Get details of a crawl session"""
     try:
@@ -177,7 +177,7 @@ async def get_crawl_session_details(session_id: str):
         logger.error(f"Error getting session details: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/crawl/sessions/{session_id}/stop")
+@router.post("/webcrawl/crawl/sessions/{session_id}/stop")
 async def stop_crawl_session(session_id: str):
     """Stop a running crawl session"""
     try:
@@ -195,7 +195,7 @@ async def stop_crawl_session(session_id: str):
 # CONTENT ENDPOINTS
 # =================================
 
-@router.get("/scrape/jobs/{job_id}/content")
+@router.get("/webcrawl/scrape/jobs/{job_id}/content")
 async def get_extracted_content(job_id: str, format: str = "json"):
     """Get extracted content from a scraping job"""
     try:
@@ -213,7 +213,7 @@ async def get_extracted_content(job_id: str, format: str = "json"):
         logger.error(f"Error getting extracted content: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/search")
+@router.get("/webcrawl/search")
 async def search_extracted_content(query: str, limit: int = 20):
     """Search across extracted content"""
     try:
@@ -239,7 +239,7 @@ async def search_extracted_content(query: str, limit: int = 20):
 # ANALYTICS ENDPOINTS
 # =================================
 
-@router.get("/analytics/scraping")
+@router.get("/webcrawl/analytics/scraping")
 async def get_scraping_analytics():
     """Get scraping analytics summary"""
     try:
@@ -253,7 +253,7 @@ async def get_scraping_analytics():
         logger.error(f"Error getting analytics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/analytics/domains")
+@router.get("/webcrawl/analytics/domains")
 async def get_domain_analytics():
     """Get domain-specific analytics"""
     try:
@@ -271,7 +271,7 @@ async def get_domain_analytics():
 # HEALTH ENDPOINTS
 # =================================
 
-@router.get("/health")
+@router.get("/webcrawl/health")
 async def health_check():
     """Health check for website crawling service"""
     try:

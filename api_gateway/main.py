@@ -162,9 +162,15 @@ if chat_router:
     app.include_router(chat_router) # Chat router has mixed prefixes, so we include it directly
 
 # Add root health endpoint for direct access
-@app.get("/health")
+@app.get("/gateway/health")
 async def root_health_check():
     """Root health check endpoint"""
+    return {"status": "healthy", "service": "api_gateway", "version": "1.0.0"}
+
+# Also keep /health for backward compatibility
+@app.get("/health")
+async def legacy_health_check():
+    """Legacy health check endpoint"""
     return {"status": "healthy", "service": "api_gateway", "version": "1.0.0"}
 
 if __name__ == "__main__":
