@@ -400,3 +400,172 @@ async def proxy_agent_sse(session_id: str, request: Request):
     except Exception as e:
         logger.error(f"SSE proxy error: {e}")
         raise HTTPException(status_code=500, detail="SSE proxy error")
+
+# =================================
+# CHAT PROXY ENDPOINTS
+# =================================
+
+@router.post("/chat/stream")
+async def chat_stream_proxy(request: Request):
+    """Proxy chat stream requests to chatbot orchestration service"""
+    try:
+        import asyncio
+        import httpx
+        from ..core.config import get_settings
+        
+        # Set user data in request state for header forwarding
+        request.state.user = {
+            'uid': request.headers.get('X-User-UID', ''),
+            'email': request.headers.get('X-User-Email', ''),
+            'displayName': request.headers.get('X-User-Display-Name', ''),
+            'photoURL': request.headers.get('X-User-Photo-URL', ''),
+            'role': 'user'
+        }
+        
+        # Get request body
+        body = await request.body()
+        
+        # Retry logic for handling intermittent 502 errors
+        max_retries = 3
+        base_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=60.0) as client:
+                    # Prepare headers with user information
+                    headers = {
+                        "Content-Type": request.headers.get("content-type", "application/json"),
+                        "Accept": request.headers.get("accept", "text/plain"),
+                    }
+                    
+                    # Add user headers if user is authenticated
+                    if request.state.user.get('uid'):
+                        headers.update({
+                            "X-User-UID": request.state.user['uid'],
+                            "X-User-Email": request.state.user['email'],
+                            "X-User-Display-Name": request.state.user['displayName'],
+                            "X-User-Photo-URL": request.state.user['photoURL']
+                        })
+                    
+                    response = await client.post(
+                        f"{get_settings().CHATBOT_ORCHESTRATION_URL}/chat/stream",
+                        content=body,
+                        headers=headers
+                    )
+                    
+                    if response.status_code == 200:
+                        from fastapi.responses import StreamingResponse
+                        return StreamingResponse(
+                            response.aiter_bytes(),
+                            media_type=response.headers.get("content-type", "text/plain"),
+                            headers={
+                                "Cache-Control": "no-cache",
+                                "Connection": "keep-alive",
+                                "Access-Control-Allow-Origin": "*",
+                                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                            }
+                        )
+                    elif response.status_code in [502, 503, 504] and attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        raise HTTPException(status_code=response.status_code, detail=f"Chat service error: {response.text}")
+                        
+            except httpx.RequestError as req_err:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)
+                    await asyncio.sleep(delay)
+                    continue
+                else:
+                    raise
+            except Exception:
+                raise
+                
+    except Exception as e:
+        logger.error(f"Chat stream endpoint error: {e}")
+        raise HTTPException(status_code=500, detail=f"Chat stream service error: {str(e)}")
+
+@router.post("/api/v1/suggested-messages")
+async def suggested_messages_endpoint(request: Request):
+    """Route suggested messages requests to chatbot orchestration service."""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        headers = dict(request.headers)
+        hop_by_hop_headers = [
+            'connection', 'keep-alive', 'proxy-authenticate',
+            'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade'
+        ]
+        headers = {k: v for k, v in headers.items() if k.lower() not in hop_by_hop_headers}
+        headers.pop('host', None)
+        headers.pop('content-length', None)
+        headers.pop('Content-Length', None)
+
+        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/suggested-messages"
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                target_url,
+                json=await request.json(),
+                headers=headers,
+                timeout=30.0
+            )
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=resp.status_code,
+                content=resp.json() if resp.headers.get("content-type", "").startswith('application/json') else resp.text
+            )
+    except Exception as e:
+        logger.error(f"Error routing suggested messages request: {e}")
+        raise HTTPException(status_code=500, detail=f"Suggested messages service error: {str(e)}")
+
+@router.get("/api/v1/sessions")
+async def list_sessions_endpoint(request: Request):
+    """Route list sessions requests to chatbot orchestration service."""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        headers = dict(request.headers)
+        hop_by_hop_headers = [
+            'connection', 'keep-alive', 'proxy-authenticate',
+            'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade'
+        ]
+        headers = {k: v for k, v in headers.items() if k.lower() not in hop_by_hop_headers and k.lower() not in ['host', 'content-length']}
+        
+        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/sessions"
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(target_url, headers=headers, timeout=10.0)
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except Exception as e:
+        logger.error(f"Error routing list sessions request: {e}")
+        raise HTTPException(status_code=500, detail=f"Chat service error: {str(e)}")
+
+@router.delete("/api/v1/sessions/{session_id}")
+async def delete_session_endpoint(session_id: str, request: Request):
+    """Route delete session requests to chatbot orchestration service."""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        headers = dict(request.headers)
+        hop_by_hop_headers = [
+            'connection', 'keep-alive', 'proxy-authenticate',
+            'proxy-authorization', 'te', 'trailers', 'transfer-encoding', 'upgrade'
+        ]
+        headers = {k: v for k, v in headers.items() if k.lower() not in hop_by_hop_headers and k.lower() not in ['host', 'content-length']}
+        
+        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/sessions/{session_id}"
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(target_url, headers=headers, timeout=10.0)
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=resp.status_code, content=resp.json())
+    except Exception as e:
+        logger.error(f"Error routing delete session request: {e}")
+        raise HTTPException(status_code=500, detail=f"Chat service error: {str(e)}")
