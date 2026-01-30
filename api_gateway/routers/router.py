@@ -4,7 +4,7 @@ All API Gateway endpoints in one file for easier debugging
 """
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from typing import Dict, List, Any, Optional
 import logging
 import json
@@ -93,6 +93,86 @@ async def login_user(request: Request):
     except Exception as e:
         logger.error(f"Error during login: {e}")
         raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
+
+# =================================
+# CONFIGURATION SERVICE PROXY ENDPOINTS
+# =================================
+
+@router.get("/api/v1/users/profile")
+async def proxy_user_profile(request: Request):
+    """Proxy user profile requests to configuration service"""
+    try:
+        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/users/profile"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            # Forward user data from request state
+            if hasattr(request.state, 'user'):
+                headers['X-User-UID'] = request.state.user.get('uid', '')
+                headers['X-User-Email'] = request.state.user.get('email', '')
+                headers['X-User-Name'] = request.state.user.get('name', '')
+            
+            response = await client.get(config_url, headers=headers)
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ User profile proxy error: {e}")
+        raise HTTPException(status_code=500, detail="User profile proxy error")
+
+@router.put("/api/v1/users/profile")
+async def proxy_update_user_profile(request: Request):
+    """Proxy update user profile requests to configuration service"""
+    try:
+        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/users/profile"
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            # Forward user data from request state
+            if hasattr(request.state, 'user'):
+                headers['X-User-UID'] = request.state.user.get('uid', '')
+                headers['X-User-Email'] = request.state.user.get('email', '')
+                headers['X-User-Name'] = request.state.user.get('name', '')
+            
+            response = await client.put(config_url, json=body, headers=headers)
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Update user profile proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Update user profile proxy error")
+
+@router.get("/api/v1/users")
+async def proxy_get_users(request: Request):
+    """Proxy get users requests to configuration service"""
+    try:
+        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/users"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            # Forward user data from request state
+            if hasattr(request.state, 'user'):
+                headers['X-User-UID'] = request.state.user.get('uid', '')
+                headers['X-User-Email'] = request.state.user.get('email', '')
+                headers['X-User-Name'] = request.state.user.get('name', '')
+            
+            response = await client.get(config_url, headers=headers)
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Get users proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Get users proxy error")
 
 # =================================
 # CONFIGURATION ENDPOINTS

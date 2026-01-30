@@ -28,14 +28,28 @@ from ..schemas.models import (
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Simple function to get current user from request state (set by API Gateway middleware)
+# Simple function to get current user from request state or headers (set by API Gateway middleware)
 async def get_current_user(request: Request):
-    """Get current user from request state (set by API Gateway middleware)"""
+    """Get current user from request state or headers (set by API Gateway middleware)"""
+    # First try request.state (direct API Gateway access)
     if hasattr(request.state, 'user'):
         return request.state.user
-    else:
-        # This should not happen if API Gateway is properly configured
-        raise HTTPException(status_code=401, detail="User not found in request state")
+    
+    # Then try headers (proxied from API Gateway)
+    user_uid = request.headers.get('X-User-UID')
+    user_email = request.headers.get('X-User-Email')
+    user_name = request.headers.get('X-User-Name')
+    
+    if user_email:
+        return {
+            "uid": user_uid,
+            "email": user_email,
+            "name": user_name or user_email,
+            "picture": None  # Not forwarded in headers
+        }
+    
+    # This should not happen if API Gateway is properly configured
+    raise HTTPException(status_code=401, detail="User not found in request state or headers")
 
 # Initialize services
 config_service = ConfigurationService()
