@@ -78,7 +78,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # Routers
-app.include_router(router)
+app.include_router(router)  # Router already has /api/v1/ prefix
 
 @app.get("/health")
 async def health_check(request: Request):

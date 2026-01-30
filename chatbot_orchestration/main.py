@@ -67,7 +67,7 @@ app.add_middleware(
 app.add_middleware(CorrelationIDMiddleware)
 
 # Include Routers
-app.include_router(router)
+app.include_router(router)  # Router already has /api/v1/ prefix
 
 @app.get("/")
 async def root_diagnostic(request: Request):

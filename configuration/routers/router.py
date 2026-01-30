@@ -65,7 +65,7 @@ token_usage_service = TokenUsageService()
 # CHATBOT CONFIGURATION ENDPOINTS
 # =================================
 
-@router.get("/configuration/configuration/chatbot")
+@router.get("/api/v1/configuration/chatbot")
 async def get_chatbot_config():
     """Get complete chatbot configuration"""
     try:
@@ -75,7 +75,7 @@ async def get_chatbot_config():
         logger.error(f"Error getting chatbot config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/configuration/configuration/chatbot")
+@router.post("/api/v1/configuration/chatbot")
 async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
     """Save chatbot configuration"""
     try:
@@ -91,7 +91,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
 # PERSONAS ENDPOINTS
 # =================================
 
-@router.get("/configuration/personas")
+@router.get("/api/v1/configuration/personas")
 async def get_personas():
     """Get all available personas"""
     try:
@@ -101,7 +101,7 @@ async def get_personas():
         logger.error(f"Error getting personas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/configuration/personas/{persona_name}/activate")
+@router.post("/api/v1/configuration/personas/{persona_name}/activate")
 async def activate_persona(persona_name: str, request: Request):
     """Activate a specific persona"""
     try:
@@ -111,7 +111,7 @@ async def activate_persona(persona_name: str, request: Request):
         logger.error(f"Error activating persona: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/configuration/personas")
+@router.post("/api/v1/configuration/personas")
 async def create_persona(persona: PersonaRequest, request: Request):
     """Create a new persona"""
     try:
@@ -125,7 +125,7 @@ async def create_persona(persona: PersonaRequest, request: Request):
 # ADMIN MANAGEMENT ENDPOINTS
 # =================================
 
-@router.get("/configuration/admins")
+@router.get("/api/v1/configuration/admins")
 async def get_admin_users():
     """Get all admin users"""
     try:
@@ -135,7 +135,7 @@ async def get_admin_users():
         logger.error(f"Error getting admin users: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/configuration/admins")
+@router.post("/api/v1/configuration/admins")
 async def add_admin_user(request_data: AdminManagementRequest, request: Request):
     """Add a new admin user"""
     try:
@@ -145,7 +145,7 @@ async def add_admin_user(request_data: AdminManagementRequest, request: Request)
         logger.error(f"Error adding admin user: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/configuration/admins/{email}")
+@router.delete("/api/v1/configuration/admins/{email}")
 async def remove_admin_user(email: str, request: Request):
     """Remove an admin user"""
     try:
@@ -155,7 +155,7 @@ async def remove_admin_user(email: str, request: Request):
         logger.error(f"Error removing admin user: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/configuration/human-agents")
+@router.get("/api/v1/configuration/human-agents")
 async def get_human_agents():
     """Get all human agents"""
     try:
@@ -165,7 +165,7 @@ async def get_human_agents():
         logger.error(f"Error getting human agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/configuration/human-agents")
+@router.post("/api/v1/configuration/human-agents")
 async def add_human_agent(request_data: AdminManagementRequest, request: Request):
     """Add a new human agent"""
     try:
@@ -175,7 +175,7 @@ async def add_human_agent(request_data: AdminManagementRequest, request: Request
         logger.error(f"Error adding human agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/configuration/human-agents/{email}")
+@router.delete("/api/v1/configuration/human-agents/{email}")
 async def remove_human_agent(email: str, request: Request):
     """Remove a human agent"""
     try:
@@ -189,7 +189,7 @@ async def remove_human_agent(email: str, request: Request):
 # CHAT LOG ENDPOINTS
 # =================================
 
-@router.get("/configuration/chat-logs")
+@router.get("/api/v1/configuration/chat-logs")
 async def get_chat_logs():
     """Get all chat logs"""
     try:
@@ -199,7 +199,7 @@ async def get_chat_logs():
         logger.error(f"Error getting chat logs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/configuration/chat-logs/{session_id}")
+@router.delete("/api/v1/configuration/chat-logs/{session_id}")
 async def delete_chat_log(session_id: str, request: Request):
     """Delete a chat log"""
     try:
@@ -213,7 +213,7 @@ async def delete_chat_log(session_id: str, request: Request):
 # NOTIFICATIONS ENDPOINTS
 # =================================
 
-@router.get("/configuration/notifications/settings")
+@router.get("/api/v1/configuration/notifications/settings")
 async def get_notification_settings():
     """Get notification settings"""
     try:
@@ -223,7 +223,7 @@ async def get_notification_settings():
         logger.error(f"Error getting notification settings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/configuration/notifications/settings")
+@router.post("/api/v1/configuration/notifications/settings")
 async def update_notification_settings(settings: NotificationRequest, request: Request):
     """Update notification settings"""
     try:
@@ -233,7 +233,7 @@ async def update_notification_settings(settings: NotificationRequest, request: R
         logger.error(f"Error updating notification settings: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/configuration/notifications/send")
+@router.post("/api/v1/configuration/notifications/send")
 async def send_notification(notification: Dict[str, Any], request: Request):
     """Send a notification"""
     try:
@@ -247,7 +247,7 @@ async def send_notification(notification: Dict[str, Any], request: Request):
 # PERFORMANCE ENDPOINTS
 # =================================
 
-@router.get("/configuration/performance/metrics")
+@router.get("/api/v1/configuration/performance/metrics")
 async def get_performance_metrics():
     """Get performance metrics"""
     try:
@@ -261,7 +261,7 @@ async def get_performance_metrics():
 # FEEDBACK ENDPOINTS
 # =================================
 
-@router.post("/configuration/feedback")
+@router.post("/api/v1/configuration/feedback")
 async def submit_feedback(feedback: FeedbackRequest, request: Request):
     """Submit feedback"""
     try:
@@ -271,7 +271,7 @@ async def submit_feedback(feedback: FeedbackRequest, request: Request):
         logger.error(f"Error submitting feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/configuration/feedback")
+@router.get("/api/v1/configuration/feedback")
 async def get_feedback():
     """Get all feedback"""
     try:
@@ -285,7 +285,7 @@ async def get_feedback():
 # USER ENDPOINTS
 # =================================
 
-@router.get("/configuration/users/profile")
+@router.get("/api/v1/configuration/users/profile")
 async def get_user_profile(user: dict = Depends(get_current_user)):
     """Get user profile information"""
     try:
@@ -315,7 +315,7 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
         logger.error(f"Error getting user profile: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/configuration/users/profile")
+@router.put("/api/v1/configuration/users/profile")
 async def update_user_profile(profile_data: Dict[str, Any], user: dict = Depends(get_current_user)):
     """Update user profile information"""
     try:
@@ -325,7 +325,7 @@ async def update_user_profile(profile_data: Dict[str, Any], user: dict = Depends
         logger.error(f"Error updating user profile: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/configuration/users")
+@router.get("/api/v1/configuration/users")
 async def get_all_users(user: dict = Depends(get_current_user)):
     """Get all users (admin only)"""
     try:
@@ -370,7 +370,7 @@ async def get_all_users(user: dict = Depends(get_current_user)):
 # HEALTH ENDPOINTS
 # =================================
 
-@router.get("/configuration/health")
+@router.get("/api/v1/configuration/health")
 async def health_check():
     """Health check endpoint"""
     try:

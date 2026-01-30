@@ -156,7 +156,7 @@ async def health_check():
     }
 
 # Include Routers
-app.include_router(config_router, prefix="/api/v1")
+app.include_router(config_router)  # Router already has /api/v1/ prefix
 
 logger.info("✅ All endpoints loaded successfully")
 

@@ -23,7 +23,7 @@ router = APIRouter()
 # FIREBASE AUTHENTICATION ENDPOINTS
 # =================================
 
-@router.post("/gateway/auth/verify")
+@router.post("/api/v1/gateway/auth/verify")
 async def verify_auth_token(request: Request):
     """Verify Firebase authentication token"""
     try:
@@ -48,7 +48,7 @@ async def verify_auth_token(request: Request):
         logger.error(f"Error verifying token: {e}")
         raise HTTPException(status_code=500, detail=f"Error verifying token: {str(e)}")
 
-@router.get("/gateway/auth/user/{uid}")
+@router.get("/api/v1/gateway/auth/user/{uid}")
 async def get_user_by_uid(uid: str):
     """Get user information by Firebase UID."""
     try:
@@ -67,7 +67,7 @@ async def get_user_by_uid(uid: str):
         logger.error(f"Error getting user by UID {uid}: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting user: {str(e)}")
 
-@router.post("/gateway/auth/login")
+@router.post("/api/v1/gateway/auth/login")
 async def login_user(request: Request):
     """Login user with Firebase token"""
     try:
@@ -102,7 +102,7 @@ async def login_user(request: Request):
 async def proxy_user_profile(request: Request):
     """Proxy user profile requests to configuration service"""
     try:
-        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/users/profile"
+        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/configuration/users/profile"
         async with httpx.AsyncClient(timeout=30.0) as client:
             headers = dict(request.headers)
             headers.pop("host", None)
@@ -127,7 +127,7 @@ async def proxy_user_profile(request: Request):
 async def proxy_update_user_profile(request: Request):
     """Proxy update user profile requests to configuration service"""
     try:
-        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/users/profile"
+        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/configuration/users/profile"
         body = await request.json()
         async with httpx.AsyncClient(timeout=30.0) as client:
             headers = dict(request.headers)
@@ -153,7 +153,7 @@ async def proxy_update_user_profile(request: Request):
 async def proxy_get_users(request: Request):
     """Proxy get users requests to configuration service"""
     try:
-        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/users"
+        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/configuration/users"
         async with httpx.AsyncClient(timeout=30.0) as client:
             headers = dict(request.headers)
             headers.pop("host", None)
@@ -178,7 +178,7 @@ async def proxy_get_users(request: Request):
 # CONFIGURATION ENDPOINTS
 # =================================
 
-@router.get("/gateway/config/settings")
+@router.get("/api/v1/gateway/config/settings")
 async def get_api_settings():
     """Get API configuration settings"""
     try:
@@ -199,7 +199,7 @@ async def get_api_settings():
 # HEALTH AND MONITORING ENDPOINTS
 # =================================
 
-@router.get("/gateway/health")
+@router.get("/api/v1/gateway/health")
 async def health_check():
     """Comprehensive health check for API Gateway"""
     try:
@@ -220,7 +220,7 @@ async def health_check():
         logger.error(f"Health check failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/gateway/status")
+@router.get("/api/v1/gateway/status")
 async def get_service_status():
     """Get detailed service status"""
     try:
@@ -245,7 +245,7 @@ async def get_service_status():
 # RATE LIMITING ENDPOINTS
 # =================================
 
-@router.get("/gateway/rate-limit/status")
+@router.get("/api/v1/gateway/rate-limit/status")
 async def get_rate_limit_status():
     """Get rate limiting status"""
     try:
@@ -272,7 +272,7 @@ async def get_rate_limit_status():
 # LOGGING ENDPOINTS
 # =================================
 
-@router.get("/gateway/logs/recent")
+@router.get("/api/v1/gateway/logs/recent")
 async def get_recent_logs(limit: int = 50):
     """Get recent API logs"""
     try:
@@ -290,7 +290,7 @@ async def get_recent_logs(limit: int = 50):
         logger.error(f"Error getting recent logs: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/gateway/logs/error")
+@router.post("/api/v1/gateway/logs/error")
 async def log_error(error_data: Dict[str, Any]):
     """Log an error from client"""
     try:
@@ -304,7 +304,7 @@ async def log_error(error_data: Dict[str, Any]):
 # METRICS ENDPOINTS
 # =================================
 
-@router.get("/gateway/metrics/overview")
+@router.get("/api/v1/gateway/metrics/overview")
 async def get_metrics_overview():
     """Get API metrics overview"""
     try:
@@ -341,7 +341,7 @@ async def get_metrics_overview():
 # MIDDLEWARE ENDPOINTS
 # =================================
 
-@router.get("/gateway/middleware/cors")
+@router.get("/api/v1/gateway/middleware/cors")
 async def get_cors_status():
     """Get CORS configuration status"""
     try:
@@ -357,7 +357,7 @@ async def get_cors_status():
         logger.error(f"Error getting CORS status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/gateway/middleware/auth")
+@router.get("/api/v1/gateway/middleware/auth")
 async def get_auth_status():
     """Get authentication middleware status"""
     try:
@@ -376,7 +376,7 @@ async def get_auth_status():
 # SSE ENDPOINTS
 # =================================
 
-@router.get("/gateway/ws/events")
+@router.get("/api/v1/gateway/ws/events")
 async def websocket_sse_endpoint():
     """SSE endpoint to replace WebSocket functionality."""
     queue = await sse_manager.connect()
@@ -397,7 +397,7 @@ async def websocket_sse_endpoint():
         await sse_manager.disconnect(queue)
         raise HTTPException(status_code=500, detail="SSE connection failed")
 
-@router.post("/gateway/ws/messages")
+@router.post("/api/v1/gateway/ws/messages")
 async def websocket_message_endpoint(request: Request):
     """HTTP endpoint to receive messages and broadcast via SSE."""
     try:
@@ -422,7 +422,7 @@ async def websocket_message_endpoint(request: Request):
 async def proxy_customer_sse(session_id: str, request: Request):
     """Proxy customer SSE connections to configuration service"""
     try:
-        sse_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/chat/{session_id}/events"
+        sse_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/configuration/chat/{session_id}/events"
         async with httpx.AsyncClient(timeout=300.0) as client:
             headers = dict(request.headers)
             headers.pop("host", None)
@@ -451,7 +451,7 @@ async def proxy_customer_sse(session_id: str, request: Request):
 async def proxy_agent_sse(session_id: str, request: Request):
     """Proxy agent SSE connections to configuration service"""
     try:
-        sse_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/admin/chat-sessions/{session_id}/events"
+        sse_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/configuration/admin/chat-sessions/{session_id}/events"
         async with httpx.AsyncClient(timeout=300.0) as client:
             headers = dict(request.headers)
             headers.pop("host", None)
@@ -522,8 +522,9 @@ async def chat_stream_proxy(request: Request):
                             "X-User-Photo-URL": request.state.user['photoURL']
                         })
                     
+                    target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/api/v1/chatbot/chat/stream"
                     response = await client.post(
-                        f"{get_settings().CHATBOT_ORCHESTRATION_URL}/chat/stream",
+                        target_url,
                         content=body,
                         headers=headers
                     )
@@ -579,7 +580,7 @@ async def suggested_messages_endpoint(request: Request):
         headers.pop('content-length', None)
         headers.pop('Content-Length', None)
 
-        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/suggested-messages"
+        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/api/v1/chatbot/suggested-messages"
         
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -611,7 +612,7 @@ async def list_sessions_endpoint(request: Request):
         ]
         headers = {k: v for k, v in headers.items() if k.lower() not in hop_by_hop_headers and k.lower() not in ['host', 'content-length']}
         
-        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/sessions"
+        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/api/v1/chatbot/sessions"
         
         async with httpx.AsyncClient() as client:
             resp = await client.get(target_url, headers=headers, timeout=10.0)
@@ -635,7 +636,7 @@ async def delete_session_endpoint(session_id: str, request: Request):
         ]
         headers = {k: v for k, v in headers.items() if k.lower() not in hop_by_hop_headers and k.lower() not in ['host', 'content-length']}
         
-        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/sessions/{session_id}"
+        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/api/v1/chatbot/sessions/{session_id}"
         
         async with httpx.AsyncClient() as client:
             resp = await client.delete(target_url, headers=headers, timeout=10.0)
