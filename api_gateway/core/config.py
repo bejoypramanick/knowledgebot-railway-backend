@@ -27,10 +27,10 @@ class Settings(BaseSettings):
     service_identity: str = "api-gateway"
     
     # Service URLs for routing - read from Railway environment variables
-    CONFIGURATION_SERVICE_URL: str = os.getenv("CONFIGURATION_SERVICE_URL", "http://localhost:8000")
-    CHATBOT_ORCHESTRATION_URL: str = os.getenv("CHATBOT_ORCHESTRATION_URL", "http://localhost:8000")
-    KNOWLEDGEBASE_INGESTION_URL: str = os.getenv("KNOWLEDGEBASE_INGESTION_URL", "http://localhost:8000")
-    WEBSITE_CRAWLING_URL: str = os.getenv("WEBSITE_CRAWLING_URL", "http://localhost:8000")
+    configuration_service_url: str = os.getenv("CONFIGURATION_SERVICE_URL", "http://localhost:8000")
+    chatbot_orchestration_url: str = os.getenv("CHATBOT_ORCHESTRATION_URL", "http://localhost:8000")
+    knowledgebase_ingestion_url: str = os.getenv("KNOWLEDGEBASE_INGESTION_URL", "http://localhost:8000")
+    website_crawling_url: str = os.getenv("WEBSITE_CRAWLING_URL", "http://localhost:8000")
     
     # Firebase Configuration
     firebase_project_id: Optional[str] = None
