@@ -24,37 +24,24 @@ CREATE TABLE IF NOT EXISTS public.suggested_messages (
     CONSTRAINT suggested_messages_pkey PRIMARY KEY (id)
 );
 
--- Create widget_configuration table if it doesn't exist  
-CREATE TABLE IF NOT EXISTS public.widget_configuration (
-    id integer DEFAULT 1 NOT NULL,
-    display_name varchar(255) DEFAULT 'Chat Assistant' NULL,
-    initial_message text DEFAULT 'Hello! How can I help you today?' NULL,
-    auto_show_duration integer DEFAULT 30 NULL,
-    keep_showing_suggested boolean DEFAULT true NULL,
-    theme varchar(50) DEFAULT 'light' NULL,
-    primary_color varchar(7) DEFAULT '#007bff' NULL,
-    use_primary_for_header boolean DEFAULT true NULL,
-    chat_bubble_color varchar(7) DEFAULT '#007bff' NULL,
-    align_bubble varchar(10) DEFAULT 'right' NULL,
-    display_chatbot boolean DEFAULT true NULL,
-    profile_picture_url text NULL,
-    chat_icon_url text NULL,
-    profile_picture_filename varchar(255) NULL,
-    chat_icon_filename varchar(255) NULL,
-    profile_zoom numeric(3,2) DEFAULT 1.0 NULL,
-    chat_icon_zoom numeric(3,2) DEFAULT 1.0 NULL,
-    profile_position jsonb DEFAULT '{"x": 0, "y": 0}'::jsonb NULL,
-    chat_icon_position jsonb DEFAULT '{"x": 0, "y": 0}'::jsonb NULL,
-    created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
-    updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
-    CONSTRAINT widget_configuration_pkey PRIMARY KEY (id),
-    CONSTRAINT single_widget_configuration CHECK ((id = 1))
-);
-
--- Insert default widget config if table is empty
-INSERT INTO public.widget_configuration (id, display_name, initial_message)
-SELECT 1, 'Chat Assistant', 'Hello! How can I help you today?'
-WHERE NOT EXISTS (SELECT 1 FROM public.widget_configuration WHERE id = 1);
+-- Add missing columns to widget_configuration table if they don't exist
+ALTER TABLE public.widget_configuration 
+ADD COLUMN IF NOT EXISTS auto_show_duration integer DEFAULT 30 NULL,
+ADD COLUMN IF NOT EXISTS keep_showing_suggested boolean DEFAULT true NULL,
+ADD COLUMN IF NOT EXISTS theme varchar(50) DEFAULT 'light' NULL,
+ADD COLUMN IF NOT EXISTS primary_color varchar(7) DEFAULT '#007bff' NULL,
+ADD COLUMN IF NOT EXISTS use_primary_for_header boolean DEFAULT true NULL,
+ADD COLUMN IF NOT EXISTS chat_bubble_color varchar(7) DEFAULT '#007bff' NULL,
+ADD COLUMN IF NOT EXISTS align_bubble varchar(10) DEFAULT 'right' NULL,
+ADD COLUMN IF NOT EXISTS display_chatbot boolean DEFAULT true NULL,
+ADD COLUMN IF NOT EXISTS profile_picture_url text NULL,
+ADD COLUMN IF NOT EXISTS chat_icon_url text NULL,
+ADD COLUMN IF NOT EXISTS profile_picture_filename varchar(255) NULL,
+ADD COLUMN IF NOT EXISTS chat_icon_filename varchar(255) NULL,
+ADD COLUMN IF NOT EXISTS profile_zoom numeric(3,2) DEFAULT 1.0 NULL,
+ADD COLUMN IF NOT EXISTS chat_icon_zoom numeric(3,2) DEFAULT 1.0 NULL,
+ADD COLUMN IF NOT EXISTS profile_position jsonb DEFAULT '{"x": 0, "y": 0}'::jsonb NULL,
+ADD COLUMN IF NOT EXISTS chat_icon_position jsonb DEFAULT '{"x": 0, "y": 0}'::jsonb NULL;
 
 -- Insert default suggested messages if table is empty
 INSERT INTO public.suggested_messages (message_text, sort_order)
