@@ -84,7 +84,7 @@ class ValidatedEmail(str):
         yield cls.validate_email
 
     @classmethod
-    def validate_email(cls, v):
+    def validate_email(cls, v, values=None):
         if not v or not isinstance(v, str):
             raise ValueError('Email is required')
 
