@@ -10,8 +10,11 @@ import logging
 from ..service.chat_service import ChatService
 from ..service.agent_service import AgentService
 from ..core.auth_middleware import get_current_user
+from ..schemas.models import ChatRequest
+from ..core.logging_config import get_railway_logger
+from ..core.utils import log_endpoint_request
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 router = APIRouter()
 
 # Initialize services
@@ -53,6 +56,27 @@ async def chat_with_agent(request: Request):
     except Exception as e:
         logger.error(f"Error in chat: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/chat/stream")
+async def chat_stream(request: Request, fastapi_request: Request, chat_request: ChatRequest):
+    """Handle chat request with streaming response using optimized Pydantic AI Gateway Service."""
+    try:
+        # Get user data from headers (set by API Gateway)
+        user_data = {
+            'uid': request.headers.get('X-User-UID', ''),
+            'email': request.headers.get('X-User-Email', ''),
+            'displayName': request.headers.get('X-User-Display-Name', ''),
+            'photoURL': request.headers.get('X-User-Photo-URL', ''),
+            'role': 'user'  # Default role - service can fetch roles from DB if needed
+        }
+        
+        log_endpoint_request("chatbot_orchestration", "chat_stream", fastapi_request)
+        
+        # Service handles all business logic
+        return await chat_service.handle_chat_stream(chat_request, user_data)
+    except Exception as e:
+        logger.error(f"Error in chat stream: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error processing chat request: {str(e)}")
 
 @router.get("/chat/history/{session_id}")
 async def get_chat_history(session_id: str, request: Request):

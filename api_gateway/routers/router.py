@@ -4,20 +4,19 @@ All API Gateway endpoints in one file for easier debugging
 """
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from typing import Dict, List, Any, Optional
 import logging
 import json
+import time
+import httpx
 
 from ..core.firebase_auth import verify_token, get_user_from_firestore
 from ..core.config import get_settings
-from ..routers.chat import router as chat_router
-from ..routers.config import router as config_router
-from ..routers.health import router as health_router
-from ..routers.knowledgebase import router as knowledgebase_router
-from ..routers.scrape import router as scrape_router
-from ..routers.sse import router as sse_router
+from ..core.sse import sse_generator, sse_manager
+from ..core.logging_config import get_railway_logger
 
-logger = logging.getLogger(__name__)
+logger = get_railway_logger(__name__)
 router = APIRouter()
 
 # =================================
@@ -297,3 +296,107 @@ async def get_auth_status():
     except Exception as e:
         logger.error(f"Error getting auth status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# =================================
+# SSE ENDPOINTS
+# =================================
+
+@router.get("/ws/events")
+async def websocket_sse_endpoint():
+    """SSE endpoint to replace WebSocket functionality."""
+    queue = await sse_manager.connect()
+    
+    try:
+        return StreamingResponse(
+            sse_generator(queue),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "*",
+            }
+        )
+    except Exception as e:
+        logger.error(f"SSE endpoint error: {e}")
+        await sse_manager.disconnect(queue)
+        raise HTTPException(status_code=500, detail="SSE connection failed")
+
+@router.post("/ws/messages")
+async def websocket_message_endpoint(request: Request):
+    """HTTP endpoint to receive messages and broadcast via SSE."""
+    try:
+        data = await request.json()
+        
+        message = {
+            "type": "response",
+            "message": data.get("message", ""),
+            "conversation_id": data.get("conversation_id", ""),
+            "timestamp": time.time(),
+            "metadata": data.get("metadata", {})
+        }
+        
+        await sse_manager.broadcast(message)
+        
+        return {"success": True, "message": "Message broadcasted"}
+    except Exception as e:
+        logger.error(f"Error processing message: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process message")
+
+@router.get("/api/v1/chat/{session_id}/events")
+async def proxy_customer_sse(session_id: str, request: Request):
+    """Proxy customer SSE connections to configuration service"""
+    try:
+        sse_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/chat/{session_id}/events"
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+
+            response = await client.get(
+                sse_url,
+                headers=headers,
+                params=request.query_params
+            )
+            
+            return StreamingResponse(
+                response.aiter_bytes(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": response.headers.get("Cache-Control", "no-cache"),
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                }
+            )
+
+    except Exception as e:
+        logger.error(f"❌ SSE proxy error: {e}")
+        raise HTTPException(status_code=500, detail="SSE proxy error")
+
+@router.get("/api/v1/admin/chat-sessions/{session_id}/events")
+async def proxy_agent_sse(session_id: str, request: Request):
+    """Proxy agent SSE connections to configuration service"""
+    try:
+        sse_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/admin/chat-sessions/{session_id}/events"
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+
+            response = await client.get(
+                sse_url,
+                headers=headers,
+                params=request.query_params
+            )
+
+            return StreamingResponse(
+                response.aiter_bytes(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": response.headers.get("Cache-Control", "no-cache"),
+                    "Connection": "keep-alive",
+                    "Access-Control-Allow-Origin": "*",
+                }
+            )
+
+    except Exception as e:
+        logger.error(f"SSE proxy error: {e}")
+        raise HTTPException(status_code=500, detail="SSE proxy error")
