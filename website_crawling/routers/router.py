@@ -9,7 +9,6 @@ import logging
 
 from ..service.scraping_service import ScrapingService
 from ..service.crawler_service import CrawlerService
-from ..core.auth_middleware import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -26,48 +25,37 @@ crawler_service = CrawlerService()
 async def scrape_website(request: Request):
     """Scrape a single website"""
     try:
-        current_user = await get_current_user(request)
         body = await request.json()
         
         url = body.get("url")
         if not url:
             raise HTTPException(status_code=400, detail="URL is required")
         
-        # Validate URL
-        if not url.startswith(("http://", "https://")):
-            raise HTTPException(status_code=400, detail="Invalid URL format")
-        
         # Scrape options
         options = {
-            "depth": body.get("depth", 1),
-            "include_images": body.get("include_images", False),
-            "follow_links": body.get("follow_links", False),
-            "max_pages": body.get("max_pages", 10)
+            "extract_links": body.get("extract_links", True),
+            "extract_images": body.get("extract_images", True),
+            "respect_robots_txt": body.get("respect_robots_txt", True),
+            "user_agent": body.get("user_agent", "KnowledgeBot-Crawler/1.0"),
+            "timeout": body.get("timeout", 30)
         }
         
-        result = await scraping_service.scrape_website(
-            url=url,
-            user_id=current_user.get("uid"),
-            options=options
-        )
+        result = await scraping_service.scrape_website(url, options)
         
         return {
             "success": True,
             "data": result,
             "message": "Website scraped successfully"
         }
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error scraping website: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/scrape/jobs")
-async def get_scraping_jobs(request: Request):
-    """Get scraping jobs for the user"""
+async def get_scraping_jobs():
+    """Get all scraping jobs"""
     try:
-        current_user = await get_current_user(request)
-        jobs = await scraping_service.get_user_jobs(current_user.get("uid"))
+        jobs = await scraping_service.get_all_jobs()
         
         return {
             "success": True,
@@ -78,11 +66,10 @@ async def get_scraping_jobs(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/scrape/jobs/{job_id}")
-async def get_scraping_job_details(job_id: str, request: Request):
+async def get_scraping_job_details(job_id: str):
     """Get details of a specific scraping job"""
     try:
-        current_user = await get_current_user(request)
-        job_details = await scraping_service.get_job_details(job_id, current_user.get("uid"))
+        job_details = await scraping_service.get_job_details(job_id)
         
         if not job_details:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -98,11 +85,10 @@ async def get_scraping_job_details(job_id: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/scrape/jobs/{job_id}")
-async def delete_scraping_job(job_id: str, request: Request):
+async def delete_scraping_job(job_id: str):
     """Delete a scraping job"""
     try:
-        current_user = await get_current_user(request)
-        result = await scraping_service.delete_job(job_id, current_user.get("uid"))
+        result = await scraping_service.delete_job(job_id)
         
         return {
             "success": True,
@@ -113,14 +99,13 @@ async def delete_scraping_job(job_id: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
-# CRAWLING ENDPOINTS
+# WEB CRAWLING ENDPOINTS
 # =================================
 
 @router.post("/crawl")
 async def start_crawl_session(request: Request):
     """Start a crawl session for multiple websites"""
     try:
-        current_user = await get_current_user(request)
         body = await request.json()
         
         urls = body.get("urls", [])
@@ -146,7 +131,7 @@ async def start_crawl_session(request: Request):
         
         result = await crawler_service.start_crawl_session(
             urls=urls,
-            user_id=current_user.get("uid"),
+            user_id="default",  # Use default user since no auth
             options=options
         )
         
@@ -155,18 +140,15 @@ async def start_crawl_session(request: Request):
             "data": result,
             "message": "Crawl session started successfully"
         }
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error starting crawl session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/crawl/sessions")
-async def get_crawl_sessions(request: Request):
-    """Get crawl sessions for the user"""
+async def get_crawl_sessions():
+    """Get all crawl sessions"""
     try:
-        current_user = await get_current_user(request)
-        sessions = await crawler_service.get_user_sessions(current_user.get("uid"))
+        sessions = await crawler_service.get_all_sessions()
         
         return {
             "success": True,
@@ -177,11 +159,10 @@ async def get_crawl_sessions(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/crawl/sessions/{session_id}")
-async def get_crawl_session_details(session_id: str, request: Request):
+async def get_crawl_session_details(session_id: str):
     """Get details of a crawl session"""
     try:
-        current_user = await get_current_user(request)
-        session_details = await crawler_service.get_session_details(session_id, current_user.get("uid"))
+        session_details = await crawler_service.get_session_details(session_id, "default")
         
         if not session_details:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -197,11 +178,10 @@ async def get_crawl_session_details(session_id: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/crawl/sessions/{session_id}/stop")
-async def stop_crawl_session(session_id: str, request: Request):
+async def stop_crawl_session(session_id: str):
     """Stop a running crawl session"""
     try:
-        current_user = await get_current_user(request)
-        result = await crawler_service.stop_session(session_id, current_user.get("uid"))
+        result = await crawler_service.stop_session(session_id, "default")
         
         return {
             "success": True,
@@ -212,54 +192,45 @@ async def stop_crawl_session(session_id: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
-# CONTENT EXTRACTION ENDPOINTS
+# CONTENT ENDPOINTS
 # =================================
 
-@router.get("/content/{job_id}")
-async def get_extracted_content(job_id: str, request: Request, format: str = "json"):
+@router.get("/scrape/jobs/{job_id}/content")
+async def get_extracted_content(job_id: str, format: str = "json"):
     """Get extracted content from a scraping job"""
     try:
-        current_user = await get_current_user(request)
         content = await scraping_service.get_extracted_content(
             job_id=job_id,
-            user_id=current_user.get("uid"),
+            user_id="default",
             format=format
         )
-        
-        if not content:
-            raise HTTPException(status_code=404, detail="Content not found")
         
         return {
             "success": True,
             "data": content
         }
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error getting extracted content: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/content/search")
-async def search_extracted_content(query: str, request: Request, limit: int = 20):
+@router.get("/search")
+async def search_extracted_content(query: str, limit: int = 20):
     """Search across extracted content"""
     try:
-        current_user = await get_current_user(request)
-        
         if not query:
             raise HTTPException(status_code=400, detail="Query is required")
         
         results = await scraping_service.search_content(
             query=query,
-            user_id=current_user.get("uid"),
+            user_id="default",
             limit=limit
         )
         
         return {
             "success": True,
-            "data": results
+            "data": results,
+            "query": query
         }
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error searching content: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -268,12 +239,11 @@ async def search_extracted_content(query: str, request: Request, limit: int = 20
 # ANALYTICS ENDPOINTS
 # =================================
 
-@router.get("/analytics/summary")
-async def get_scraping_analytics(request: Request):
+@router.get("/analytics/scraping")
+async def get_scraping_analytics():
     """Get scraping analytics summary"""
     try:
-        current_user = await get_current_user(request)
-        analytics = await scraping_service.get_analytics_summary(current_user.get("uid"))
+        analytics = await scraping_service.get_analytics_summary("default")
         
         return {
             "success": True,
@@ -284,11 +254,10 @@ async def get_scraping_analytics(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/analytics/domains")
-async def get_domain_analytics(request: Request):
+async def get_domain_analytics():
     """Get domain-specific analytics"""
     try:
-        current_user = await get_current_user(request)
-        domain_stats = await scraping_service.get_domain_analytics(current_user.get("uid"))
+        domain_stats = await scraping_service.get_domain_analytics("default")
         
         return {
             "success": True,
