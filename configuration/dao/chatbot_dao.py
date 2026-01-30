@@ -220,26 +220,30 @@ class ChatbotDAO:
         if not updates_dict:
             return
         
-        placeholders = []
+        # Build the SET clause for the UPDATE part
+        set_clauses = []
         values = []
-        set_clause = []
-        
-        # Start parameter indexing from 2 (since id=1 is $1)
-        param_index = 2
+        param_index = 1
         
         for key, value in updates_dict.items():
-            placeholders.append(f"${param_index}::{self._get_postgres_type(key)}")
+            set_clauses.append(f"{key} = ${param_index}")
             values.append(value)
-            set_clause.append(f"{key} = EXCLUDED.{key}")
             param_index += 1
+        
+        # Use a single parameter for the id
+        values.append(1)
         
         query = f"""
         INSERT INTO configuration_metadata (id, {', '.join(updates_dict.keys())})
-        VALUES (1, {', '.join(placeholders)})
-        ON CONFLICT (id) DO UPDATE SET {', '.join(set_clause)}, updated_at = CURRENT_TIMESTAMP
+        VALUES ($1, {', '.join([f'${i+2}' for i in range(len(updates_dict))])})
+        ON CONFLICT (id) DO UPDATE SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP
         """
+        
+        # Reorder values: id first, then the update values
+        all_values = [1] + list(updates_dict.values())
+        
         async with get_db_connection() as conn:
-            await conn.execute(query, 1, *values)
+            await conn.execute(query, *all_values)
     
     def _get_postgres_type(self, column_name: str) -> str:
         """Get PostgreSQL type for configuration metadata columns"""
