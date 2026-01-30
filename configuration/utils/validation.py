@@ -57,4 +57,13 @@ def validate_configuration_consistency(config: ChatbotConfigRequest):
                 except IndexError:
                     pass
 
-    return errors
+    # Return validation result object
+    from typing import NamedTuple
+    class ValidationResult(NamedTuple):
+        is_valid: bool
+        issues: list
+    
+    return ValidationResult(
+        is_valid=len(errors) == 0,
+        issues=errors
+    )

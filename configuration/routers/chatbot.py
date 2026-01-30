@@ -34,7 +34,7 @@ async def save_chatbot_config(
     """Save chatbot configuration"""
     try:
         # Validate configuration consistency
-        validation_result = await validate_configuration_consistency(config)
+        validation_result = validate_configuration_consistency(config)
         if not validation_result.is_valid:
             raise HTTPException(
                 status_code=400,
@@ -56,7 +56,8 @@ async def save_chatbot_config(
                     email = admin_item
 
                 if email:
-                    is_admin = await auth_service.check_admin_exists(email)
+                    admin_result = await auth_service.check_admin_exists(email)
+                    is_admin = bool(admin_result)
                     if not is_admin:
                         await auth_service.add_admin(email)
                         logger.info(f"Admin {email} added to database")
