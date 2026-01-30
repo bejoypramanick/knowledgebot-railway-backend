@@ -35,9 +35,9 @@ class AuthService:
     async def add_admins(self, emails: List[str], current_user_email: str) -> dict:
         """Add multiple admin users with business logic"""
         # Check if current user is an admin
-        is_admin = await self.check_admin_exists(current_user_email)
+        admin_result = await self.check_admin_exists(current_user_email)
         
-        if not is_admin or is_admin == 0:
+        if not admin_result:
             raise HTTPException(status_code=403, detail="Only admins can add new admins")
         
         # Create admins directly without email confirmation
@@ -73,8 +73,8 @@ class AuthService:
             roles = []
             
             # Check if user is an admin
-            is_admin = await self.check_admin_exists(email)
-            if is_admin:
+            admin_result = await self.check_admin_exists(email)
+            if admin_result:
                 roles.append("admin")
             
             # Check if user is a human agent
@@ -94,9 +94,9 @@ class AuthService:
     async def remove_admin(self, email: str, current_user_email: str) -> dict:
         """Remove an admin. Only admins can remove other admins."""
         # Check if current user is an admin
-        is_admin = await self.check_admin_exists(current_user_email)
+        admin_result = await self.check_admin_exists(current_user_email)
         
-        if not is_admin or is_admin == 0:
+        if not admin_result:
             raise HTTPException(status_code=403, detail="Only admins can remove other admins")
         
         # Check if admin exists
