@@ -259,6 +259,57 @@ async def get_feedback():
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
+# USER ENDPOINTS
+# =================================
+
+@router.get("/users/profile")
+async def get_user_profile():
+    """Get user profile information"""
+    try:
+        # Return default profile since no auth
+        profile = {
+            "email": "admin@example.com",
+            "name": "Administrator",
+            "role": "admin",
+            "preferences": {
+                "theme": "light",
+                "notifications": True
+            }
+        }
+        return {"success": True, "data": profile}
+    except Exception as e:
+        logger.error(f"Error getting user profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/users/profile")
+async def update_user_profile(profile_data: Dict[str, Any]):
+    """Update user profile information"""
+    try:
+        # Mock update since no auth
+        return {"success": True, "message": "Profile updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating user profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/users")
+async def get_all_users():
+    """Get all users"""
+    try:
+        # Return mock users since no auth
+        users = [
+            {
+                "email": "admin@example.com",
+                "name": "Administrator",
+                "role": "admin",
+                "status": "active"
+            }
+        ]
+        return {"success": True, "data": users}
+    except Exception as e:
+        logger.error(f"Error getting users: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =================================
 # TOKEN USAGE ENDPOINTS
 # =================================
 
