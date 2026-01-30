@@ -16,7 +16,6 @@ from ..service.notifications_service import NotificationsService
 from ..service.performance_service import PerformanceService
 from ..service.feedback_service import FeedbackService
 from ..service.token_usage_service import TokenUsageService
-from ..core.auth_middleware import get_current_user
 from ..schemas.models import (
     ChatbotConfigRequest, 
     AdminManagementRequest,
@@ -28,6 +27,15 @@ from ..schemas.models import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Simple function to get current user from request state (set by API Gateway middleware)
+async def get_current_user(request: Request):
+    """Get current user from request state (set by API Gateway middleware)"""
+    if hasattr(request.state, 'user'):
+        return request.state.user
+    else:
+        # This should not happen if API Gateway is properly configured
+        raise HTTPException(status_code=401, detail="User not found in request state")
 
 # Initialize services
 config_service = ConfigurationService()
