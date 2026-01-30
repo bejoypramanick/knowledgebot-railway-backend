@@ -534,12 +534,12 @@ class ConfigurationService:
                 async with conn.transaction():
                     # Deactivate all personas
                     await conn.execute(
-                        "UPDATE chatbot_personas SET is_active = false, updated_at = NOW()"
+                        "UPDATE persona_configurations SET is_active = false, updated_at = NOW()"
                     )
                     # Activate the selected persona
                     result = await conn.execute(
                         """
-                        UPDATE chatbot_personas 
+                        UPDATE persona_configurations 
                         SET is_active = true, updated_at = NOW() 
                         WHERE persona_name = $1
                         """,
