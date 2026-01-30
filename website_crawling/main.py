@@ -17,7 +17,7 @@ from website_crawling.core.config import settings
 from website_crawling.core.utils import (register_fastapi_exception_handlers,
                           setup_global_exception_logging)
 from website_crawling.core.ai import get_genai_client
-from website_crawling.routers.scrape import router
+from website_crawling.routers import router
 from website_crawling.utils.middleware import log_requests_middleware
 
 setup_global_exception_logging("website_scraping")
