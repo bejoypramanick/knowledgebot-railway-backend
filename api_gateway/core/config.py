@@ -1,6 +1,6 @@
 """Shared configuration settings for all services."""
 from typing import Optional
-
+import os
 from pydantic_settings import BaseSettings
 
 
