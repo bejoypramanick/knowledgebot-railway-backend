@@ -13,7 +13,7 @@ from knowledgebase_ingestion.core.correlation_middleware import CorrelationIDMid
 logger = auto_configure_logging("knowledgebase_ingestion")
 
 from knowledgebase_ingestion.core.ai import get_genai_client
-from knowledgebase_ingestion.routers import files
+from knowledgebase_ingestion.routers import router
 from knowledgebase_ingestion.utils.middleware import log_requests_middleware
 from knowledgebase_ingestion.core import db
 from knowledgebase_ingestion.core.config import settings

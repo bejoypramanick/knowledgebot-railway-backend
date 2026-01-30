@@ -125,7 +125,7 @@ async def start_crawl_session(request: Request):
         
         urls = body.get("urls", [])
         if not urls:
-            raise HTTPException(status_code=400, detail"At least one URL is required")
+            raise HTTPException(status_code=400, detail="At least one URL is required")
         
         if len(urls) > 50:
             raise HTTPException(status_code=400, detail="Too many URLs (max 50 per session)")

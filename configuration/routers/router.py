@@ -12,7 +12,7 @@ from ..service.configuration_service import ConfigurationService
 from ..service.personas_service import PersonasService
 from ..service.auth_service import AuthService
 from ..service.chat_log_service import ChatLogService
-from ..service.notifications_service import NotificationService
+from ..service.notifications_service import NotificationsService
 from ..service.performance_service import PerformanceService
 from ..service.feedback_service import FeedbackService
 from ..service.user_service import UserService
@@ -36,7 +36,7 @@ config_service = ConfigurationService()
 personas_service = PersonasService()
 auth_service = AuthService()
 chat_log_service = ChatLogService()
-notifications_service = NotificationService()
+notifications_service = NotificationsService(notifications_dao=None)
 performance_service = PerformanceService()
 feedback_service = FeedbackService()
 user_service = UserService()

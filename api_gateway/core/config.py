@@ -32,19 +32,28 @@ class Settings(BaseSettings):
     knowledgebase_ingestion_url: str = ""
     website_crawling_url: str = ""
     
-    model_config = {
-        'env_file': ".env",
-        'case_sensitive': False
-    }
+    # Firebase Configuration
+    firebase_project_id: Optional[str] = None
+    firebase_credentials_path: Optional[str] = None
+    
+    # Redis Configuration
+    redis_url: Optional[str] = None
+    
+    # Logging Configuration
+    log_level: str = "INFO"
+    
+    class Config:
+        env_file = ".env"
+        case_sensitive = False
 
 
-settings = Settings()
+# Global settings instance
+_settings = None
 
-# Service Identity for logging and identification
-SERVICE_IDENTITY = settings.service_identity
 
-# Service URLs
-CONFIGURATION_SERVICE_URL = settings.configuration_service_url
-CHATBOT_ORCHESTRATION_URL = settings.chatbot_orchestration_url
-KNOWLEDGEBASE_INGESTION_URL = settings.knowledgebase_ingestion_url
-WEBSITE_CRAWLING_URL = settings.website_crawling_url
+def get_settings() -> Settings:
+    """Get the global settings instance."""
+    global _settings
+    if _settings is None:
+        _settings = Settings()
+    return _settings
