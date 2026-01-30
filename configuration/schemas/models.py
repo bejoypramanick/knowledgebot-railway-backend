@@ -71,7 +71,7 @@ class PersonaUpdate(BaseModel):
     def validate_persona(cls, v):
         valid_personas = [
             'friendly-receptionist', 'knowledgeable-expert',
-            'fast-paced-solver', 'upselling-assistant', 'custom'
+            'fast-paced-solver', 'upselling-assistant', 'custom', 'KnowledgeBot'
         ]
         if v not in valid_personas:
             raise ValueError(f'Invalid persona. Must be one of: {", ".join(valid_personas)}')
