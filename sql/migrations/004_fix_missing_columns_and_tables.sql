@@ -24,8 +24,8 @@ CREATE TABLE IF NOT EXISTS public.suggested_messages (
     CONSTRAINT suggested_messages_pkey PRIMARY KEY (id)
 );
 
--- Create widget_config table if it doesn't exist  
-CREATE TABLE IF NOT EXISTS public.widget_config (
+-- Create widget_configuration table if it doesn't exist  
+CREATE TABLE IF NOT EXISTS public.widget_configuration (
     id integer DEFAULT 1 NOT NULL,
     display_name varchar(255) DEFAULT 'Chat Assistant' NULL,
     initial_message text DEFAULT 'Hello! How can I help you today?' NULL,
@@ -47,14 +47,14 @@ CREATE TABLE IF NOT EXISTS public.widget_config (
     chat_icon_position jsonb DEFAULT '{"x": 0, "y": 0}'::jsonb NULL,
     created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
     updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
-    CONSTRAINT widget_config_pkey PRIMARY KEY (id),
-    CONSTRAINT single_widget_config CHECK ((id = 1))
+    CONSTRAINT widget_configuration_pkey PRIMARY KEY (id),
+    CONSTRAINT single_widget_configuration CHECK ((id = 1))
 );
 
 -- Insert default widget config if table is empty
-INSERT INTO public.widget_config (id, display_name, initial_message)
+INSERT INTO public.widget_configuration (id, display_name, initial_message)
 SELECT 1, 'Chat Assistant', 'Hello! How can I help you today?'
-WHERE NOT EXISTS (SELECT 1 FROM public.widget_config WHERE id = 1);
+WHERE NOT EXISTS (SELECT 1 FROM public.widget_configuration WHERE id = 1);
 
 -- Insert default suggested messages if table is empty
 INSERT INTO public.suggested_messages (message_text, sort_order)
