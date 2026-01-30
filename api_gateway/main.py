@@ -20,7 +20,6 @@ from api_gateway.core.config import get_settings
 # Import routers and config
 from api_gateway.routers import router as api_router
 from chatbot_orchestration.routers import router as chat_router
-from api_gateway.routers.firebase import router as firebase_router
 from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
 from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
@@ -108,7 +107,6 @@ async def chat_confusion_detector(request: Request):
 # Include Routers
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(chat_router) # Chat router has mixed prefixes, so we include it directly
-app.include_router(firebase_router)
 
 if __name__ == "__main__":
     import uvicorn
