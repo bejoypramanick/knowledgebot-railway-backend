@@ -217,33 +217,40 @@ class ChatbotDAO:
                 )
 
     async def upsert_configuration_metadata(self, updates_dict: Dict[str, Any]):
+        """Upsert configuration metadata using proper PostgreSQL syntax"""
         if not updates_dict:
             return
         
-        # Build the SET clause for the UPDATE part with proper type casting
-        set_clauses = []
-        values = []
-        param_index = 1
+        # Build column lists and values
+        columns = list(updates_dict.keys())
+        values = list(updates_dict.values())
         
-        for key, value in updates_dict.items():
-            # Add explicit type casting based on the column
-            if key == 'hil_enabled':
-                set_clauses.append(f"{key} = ${param_index}::boolean")
-            elif key == 'response_policy':
-                set_clauses.append(f"{key} = ${param_index}::integer")
+        # Build the INSERT query with proper type casting
+        column_definitions = []
+        value_placeholders = []
+        update_clauses = []
+        
+        for i, (column, value) in enumerate(updates_dict.items()):
+            # Determine PostgreSQL type
+            if column == 'hil_enabled':
+                pg_type = 'boolean'
+            elif column == 'response_policy':
+                pg_type = 'integer'
             else:
-                set_clauses.append(f"{key} = ${param_index}::text")
-            values.append(value)
-            param_index += 1
+                pg_type = 'text'
+            
+            column_definitions.append(column)
+            value_placeholders.append(f'${i+2}::{pg_type}')
+            update_clauses.append(f"{column} = EXCLUDED.{column}")
         
         query = f"""
-        INSERT INTO configuration_metadata (id, {', '.join(updates_dict.keys())})
-        VALUES ($1, {', '.join([f'${i+2}::' + self._get_postgres_type(k) for i, k in enumerate(updates_dict.keys())])})
-        ON CONFLICT (id) DO UPDATE SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP
+        INSERT INTO configuration_metadata (id, {', '.join(column_definitions)})
+        VALUES ($1, {', '.join(value_placeholders)})
+        ON CONFLICT (id) DO UPDATE SET {', '.join(update_clauses)}, updated_at = CURRENT_TIMESTAMP
         """
         
-        # Reorder values: id first, then the update values
-        all_values = [1] + list(updates_dict.values())
+        # Execute with id=1 as the first parameter
+        all_values = [1] + values
         
         async with get_db_connection() as conn:
             await conn.execute(query, *all_values)
