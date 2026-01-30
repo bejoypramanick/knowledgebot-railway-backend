@@ -31,11 +31,11 @@ class Settings(BaseSettings):
     # Service Identity
     service_identity: str = "api-gateway"
     
-    # Service URLs for routing - Railway provides these as environment variables
-    configuration_service_url: str = "http://configuration-service.railway.internal:8004"
-    chatbot_orchestration_url: str = "http://chatbot-orchestration.railway.internal:8003"
-    knowledgebase_ingestion_url: str = "http://knowledgebase-ingestion.railway.internal:8001"
-    website_crawling_url: str = "http://website-crawling.railway.internal:8002"
+    # Service URLs for routing - read from Railway environment variables
+    configuration_service_url: str = ""
+    chatbot_orchestration_url: str = ""
+    knowledgebase_ingestion_url: str = ""
+    website_crawling_url: str = ""
     
     model_config = {
         'env_file': ".env",
