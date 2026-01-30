@@ -92,16 +92,9 @@ class ValidatedEmail(str):
 
         # Use email_validator for comprehensive email validation
         try:
-            # This checks format, MX records, and more
-            validate_email(v, check_deliverability=True)
+            validate_email(v)
         except EmailNotValidError as e:
             raise ValueError(f'Invalid email: {str(e)}')
-        except TypeError:
-            # Fallback for older versions of email_validator
-            try:
-                validate_email(v)
-            except EmailNotValidError as e:
-                raise ValueError(f'Invalid email: {str(e)}')
 
         # Additional custom checks
         domain = v.split('@')[1].lower()
