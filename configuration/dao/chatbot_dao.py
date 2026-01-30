@@ -325,7 +325,7 @@ class ChatbotDAO:
         try:
             async with get_db_connection() as conn:
                 results = await conn.fetch(
-                    "SELECT email FROM human_agents WHERE removed_at IS NULL"
+                    "SELECT email FROM human_agents"
                 )
                 return [row['email'] for row in results]
         except Exception as e:
@@ -343,6 +343,124 @@ class ChatbotDAO:
         except Exception as e:
             logger.error(f"Error getting admins: {e}")
             return []
+
+    async def sync_admin_emails(self, ui_emails: List[str]) -> Dict[str, List[str]]:
+        """Sync admin emails by comparing database with UI request.
+        
+        Args:
+            ui_emails: List of emails from the UI request
+            
+        Returns:
+            Dict with 'added', 'removed', and 'unchanged' email lists
+        """
+        try:
+            async with get_db_connection() as conn:
+                # Get current admin emails from database
+                current_admins = await self.get_admins()
+                current_admins_set = set(current_admins)
+                ui_emails_set = set(ui_emails)
+                
+                # Calculate differences
+                to_add = ui_emails_set - current_admins_set  # UI has, DB doesn't
+                to_remove = current_admins_set - ui_emails_set  # DB has, UI doesn't
+                unchanged = current_admins_set & ui_emails_set  # Both have
+                
+                # Add new admins
+                added_emails = []
+                for email in to_add:
+                    try:
+                        await conn.execute(
+                            "INSERT INTO admins (email, status) VALUES ($1, 'active')",
+                            email
+                        )
+                        added_emails.append(email)
+                        logger.info(f"Added admin: {email}")
+                    except asyncpg.exceptions.UniqueViolationError:
+                        # Admin already exists, just update status
+                        await conn.execute(
+                            "UPDATE admins SET status = 'active' WHERE email = $1",
+                            email
+                        )
+                        added_emails.append(email)
+                
+                # Remove admins (hard delete from database)
+                removed_emails = []
+                for email in to_remove:
+                    await conn.execute(
+                        "DELETE FROM admins WHERE email = $1",
+                        email
+                    )
+                    removed_emails.append(email)
+                    logger.info(f"Deleted admin from database: {email}")
+                
+                return {
+                    'added': list(added_emails),
+                    'removed': list(removed_emails),
+                    'unchanged': list(unchanged)
+                }
+                
+        except Exception as e:
+            logger.error(f"Error syncing admin emails: {e}")
+            raise
+
+    async def sync_human_agent_emails(self, ui_emails: List[str]) -> Dict[str, List[str]]:
+        """Sync human agent emails by comparing database with UI request.
+        
+        Args:
+            ui_emails: List of emails from the UI request
+            
+        Returns:
+            Dict with 'added', 'removed', and 'unchanged' email lists
+        """
+        try:
+            async with get_db_connection() as conn:
+                # Get current human agent emails from database
+                current_agents = await self.get_human_agents()
+                current_agents_set = set(current_agents)
+                ui_emails_set = set(ui_emails)
+                
+                # Calculate differences
+                to_add = ui_emails_set - current_agents_set  # UI has, DB doesn't
+                to_remove = current_agents_set - ui_emails_set  # DB has, UI doesn't
+                unchanged = current_agents_set & ui_emails_set  # Both have
+                
+                # Add new human agents
+                added_emails = []
+                for email in to_add:
+                    try:
+                        await conn.execute(
+                            "INSERT INTO human_agents (email) VALUES ($1)",
+                            email
+                        )
+                        added_emails.append(email)
+                        logger.info(f"Added human agent: {email}")
+                    except asyncpg.exceptions.UniqueViolationError:
+                        # Agent already exists, just ensure it's not removed
+                        await conn.execute(
+                            "UPDATE human_agents SET removed_at = NULL WHERE email = $1",
+                            email
+                        )
+                        added_emails.append(email)
+                
+                # Remove human agents (hard delete from database)
+                removed_emails = []
+                for email in to_remove:
+                    await conn.execute(
+                        "DELETE FROM human_agents WHERE email = $1",
+                        email
+                    )
+                    removed_emails.append(email)
+                    logger.info(f"Deleted human agent from database: {email}")
+                
+                return {
+                    'added': list(added_emails),
+                    'removed': list(removed_emails),
+                    'unchanged': list(unchanged)
+                }
+                
+        except Exception as e:
+            logger.error(f"Error syncing human agent emails: {e}")
+            raise
 
     # Session Assignment Methods
     async def get_existing_assignment(self, session_id: str) -> Optional[Dict[str, Any]]:

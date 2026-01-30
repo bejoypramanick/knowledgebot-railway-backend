@@ -44,8 +44,9 @@ async def save_chatbot_config(
                 }
             )
 
-        # Handle admin emails
+        # Handle admin emails - sync with database
         if config.admin_emails is not None:
+            admin_emails_list = []
             for admin_item in config.admin_emails:
                 email = None
                 if isinstance(admin_item, dict):
@@ -54,23 +55,21 @@ async def save_chatbot_config(
                     email = admin_item.email
                 elif isinstance(admin_item, str):
                     email = admin_item
+                
+                if email and email.strip():
+                    admin_emails_list.append(email.strip())
+            
+            if admin_emails_list:
+                admin_sync_result = await configuration_service.sync_admin_emails(admin_emails_list)
+                logger.info(f"Admin sync result: {admin_sync_result}")
 
-                if email:
-                    admin_result = await auth_service.check_admin_exists(email)
-                    is_admin = bool(admin_result)
-                    if not is_admin:
-                        await auth_service.add_admin(email)
-                        logger.info(f"Admin {email} added to database")
-
-        # Handle human agents
+        # Handle human agents - sync with database
         if config.human_agents is not None:
-            for agent_email in config.human_agents:
-                if agent_email and isinstance(agent_email, str):
-                    try:
-                        await configuration_service.add_human_agent(agent_email)
-                        logger.info(f"Human agent {agent_email} added directly")
-                    except Exception as e:
-                        logger.error(f"Error processing human agent {agent_email}: {e}")
+            human_agents_list = [email.strip() for email in config.human_agents if email and email.strip()]
+            
+            if human_agents_list:
+                agent_sync_result = await configuration_service.sync_human_agent_emails(human_agents_list)
+                logger.info(f"Human agent sync result: {agent_sync_result}")
 
         # Update configuration metadata
         if any([config.hil_enabled is not None, config.response_policy is not None]):
@@ -149,71 +148,6 @@ async def save_chatbot_config(
             
             # Configuration updates completed using normalized tables
         logger.info("Configuration saved successfully using normalized tables")
-        
-        # If human agents are provided, process them
-        logger.info(f"Checking human agents: config.human_agents = {config.human_agents}")
-        if config.human_agents is not None and len(config.human_agents) > 0:
-            logger.info(f"Processing {len(config.human_agents)} human agent(s)")
-            try:
-                agents_created = []
-                
-                for email in config.human_agents:
-                    if not email or not email.strip():
-                        continue
-                    
-                    email = email.strip()
-                    
-                    # Check if agent already exists
-                    existing = await configuration_service.find_human_agent(email)
-
-                    if existing:
-                        logger.info(f"Agent {email} already exists, skipping creation")
-                        continue
-
-                    # Create new agent
-                    logger.info(f"Creating new agent record for {email}")
-                    agent_id = await configuration_service.add_human_agent(email)
-
-                    agents_created.append({
-                        "email": email
-                    })
-                    logger.info(f"✅ Human agent {email} added directly")
-            except Exception as e:
-                # Don't fail the entire save if agent processing fails
-                logger.error(f"❌ Error processing human agents: {e}", exc_info=True)
-                logger.error(f"Error type: {type(e).__name__}")
-        
-        # Handle deletion of agents that are no longer in the list
-        if config.human_agents is not None:
-            try:
-                # Get all current agents from the database
-                current_agents = await configuration_service.get_all_human_agents()
-                
-                # Create a mapping of lowercase email to original email for comparison
-                current_emails_map = {agent['email'].lower(): agent['email'] for agent in current_agents}
-                
-                # Get the new list of emails (normalize to lowercase for comparison)
-                new_emails_lower = {email.strip().lower() for email in config.human_agents if email and email.strip()}
-                
-                # Find agents to delete (in database but not in new list)
-                agents_to_delete = []
-                for lower_email, original_email in current_emails_map.items():
-                    if lower_email not in new_emails_lower:
-                        agents_to_delete.append(original_email)
-                
-                # Delete agents that are no longer in the list
-                if agents_to_delete:
-                    logger.info(f"Deleting {len(agents_to_delete)} agent(s) that are no longer in the list: {', '.join(agents_to_delete)}")
-                    for email in agents_to_delete:
-                        await configuration_service.delete_human_agent(email)
-                        logger.info(f"✅ Deleted agent {email} from database")
-                else:
-                    logger.info("No agents to delete - all current agents are in the new list")
-            except Exception as e:
-                # Don't fail the entire save if deletion fails
-                logger.error(f"❌ Error deleting removed human agents: {e}", exc_info=True)
-        else:
-            logger.info("No human agents provided or list is empty, skipping agent processing")
 
         # Log the configuration change (non-blocking)
         try:

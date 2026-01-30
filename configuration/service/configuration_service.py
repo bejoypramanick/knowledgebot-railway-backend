@@ -280,6 +280,22 @@ class ConfigurationService:
             logger.error(f"Error upserting persona: {e}")
             raise
 
+    async def sync_admin_emails(self, admin_emails: List[str]) -> Dict[str, List[str]]:
+        """Sync admin emails by comparing database with UI request"""
+        try:
+            return await self._chatbot_dao.sync_admin_emails(admin_emails)
+        except Exception as e:
+            logger.error(f"Error syncing admin emails: {e}")
+            raise
+
+    async def sync_human_agent_emails(self, human_agent_emails: List[str]) -> Dict[str, List[str]]:
+        """Sync human agent emails by comparing database with UI request"""
+        try:
+            return await self._chatbot_dao.sync_human_agent_emails(human_agent_emails)
+        except Exception as e:
+            logger.error(f"Error syncing human agent emails: {e}")
+            raise
+
     async def update_llm_tokens(self, provider: str, token_limit: int):
         """Update LLM token limit"""
         try:
