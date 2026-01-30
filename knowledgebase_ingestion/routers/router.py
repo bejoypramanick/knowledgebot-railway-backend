@@ -98,7 +98,7 @@ async def delete_file(file_id: str):
 # HEALTH ENDPOINTS
 # =================================
 
-@router.get("/api/v1/knowledgebase/health")
+@router.get("/health")
 async def health_check():
     """Health check endpoint"""
     try:
