@@ -254,12 +254,8 @@ async def get_metrics_overview():
 # INCLUDE OTHER ROUTERS
 # =================================
 
-# Note: chat_router is included in main.py to avoid circular imports
-router.include_router(config_router, prefix="/config", tags=["config"])
-router.include_router(health_router, prefix="/health", tags=["health"])
-router.include_router(knowledgebase_router, prefix="/knowledgebase", tags=["knowledgebase"])
-router.include_router(scrape_router, prefix="/scrape", tags=["scrape"])
-router.include_router(sse_router, prefix="/sse", tags=["sse"])
+# Note: All routers are included in main.py to avoid circular imports
+# This router only contains API Gateway specific endpoints
 
 # =================================
 # MIDDLEWARE ENDPOINTS
