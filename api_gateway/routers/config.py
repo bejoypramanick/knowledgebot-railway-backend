@@ -363,6 +363,58 @@ def add_user_headers_to_request(request: Request, headers: dict) -> dict:
     
     return headers
 
+# Widget Configuration API endpoints - proxy to configuration service
+@router.get("/configuration/widget")
+@router.post("/configuration/widget")
+async def proxy_widget_config(request: Request):
+    """Proxy widget configuration requests to configuration service"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            method = request.method
+            url = f"{CONFIGURATION_SERVICE_URL}/api/v1/configuration/widget"
+            
+            query_string = str(request.url.query)
+            if query_string:
+                url += f"?{query_string}"
+            
+            body = None
+            if method == "POST":
+                body = await request.body()
+            
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            # Add user headers if user is authenticated
+            headers = add_user_headers_to_request(request, headers)
+            
+            response = await client.request(
+                method=method,
+                url=url,
+                content=body,
+                headers=headers
+            )
+            
+            if "application/json" in response.headers.get("content-type", ""):
+                return JSONResponse(
+                    content=response.json(),
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
+                )
+            else:
+                return JSONResponse(
+                    content=response.text,
+                    status_code=response.status_code,
+                    headers=dict(response.headers)
+                )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Configuration service timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Error proxying widget config to configuration service: {e}")
+        raise HTTPException(status_code=503, detail=f"Configuration service unavailable: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in widget config proxy: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
 # Widget API endpoints - proxy to configuration service
 @router.api_route("/widget/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy_widget_routes(request: Request, path: str):
