@@ -2,16 +2,37 @@
 -- Fixes issues found in production logs
 
 -- Add missing status column to human_agents table
-ALTER TABLE public.human_agents 
-ADD COLUMN IF NOT EXISTS status varchar(20) DEFAULT 'active' NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'human_agents' AND column_name = 'status'
+    ) THEN
+        ALTER TABLE public.human_agents ADD COLUMN status varchar(20) DEFAULT 'active' NULL;
+    END IF;
+END $$;
 
 -- Add missing user_id column to token_usage_log table  
-ALTER TABLE public.token_usage_log 
-ADD COLUMN IF NOT EXISTS user_id uuid NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'token_usage_log' AND column_name = 'user_id'
+    ) THEN
+        ALTER TABLE public.token_usage_log ADD COLUMN user_id uuid NULL;
+    END IF;
+END $$;
 
 -- Add missing agent_email column to agent_session_assignments table
-ALTER TABLE public.agent_session_assignments 
-ADD COLUMN IF NOT EXISTS agent_email varchar(255) NULL;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'agent_session_assignments' AND column_name = 'agent_email'
+    ) THEN
+        ALTER TABLE public.agent_session_assignments ADD COLUMN agent_email varchar(255) NULL;
+    END IF;
+END $$;
 
 -- Create suggested_messages table if it doesn't exist
 CREATE TABLE IF NOT EXISTS public.suggested_messages (
@@ -38,8 +59,16 @@ CREATE INDEX IF NOT EXISTS idx_token_usage_log_user_id ON public.token_usage_log
 CREATE INDEX IF NOT EXISTS idx_agent_session_assignments_agent_email ON public.agent_session_assignments USING btree (agent_email);
 
 -- Add constraints for human_agents status
-ALTER TABLE public.human_agents 
-ADD CONSTRAINT IF NOT EXISTS human_agents_status_check 
-CHECK (status IN ('active', 'inactive', 'removed'));
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.table_constraints 
+        WHERE table_name = 'human_agents' AND constraint_name = 'human_agents_status_check'
+    ) THEN
+        ALTER TABLE public.human_agents 
+        ADD CONSTRAINT human_agents_status_check 
+        CHECK (status IN ('active', 'inactive', 'removed'));
+    END IF;
+END $$;
 
 COMMIT;
