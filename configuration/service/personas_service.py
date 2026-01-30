@@ -24,11 +24,19 @@ class PersonasService:
             # Filter to only active personas for general use
             active_personas = [p for p in personas if p.get('is_active', False)]
             
+            # Get the currently active persona (should be only one)
+            current_active_persona = None
+            for persona in personas:
+                if persona.get('is_active', False):
+                    current_active_persona = persona
+                    break
+            
             return {
                 "success": True,
                 "data": {
                     "all_personas": personas,
                     "active_personas": active_personas,
+                    "current_active_persona": current_active_persona,
                     "total_count": len(personas),
                     "active_count": len(active_personas)
                 }
