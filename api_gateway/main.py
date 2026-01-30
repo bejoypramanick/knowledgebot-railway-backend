@@ -157,18 +157,23 @@ async def chat_confusion_detector(request: Request):
     )
 
 # Include Routers
-app.include_router(api_router)  # Router already has /api/v1/ prefix
+app.include_router(api_router, prefix="/api/v1/gateway")  
 if chat_router:
-    app.include_router(chat_router) # Chat router has mixed prefixes, so we include it directly
+    app.include_router(chat_router) 
 
-# Add root health endpoint for direct access
-@app.get("/gateway/health")
+# Add app-level endpoints
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {"service": "api_gateway", "status": "running"}
+
+@app.get("/health")
 async def root_health_check():
     """Root health check endpoint"""
     return {"status": "healthy", "service": "api_gateway", "version": "1.0.0"}
 
-# Also keep /health for backward compatibility
-@app.get("/health")
+# Also keep /gateway/health for backward compatibility
+@app.get("/gateway/health")
 async def legacy_health_check():
     """Legacy health check endpoint"""
     return {"status": "healthy", "service": "api_gateway", "version": "1.0.0"}

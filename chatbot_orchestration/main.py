@@ -67,7 +67,7 @@ app.add_middleware(
 app.add_middleware(CorrelationIDMiddleware)
 
 # Include Routers
-app.include_router(router)  # Router already has /api/v1/ prefix
+app.include_router(router, prefix="/api/v1/chatbot")  # Service name as root
 
 @app.get("/")
 async def root_diagnostic(request: Request):

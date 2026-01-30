@@ -76,7 +76,17 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # Routers
-app.include_router(router)  # Router already has /api/v1/ prefix
+app.include_router(router, prefix="/api/v1/webcrawl")  # Service name as root
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {"service": "website_crawling", "status": "running"}
+
+@app.get("/health")
+async def health_check(request: Request):
+    log_endpoint_request("website_crawling", "health", request)
+    return {"status": "healthy", "service": "website_crawling"}
 
 if __name__ == "__main__":
     import uvicorn

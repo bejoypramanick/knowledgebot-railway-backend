@@ -156,7 +156,17 @@ async def health_check():
     }
 
 # Include Routers
-app.include_router(config_router)  # Router already has /api/v1/ prefix
+app.include_router(config_router, prefix="/api/v1/configuration")  # Service name as root
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {"service": "configuration", "status": "running"}
+
+@app.get("/health")
+async def health_check(request: Request):
+    log_endpoint_request("configuration", "health", request)
+    return {"status": "healthy", "service": "configuration"}
 
 logger.info("✅ All endpoints loaded successfully")
 

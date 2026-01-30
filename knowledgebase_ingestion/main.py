@@ -78,7 +78,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 # Routers
-app.include_router(router)  # Router already has /api/v1/ prefix
+app.include_router(router, prefix="/api/v1/knowledgebase")  # Service name as root
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {"service": "knowledgebase_ingestion", "status": "running"}
 
 @app.get("/health")
 async def health_check(request: Request):
