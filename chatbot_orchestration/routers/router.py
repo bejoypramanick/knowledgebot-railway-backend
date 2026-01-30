@@ -8,7 +8,7 @@ from typing import Dict, List, Any, Optional
 import logging
 
 from ..service.chat_service import ChatService
-from ..service.agent_service import AgentService
+from ..service.agent_service import PydanticAIGatewayService
 from ..core.auth_middleware import get_current_user
 from ..schemas.models import ChatRequest
 from ..core.logging_config import get_railway_logger
@@ -19,7 +19,7 @@ router = APIRouter()
 
 # Initialize services
 chat_service = ChatService()
-agent_service = AgentService()
+agent_service = PydanticAIGatewayService()
 
 # =================================
 # CHAT ENDPOINTS
