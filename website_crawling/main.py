@@ -15,7 +15,8 @@ logger = auto_configure_logging("website_crawling")
 from website_crawling.core import db
 from website_crawling.core.config import settings
 from website_crawling.core.utils import (register_fastapi_exception_handlers,
-                          setup_global_exception_logging)
+                          setup_global_exception_logging,
+                          log_endpoint_request)
 from website_crawling.core.ai import get_genai_client
 from website_crawling.routers import router
 from website_crawling.utils.middleware import log_requests_middleware
