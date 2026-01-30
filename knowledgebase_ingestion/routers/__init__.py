@@ -1,1 +1,3 @@
-from .files import router as files
+from .main import router
+
+__all__ = ["router"]

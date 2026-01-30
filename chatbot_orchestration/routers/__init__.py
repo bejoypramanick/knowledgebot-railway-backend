@@ -1,1 +1,3 @@
-from .chat import router as chat_router
+from .main import router
+
+__all__ = ["router"]
