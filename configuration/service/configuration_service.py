@@ -312,30 +312,6 @@ class ConfigurationService:
             logger.error(f"Error updating LLM used tokens: {e}")
             raise
 
-    async def find_human_agent(self, email: str):
-        """Find human agent by email"""
-        try:
-            return await self._chatbot_dao.find_human_agent(email)
-        except Exception as e:
-            logger.error(f"Error finding human agent: {e}")
-            return None
-
-    async def add_human_agent(self, email: str):
-        """Add a new human agent"""
-        try:
-            return await self._chatbot_dao.create_human_agent(email)
-        except Exception as e:
-            logger.error(f"Error adding human agent: {e}")
-            raise
-
-    async def delete_human_agent(self, email: str):
-        """Delete human agent by email"""
-        try:
-            await self._chatbot_dao.delete_human_agent(email)
-        except Exception as e:
-            logger.error(f"Error deleting human agent: {e}")
-            raise
-
     async def get_chatbot_config(self):
         """Get complete chatbot configuration with all data transformations"""
         try:
@@ -514,15 +490,6 @@ class ConfigurationService:
             return data
         except Exception as e:
             logger.error(f"Error getting widget configuration: {e}")
-            raise
-
-    async def get_all_personas(self) -> List[Dict[str, Any]]:
-        """Get all available personas from the database."""
-        try:
-            chatbot_dao = ChatbotDAO()
-            return await chatbot_dao.get_all_personas()
-        except Exception as e:
-            logger.error(f"Error getting all personas: {e}")
             raise
 
     async def activate_persona(self, persona_name: str) -> bool:
