@@ -25,9 +25,14 @@ class DatabaseManager:
             'min_size': 2,
             'max_size': 20,
             'command_timeout': 60.0,
+            'max_inactive_connection_lifetime': 300.0,  # 5 minutes
+            'max_queries': 50000,  # Recreate connection after 50k queries
             'server_settings': {
                 'timezone': 'UTC',
-                'application_name': 'knowledgebot_backend'
+                'application_name': 'knowledgebot_backend',
+                'tcp_keepalives_idle': '60',  # Enable TCP keepalives
+                'tcp_keepalives_interval': '30',
+                'tcp_keepalives_count': '3'
             }
         }
         self._last_health_check = 0
