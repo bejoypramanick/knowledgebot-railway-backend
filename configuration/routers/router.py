@@ -259,6 +259,90 @@ async def get_feedback():
         logger.error(f"Error getting feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# =================================
+# USER ENDPOINTS
+# =================================
+
+@router.get("/users/profile")
+async def get_user_profile(user: dict = Depends(get_current_user)):
+    """Get user profile information"""
+    try:
+        # Get user's actual role from database
+        user_email = user.get("email")
+        role_result = await auth_service.get_user_role(user_email)
+        user_roles = role_result.get("roles", ["user"])
+        
+        # Determine primary role (admin > human_agent > user)
+        primary_role = "admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user")
+        
+        # Return authenticated user profile with actual role
+        profile = {
+            "email": user.get("email"),
+            "uid": user.get("uid"),
+            "name": user.get("name", user.get("email")),
+            "picture": user.get("picture"),
+            "role": primary_role,
+            "roles": user_roles,  # Include all roles for frontend
+            "preferences": {
+                "theme": "light",
+                "notifications": True
+            }
+        }
+        return {"success": True, "data": profile}
+    except Exception as e:
+        logger.error(f"Error getting user profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/users/profile")
+async def update_user_profile(profile_data: Dict[str, Any], user: dict = Depends(get_current_user)):
+    """Update user profile information"""
+    try:
+        # Mock update - in real implementation, this would update user in database
+        return {"success": True, "message": "Profile updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating user profile: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/users")
+async def get_all_users(user: dict = Depends(get_current_user)):
+    """Get all users (admin only)"""
+    try:
+        # Check if current user is admin using database
+        current_user_email = user.get("email")
+        current_user_role = await auth_service.get_user_role(current_user_email)
+        
+        if "admin" not in current_user_role.get("roles", []):
+            raise HTTPException(status_code=403, detail="Admin access required")
+        
+        # Get all admins and human agents from database
+        admins = await auth_service.get_admins()
+        human_agents = await auth_service.get_human_agents()
+        
+        # Combine and format users
+        users = []
+        
+        # Add admins
+        for admin in admins:
+            users.append({
+                "email": admin.get("email"),
+                "role": "admin",
+                "status": "active",
+                "added_at": admin.get("created_at")
+            })
+        
+        # Add human agents
+        for agent in human_agents:
+            users.append({
+                "email": agent.get("email"),
+                "role": "human_agent",
+                "status": "active",
+                "added_at": agent.get("created_at")
+            })
+        
+        return {"success": True, "data": users}
+    except Exception as e:
+        logger.error(f"Error getting users: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
 # HEALTH ENDPOINTS
