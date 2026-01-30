@@ -307,7 +307,7 @@ class ConfigurationService:
     async def add_human_agent(self, email: str):
         """Add a new human agent"""
         try:
-            return await self._chatbot_dao.add_human_agent(email)
+            return await self._chatbot_dao.create_human_agent(email)
         except Exception as e:
             logger.error(f"Error adding human agent: {e}")
             raise
