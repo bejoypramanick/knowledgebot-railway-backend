@@ -11,7 +11,7 @@ import json
 import time
 import httpx
 
-from ..core.firebase_auth import verify_token, get_user_from_firestore
+from ..core.firebase_auth import verify_firebase_token, get_user_from_firestore
 from ..core.config import get_settings
 from ..core.sse import sse_generator, sse_manager
 from ..core.logging_config import get_railway_logger
@@ -33,7 +33,7 @@ async def verify_auth_token(request: Request):
             raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
         
         token = auth_header.split(" ")[1]
-        user_data = verify_token(token)
+        user_data = verify_firebase_token(token)
         
         if not user_data:
             raise HTTPException(status_code=401, detail="Invalid token")
@@ -78,7 +78,7 @@ async def login_user(request: Request):
         if not token:
             raise HTTPException(status_code=400, detail="Missing token")
         
-        user_data = verify_token(token)
+        user_data = verify_firebase_token(token)
         
         if not user_data:
             raise HTTPException(status_code=401, detail="Invalid token")
