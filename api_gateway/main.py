@@ -16,11 +16,12 @@ from api_gateway.core.logging_config import auto_configure_logging
 
 logger = auto_configure_logging("api_gateway")
 
-from api_gateway.core.config import SERVICE_IDENTITY
+from api_gateway.core.config import get_settings
 # Import routers and config
-from api_gateway.routers import (chat_router, config_router, health_router,
+from api_gateway.routers import (config_router, health_router,
                                  knowledgebase_router, scrape_router,
                                  sse_router)
+from chatbot_orchestration.routers import router as chat_router
 from api_gateway.routers.firebase import router as firebase_router
 from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
@@ -34,8 +35,9 @@ setup_global_exception_logging("api_gateway")
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     try:
+        settings = get_settings()
         # Startup
-        logger.info(f"🚀 API Gateway ({SERVICE_IDENTITY}) started successfully")
+        logger.info(f"🚀 API Gateway ({settings.service_identity}) started successfully")
         yield
         # Shutdown
         logger.info("🛑 API Gateway shutting down")
@@ -92,14 +94,14 @@ async def gateway_check():
     }
 
 @app.post("/chat")
-async def chatbot_bypass_diagnostic(request: Request):
-    """NUCLEAR DIAGNOSTIC BYPASS: Detects service confusion."""
-    logger.error("🛑 CRITICAL: Service Confusion Detected!")
+async def chat_confusion_detector(request: Request):
+    """Detect if Railway is misrouting the chatbot service to the API Gateway."""
+    settings = get_settings()
     return JSONResponse(
         status_code=418,
         content={
             "error": "Service Confusion Detected",
-            "identity": SERVICE_IDENTITY,
+            "identity": settings.service_identity,
             "message": "This is the API Gateway, but you called /chat (the Chatbot route). This proves Railway is misrouting your deployment.",
             "suggestion": "Check Railway UI -> Chatbot Service -> Settings -> Dockerfile Path. Ensure it points to 'services/chatbot_orchestration/Dockerfile'."
         }

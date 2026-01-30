@@ -15,7 +15,6 @@ from ..service.chat_log_service import ChatLogService
 from ..service.notifications_service import NotificationsService
 from ..service.performance_service import PerformanceService
 from ..service.feedback_service import FeedbackService
-from ..service.user_service import UserService
 from ..service.widget_service import WidgetService
 from ..service.token_usage_service import TokenUsageService
 from ..core.auth_middleware import get_current_user
@@ -39,7 +38,6 @@ chat_log_service = ChatLogService()
 notifications_service = NotificationsService(notifications_dao=None)
 performance_service = PerformanceService()
 feedback_service = FeedbackService()
-user_service = UserService()
 widget_service = WidgetService()
 token_usage_service = TokenUsageService()
 

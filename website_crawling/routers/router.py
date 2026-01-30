@@ -8,7 +8,7 @@ from typing import Dict, List, Any, Optional
 import logging
 
 from ..service.scraping_service import ScrapingService
-from ..service.crawl_service import CrawlService
+from ..service.crawler_service import CrawlerService
 from ..core.auth_middleware import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ router = APIRouter()
 
 # Initialize services
 scraping_service = ScrapingService()
-crawl_service = CrawlService()
+crawler_service = CrawlerService()
 
 # =================================
 # WEB SCRAPING ENDPOINTS
@@ -144,7 +144,7 @@ async def start_crawl_session(request: Request):
             "user_agent": body.get("user_agent", "KnowledgeBot-Crawler/1.0")
         }
         
-        result = await crawl_service.start_crawl_session(
+        result = await crawler_service.start_crawl_session(
             urls=urls,
             user_id=current_user.get("uid"),
             options=options
@@ -166,7 +166,7 @@ async def get_crawl_sessions(request: Request):
     """Get crawl sessions for the user"""
     try:
         current_user = await get_current_user(request)
-        sessions = await crawl_service.get_user_sessions(current_user.get("uid"))
+        sessions = await crawler_service.get_user_sessions(current_user.get("uid"))
         
         return {
             "success": True,
@@ -181,7 +181,7 @@ async def get_crawl_session_details(session_id: str, request: Request):
     """Get details of a crawl session"""
     try:
         current_user = await get_current_user(request)
-        session_details = await crawl_service.get_session_details(session_id, current_user.get("uid"))
+        session_details = await crawler_service.get_session_details(session_id, current_user.get("uid"))
         
         if not session_details:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -201,7 +201,7 @@ async def stop_crawl_session(session_id: str, request: Request):
     """Stop a running crawl session"""
     try:
         current_user = await get_current_user(request)
-        result = await crawl_service.stop_session(session_id, current_user.get("uid"))
+        result = await crawler_service.stop_session(session_id, current_user.get("uid"))
         
         return {
             "success": True,
@@ -312,7 +312,7 @@ async def health_check():
             "timestamp": "2024-01-01T00:00:00Z",
             "components": {
                 "scraping_service": "healthy",
-                "crawl_service": "healthy",
+                "crawler_service": "healthy",
                 "database": "connected",
                 "proxy": "available"
             }
