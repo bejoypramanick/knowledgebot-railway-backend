@@ -18,9 +18,9 @@ class PersonasDAO:
         try:
             async with get_db_connection() as conn:
                 query = """
-                    SELECT id, persona_name, persona_description, system_prompt, 
-                           is_active, created_at, updated_at, created_by_email
-                    FROM public.chatbot_personas
+                    SELECT id, persona_name, system_prompt, 
+                           is_active, created_at, updated_at
+                    FROM public.persona_configurations
                     ORDER BY persona_name
                 """
                 rows = await conn.fetch(query)
@@ -35,9 +35,9 @@ class PersonasDAO:
         try:
             async with get_db_connection() as conn:
                 query = """
-                    SELECT id, persona_name, persona_description, system_prompt, 
-                           is_active, created_at, updated_at, created_by_email
-                    FROM public.chatbot_personas
+                    SELECT id, persona_name, system_prompt, 
+                           is_active, created_at, updated_at
+                    FROM public.persona_configurations
                     WHERE persona_name = $1
                 """
                 row = await conn.fetchrow(query, persona_name)
