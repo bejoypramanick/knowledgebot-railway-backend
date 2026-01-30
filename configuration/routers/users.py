@@ -27,10 +27,20 @@ async def get_user_profile(request: Request):
         display_name = request.headers.get("X-User-Display-Name", "")
         photo_url = request.headers.get("X-User-Photo-URL", "")
         
-        # Fetch roles from database
+        # Fetch roles from database with timeout protection
+        import asyncio
         service = AuthService()
-        result = await service.get_user_role(email)
-        roles = result.get('roles', [])
+        
+        try:
+            # Add timeout to prevent hanging
+            result = await asyncio.wait_for(service.get_user_role(email), timeout=5.0)
+            roles = result.get('roles', [])
+        except asyncio.TimeoutError:
+            logger.warning(f"Timeout getting user role for {email}, using default")
+            roles = ["user"]
+        except Exception as e:
+            logger.error(f"Error getting user role for {email}: {e}")
+            roles = ["user"]
         
         # Determine primary role based on priority
         current_role = 'user'
