@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     service_identity: str = "api-gateway"
     
     # Service URLs for routing
-    configuration_service_url: str = "http://localhost:8001"
+    configuration_service_url: str = "https://configuration-service.up.railway.app"
     chatbot_orchestration_url: str = "http://localhost:8003"
     knowledgebase_ingestion_url: str = "http://localhost:8002"
     website_crawling_url: str = "http://localhost:8004"
