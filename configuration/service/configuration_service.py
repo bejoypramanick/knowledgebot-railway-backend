@@ -411,7 +411,6 @@ class ConfigurationService:
             data = {
                 "admin_user": "GLOBISTAAN",
                 "admin_emails": admin_emails_list,
-                "admin_password": "**********",
                 "human_agents": human_agents_list,
                 "hil_enabled": metadata['hil_enabled'] if metadata else True,
                 "notifications": notifications,
