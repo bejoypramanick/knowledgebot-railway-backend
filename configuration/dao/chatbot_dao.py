@@ -224,10 +224,14 @@ class ChatbotDAO:
         values = []
         set_clause = []
         
-        for i, (key, value) in enumerate(updates_dict.items(), 2):
-            placeholders.append(f"${i}")
+        # Start parameter indexing from 2 (since id=1 is $1)
+        param_index = 2
+        
+        for key, value in updates_dict.items():
+            placeholders.append(f"${param_index}::{self._get_postgres_type(key)}")
             values.append(value)
             set_clause.append(f"{key} = EXCLUDED.{key}")
+            param_index += 1
         
         query = f"""
         INSERT INTO configuration_metadata (id, {', '.join(updates_dict.keys())})
@@ -236,6 +240,15 @@ class ChatbotDAO:
         """
         async with get_db_connection() as conn:
             await conn.execute(query, 1, *values)
+    
+    def _get_postgres_type(self, column_name: str) -> str:
+        """Get PostgreSQL type for configuration metadata columns"""
+        type_mapping = {
+            'hil_enabled': 'boolean',
+            'response_policy': 'integer',
+            'default_user_role': 'text'
+        }
+        return type_mapping.get(column_name, 'text')
 
     async def upsert_notification_setting_with_desc(self, name: str, enabled: bool, description: str):
         async with get_db_connection() as conn:
