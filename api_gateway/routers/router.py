@@ -98,7 +98,7 @@ async def login_user(request: Request):
 # CONFIGURATION SERVICE PROXY ENDPOINTS
 # =================================
 
-@router.get("/api/v1/users/profile")
+@router.get("/configuration/users/profile")
 async def proxy_user_profile(request: Request):
     """Proxy user profile requests to configuration service"""
     try:
@@ -123,7 +123,7 @@ async def proxy_user_profile(request: Request):
         logger.error(f"❌ User profile proxy error: {e}")
         raise HTTPException(status_code=500, detail="User profile proxy error")
 
-@router.put("/api/v1/users/profile")
+@router.put("/configuration/users/profile")
 async def proxy_update_user_profile(request: Request):
     """Proxy update user profile requests to configuration service"""
     try:
@@ -149,7 +149,7 @@ async def proxy_update_user_profile(request: Request):
         logger.error(f"❌ Update user profile proxy error: {e}")
         raise HTTPException(status_code=500, detail="Update user profile proxy error")
 
-@router.get("/api/v1/users")
+@router.get("/configuration/users")
 async def proxy_get_users(request: Request):
     """Proxy get users requests to configuration service"""
     try:
@@ -418,7 +418,7 @@ async def websocket_message_endpoint(request: Request):
         logger.error(f"Error processing message: {e}")
         raise HTTPException(status_code=500, detail="Failed to process message")
 
-@router.get("/api/v1/chat/{session_id}/events")
+@router.get("/configuration/chat/{session_id}/events")
 async def proxy_customer_sse(session_id: str, request: Request):
     """Proxy customer SSE connections to configuration service"""
     try:
@@ -447,7 +447,7 @@ async def proxy_customer_sse(session_id: str, request: Request):
         logger.error(f"❌ SSE proxy error: {e}")
         raise HTTPException(status_code=500, detail="SSE proxy error")
 
-@router.get("/api/v1/admin/chat-sessions/{session_id}/events")
+@router.get("/configuration/admin/chat-sessions/{session_id}/events")
 async def proxy_agent_sse(session_id: str, request: Request):
     """Proxy agent SSE connections to configuration service"""
     try:
@@ -480,7 +480,7 @@ async def proxy_agent_sse(session_id: str, request: Request):
 # CHAT PROXY ENDPOINTS
 # =================================
 
-@router.post("/chat/stream")
+@router.post("/chatbot/chat/stream")
 async def chat_stream_proxy(request: Request):
     """Proxy chat stream requests to chatbot orchestration service"""
     try:
@@ -562,7 +562,7 @@ async def chat_stream_proxy(request: Request):
         logger.error(f"Chat stream endpoint error: {e}")
         raise HTTPException(status_code=500, detail=f"Chat stream service error: {str(e)}")
 
-@router.post("/api/v1/suggested-messages")
+@router.post("/chatbot/suggested-messages")
 async def suggested_messages_endpoint(request: Request):
     """Route suggested messages requests to chatbot orchestration service."""
     try:
@@ -597,7 +597,7 @@ async def suggested_messages_endpoint(request: Request):
         logger.error(f"Error routing suggested messages request: {e}")
         raise HTTPException(status_code=500, detail=f"Suggested messages service error: {str(e)}")
 
-@router.get("/api/v1/sessions")
+@router.get("/chatbot/sessions")
 async def list_sessions_endpoint(request: Request):
     """Route list sessions requests to chatbot orchestration service."""
     try:
@@ -621,7 +621,7 @@ async def list_sessions_endpoint(request: Request):
         logger.error(f"Error routing list sessions request: {e}")
         raise HTTPException(status_code=500, detail=f"Chat service error: {str(e)}")
 
-@router.delete("/api/v1/sessions/{session_id}")
+@router.delete("/chatbot/sessions/{session_id}")
 async def delete_session_endpoint(session_id: str, request: Request):
     """Route delete session requests to chatbot orchestration service."""
     try:

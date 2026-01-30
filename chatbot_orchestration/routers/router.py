@@ -26,7 +26,7 @@ agent_service = PydanticAIGatewayService()
 # CHAT ENDPOINTS
 # =================================
 
-@router.post("chat")
+@router.post("/chat")
 async def chat_with_agent(request: Request):
     """Chat with AI agent"""
     try:
@@ -54,7 +54,7 @@ async def chat_with_agent(request: Request):
         logger.error(f"Error in chat: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("chat/stream")
+@router.post("/chat/stream")
 async def chat_with_agent_stream(request: Request):
     """Chat with AI agent with streaming response"""
     try:
@@ -80,7 +80,7 @@ async def chat_with_agent_stream(request: Request):
         logger.error(f"Error in chat stream: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("chat/history/{session_id}")
+@router.get("/chat/history/{session_id}")
 async def get_chat_history(session_id: str):
     """Get chat history for a session"""
     try:
@@ -95,7 +95,7 @@ async def get_chat_history(session_id: str):
         logger.error(f"Error getting chat history: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("chat/session/{session_id}")
+@router.delete("/chat/session/{session_id}")
 async def delete_chat_session(session_id: str):
     """Delete a chat session"""
     try:
@@ -109,7 +109,7 @@ async def delete_chat_session(session_id: str):
         logger.error(f"Error deleting session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("chat/session")
+@router.post("/chat/session")
 async def create_chat_session(request: Request):
     """Create a new chat session"""
     try:
@@ -128,7 +128,7 @@ async def create_chat_session(request: Request):
         logger.error(f"Error creating session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("chat/sessions")
+@router.get("/chat/sessions")
 async def get_user_sessions():
     """Get all chat sessions"""
     try:
@@ -146,7 +146,7 @@ async def get_user_sessions():
 # AGENT ENDPOINTS
 # =================================
 
-@router.get("agents")
+@router.get("/agents")
 async def get_available_agents():
     """Get list of available agents"""
     try:
@@ -160,7 +160,7 @@ async def get_available_agents():
         logger.error(f"Error getting agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("agents/{agent_id}")
+@router.get("/agents/{agent_id}")
 async def get_agent_info(agent_id: str):
     """Get information about a specific agent"""
     try:
@@ -183,7 +183,7 @@ async def get_agent_info(agent_id: str):
 # HEALTH ENDPOINTS
 # =================================
 
-@router.get("/api/v1/chatbot/health")
+@router.get("/health")
 async def health_check():
     """Health check endpoint"""
     try:
