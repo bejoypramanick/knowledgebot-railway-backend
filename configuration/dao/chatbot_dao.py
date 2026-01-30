@@ -220,22 +220,25 @@ class ChatbotDAO:
         if not updates_dict:
             return
         
-        # Build the SET clause for the UPDATE part
+        # Build the SET clause for the UPDATE part with proper type casting
         set_clauses = []
         values = []
         param_index = 1
         
         for key, value in updates_dict.items():
-            set_clauses.append(f"{key} = ${param_index}")
+            # Add explicit type casting based on the column
+            if key == 'hil_enabled':
+                set_clauses.append(f"{key} = ${param_index}::boolean")
+            elif key == 'response_policy':
+                set_clauses.append(f"{key} = ${param_index}::integer")
+            else:
+                set_clauses.append(f"{key} = ${param_index}::text")
             values.append(value)
             param_index += 1
         
-        # Use a single parameter for the id
-        values.append(1)
-        
         query = f"""
         INSERT INTO configuration_metadata (id, {', '.join(updates_dict.keys())})
-        VALUES ($1, {', '.join([f'${i+2}' for i in range(len(updates_dict))])})
+        VALUES ($1, {', '.join([f'${i+2}::' + self._get_postgres_type(k) for i, k in enumerate(updates_dict.keys())])})
         ON CONFLICT (id) DO UPDATE SET {', '.join(set_clauses)}, updated_at = CURRENT_TIMESTAMP
         """
         
