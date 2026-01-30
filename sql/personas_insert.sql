@@ -12,6 +12,17 @@ VALUES (
     NOW()
 );
 
+-- Custom - User customizable persona
+INSERT INTO persona_configurations (persona_name, persona_description, system_prompt, is_active, created_at, updated_at) 
+VALUES (
+    'Custom',
+    'User customizable persona',
+    '',
+    false,
+    NOW(),
+    NOW()
+);
+
 -- Friendly Receptionist - Warm and professional receptionist
 INSERT INTO persona_configurations (persona_name, persona_description, system_prompt, is_active, created_at, updated_at) 
 VALUES (
