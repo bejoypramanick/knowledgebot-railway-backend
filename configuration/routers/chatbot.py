@@ -6,10 +6,12 @@ from configuration.core.utils import log_endpoint_request
 
 from ..schemas.models import ChatbotConfigRequest
 from ..service.configuration_service import configuration_service
+from ..service.auth_service import AuthService
 from ..utils.logging_utils import log_configuration_change
 from ..utils.validation import validate_configuration_consistency
 
 logger = get_railway_logger(__name__)
+auth_service = AuthService()
 
 router = APIRouter(prefix="/api/v1", tags=["Chatbot Configuration"])
 
