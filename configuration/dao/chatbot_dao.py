@@ -284,16 +284,26 @@ class ChatbotDAO:
 
     # Human Agent Management Methods
     async def create_human_agent(self, email: str) -> int:
-        """Create a new human agent and return the ID."""
+        """Create a new human agent and return the ID. Returns existing ID if email already exists."""
         async with get_db_connection() as conn:
-            return await conn.fetchval(
-                """
-                INSERT INTO human_agents (email)
-                VALUES ($1)
-                RETURNING id
-                """,
-                email
-            )
+            # Try to insert first
+            try:
+                return await conn.fetchval(
+                    """
+                    INSERT INTO human_agents (email)
+                    VALUES ($1)
+                    RETURNING id
+                    """,
+                    email
+                )
+            except asyncpg.exceptions.UniqueViolationError:
+                # If email already exists, return the existing ID
+                return await conn.fetchval(
+                    """
+                    SELECT id FROM human_agents WHERE email = $1
+                    """,
+                    email
+                )
 
     async def delete_human_agent(self, email: str):
         """Delete a human agent by email."""
