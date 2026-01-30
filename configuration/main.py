@@ -11,9 +11,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import Routers
-from configuration.routers import chatbot_router, widget_router
-from configuration.routers.admin_management import \
-    router as admin_management_router
+from configuration.routers.chatbot import router as chatbot_router
+from configuration.routers.widget import router as widget_router
+from configuration.routers.admin_management import router as admin_management_router
 from configuration.routers.users import router as users_router
 from configuration.routers.personas import router as personas_router
 from configuration.routers.chat_log import public_chat_router
