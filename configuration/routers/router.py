@@ -12,7 +12,7 @@ from ..service.configuration_service import ConfigurationService
 from ..service.personas_service import PersonasService
 from ..service.auth_service import AuthService
 from ..service.chat_log_service import ChatLogService
-from ..service.notification_service import NotificationService
+from ..service.notifications_service import NotificationService
 from ..service.performance_service import PerformanceService
 from ..service.feedback_service import FeedbackService
 from ..service.user_service import UserService
@@ -36,7 +36,7 @@ config_service = ConfigurationService()
 personas_service = PersonasService()
 auth_service = AuthService()
 chat_log_service = ChatLogService()
-notification_service = NotificationService()
+notifications_service = NotificationService()
 performance_service = PerformanceService()
 feedback_service = FeedbackService()
 user_service = UserService()
@@ -231,7 +231,7 @@ async def delete_chat_log(session_id: str, request: Request):
 async def get_notification_settings():
     """Get notification settings"""
     try:
-        settings = await notification_service.get_settings()
+        settings = await notifications_service.get_settings()
         return {"success": True, "data": settings}
     except Exception as e:
         logger.error(f"Error getting notification settings: {e}")
@@ -242,7 +242,7 @@ async def update_notification_settings(settings: NotificationRequest, request: R
     """Update notification settings"""
     try:
         current_user = await get_current_user(request)
-        result = await notification_service.update_settings(settings.dict(), current_user.get('email'))
+        result = await notifications_service.update_settings(settings.dict(), current_user.get("email"))
         return {"success": True, "message": "Notification settings updated successfully"}
     except Exception as e:
         logger.error(f"Error updating notification settings: {e}")
@@ -253,7 +253,7 @@ async def send_notification(notification: Dict[str, Any], request: Request):
     """Send a notification"""
     try:
         current_user = await get_current_user(request)
-        result = await notification_service.send_notification(notification, current_user.get('email'))
+        result = await notification_service.send_notification(notification, current_user.get("email"))
         return {"success": True, "message": "Notification sent successfully"}
     except Exception as e:
         logger.error(f"Error sending notification: {e}")
