@@ -41,13 +41,17 @@ def validate_configuration_consistency(config: ChatbotConfigRequest):
     if config.hil_enabled and (not config.human_agents or len(config.human_agents) == 0):
         errors.append("Human-in-the-Loop is enabled but no human agents are configured")
 
-    # If HIL is disabled, warn about removing agents
-    if config.hil_enabled is False and config.human_agents and len(config.human_agents) > 0:
-        errors.append("Human-in-the-Loop is disabled but human agents are still configured")
+    # Note: Allow human agents to be configured even when HIL is disabled
+    # This is useful for keeping the agent list ready for future HIL activation
 
     # Validate admin email domains (optional business rule)
+    # Allow common email providers and specific domains
+    allowed_domains = [
+        'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
+        'globistaan.com', 'pramanick.com', 'company.com', 'trusted-domain.org'
+    ]
+    
     if config.admin_emails:
-        allowed_domains = ['company.com', 'trusted-domain.org']  # Configure as needed
         for email in config.admin_emails:
             if isinstance(email, str):
                 try:
@@ -55,7 +59,21 @@ def validate_configuration_consistency(config: ChatbotConfigRequest):
                     if domain not in allowed_domains:
                         errors.append(f"Admin email domain '{domain}' is not in allowed domains")
                 except IndexError:
-                    pass
+                    errors.append(f"Invalid email format: {email}")
+            elif hasattr(email, 'email'):
+                try:
+                    domain = email.email.split('@')[1].lower()
+                    if domain not in allowed_domains:
+                        errors.append(f"Admin email domain '{domain}' is not in allowed domains")
+                except (IndexError, AttributeError):
+                    errors.append(f"Invalid email format: {email}")
+            elif isinstance(email, dict) and 'email' in email:
+                try:
+                    domain = email['email'].split('@')[1].lower()
+                    if domain not in allowed_domains:
+                        errors.append(f"Admin email domain '{domain}' is not in allowed domains")
+                except (IndexError, KeyError):
+                    errors.append(f"Invalid email format: {email}")
 
     # Return validation result object
     from typing import NamedTuple
