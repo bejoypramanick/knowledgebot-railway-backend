@@ -373,7 +373,10 @@ class ConfigurationService:
 
             # Get all available personas (with fallback)
             try:
-                all_personas = await self.get_all_personas()
+                from .personas_service import PersonasService
+                personas_service = PersonasService()
+                personas_response = await personas_service.get_personas()
+                all_personas = personas_response.get('data', {}).get('all_personas', [])
             except Exception as e:
                 logger.warning(f"Could not fetch personas from database, using fallback: {e}")
                 all_personas = [{
