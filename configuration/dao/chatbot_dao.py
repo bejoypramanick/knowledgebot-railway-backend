@@ -103,13 +103,13 @@ class ChatbotDAO:
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables 
                         WHERE table_schema = 'public' 
-                        AND table_name = 'chatbot_personas'
+                        AND table_name = 'persona_configurations'
                     )
                     """
                 )
                 
                 if not table_exists:
-                    logger.warning("chatbot_personas table does not exist, returning fallback persona")
+                    logger.warning("persona_configurations table does not exist, returning fallback persona")
                     return [{
                         'persona_name': 'KnowledgeBot',
                         'persona_description': 'A helpful AI assistant for knowledge management',
@@ -120,7 +120,7 @@ class ChatbotDAO:
                 personas = await conn.fetch(
                     """
                     SELECT persona_name, persona_description, system_prompt, is_active
-                    FROM chatbot_personas
+                    FROM persona_configurations
                     ORDER BY persona_name
                     """
                 )
