@@ -91,7 +91,7 @@ async def login_user(request: Request):
 # GENERIC SERVICE PROXY HANDLER (catches ALL requests)
 # =================================
 
-@router.api_route("/{path:path}")
+@router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def generic_proxy_handler(request: Request, path: str):
     """Generic proxy handler that routes ALL requests to appropriate services"""
     try:
