@@ -26,6 +26,7 @@ from ..schemas.models import (
 )
 from ..core.correlation_id import get_correlation_id
 
+# Version: 2.0 - Fixed import issue
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
