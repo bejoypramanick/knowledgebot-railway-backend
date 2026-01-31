@@ -2,14 +2,8 @@
 Configuration Service for Configuration Management
 Provides business logic layer between routers and DAO
 """
-from typing import Any, Dict, List, Optional
 
 from configuration.core.logging_config import get_railway_logger
-
-from ..dao.auth_dao import AuthDAO
-from ..dao.chatbot_dao import ChatbotDAO
-from ..dao.performance_dao import PerformanceDAO
-from ..dao.widget_dao import WidgetDAO
 
 logger = get_railway_logger(__name__)
 
@@ -17,19 +11,7 @@ class ConfigurationService:
     """Service layer for configuration operations"""
     
     def __init__(self):
-        self._chatbot_dao = ChatbotDAO()  # Service manages its own DAO
-        self._auth_dao = AuthDAO()  # Service manages its own DAO
-        self._widget_dao = WidgetDAO()    # Service manages its own DAO
-        self._performance_dao = PerformanceDAO()  # Service manages its own DAO
-    
-    # Chatbot Configuration Methods
-    async def get_metadata(self) -> Optional[Dict[str, Any]]:
-        """Get chatbot metadata"""
-        try:
-            return await self._chatbot_dao.get_metadata()
-        except Exception as e:
-            logger.error(f"Error getting metadata: {e}")
-            return None
+        pass  # Service manages its own dependencies
     
     async def update_metadata(self, **kwargs):
         """Update chatbot metadata"""
