@@ -26,9 +26,19 @@ from ..schemas.models import (
 )
 from ..core.correlation_id import get_correlation_id
 
-# Version: 2.0 - Fixed import issue
+# Version: 2.1 - Force Railway redeploy - CRITICAL FIX
+# This version includes the missing get_correlation_id import
+# The NameError should be resolved with this deployment
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# CRITICAL DEBUG: Verify import is working
+try:
+    test_correlation = get_correlation_id
+    logger.info("✅ get_correlation_id import SUCCESSFUL")
+except NameError:
+    logger.error("❌ get_correlation_id import FAILED - This should not happen!")
+    raise
 
 # Simple function to get current user from request state or headers (set by API Gateway middleware)
 async def get_current_user(request: Request):
