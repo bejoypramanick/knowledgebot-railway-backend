@@ -6,6 +6,7 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExport
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 def setup_telemetry(service_name: str, log_level=logging.INFO):
     """
@@ -55,6 +56,10 @@ def setup_telemetry(service_name: str, log_level=logging.INFO):
     # Instrument standard logging
     # set_logging_format=False because we manually set the formatter above
     LoggingInstrumentor().instrument(set_logging_format=False)
+    
+    # Instrument HTTPX Clients (The Glue for Outgoing Requests)
+    # This automatically injects the 'traceparent' header into outgoing httpx calls
+    HTTPXClientInstrumentor().instrument()
     
     logging.info(f"🔭 OpenTelemetry initialized for {service_name}")
     
