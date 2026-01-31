@@ -2,7 +2,7 @@
 Crawler Service Layer
 Provides business logic for website crawling operations
 """
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from website_crawling.core.logging_config import get_railway_logger
 

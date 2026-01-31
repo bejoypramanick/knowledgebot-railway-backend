@@ -2,6 +2,7 @@
 Ingestion Service Layer for Knowledgebase Ingestion
 Provides business logic for file ingestion operations
 """
+from typing import Dict
 
 from knowledgebase_ingestion.core.logging_config import get_railway_logger
 

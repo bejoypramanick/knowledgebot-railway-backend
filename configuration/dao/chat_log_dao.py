@@ -2,6 +2,7 @@
 Chat Log Data Access Object for Configuration Service
 Handles database operations for chat logging
 """
+from typing import Dict, List, Any
 
 from configuration.core.db import get_db_connection
 from configuration.core.logging_config import get_railway_logger
