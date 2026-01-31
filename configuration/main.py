@@ -44,7 +44,6 @@ try:
     print("🚀 IMPORTING CORE MODULES...")
     from configuration.core.logging_config import auto_configure_logging
     from configuration.core.utils import validate_environment, wait_for_railway_network, service_status
-    from configuration.core.correlation_middleware import CorrelationIDMiddleware
     from configuration.core.database_initializer import database_initializer
     from configuration.core.db import close_databases, railway_db
     print("✅ CORE MODULES IMPORTED SUCCESSFULLY")
@@ -175,7 +174,6 @@ async def health_check():
     }
 
 # CORS middleware
-app.add_middleware(CorrelationIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

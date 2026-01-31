@@ -100,13 +100,11 @@ token_usage_service = TokenUsageService()
 @router.get("/debug/test")
 async def debug_test():
     """Test endpoint to verify logging is working"""
-    correlation_id = get_correlation_id()
-    logger.info(f"🔍 [{correlation_id}] Debug test endpoint called - logging is working!")
+    logger.info("🔍 Debug test endpoint called - logging is working!")
     return {
         "success": True,
         "message": "Debug test successful",
-        "correlation_id": correlation_id,
-        "timestamp": "2025-01-31T13:53:00Z"
+        "timestamp": "2026-01-31T14:40:00Z"
     }
 
 # =================================
