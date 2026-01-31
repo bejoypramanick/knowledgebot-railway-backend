@@ -99,18 +99,24 @@ logger.info(f"🔍 PORT being used: {PORT}")
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events with Railway fixes."""
     try:
+        logger.info("🚀 LIFESPAN: Starting application startup sequence")
         service_status.set_status("starting")
+        logger.info("🚀 LIFESPAN: Service status set to 'starting'")
 
         # Validate environment variables
+        logger.info("🚀 LIFESPAN: About to validate environment variables")
         try:
             validate_environment()
+            logger.info("✅ LIFESPAN: Environment validation successful")
         except ValueError as e:
-            logger.error(f"❌ Environment validation failed: {e}")
+            logger.error(f"❌ LIFESPAN: Environment validation failed: {e}")
             service_status.set_status("error")
             raise
 
         # Wait for Railway network initialization
+        logger.info("🚀 LIFESPAN: About to wait for Railway network")
         await wait_for_railway_network()
+        logger.info("✅ LIFESPAN: Railway network ready")
 
         # Store database URL for lazy initialization
         database_url = (
@@ -118,33 +124,41 @@ async def lifespan(app: FastAPI):
             os.getenv("RAILWAY_POSTGRES_URL") or
             os.getenv("POSTGRES_URL")
         )
+        logger.info(f"🔍 LIFESPAN: Database URL configured: {'✅' if database_url else '❌'}")
 
         if database_url:
             # Initialize database connection pool using centralized initializer
             app.state.database_url = database_url
+            logger.info("🚀 LIFESPAN: About to initialize database")
             try:
                 await database_initializer.initialize_and_validate(database_url)
-                logger.info("✅ Database initialized and validated")
+                logger.info("✅ LIFESPAN: Database initialized and validated")
             except Exception as e:
-                logger.error(f"❌ Failed to initialize database: {e}")
+                logger.error(f"❌ LIFESPAN: Failed to initialize database: {e}")
+                import traceback
+                logger.error(f"❌ LIFESPAN: Database error traceback: {traceback.format_exc()}")
                 # Don't fail startup, but log the error
         else:
-            logger.error("❌ DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
+            logger.error("❌ LIFESPAN: DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
             app.state.database_url = None
             service_status.set_status("error")
             raise ValueError("Database URL not configured")
 
         service_status.set_status("running")
-        logger.info(f"🚀 Configuration service started successfully on port {PORT}")
+        logger.info(f"🚀 LIFESPAN: Configuration service started successfully on port {PORT}")
+        logger.info("✅ LIFESPAN: Startup complete - yielding to application")
         yield
 
         # Shutdown
+        logger.info("🛑 LIFESPAN: Starting shutdown sequence")
         service_status.set_status("stopping")
         await close_databases()
-        logger.info("✅ Configuration service shutdown complete")
+        logger.info("✅ LIFESPAN: Configuration service shutdown complete")
     except Exception as e:
+        logger.error(f"❌ LIFESPAN: Error in lifespan handler: {e}")
+        import traceback
+        logger.error(f"❌ LIFESPAN: Full traceback: {traceback.format_exc()}")
         service_status.set_status("error")
-        logger.error(f"❌ Error in lifespan handler: {e}")
         raise
 
 # Create FastAPI app
