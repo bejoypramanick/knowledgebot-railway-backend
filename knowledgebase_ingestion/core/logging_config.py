@@ -40,24 +40,8 @@ def setup_railway_logging(service_name: str, level: str = "INFO") -> logging.Log
     logger = logging.getLogger(service_name)
     logger.setLevel(numeric_level)
     
-    # Ensure logger propagates to root (important for Railway)
-    logger.propagate = True
-    
-    # Remove any existing handlers that might interfere
-    for handler in logger.handlers[:]:
-        logger.removeHandler(handler)
-    
-    # Add a console handler that outputs to stdout
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(numeric_level)
-    
-    # Use Railway-compatible formatter
-    formatter = logging.Formatter(
-        '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    # Logger will use root logger's handler configured via basicConfig
+    # No additional handler needed to prevent duplicates
     
     # Log initialization
     logger.info(f"🚀 Railway logging initialized for service: {service_name}")
@@ -93,7 +77,7 @@ def configure_all_loggers(level: str = "INFO") -> None:
     for logger_name in logger_names:
         logger = logging.getLogger(logger_name)
         logger.setLevel(getattr(logging, level.upper(), logging.INFO))
-        logger.propagate = True
+        logger.propagate = False  # Disable propagation to prevent duplicate logs
         
         # Remove existing handlers
         for handler in logger.handlers[:]:
