@@ -167,7 +167,22 @@ async def generic_proxy_handler(request: Request, path: str):
                 params=request.query_params
             )
             logger.info(f"✅ Received response from {full_url} (Status: {response.status_code})")
-            return response
+            
+            # Create proper FastAPI Response from httpx response
+            from fastapi.responses import Response
+            
+            # Copy headers from httpx response to FastAPI response
+            response_headers = {}
+            for key, value in response.headers.items():
+                # Skip problematic headers that might cause issues
+                if key.lower() not in ['content-length', 'transfer-encoding']:
+                    response_headers[key] = value
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=response_headers
+            )
     except httpx.ConnectError as e:
         logger.error(f"❌ Connection failed to {full_url}: {e}")
         logger.error(f"❌ Service URL: {service_url}")
