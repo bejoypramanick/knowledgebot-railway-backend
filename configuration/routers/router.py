@@ -395,6 +395,16 @@ async def get_performance_metrics():
         logger.error(f"Error getting metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/admin/token-usage/detailed")
+async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_call_type: str = None):
+    """Get detailed token usage"""
+    try:
+        usage = await token_usage_service.get_detailed_token_usage(limit, provider, api_call_type)
+        return {"success": True, "data": usage}
+    except Exception as e:
+        logger.error(f"Error getting detailed token usage: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # =================================
 # FEEDBACK ENDPOINTS
 # =================================
