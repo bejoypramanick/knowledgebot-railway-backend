@@ -14,45 +14,6 @@ class FileService:
     
     def __init__(self):
         pass  # No DAO needed - using direct database calls
-    
-    async def get_or_create_user(self, email: str) -> str:
-        """Get user identifier for tracking purposes."""
-        if not email:
-            logger.warning("No email provided for user identification")
-            return None
-        
-        try:
-            # Simple user lookup - for now just return email
-            # In future, could implement user table lookup
-            return email
-        except Exception as e:
-            logger.error(f"Error checking user tables for email {email}: {e}")
-            return email
-
-    async def record_api_usage(
-        self,
-        user_id: Optional[str],
-        provider: str,
-        endpoint: str,
-        method: str = "POST",
-        status_code: int = 200,
-        req_size: int = 0,
-        res_size: int = 0,
-        duration_ms: int = 0,
-        metadata: Dict[str, Any] = None
-    ):
-        """Record API usage to the database."""
-        try:
-            if db.railway_db:
-                await db.railway_db.execute(
-                    """INSERT INTO api_usage (user_id, provider, endpoint, method, status_code, 
-                       req_size, res_size, duration_ms, metadata, created_at) 
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())""",
-                    user_id, provider, endpoint, method, status_code,
-                    req_size, res_size, duration_ms, metadata
-                )
-        except Exception as e:
-            logger.exception("Failed to record API usage: %s", e)
 
     async def check_duplicate_file(self, sha256_hash: str, original_filename: str) -> Optional[Dict[str, Any]]:
         """Check if a file with the same hash or name already exists."""
@@ -239,6 +200,65 @@ class FileService:
         except Exception as e:
             logger.error(f"Error getting all files: {e}")
             return []
+
+    async def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
+        """Get file record by ID"""
+        try:
+            if not db.railway_db:
+                logger.warning("Database not available - returning None")
+                return None
+            
+            file_record = await db.railway_db.fetchrow(
+                """SELECT id, original_filename, display_name, file_extension, mime_type, 
+                   size_bytes, sha256_hash, gemini_state, processed_at, created_at, version
+                   FROM file_uploads 
+                   WHERE id = $1""",
+                file_id
+            )
+            
+            if not file_record:
+                return None
+                
+            return {
+                "id": str(file_record['id']),
+                "original_filename": file_record['original_filename'],
+                "display_name": file_record['display_name'],
+                "file_extension": file_record['file_extension'],
+                "mime_type": file_record['mime_type'],
+                "size_bytes": file_record['size_bytes'],
+                "sha256_hash": file_record['sha256_hash'],
+                "gemini_state": file_record['gemini_state'],
+                "processed_at": file_record['processed_at'].isoformat() if file_record['processed_at'] else None,
+                "created_at": file_record['created_at'].isoformat() if file_record['created_at'] else None,
+                "version": file_record.get('version', 1)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting file by ID: {e}")
+            return None
+
+    async def delete_file(self, file_id: str) -> bool:
+        """Delete file by ID"""
+        try:
+            if not db.railway_db:
+                logger.warning("Database not available - cannot delete file")
+                return False
+            
+            # First get the file record
+            file_record = await self.get_file_by_id(file_id)
+            if not file_record:
+                logger.warning(f"File not found: {file_id}")
+                return False
+            
+            # Delete from database
+            await db.railway_db.execute("DELETE FROM file_uploads WHERE id = $1", file_id)
+            
+            logger.info(f"File deleted from database: {file_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error deleting file: {e}")
+            return False
 
     async def handle_duplicate_check(self, sha256_hash: str, original_filename: str, replace_existing: bool = False) -> dict:
         """Handle duplicate file checking logic"""
