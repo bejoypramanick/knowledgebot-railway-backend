@@ -370,14 +370,24 @@ async def get_feedback():
 @router.get("/users/profile")
 async def get_user_profile(user: dict = Depends(get_current_user)):
     """Get user profile information"""
+    correlation_id = get_correlation_id()
+    logger.info(f"🔍 [{correlation_id}] GET /users/profile called")
+    logger.info(f"🔍 [{correlation_id}] User data: {user}")
+    
     try:
         # Get user's actual role from database
         user_email = user.get("email")
+        logger.info(f"🔍 [{correlation_id}] Getting role for user email: {user_email}")
+        
         role_result = await auth_service.get_user_role(user_email)
+        logger.info(f"🔍 [{correlation_id}] Role result: {role_result}")
+        
         user_roles = role_result.get("roles", ["user"])
+        logger.info(f"🔍 [{correlation_id}] User roles: {user_roles}")
         
         # Determine primary role (admin > human_agent > user)
         primary_role = "admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user")
+        logger.info(f"🔍 [{correlation_id}] Primary role: {primary_role}")
         
         # Return authenticated user profile with actual role
         profile = {
@@ -392,9 +402,14 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
                 "notifications": True
             }
         }
+        logger.info(f"🔍 [{correlation_id}] User profile created successfully")
         return {"success": True, "data": profile}
     except Exception as e:
-        logger.error(f"Error getting user profile: {e}")
+        logger.error(f"❌ [{correlation_id}] Error getting user profile: {e}")
+        logger.error(f"❌ [{correlation_id}] Error type: {type(e)}")
+        logger.error(f"❌ [{correlation_id}] Error details: {str(e)}")
+        import traceback
+        logger.error(f"❌ [{correlation_id}] Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/users/profile")
