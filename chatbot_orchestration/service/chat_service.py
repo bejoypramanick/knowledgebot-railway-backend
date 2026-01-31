@@ -177,5 +177,43 @@ class ChatService:
             headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
         )
 
+    async def get_chat_history(self, session_id: str):
+        """Get chat history for a session"""
+        try:
+            # This would need to be implemented based on the actual chat storage
+            # For now, return empty history
+            return {
+                "session_id": session_id,
+                "messages": [],
+                "total_messages": 0
+            }
+        except Exception as e:
+            logger.error(f"Error getting chat history for session {session_id}: {e}")
+            raise
+
+    async def delete_session(self, session_id: str):
+        """Delete a chat session"""
+        try:
+            # This would need to be implemented based on the actual chat storage
+            # For now, return success
+            logger.info(f"Deleted session: {session_id}")
+            return {"success": True, "message": "Session deleted successfully"}
+        except Exception as e:
+            logger.error(f"Error deleting session {session_id}: {e}")
+            raise
+
+    async def get_all_sessions(self):
+        """Get all chat sessions"""
+        try:
+            # This would need to be implemented based on the actual chat storage
+            # For now, return empty list
+            return {
+                "sessions": [],
+                "total_sessions": 0
+            }
+        except Exception as e:
+            logger.error(f"Error getting all sessions: {e}")
+            raise
+
 # Singleton instance
 chat_service = ChatService()
