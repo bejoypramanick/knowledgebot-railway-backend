@@ -30,25 +30,6 @@ class ChatLogService:
         except Exception as e:
             logger.error(f"Error deleting chat log {session_id}: {e}")
             raise
-        """Assign a chat session to a human agent and send notification."""
-        try:
-            session_db_id = await self.dao.get_session_db_id(session_id)
-            
-            metadata_dict = {"assigned_agent": agent_email, "status": "active"}
-            if not session_db_id:
-                session_db_id = await self.dao.create_chat_session(session_id, metadata_dict)
-            else:
-                await self.dao.update_chat_session_metadata(session_db_id, metadata_dict)
-            
-            assignee_type = await self.dao.get_assignee_type(agent_email)
-            existing = await self.dao.get_session_assignment(session_db_id)
-            
-            if existing:
-                await self.dao.update_session_assignment(session_db_id, agent_email, assignee_type)
-            else:
-                await self.dao.create_session_assignment(session_db_id, agent_email, assignee_type)
-            
-            await self.dao.update_last_activity(session_db_id)
             logger.info(f"Chat session {session_id} assigned to agent {agent_email}")
         except Exception as e:
             logger.error(f"Error assigning chat to agent: {e}", exc_info=True)
