@@ -397,6 +397,315 @@ async def proxy_agent_sse(session_id: str, request: Request):
         raise HTTPException(status_code=500, detail="SSE proxy error")
 
 # =================================
+# COMPREHENSIVE SERVICE PROXY ENDPOINTS
+# =================================
+
+@router.get("/configuration/chatbot")
+async def proxy_get_chatbot_config(request: Request):
+    """Proxy chatbot configuration requests to configuration service"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/chatbot"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            # Forward user data from request state
+            if hasattr(request.state, 'user'):
+                headers['X-User-UID'] = request.state.user.get('uid', '')
+                headers['X-User-Email'] = request.state.user.get('email', '')
+                headers['X-User-Name'] = request.state.user.get('name', '')
+            
+            response = await client.get(
+                config_url,
+                headers=headers,
+                params=request.query_params
+            )
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Chatbot config proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Chatbot config proxy error")
+
+@router.post("/configuration/chatbot")
+async def proxy_save_chatbot_config(request: Request):
+    """Proxy save chatbot configuration requests to configuration service"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/chatbot"
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            # Forward user data from request state
+            if hasattr(request.state, 'user'):
+                headers['X-User-UID'] = request.state.user.get('uid', '')
+                headers['X-User-Email'] = request.state.user.get('email', '')
+                headers['X-User-Name'] = request.state.user.get('name', '')
+            
+            response = await client.post(
+                config_url,
+                json=body,
+                headers=headers
+            )
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Save chatbot config proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Save chatbot config proxy error")
+
+@router.get("/configuration/personas")
+async def proxy_get_personas(request: Request):
+    """Proxy personas requests to configuration service"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/personas"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            # Forward user data from request state
+            if hasattr(request.state, 'user'):
+                headers['X-User-UID'] = request.state.user.get('uid', '')
+                headers['X-User-Email'] = request.state.user.get('email', '')
+                headers['X-User-Name'] = request.state.user.get('name', '')
+            
+            response = await client.get(
+                config_url,
+                headers=headers,
+                params=request.query_params
+            )
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Personas proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Personas proxy error")
+
+@router.post("/configuration/feedback")
+async def proxy_feedback(request: Request):
+    """Proxy feedback requests to configuration service"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/feedback"
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            # Forward user data from request state
+            if hasattr(request.state, 'user'):
+                headers['X-User-UID'] = request.state.user.get('uid', '')
+                headers['X-User-Email'] = request.state.user.get('email', '')
+                headers['X-User-Name'] = request.state.user.get('name', '')
+            
+            response = await client.post(
+                config_url,
+                json=body,
+                headers=headers
+            )
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Feedback proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Feedback proxy error")
+
+@router.get("/configuration/widget")
+async def proxy_get_widget_config(request: Request):
+    """Proxy widget configuration requests to configuration service"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/widget"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.get(
+                config_url,
+                headers=headers,
+                params=request.query_params
+            )
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Widget config proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Widget config proxy error")
+
+@router.post("/configuration/widget")
+async def proxy_save_widget_config(request: Request):
+    """Proxy save widget configuration requests to configuration service"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/widget"
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            # Forward user data from request state
+            if hasattr(request.state, 'user'):
+                headers['X-User-UID'] = request.state.user.get('uid', '')
+                headers['X-User-Email'] = request.state.user.get('email', '')
+                headers['X-User-Name'] = request.state.user.get('name', '')
+            
+            response = await client.post(
+                config_url,
+                json=body,
+                headers=headers
+            )
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Save widget config proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Save widget config proxy error")
+
+@router.post("/configuration/notifications")
+async def proxy_create_notification(request: Request):
+    """Proxy create notification requests to configuration service"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/notifications"
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.post(
+                config_url,
+                json=body,
+                headers=headers
+            )
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Create notification proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Create notification proxy error")
+
+@router.get("/configuration/notifications")
+async def proxy_get_notifications(request: Request):
+    """Proxy get notifications requests to configuration service"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/notifications"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.get(
+                config_url,
+                headers=headers,
+                params=request.query_params
+            )
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Get notifications proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Get notifications proxy error")
+
+@router.put("/configuration/notifications/mark-read")
+async def proxy_mark_notifications_read(request: Request):
+    """Proxy mark notifications read requests to configuration service"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/notifications/mark-read"
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.put(
+                config_url,
+                json=body,
+                headers=headers
+            )
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Mark notifications read proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Mark notifications read proxy error")
+
+@router.put("/configuration/notifications/mark-all-read")
+async def proxy_mark_all_notifications_read(request: Request):
+    """Proxy mark all notifications read requests to configuration service"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/notifications/mark-all-read"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = dict(request.headers)
+            headers.pop("host", None)
+            
+            response = await client.put(
+                config_url,
+                json={},
+                headers=headers
+            )
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+    except Exception as e:
+        logger.error(f"❌ Mark all notifications read proxy error: {e}")
+        raise HTTPException(status_code=500, detail="Mark all notifications read proxy error")
+
+# =================================
 # CHAT PROXY ENDPOINTS
 # =================================
 
