@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional
 
 from configuration.core.db import get_db_connection
-from configuration.core.db_logger import execute_with_logging
+from configuration.core.db_logger import execute_with_logging, fetch_with_logging, fetchrow_with_logging
 from configuration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
@@ -53,9 +53,9 @@ class FeedbackDAO:
     async def get_feedback_stats(self, days: int = 30) -> Dict[str, Any]:
         """Get feedback statistics for the last N days."""
         try:
+            logger.info(f"🔍 DEBUG: get_feedback_stats called with days={days}")
             async with get_db_connection() as conn:
-                result = await conn.fetchrow(
-                    """
+                query = """
                     SELECT 
                         COUNT(*) as total_feedback,
                         COUNT(CASE WHEN feedback = 'positive' THEN 1 END) as positive_feedback,
@@ -65,9 +65,11 @@ class FeedbackDAO:
                             NULLIF(COUNT(*), 0), 2
                         ) as positive_percentage
                     FROM message_feedback 
-                    WHERE created_at >= NOW() - INTERVAL '%s days'
-                    """ % days
-                )
+                    WHERE created_at >= NOW() - INTERVAL $1 day
+                """
+                # Use parameterized query to prevent SQL injection
+                result = await fetchrow_with_logging(conn, query, days, operation="GET_FEEDBACK_STATS")
+                logger.info(f"🔍 DEBUG: get_feedback_stats completed")
                 return dict(result) if result else {}
         except Exception as e:
             logger.error(f"Error getting feedback stats: {e}")
@@ -76,16 +78,17 @@ class FeedbackDAO:
     async def get_feedback_by_session(self, session_id: str) -> List[Dict[str, Any]]:
         """Get all feedback for a specific session."""
         try:
+            logger.info(f"🔍 DEBUG: get_feedback_by_session called with session_id={session_id}")
             async with get_db_connection() as conn:
-                return await conn.fetch(
-                    """
+                query = """
                     SELECT message_id, feedback, user_email, created_at
                     FROM message_feedback 
                     WHERE session_id = $1
                     ORDER BY created_at DESC
-                    """,
-                    session_id
-                )
+                """
+                result = await fetch_with_logging(conn, query, session_id, operation="GET_FEEDBACK_BY_SESSION")
+                logger.info(f"🔍 DEBUG: get_feedback_by_session completed")
+                return result
         except Exception as e:
             logger.error(f"Error getting feedback by session: {e}")
             return []
@@ -93,9 +96,9 @@ class FeedbackDAO:
     async def get_daily_feedback_trend(self, days: int = 30) -> List[Dict[str, Any]]:
         """Get daily feedback trend for the last N days."""
         try:
+            logger.info(f"🔍 DEBUG: get_daily_feedback_trend called with days={days}")
             async with get_db_connection() as conn:
-                return await conn.fetch(
-                    """
+                query = """
                     SELECT 
                         DATE(created_at) as date,
                         COUNT(*) as total_feedback,
@@ -106,11 +109,13 @@ class FeedbackDAO:
                             NULLIF(COUNT(*), 0), 2
                         ) as positive_percentage
                     FROM message_feedback 
-                    WHERE created_at >= NOW() - INTERVAL '%s days'
+                    WHERE created_at >= NOW() - INTERVAL $1 day
                     GROUP BY DATE(created_at)
                     ORDER BY date DESC
-                    """ % days
-                )
+                """
+                result = await fetch_with_logging(conn, query, days, operation="GET_DAILY_FEEDBACK_TREND")
+                logger.info(f"🔍 DEBUG: get_daily_feedback_trend completed")
+                return result
         except Exception as e:
             logger.error(f"Error getting daily feedback trend: {e}")
             return []
