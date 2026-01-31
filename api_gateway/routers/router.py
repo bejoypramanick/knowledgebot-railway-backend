@@ -410,15 +410,22 @@ async def generic_proxy_handler(request: Request, path: str):
         # Determine service based on URL path
         service_url = None
         
-        if "/api/v1/gateway/configuration" in path:
+        logger.info(f"🔍 Processing path: '{path}'")
+        
+        if path.startswith("configuration/"):
             service_url = get_settings().configuration_service_url
-        elif "/api/v1/gateway/chatbot" in path:
+            logger.info(f"✅ Routing to configuration service: {service_url}")
+        elif path.startswith("chatbot/"):
             service_url = get_settings().chatbot_orchestration_url
-        elif "/api/v1/gateway/knowledgebase" in path:
+            logger.info(f"✅ Routing to chatbot service: {service_url}")
+        elif path.startswith("knowledgebase/"):
             service_url = get_settings().knowledgebase_ingestion_url
-        elif "/api/v1/gateway/webcrawl" in path:
+            logger.info(f"✅ Routing to knowledgebase service: {service_url}")
+        elif path.startswith("webcrawl/"):
             service_url = get_settings().website_crawling_url
+            logger.info(f"✅ Routing to webcrawl service: {service_url}")
         else:
+            logger.error(f"❌ Unknown service path: '{path}'")
             raise HTTPException(status_code=404, detail=f"Unknown service path: {path}")
         
         # Construct full URL
