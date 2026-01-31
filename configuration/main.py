@@ -28,13 +28,22 @@ logger = auto_configure_logging("configuration")
 logger.info("="*60)
 logger.info("CONFIGURATION SERVICE STARTING UP")
 logger.info("="*60)
+logger.info("🚀 CONFIGURATION SERVICE STARTING")
+logger.info("="*60)
 logger.info(f"Python version: {sys.version}")
 logger.info(f"Working directory: {os.getcwd()}")
 logger.info(f"Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'development')}")
 
+# Check critical environment variables early
+db_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+gemini_key = os.getenv("GEMINI_API_KEY")
+
+logger.info(f"🔍 Database URL configured: {'✅' if db_url else '❌'}")
+logger.info(f"🔍 Gemini API Key configured: {'✅' if gemini_key else '❌'}")
+
 # Get port configuration
 PORT = int(os.getenv('CONFIGURATION_SERVICE_PORT', os.getenv('PORT', '8004')))
-logger.info(f"PORT being used: {PORT}")
+logger.info(f"🔍 PORT being used: {PORT}")
 
 # Lifespan context manager
 @asynccontextmanager
@@ -95,6 +104,25 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Simple root endpoint for testing
+@app.get("/")
+async def root():
+    """Root endpoint for testing service availability"""
+    return {
+        "service": "configuration",
+        "status": "running",
+        "timestamp": "2025-01-31T13:09:00Z"
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint that doesn't depend on database"""
+    return {
+        "status": "healthy",
+        "service": "configuration",
+        "database": "not_checked"
+    }
 
 # CORS middleware
 app.add_middleware(CorrelationIDMiddleware)
