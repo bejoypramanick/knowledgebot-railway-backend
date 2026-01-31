@@ -29,10 +29,11 @@ except ImportError:
     logger.warning("Could not import chatbot_orchestration router - running in standalone mode")
 try:
     from configuration.routers import router as config_router
-except ImportError:
+    logger.info(f"✅ Configuration router imported successfully: {config_router}")
+except ImportError as e:
     # Fallback if running in different context
     config_router = None
-    logger.warning("Could not import configuration router - running in standalone mode")
+    logger.warning(f"Could not import configuration router - running in standalone mode: {e}")
 try:
     from knowledgebase_ingestion.routers import router as knowledgebase_router
 except ImportError:
@@ -198,14 +199,31 @@ async def chat_confusion_detector(request: Request):
 
 # Include Routers
 app.include_router(api_router, prefix="/api/v1/gateway")  
+logger.info(f"🔧 API Gateway router included with /api/v1/gateway prefix")
+
 if chat_router:
     app.include_router(chat_router, prefix="/api/v1/gateway/chatbot") 
+    logger.info(f"🤖 Chatbot router included with /api/v1/gateway/chatbot prefix")
+else:
+    logger.warning("⚠️ Chatbot router is None - not included")
+
 if config_router:
     app.include_router(config_router, prefix="/api/v1/gateway/configuration") 
+    logger.info(f"⚙️ Configuration router included with /api/v1/gateway/configuration prefix")
+else:
+    logger.warning("⚠️ Configuration router is None - not included")
+
 if knowledgebase_router:
     app.include_router(knowledgebase_router, prefix="/api/v1/gateway/knowledgebase") 
+    logger.info(f"📚 Knowledgebase router included with /api/v1/gateway/knowledgebase prefix")
+else:
+    logger.warning("⚠️ Knowledgebase router is None - not included")
+
 if webcrawl_router:
     app.include_router(webcrawl_router, prefix="/api/v1/gateway/webcrawl") 
+    logger.info(f"🕷️ Webcrawl router included with /api/v1/gateway/webcrawl prefix")
+else:
+    logger.warning("⚠️ Webcrawl router is None - not included") 
 
 # Add app-level endpoints
 @app.get("/")
