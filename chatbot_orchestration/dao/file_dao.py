@@ -3,10 +3,9 @@ File Data Access Object for Chatbot Orchestration
 Handles database operations for file management
 """
 
-from chatbot_orchestration.core.db import get_db_connection
-from chatbot_orchestration.core.logging_config import get_railway_logger
+from chatbot_orchestration.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("file_dao", "chatbot-orchestration")
 
 class FileDAO:
     """Data access object for file operations"""

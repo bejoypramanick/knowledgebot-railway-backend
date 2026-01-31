@@ -1,10 +1,14 @@
-from typing import Any, Dict, List, Optional
+"""
+Token Data Access Object for Configuration Service
+Handles database operations for token management
+"""
+from typing import Dict, List, Any, Optional
 
+from configuration.core.otel_logger import get_otel_logger
 from configuration.core.db import get_db_connection
 from configuration.core.db_logger import execute_with_logging
-from configuration.core.logging_config import get_railway_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("token_dao", "configuration")
 
 class TokenDAO:
     def __init__(self):

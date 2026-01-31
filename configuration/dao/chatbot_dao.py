@@ -4,10 +4,9 @@ Handles database operations for chatbot configuration management
 """
 from typing import Dict, List, Any, Optional
 
-from configuration.core.db import get_db_connection
-from configuration.core.logging_config import get_railway_logger
+from configuration.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("chatbot_dao", "configuration")
 
 class ChatbotDAO:
     def __init__(self):

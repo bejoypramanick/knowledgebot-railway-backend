@@ -1,15 +1,15 @@
 """
-Personas Data Access Object - v2
+Personas Data Access Object for Configuration Service
 Handles database operations for chatbot personas
 """
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Any, Optional
 import asyncpg
 
-from configuration.core.logging_config import get_railway_logger
+from configuration.core.otel_logger import get_otel_logger
 from configuration.core.db import get_db_connection
 from configuration.core.db_logger import fetch_with_logging
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("personas_dao", "configuration")
 
 class PersonasDAO:
     """Data Access Object for personas operations"""

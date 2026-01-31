@@ -1,9 +1,12 @@
-from typing import Any, Dict, List, Optional
+f"""
+Performance Data Access Object for Configuration Service
+Handles database operations for performance metrics
+"""
+from typing import Dict, List, Any, Optional
 
-from configuration.core.db import get_db_connection
-from configuration.core.logging_config import get_railway_logger
+from configuration.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("performance_dao", "configuration")
 
 class PerformanceDAO:
     def __init__(self):

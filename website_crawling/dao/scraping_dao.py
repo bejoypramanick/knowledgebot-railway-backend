@@ -1,13 +1,12 @@
 """
-Scraping Data Access Object for Website Crawling Service
-Handles database operations for website scraping metadata
+Scraping Data Access Object for Website Crawling
+Handles database operations for web scraping
 """
-from typing import Dict, Any, Optional
+from typing import Dict, List, Any, Optional
 
-from website_crawling.core.db import get_db_connection
-from website_crawling.core.logging_config import get_railway_logger
+from website_crawling.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("scraping_dao", "website-crawling")
 
 class ScrapingDAO:
     def __init__(self):

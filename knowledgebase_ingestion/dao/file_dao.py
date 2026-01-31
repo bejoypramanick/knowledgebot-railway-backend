@@ -1,10 +1,12 @@
-import json
+"""
+File Data Access Object for Knowledgebase Ingestion
+Handles database operations for file management
+"""
 from typing import Any, Dict, List, Optional
 
-from knowledgebase_ingestion.core.db import get_db_connection
-from knowledgebase_ingestion.core.logging_config import get_railway_logger
+from knowledgebase_ingestion.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("file_dao", "knowledgebase-ingestion")
 
 class FileDAO:
     def __init__(self):

@@ -1,13 +1,13 @@
 """
 Feedback Data Access Object for Configuration Service
-Handles database operations for user feedback management
+Handles database operations for user feedback
 """
 from typing import Dict, List, Any, Optional
 
+from configuration.core.otel_logger import get_otel_logger
 from configuration.core.db import get_db_connection
-from configuration.core.logging_config import get_railway_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("feedback_dao", "configuration")
 
 class FeedbackDAO:
     def __init__(self):
