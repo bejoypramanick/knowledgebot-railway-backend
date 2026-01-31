@@ -397,165 +397,69 @@ async def proxy_agent_sse(session_id: str, request: Request):
         raise HTTPException(status_code=500, detail="SSE proxy error")
 
 # =================================
-# CONFIGURATION SERVICE PROXY ENDPOINTS
+# GENERIC SERVICE PROXY HANDLER
 # =================================
 
-@router.get("/configuration/users/profile")
-async def proxy_user_profile(request: Request):
-    """Proxy user profile requests to configuration service"""
+@router.api_route("/{path:path}")
+async def generic_proxy_handler(request: Request, path: str):
+    """Generic proxy handler that routes requests to appropriate services"""
     try:
         import httpx
         from ..core.config import get_settings
         
-        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/users/profile"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            headers = dict(request.headers)
-            headers.pop("host", None)
-            
-            # Forward user data from request state
-            if hasattr(request.state, 'user'):
-                headers['X-User-UID'] = request.state.user.get('uid', '')
-                headers['X-User-Email'] = request.state.user.get('email', '')
-                headers['X-User-Name'] = request.state.user.get('name', '')
-            
-            response = await client.get(config_url, headers=headers)
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                headers=dict(response.headers)
-            )
-    except Exception as e:
-        logger.error(f"❌ User profile proxy error: {e}")
-        raise HTTPException(status_code=500, detail="User profile proxy error")
-
-@router.put("/configuration/users/profile")
-async def proxy_update_user_profile(request: Request):
-    """Proxy update user profile requests to configuration service"""
-    try:
-        import httpx
-        from ..core.config import get_settings
+        # Determine service based on URL path
+        service_url = None
         
-        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/users/profile"
-        body = await request.json()
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            headers = dict(request.headers)
-            headers.pop("host", None)
-            
-            # Forward user data from request state
-            if hasattr(request.state, 'user'):
-                headers['X-User-UID'] = request.state.user.get('uid', '')
-                headers['X-User-Email'] = request.state.user.get('email', '')
-                headers['X-User-Name'] = request.state.user.get('name', '')
-            
-            response = await client.put(config_url, json=body, headers=headers)
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                headers=dict(response.headers)
-            )
-    except Exception as e:
-        logger.error(f"❌ Update user profile proxy error: {e}")
-        raise HTTPException(status_code=500, detail="Update user profile proxy error")
-
-@router.get("/configuration/chatbot")
-async def proxy_get_chatbot_config(request: Request):
-    """Proxy chatbot configuration requests to configuration service"""
-    try:
-        import httpx
-        from ..core.config import get_settings
+        if path.startswith("configuration/"):
+            service_url = get_settings().configuration_service_url
+        elif path.startswith("chatbot/"):
+            service_url = get_settings().chatbot_orchestration_url
+        elif path.startswith("knowledgebase/"):
+            service_url = get_settings().knowledgebase_ingestion_url
+        elif path.startswith("webcrawl/"):
+            service_url = get_settings().website_crawling_url
+        else:
+            raise HTTPException(status_code=404, detail=f"Unknown service path: {path}")
         
-        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/chatbot"
+        # Construct full URL
+        full_url = f"{service_url}/api/v1/{path}"
+        
+        # Prepare headers
+        headers = dict(request.headers)
+        headers.pop("host", None)
+        
+        # Forward user data from request state
+        if hasattr(request.state, 'user'):
+            headers['X-User-UID'] = request.state.user.get('uid', '')
+            headers['X-User-Email'] = request.state.user.get('email', '')
+            headers['X-User-Name'] = request.state.user.get('name', '')
+        
         async with httpx.AsyncClient(timeout=30.0) as client:
-            headers = dict(request.headers)
-            headers.pop("host", None)
-            
-            # Forward user data from request state
-            if hasattr(request.state, 'user'):
-                headers['X-User-UID'] = request.state.user.get('uid', '')
-                headers['X-User-Email'] = request.state.user.get('email', '')
-                headers['X-User-Name'] = request.state.user.get('name', '')
-            
-            response = await client.get(
-                config_url,
-                headers=headers,
-                params=request.query_params
-            )
+            # Make the request to the appropriate service
+            if request.method == "GET":
+                response = await client.get(full_url, headers=headers, params=request.query_params)
+            elif request.method == "POST":
+                body = await request.json()
+                response = await client.post(full_url, json=body, headers=headers)
+            elif request.method == "PUT":
+                body = await request.json()
+                response = await client.put(full_url, json=body, headers=headers)
+            elif request.method == "DELETE":
+                response = await client.delete(full_url, headers=headers)
+            else:
+                raise HTTPException(status_code=405, detail="Method not allowed")
             
             return Response(
                 content=response.content,
                 status_code=response.status_code,
                 headers=dict(response.headers)
             )
+            
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"❌ Chatbot config proxy error: {e}")
-        raise HTTPException(status_code=500, detail="Chatbot config proxy error")
-
-@router.post("/configuration/chatbot")
-async def proxy_save_chatbot_config(request: Request):
-    """Proxy save chatbot configuration requests to configuration service"""
-    try:
-        import httpx
-        from ..core.config import get_settings
-        
-        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/chatbot"
-        body = await request.json()
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            headers = dict(request.headers)
-            headers.pop("host", None)
-            
-            # Forward user data from request state
-            if hasattr(request.state, 'user'):
-                headers['X-User-UID'] = request.state.user.get('uid', '')
-                headers['X-User-Email'] = request.state.user.get('email', '')
-                headers['X-User-Name'] = request.state.user.get('name', '')
-            
-            response = await client.post(
-                config_url,
-                json=body,
-                headers=headers
-            )
-            
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                headers=dict(response.headers)
-            )
-    except Exception as e:
-        logger.error(f"❌ Save chatbot config proxy error: {e}")
-        raise HTTPException(status_code=500, detail="Save chatbot config proxy error")
-
-@router.get("/configuration/personas")
-async def proxy_get_personas(request: Request):
-    """Proxy personas requests to configuration service"""
-    try:
-        import httpx
-        from ..core.config import get_settings
-        
-        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/personas"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            headers = dict(request.headers)
-            headers.pop("host", None)
-            
-            # Forward user data from request state
-            if hasattr(request.state, 'user'):
-                headers['X-User-UID'] = request.state.user.get('uid', '')
-                headers['X-User-Email'] = request.state.user.get('email', '')
-                headers['X-User-Name'] = request.state.user.get('name', '')
-            
-            response = await client.get(
-                config_url,
-                headers=headers,
-                params=request.query_params
-            )
-            
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                headers=dict(response.headers)
-            )
-    except Exception as e:
-        logger.error(f"❌ Personas proxy error: {e}")
-        raise HTTPException(status_code=500, detail="Personas proxy error")
+        logger.error(f"❌ Generic proxy error for path '{path}': {e}")
+        raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}")
 
 # =================================
 # CHAT PROXY ENDPOINTS
