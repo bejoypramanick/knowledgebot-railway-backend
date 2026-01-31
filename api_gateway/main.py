@@ -63,9 +63,10 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, exclude_paths=None):
         super().__init__(app)
         self.exclude_paths = exclude_paths or [
-            "/health",
             "/",
-            "/docs", 
+            "/health",
+            "/gateway/health",
+            "/docs",
             "/redoc",
             "/openapi.json",
             "/favicon.ico",
@@ -81,9 +82,10 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
         # Get token from Authorization header
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
                 status_code=401,
-                detail="Missing or invalid authorization header",
+                content={"detail": "Missing or invalid authorization header"},
                 headers={"WWW-Authenticate": "Bearer"}
             )
         
@@ -93,12 +95,28 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
             from api_gateway.core.firebase_auth import verify_firebase_token
             user_data = verify_firebase_token(token)
             if not user_data:
-                raise HTTPException(status_code=401, detail="Invalid token")
+                from fastapi.responses import JSONResponse
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Invalid token"}
+                )
             request.state.user = user_data
         except Exception as e:
-            raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=401,
+                content={"detail": f"Authentication failed: {str(e)}"}
+            )
         
-        return await call_next(request)
+        try:
+            return await call_next(request)
+        except Exception as e:
+            # Catch any other exceptions that might occur during request processing
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error"}
+            )
 
 # Add middleware to app
 app.add_middleware(FirebaseAuthMiddleware)

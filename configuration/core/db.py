@@ -39,7 +39,6 @@ class DatabaseManager:
                 'tcp_keepalives_idle': '30',  # Shorter keepalives for Railway
                 'tcp_keepalives_interval': '10',
                 'tcp_keepalives_count': '3',
-                'connect_timeout': '10',  # Connection timeout
                 'statement_timeout': '30000'  # 30 second statement timeout
             }
         }
