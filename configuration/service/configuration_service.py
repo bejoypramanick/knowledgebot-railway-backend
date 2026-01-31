@@ -600,6 +600,3 @@ class ConfigurationService:
         except Exception as e:
             logger.error(f"❌ Error saving chatbot config: {e}")
             raise
-
-# Singleton instance
-configuration_service = ConfigurationService()
