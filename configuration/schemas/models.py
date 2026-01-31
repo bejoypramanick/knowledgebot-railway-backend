@@ -1,7 +1,7 @@
 import re
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Annotated
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, AfterValidator
 
 try:
     from email_validator import EmailNotValidError, validate_email
@@ -46,10 +46,11 @@ class PersonaUpdate(BaseModel):
 
 class ValidatedEmail(str):
     """Custom email validator with enhanced checks"""
+    
     @classmethod
-    def __get_validators__(cls):
-        yield cls.validate
-
+    def __get_pydantic_core_schema__(cls, source_type, handler):
+        return handler(Annotated[str, AfterValidator(cls.validate)])
+    
     @classmethod
     def validate(cls, v):
         if isinstance(v, str):
