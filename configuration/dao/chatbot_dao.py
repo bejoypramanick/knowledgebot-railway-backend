@@ -1,9 +1,11 @@
-from typing import Any, Dict, List, Optional
-import asyncpg
+"""
+Chatbot Data Access Object for Configuration Service
+Handles database operations for chatbot configuration management
+"""
+from typing import Dict, List, Any, Optional
 
-from configuration.core.logging_config import get_railway_logger
 from configuration.core.db import get_db_connection
-from configuration.core.db_logger import execute_with_logging, fetchrow_with_logging, fetch_with_logging
+from configuration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 
@@ -12,122 +14,139 @@ class ChatbotDAO:
         pass  # No connection parameter - DAO manages its own connection
 
     async def get_metadata(self) -> Optional[Dict[str, Any]]:
-        async with get_db_connection() as conn:
-            return await conn.fetchrow(
-                """
-                SELECT default_user_role, hil_enabled, response_policy
-                FROM configuration_metadata
-                WHERE id = 1
-                """
-            )
+        """Get chatbot metadata."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchrow("""
+                    SELECT id, display_name, description, version, created_at, updated_at
+                    FROM chatbot_metadata
+                    WHERE id = 1
+                """)
+        except Exception as e:
+            logger.error(f"Error fetching chatbot metadata: {e}")
+            return None
+
+    async def update_metadata(self, **kwargs):
+        """Update chatbot metadata."""
+        try:
+            async with get_db_connection() as conn:
+                set_clauses = []
+                params = []
+                
+                for key, value in kwargs.items():
+                    set_clauses.append(f"{key} = ${len(params) + 1}")
+                    params.append(value)
+                
+                if set_clauses:
+                    await conn.execute(f"""
+                        UPDATE chatbot_metadata 
+                        SET {', '.join(set_clauses)}, updated_at = NOW()
+                        WHERE id = 1
+                    """, *params)
+                    logger.info(f"Updated chatbot metadata: {kwargs}")
+        except Exception as e:
+            logger.error(f"Error updating chatbot metadata: {e}")
+            raise
+
+    async def get_widget_config(self) -> Optional[Dict[str, Any]]:
+        """Get widget configuration."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchrow("""
+                    SELECT id, primary_color, chat_icon_url, chat_icon_zoom, 
+                           display_chatbot, align_bubble, auto_show_duration,
+                           chat_bubble_color, profile_picture_url, profile_zoom,
+                           keep_showing_suggested, use_primary_for_header,
+                           created_at, updated_at
+                    FROM widget_config
+                    WHERE id = 1
+                """)
+        except Exception as e:
+            logger.error(f"Error fetching widget config: {e}")
+            return None
+
+    async def get_suggested_messages(self) -> List[str]:
+        """Get suggested messages for the widget."""
+        try:
+            async with get_db_connection() as conn:
+                records = await conn.fetch("""
+                    SELECT message_text 
+                    FROM widget_suggested_messages 
+                    WHERE is_active = true
+                    ORDER BY display_order ASC
+                """)
+                return [record['message_text'] for record in records]
+        except Exception as e:
+            logger.error(f"Error fetching suggested messages: {e}")
+            return []
+
+    async def update_widget_config(self, config_data: Dict[str, Any]):
+        """Update widget configuration."""
+        try:
+            async with get_db_connection() as conn:
+                set_clauses = []
+                params = []
+                
+                for key, value in config_data.items():
+                    if key in ['primary_color', 'chat_icon_url', 'chat_icon_zoom', 'display_chatbot', 
+                               'align_bubble', 'auto_show_duration', 'chat_bubble_color', 
+                               'profile_picture_url', 'profile_zoom', 'keep_showing_suggested', 
+                               'use_primary_for_header']:
+                        set_clauses.append(f"{key} = ${len(params) + 1}")
+                        params.append(value)
+                
+                if set_clauses:
+                    await conn.execute(f"""
+                        UPDATE widget_config 
+                        SET {', '.join(set_clauses)}, updated_at = NOW()
+                        WHERE id = 1
+                    """, *params)
+                    logger.info(f"Updated widget config: {config_data}")
+        except Exception as e:
+            logger.error(f"Error updating widget config: {e}")
+            raise
 
     async def get_notification_settings(self) -> List[Dict[str, Any]]:
-        async with get_db_connection() as conn:
-            return await conn.fetch(
-                """
-                SELECT setting_name, is_enabled
-                FROM notification_settings
-                ORDER BY setting_name
-                """
-            )
+        """Get notification settings."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetch("""
+                    SELECT setting_name, is_enabled, description
+                    FROM notification_settings
+                    ORDER BY setting_name
+                """)
+        except Exception as e:
+            logger.error(f"Error fetching notification settings: {e}")
+            return []
 
     async def get_security_settings(self) -> List[Dict[str, Any]]:
-        async with get_db_connection() as conn:
-            return await conn.fetch(
-                """
-                SELECT setting_name, setting_value, setting_type
-                FROM security_settings
-                ORDER BY setting_name
-                """
-            )
+        """Get security settings."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetch("""
+                    SELECT setting_name, setting_value, setting_type, description
+                    FROM security_settings
+                    ORDER BY setting_name
+                """)
+        except Exception as e:
+            logger.error(f"Error fetching security settings: {e}")
+            return []
 
     async def get_active_persona(self) -> Optional[Dict[str, Any]]:
         """Get active chatbot persona from database."""
         try:
             async with get_db_connection() as conn:
-                # Check if table exists first
-                table_exists = await conn.fetchval(
-                    """
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables 
-                        WHERE table_schema = 'public' 
-                        AND table_name = 'persona_configurations'
-                    )
-                    """
-                )
-                
-                if not table_exists:
-                    logger.warning("persona_configurations table does not exist, returning fallback persona")
-                    return {
-                        'persona_name': 'KnowledgeBot',
-                        'persona_description': 'A helpful AI assistant for knowledge management',
-                        'is_active': True,
-                        'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
-                    }
-                
-                # Try to get active persona from database
-                query = """
-                    SELECT persona_name, system_prompt, is_active
-                    FROM persona_configurations
+                return await conn.fetchrow("""
+                    SELECT id, persona_name, persona_description, system_prompt, 
+                           is_active, created_at, updated_at
+                    FROM chatbot_personas
                     WHERE is_active = true
+                    ORDER BY created_at DESC
                     LIMIT 1
-                """
-                
-                persona = await conn.fetchrow(query)
-                
-                if persona:
-                    return {
-                        'persona_name': persona['persona_name'],
-                        'persona_description': f"AI assistant: {persona['persona_name']}",
-                        'is_active': persona['is_active'],
-                        'system_prompt': persona['system_prompt']
-                    }
-                else:
-                    # Fallback to default persona if no active persona found
-                    return {
-                        'persona_name': 'KnowledgeBot',
-                        'persona_description': 'AI assistant',
-                        'is_active': True,
-                        'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
-                    }
+                """)
         except Exception as e:
             logger.error(f"Error fetching active persona: {e}")
             return None
-
-    async def get_llm_providers(self) -> List[Dict[str, Any]]:
-        """Get LLM providers for this service."""
-        async with get_db_connection() as conn:
-            return await conn.fetch(
-                """
-                SELECT provider_name, token_used, token_limit
-                FROM llm_providers
-                WHERE is_active = true
-                ORDER BY provider_name
-                """
-            )
-
-    async def add_llm_provider(self, provider: str, limit: int):
-        """Add LLM provider for this service."""
-        async with get_db_connection() as conn:
-            query = """
-                INSERT INTO llm_providers (provider_name, token_limit, is_active)
-                VALUES ($1, $2, true)
-                ON CONFLICT (provider_name) DO UPDATE SET
-                token_limit = EXCLUDED.token_limit, updated_at = NOW()
-            """
-            params = [provider, limit]
-            await conn.execute(query, *params)
-
-    async def update_llm_used_tokens(self, provider: str, used: int):
-        """Update LLM token usage for this service."""
-        async with get_db_connection() as conn:
-            query = "UPDATE llm_providers SET token_used = $1 WHERE provider_name = $2"
-            params = [used, provider]
-            await conn.execute(query, *params)
-
-    async def upsert_notification_setting(self, name: str, enabled: bool):
-        async with get_db_connection() as conn:
-            query = """
                 INSERT INTO notification_settings (setting_name, is_enabled)
                 VALUES ($1, $2)
                 ON CONFLICT (setting_name) DO UPDATE SET
