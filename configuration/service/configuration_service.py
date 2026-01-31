@@ -5,6 +5,7 @@ Provides business logic layer between routers and DAO
 from typing import Any, Dict, List, Optional
 
 from configuration.core.logging_config import get_railway_logger
+from configuration.core.correlation_id import get_correlation_id
 
 from ..dao.auth_dao import AuthDAO
 from ..dao.chatbot_dao import ChatbotDAO
@@ -527,27 +528,30 @@ class ConfigurationService:
 
     async def save_chatbot_config(self, config_data: Dict[str, Any]):
         """Save complete chatbot configuration"""
+        correlation_id = get_correlation_id()
+        correlation_prefix = f"[{correlation_id}] " if correlation_id else ""
+        
         try:
-            logger.info(f"🔍 Saving chatbot config: {config_data}")
+            logger.info(f"🔍 {correlation_prefix}Saving chatbot config: {config_data}")
             
             # Update metadata if provided
             if 'display_name' in config_data or 'description' in config_data or 'response_policy' in config_data:
                 metadata_updates = {}
                 if 'display_name' in config_data:
                     metadata_updates['display_name'] = config_data['display_name']
-                    logger.info(f"🔍 Updating display_name: {config_data['display_name']}")
+                    logger.info(f"🔍 {correlation_prefix}Updating display_name: {config_data['display_name']}")
                 if 'description' in config_data:
                     metadata_updates['description'] = config_data['description']
-                    logger.info(f"🔍 Updating description: {config_data['description']}")
+                    logger.info(f"🔍 {correlation_prefix}Updating description: {config_data['description']}")
                 if 'response_policy' in config_data:
                     metadata_updates['response_policy'] = config_data['response_policy']
-                    logger.info(f"🔍 UPDATING RESPONSE_POLICY: {config_data['response_policy']}")
+                    logger.info(f"🔍 {correlation_prefix}UPDATING RESPONSE_POLICY: {config_data['response_policy']}")
                 
-                logger.info(f"🔍 Calling update_metadata with: {metadata_updates}")
+                logger.info(f"🔍 {correlation_prefix}Calling update_metadata with: {metadata_updates}")
                 await self.update_metadata(**metadata_updates)
-                logger.info(f"✅ update_metadata completed successfully")
+                logger.info(f"✅ {correlation_prefix}update_metadata completed successfully")
             else:
-                logger.info(f"🔍 No metadata updates needed - checking keys: display_name={config_data.get('display_name')}, description={config_data.get('description')}, response_policy={config_data.get('response_policy')}")
+                logger.info(f"🔍 {correlation_prefix}No metadata updates needed - checking keys: display_name={config_data.get('display_name')}, description={config_data.get('description')}, response_policy={config_data.get('response_policy')}")
             
             # Update admin emails if provided
             if 'admin_emails' in config_data and config_data['admin_emails']:
