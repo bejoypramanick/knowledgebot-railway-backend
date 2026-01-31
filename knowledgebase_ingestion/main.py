@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from knowledgebase_ingestion.core.logging_config import auto_configure_logging
-from knowledgebase_ingestion.core.correlation_middleware import CorrelationIDMiddleware
+from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
 
 # Configure Railway-compatible logging
 logger = auto_configure_logging("knowledgebase_ingestion")

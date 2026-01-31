@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from website_crawling.core.logging_config import auto_configure_logging
-from website_crawling.core.correlation_middleware import CorrelationIDMiddleware
+from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
 
 # Configure Railway-compatible logging
 logger = auto_configure_logging("website_crawling")
