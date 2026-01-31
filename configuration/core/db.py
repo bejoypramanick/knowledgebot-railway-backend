@@ -29,17 +29,17 @@ class DatabaseManager:
         
         self._pool_config = {
             'min_size': 1,  # Reduced for Railway memory limits
-            'max_size': 10,  # Reduced to prevent overwhelming DB
-            'command_timeout': 30.0,  # Reduced timeout
-            'max_inactive_connection_lifetime': 180.0,  # 3 minutes
-            'max_queries': 25000,  # Reduced recreation threshold
+            'max_size': 5,  # Further reduced to prevent overwhelming DB during retry storms
+            'command_timeout': 15.0,  # Reduced timeout for faster failure detection
+            'max_inactive_connection_lifetime': 120.0,  # 2 minutes - shorter cleanup
+            'max_queries': 10000,  # Reduced recreation threshold
             'server_settings': {
                 'timezone': 'UTC',
                 'application_name': 'knowledgebot_configuration',
                 'tcp_keepalives_idle': '30',  # Shorter keepalives for Railway
                 'tcp_keepalives_interval': '10',
                 'tcp_keepalives_count': '3',
-                'statement_timeout': '30000'  # 30 second statement timeout
+                'statement_timeout': '15000'  # 15 second statement timeout - faster failure
             }
         }
         self._last_health_check = 0
@@ -96,18 +96,27 @@ class DatabaseManager:
                 redacted_url = "redacted_url"
 
         logger.info(f"🆕 Initializing DB pool (min={self._pool_config['min_size']}, max={self._pool_config['max_size']})")
+        logger.info(f"🔧 DB pool config: {self._pool_config}")
         
         try:
+            logger.info("🔌 Creating asyncpg connection pool...")
             self._pool = await asyncpg.create_pool(
                 dsn=self._connection_url,
                 **self._pool_config
             )
+            logger.info("✅ asyncpg pool created successfully")
+            
             # Basic validation
+            logger.info("🔍 Testing database connection...")
             async with self._pool.acquire() as conn:
-                await conn.execute("SELECT 1")
-            logger.info("✅ DB pool initialized successfully")
+                result = await conn.execute("SELECT 1")
+                logger.info(f"✅ DB test query successful: {result}")
+            logger.info("✅ DB pool initialized and validated successfully")
         except Exception as e:
-            logger.error(f"❌ Failed to create DB pool: {e}")
+            logger.error(f"❌ Failed to initialize DB pool: {e}")
+            logger.error(f"❌ Error type: {type(e)}")
+            import traceback
+            logger.error(f"❌ Traceback: {traceback.format_exc()}")
             self._pool = None
             raise
 
@@ -152,9 +161,17 @@ class DatabaseManager:
         await self.ensure_healthy()
         if not self._pool:
             raise RuntimeError("Database pool not available")
-            
-        async with self._pool.acquire() as conn:
-            yield conn
+        
+        logger.debug("🔌 Acquiring database connection from pool...")
+        try:
+            async with self._pool.acquire() as conn:
+                logger.debug(f"✅ DB connection acquired (pool size: {self._pool.get_size()})")
+                yield conn
+                logger.debug("🔄 DB connection released back to pool")
+        except Exception as e:
+            logger.error(f"❌ Failed to acquire DB connection: {e}")
+            logger.error(f"❌ Pool status - size: {self._pool.get_size() if self._pool else 'N/A'}")
+            raise
 
     async def close(self):
         """Close the pool."""

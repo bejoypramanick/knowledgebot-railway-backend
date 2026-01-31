@@ -59,10 +59,20 @@ try:
     print("✅ ROUTERS AND SERVICES IMPORTED SUCCESSFULLY")
 except Exception as e:
     print(f"❌ ROUTERS AND SERVICES IMPORT FAILED: {e}")
+    import traceback
+    print(f"❌ TRACEBACK: {traceback.format_exc()}")
     sys.exit(1)
 
 # Configure Railway-compatible logging
-logger = auto_configure_logging("configuration")
+try:
+    print("🚀 CONFIGURING RAILWAY LOGGING...")
+    logger = auto_configure_logging("configuration")
+    print("✅ RAILWAY LOGGING CONFIGURED SUCCESSFULLY")
+except Exception as e:
+    print(f"❌ RAILWAY LOGGING CONFIGURATION FAILED: {e}")
+    import traceback
+    print(f"❌ TRACEBACK: {traceback.format_exc()}")
+    sys.exit(1)
 
 # Log startup diagnostics
 logger.info("="*60)
