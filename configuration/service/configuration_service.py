@@ -535,10 +535,10 @@ class ConfigurationService:
                 metadata_updates = {}
                 if 'display_name' in config_data:
                     metadata_updates['display_name'] = config_data['display_name']
-                    logger.info(f"🔍 {correlation_prefix}Updating display_name: {config_data['display_name']}")
+                    logger.info(f"🔍 Updating display_name: {config_data['display_name']}")
                 if 'description' in config_data:
                     metadata_updates['description'] = config_data['description']
-                    logger.info(f"🔍 {correlation_prefix}Updating description: {config_data['description']}")
+                    logger.info(f"🔍 Updating description: {config_data['description']}")
                 if 'response_policy' in config_data:
                     metadata_updates['response_policy'] = config_data['response_policy']
                     logger.info(f"🔍 UPDATING RESPONSE_POLICY: {config_data['response_policy']}")
