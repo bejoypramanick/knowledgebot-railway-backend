@@ -5,7 +5,6 @@ Provides business logic layer between routers and DAO
 from typing import Any, Dict, List, Optional
 
 from configuration.core.logging_config import get_railway_logger
-from configuration.core.db import get_db_connection
 
 from ..dao.auth_dao import AuthDAO
 from ..dao.chatbot_dao import ChatbotDAO
@@ -499,26 +498,21 @@ class ConfigurationService:
     async def activate_persona(self, persona_name: str) -> bool:
         """Activate a specific persona by deactivating all others and activating the selected one."""
         try:
-            chatbot_dao = ChatbotDAO()
-            async with get_db_connection() as conn:
-                # Start transaction
-                async with conn.transaction():
-                    # Deactivate all personas
-                    await conn.execute(
-                        "UPDATE persona_configurations SET is_active = false, updated_at = NOW()"
-                    )
-                    # Activate the selected persona
-                    result = await conn.execute(
-                        """
-                        UPDATE persona_configurations 
-                        SET is_active = true, updated_at = NOW() 
-                        WHERE persona_name = $1
-                        """,
-                        persona_name
-                    )
-                    return result == "UPDATE 1"
+            # Get the current persona to get its system prompt
+            current_persona = await self.get_active_persona()
+            
+            # Use the DAO method to activate the persona
+            await self._chatbot_dao.upsert_persona(
+                persona_name=persona_name,
+                system_prompt=current_persona.get('system_prompt', '') if current_persona else '',
+                is_active=True
+            )
+            
+            logger.info(f"✅ Successfully activated persona: {persona_name}")
+            return True
+            
         except Exception as e:
-            logger.error(f"Error activating persona '{persona_name}': {e}")
+            logger.error(f"❌ Error activating persona '{persona_name}': {e}")
             raise
 
     async def save_chatbot_config(self, config_data: Dict[str, Any]):
