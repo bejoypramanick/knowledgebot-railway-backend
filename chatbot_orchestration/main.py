@@ -4,13 +4,19 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
+# Configure OpenTelemetry for Railway
+from api_gateway.core.shared_otel import setup_opentelemetry_for_service
+setup_opentelemetry_for_service("chatbot-orchestration", "1.0.0")
+
+# Configure Railway-compatible logging with OpenTelemetry
+from chatbot_orchestration.core.logging_config import auto_configure_logging
+from chatbot_orchestration.core.otel_logger import get_otel_logger
+
+logger = get_otel_logger("chatbot_orchestration", "chatbot-orchestration")
+
 from chatbot_orchestration.routers import router
 from chatbot_orchestration.service.agent_service import pydantic_ai_service
-from chatbot_orchestration.core.logging_config import auto_configure_logging
 from chatbot_orchestration.core.utils import log_endpoint_request
-
-# Configure Railway-compatible logging
-logger = auto_configure_logging("chatbot_orchestration")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

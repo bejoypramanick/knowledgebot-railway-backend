@@ -3,7 +3,6 @@ OpenTelemetry Logging Utilities for Railway Console
 Provides structured logging with OTel span context integration
 """
 import logging
-import json
 import time
 from typing import Dict, Any, Optional
 from opentelemetry import trace, context
@@ -23,8 +22,7 @@ class OpenTelemetryLogger:
         if span and span.is_recording():
             return {
                 "trace_id": format(span.get_span_context().trace_id, "032x"),
-                "span_id": format(span.get_span_context().span_id, "032x"),
-                "trace_flags": span.get_span_context().trace_flags
+                "span_id": format(span.get_span_context().span_id, "032x")
             }
         return None
     
@@ -32,18 +30,13 @@ class OpenTelemetryLogger:
         """Log message with OpenTelemetry context"""
         span_context = self._get_span_context()
         
-        # Create structured log entry
-        log_entry = {
-            "timestamp": time.time(),
-            "level": logging.getLevelName(level),
-            "service": self.service_name,
-            "message": message,
-            "otel_context": span_context
-        }
+        # Create log prefix with trace context
+        prefix = f"[{self.service_name}]"
+        if span_context:
+            prefix += f"[trace:{span_context['trace_id'][:8]}]"
         
-        # Add extra fields if provided
-        if extra:
-            log_entry.update(extra)
+        # Format message with context
+        formatted_message = f"{prefix} {message}"
         
         # Add span attributes if span exists
         if span_context:
@@ -55,13 +48,12 @@ class OpenTelemetryLogger:
                     attributes={
                         "log.level": logging.getLevelName(level),
                         "log.message": message,
-                        "log.logger": self.logger.name,
-                        **{f"log.{k}": v for k, v in (extra or {}).items()}
+                        "log.logger": self.logger.name
                     }
                 )
         
-        # Log with structured format
-        self.logger.log(level, json.dumps(log_entry, default=str))
+        # Log with formatted message
+        self.logger.log(level, formatted_message)
     
     def info(self, message: str, **kwargs):
         """Info level log with OTel context"""
@@ -103,7 +95,7 @@ class OpenTelemetryLogger:
             
             if error:
                 span.set_status(Status(StatusCode.ERROR, str(error)))
-                self.error(f"DB Query Failed: {query}", params=params, error=str(error))
+                self.error(f"DB Query Failed: {query.strip()}", params=params, error=str(error))
             else:
                 if result is not None:
                     if isinstance(result, list):

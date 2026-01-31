@@ -6,8 +6,6 @@ import os
 import logging
 from typing import Optional
 from opentelemetry import trace, metrics, baggage
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.metrics import MeterProvider
@@ -19,9 +17,10 @@ from opentelemetry.instrumentation.asyncpg import AsyncPGInstrumentor
 from opentelemetry.propagate import set_global_textmap
 from opentelemetry.semconv.trace import SpanKind
 from opentelemetry import context as context_api
+from opentelemetry.exporter.console.trace import ConsoleSpanExporter
+from opentelemetry.exporter.console.metric_exporter import ConsoleMetricExporter
 
-# Get Railway OTel endpoint from environment
-RAILWAY_OTEL_ENDPOINT = os.getenv("RAILWAY_OTEL_ENDPOINT", "https://otel.railway.app")
+# Service configuration
 SERVICE_NAME = os.getenv("SERVICE_NAME", "knowledgebot-service")
 SERVICE_VERSION = os.getenv("SERVICE_VERSION", "1.0.0")
 
@@ -73,43 +72,33 @@ class OpenTelemetryConfig:
     
     def _configure_tracing(self, resource: Resource):
         """Configure OpenTelemetry tracing"""
-        # Configure OTLP exporter for Railway
-        otlp_exporter = OTLPSpanExporter(
-            endpoint=f"{RAILWAY_OTEL_ENDPOINT}/v1/traces",
-            headers={
-                "Authorization": f"Bearer {os.getenv('RAILWAY_OTEL_TOKEN', '')}"
-            } if os.getenv("RAILWAY_OTEL_TOKEN") else None
-        )
+        # Configure console exporter for Railway console
+        console_exporter = ConsoleSpanExporter()
         
         # Configure tracer provider
         tracer_provider = TracerProvider(resource=resource)
-        span_processor = BatchSpanProcessor(otlp_exporter)
+        span_processor = BatchSpanProcessor(console_exporter)
         tracer_provider.add_span_processor(span_processor)
         
         # Set global tracer provider
         trace.set_tracer_provider(tracer_provider)
-        logger.info("🔍 OpenTelemetry tracing configured")
+        logger.info("🔍 OpenTelemetry tracing configured for Railway console")
     
     def _configure_metrics(self, resource: Resource):
         """Configure OpenTelemetry metrics"""
-        # Configure OTLP exporter for metrics
-        otlp_exporter = OTLPMetricExporter(
-            endpoint=f"{RAILWAY_OTEL_ENDPOINT}/v1/metrics",
-            headers={
-                "Authorization": f"Bearer {os.getenv('RAILWAY_OTEL_TOKEN', '')}"
-            } if os.getenv("RAILWAY_OTEL_TOKEN") else None
-        )
+        # Configure console exporter for Railway console
+        console_exporter = ConsoleMetricExporter()
         
         # Configure metric reader
         metric_reader = PeriodicExportingMetricReader(
-            exporter=otlp_exporter,
+            exporter=console_exporter,
             export_interval_millis=30000  # Export every 30 seconds
         )
         
         # Configure meter provider
         meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
         metrics.set_meter_provider(meter_provider)
-        logger.info("🔍 OpenTelemetry metrics configured")
+        logger.info("🔍 OpenTelemetry metrics configured for Railway console")
     
     def _configure_auto_instrumentation(self):
         """Configure auto-instrumentation for common libraries"""
