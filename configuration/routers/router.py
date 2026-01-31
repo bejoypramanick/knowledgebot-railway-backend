@@ -79,11 +79,18 @@ async def get_chatbot_config():
 async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
     """Save chatbot configuration"""
     try:
+        logger.info(f"🔍 POST /chatbot received: {config}")
+        logger.info(f"🔍 Request headers: {dict(request.headers)}")
+        
         await config_service.save_chatbot_config(config.dict())
+        
+        logger.info("✅ Chatbot config saved successfully")
         return {"success": True, "message": "Chatbot configuration saved successfully"}
     except Exception as e:
-        logger.error(f"Error saving chatbot config: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Error saving chatbot config: {e}")
+        logger.error(f"❌ Error type: {type(e)}")
+        logger.error(f"❌ Error details: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error saving chatbot config: {str(e)}")
 
 # =================================
 # WIDGET CONFIGURATION ENDPOINTS
