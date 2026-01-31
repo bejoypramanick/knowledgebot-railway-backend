@@ -115,20 +115,21 @@ class ChatbotDAO:
     async def add_llm_provider(self, provider: str, limit: int):
         """Add LLM provider for this service."""
         async with get_db_connection() as conn:
-            await conn.execute(
-                """
+            query = """
                 INSERT INTO llm_providers (provider_name, token_limit, is_active)
                 VALUES ($1, $2, true)
                 ON CONFLICT (provider_name) DO UPDATE SET
                 token_limit = EXCLUDED.token_limit, updated_at = NOW()
-                """,
-                provider, limit
-            )
+            """
+            params = [provider, limit]
+            await execute_with_logging(conn, query, *params, operation="ADD_LLM_PROVIDER")
 
     async def update_llm_used_tokens(self, provider: str, used: int):
         """Update LLM token usage for this service."""
         async with get_db_connection() as conn:
-            await conn.execute("UPDATE llm_providers SET token_used = $1 WHERE provider_name = $2", used, provider)
+            query = "UPDATE llm_providers SET token_used = $1 WHERE provider_name = $2"
+            params = [used, provider]
+            await execute_with_logging(conn, query, *params, operation="UPDATE_LLM_USED_TOKENS")
 
     async def update_metadata(self, **kwargs):
         """Update chatbot metadata with dynamic parameters"""
@@ -140,27 +141,25 @@ class ChatbotDAO:
 
     async def upsert_notification_setting(self, name: str, enabled: bool):
         async with get_db_connection() as conn:
-            await conn.execute(
-                """
+            query = """
                 INSERT INTO notification_settings (setting_name, is_enabled)
                 VALUES ($1, $2)
                 ON CONFLICT (setting_name) DO UPDATE SET
                 is_enabled = EXCLUDED.is_enabled, updated_at = NOW()
-                """,
-                name, enabled
-            )
+            """
+            params = [name, enabled]
+            await execute_with_logging(conn, query, *params, operation="UPSERT_NOTIFICATION_SETTING")
 
     async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'text'):
         async with get_db_connection() as conn:
-            await conn.execute(
-                """
+            query = """
                 INSERT INTO security_settings (setting_name, setting_value, setting_type)
                 VALUES ($1, $2, $3)
                 ON CONFLICT (setting_name) DO UPDATE SET
                 setting_value = EXCLUDED.setting_value, updated_at = NOW()
-                """,
-                name, value, setting_type
-            )
+            """
+            params = [name, value, setting_type]
+            await execute_with_logging(conn, query, *params, operation="UPSERT_SECURITY_SETTING")
 
     async def upsert_persona(self, persona_name: str, system_prompt: str, is_active: bool = True):
         async with get_db_connection() as conn:
@@ -228,28 +227,26 @@ class ChatbotDAO:
 
     async def upsert_notification_setting_with_desc(self, name: str, enabled: bool, description: str):
         async with get_db_connection() as conn:
-            await conn.execute(
-                """
+            query = """
                 INSERT INTO notification_settings (setting_name, is_enabled, description)
                 VALUES ($1, $2, $3)
                 ON CONFLICT (setting_name) DO UPDATE SET
                 is_enabled = EXCLUDED.is_enabled, description = EXCLUDED.description, updated_at = NOW()
-                """,
-                name, enabled, description
-            )
+            """
+            params = [name, enabled, description]
+            await execute_with_logging(conn, query, *params, operation="UPSERT_NOTIFICATION_SETTING_WITH_DESC")
 
     async def upsert_security_setting_with_desc(self, name: str, value: str, setting_type: str, description: str):
         async with get_db_connection() as conn:
-            await conn.execute(
-                """
+            query = """
                 INSERT INTO security_settings (setting_name, setting_value, setting_type, description)
                 VALUES ($1, $2, $3, $4)
                 ON CONFLICT (setting_name) DO UPDATE SET
                 setting_value = EXCLUDED.setting_value, setting_type = EXCLUDED.setting_type, 
                 description = EXCLUDED.description, updated_at = NOW()
-                """,
-                name, value, setting_type, description
-            )
+            """
+            params = [name, value, setting_type, description]
+            await execute_with_logging(conn, query, *params, operation="UPSERT_SECURITY_SETTING_WITH_DESC")
 
     # Human Agent Management Methods
     async def create_human_agent(self, email: str) -> int:

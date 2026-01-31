@@ -1,6 +1,8 @@
 from typing import Any, Dict, List, Optional
+import asyncpg
 
 from chatbot_orchestration.core.db import get_db_connection
+from chatbot_orchestration.core.db_logger import execute_with_logging, fetch_with_logging, fetchrow_with_logging
 from chatbot_orchestration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
