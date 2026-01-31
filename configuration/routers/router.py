@@ -149,6 +149,32 @@ async def get_widget_config():
     """Get widget configuration"""
     try:
         config = await config_service.get_widget_config()
+        
+        # If no config exists, return default configuration
+        if not config:
+            config = {
+                "display_name": "GLOBISTAAN",
+                "initial_message": "Hi! What can I help you with?",
+                "auto_show_duration": 4,
+                "keep_showing_suggested": True,
+                "theme": "light",
+                "primary_color": "#3b82f6",
+                "use_primary_for_header": False,
+                "chat_bubble_color": "#f3f4f6",
+                "align_bubble": "left",
+                "display_chatbot": True,
+                "profile_picture_url": "",
+                "chat_icon_url": "",
+                "profile_picture_filename": "",
+                "chat_icon_filename": "",
+                "profile_zoom": 1,
+                "chat_icon_zoom": 1,
+                "profile_position": {"x": 0, "y": 0},
+                "chat_icon_position": {"x": 0, "y": 0},
+                "suggested_messages": []
+            }
+            logger.info("🔧 Returning default widget configuration (no data in database)")
+        
         return {"success": True, "data": config}
     except Exception as e:
         logger.error(f"Error getting widget config: {e}")
