@@ -5,6 +5,7 @@ Provides business logic layer between routers and DAO
 from typing import Any, Dict, List, Optional
 
 from configuration.core.logging_config import get_railway_logger
+from configuration.core.db import get_db_connection
 
 from ..dao.auth_dao import AuthDAO
 from ..dao.chatbot_dao import ChatbotDAO
