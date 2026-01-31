@@ -95,6 +95,87 @@ async def login_user(request: Request):
         raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
 
 # =================================
+# GENERIC SERVICE PROXY HANDLER (must be first to catch all requests)
+# =================================
+
+@router.api_route("/{path:path}")
+async def generic_proxy_handler(request: Request, path: str):
+    """Generic proxy handler that routes requests to appropriate services"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        # Skip auth endpoints
+        if path.startswith("auth/"):
+            raise HTTPException(status_code=404, detail=f"Auth endpoints not found: {path}")
+        
+        # Determine service based on URL path
+        service_url = None
+        
+        logger.info(f"🔍 Processing path: '{path}'")
+        
+        if path.startswith("configuration/"):
+            service_url = get_settings().configuration_service_url
+            logger.info(f"✅ Routing to configuration service: {service_url}")
+        elif path.startswith("chatbot/"):
+            service_url = get_settings().chatbot_orchestration_url
+            logger.info(f"✅ Routing to chatbot service: {service_url}")
+        elif path.startswith("knowledgebase/"):
+            service_url = get_settings().knowledgebase_ingestion_url
+            logger.info(f"✅ Routing to knowledgebase service: {service_url}")
+        elif path.startswith("webcrawl/"):
+            service_url = get_settings().website_crawling_url
+            logger.info(f"✅ Routing to webcrawl service: {service_url}")
+        else:
+            logger.error(f"❌ Unknown service path: '{path}'")
+            raise HTTPException(status_code=404, detail=f"Unknown service path: {path}")
+        
+        # Construct full URL
+        full_url = f"{service_url}/api/v1/{path}"
+        logger.info(f"🌐 Making {request.method} request to: {full_url}")
+        
+        # Prepare headers
+        headers = dict(request.headers)
+        headers.pop("host", None)
+        
+        # Forward user data from request state
+        if hasattr(request.state, 'user'):
+            headers['X-User-UID'] = request.state.user.get('uid', '')
+            headers['X-User-Email'] = request.state.user.get('email', '')
+            headers['X-User-Name'] = request.state.user.get('name', '')
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # Make the request to the appropriate service
+            if request.method == "GET":
+                response = await client.get(full_url, headers=headers, params=request.query_params)
+            elif request.method == "POST":
+                body = await request.json()
+                response = await client.post(full_url, json=body, headers=headers)
+            elif request.method == "PUT":
+                body = await request.json()
+                response = await client.put(full_url, json=body, headers=headers)
+            elif request.method == "DELETE":
+                response = await client.delete(full_url, headers=headers)
+            else:
+                raise HTTPException(status_code=405, detail="Method not allowed")
+            
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Generic proxy error for path '{path}': {e}")
+        raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}")
+
+# =================================
+# SPECIFIC PROXY ENDPOINTS (for special cases that need custom handling)
+# =================================
+
+# =================================
 # CONFIGURATION ENDPOINTS
 # =================================
 
@@ -395,78 +476,6 @@ async def proxy_agent_sse(session_id: str, request: Request):
     except Exception as e:
         logger.error(f"SSE proxy error: {e}")
         raise HTTPException(status_code=500, detail="SSE proxy error")
-
-# =================================
-# GENERIC SERVICE PROXY HANDLER
-# =================================
-
-@router.api_route("/{path:path}")
-async def generic_proxy_handler(request: Request, path: str):
-    """Generic proxy handler that routes requests to appropriate services"""
-    try:
-        import httpx
-        from ..core.config import get_settings
-        
-        # Determine service based on URL path
-        service_url = None
-        
-        logger.info(f"🔍 Processing path: '{path}'")
-        
-        if path.startswith("configuration/"):
-            service_url = get_settings().configuration_service_url
-            logger.info(f"✅ Routing to configuration service: {service_url}")
-        elif path.startswith("chatbot/"):
-            service_url = get_settings().chatbot_orchestration_url
-            logger.info(f"✅ Routing to chatbot service: {service_url}")
-        elif path.startswith("knowledgebase/"):
-            service_url = get_settings().knowledgebase_ingestion_url
-            logger.info(f"✅ Routing to knowledgebase service: {service_url}")
-        elif path.startswith("webcrawl/"):
-            service_url = get_settings().website_crawling_url
-            logger.info(f"✅ Routing to webcrawl service: {service_url}")
-        else:
-            logger.error(f"❌ Unknown service path: '{path}'")
-            raise HTTPException(status_code=404, detail=f"Unknown service path: {path}")
-        
-        # Construct full URL
-        full_url = f"{service_url}/api/v1/{path}"
-        
-        # Prepare headers
-        headers = dict(request.headers)
-        headers.pop("host", None)
-        
-        # Forward user data from request state
-        if hasattr(request.state, 'user'):
-            headers['X-User-UID'] = request.state.user.get('uid', '')
-            headers['X-User-Email'] = request.state.user.get('email', '')
-            headers['X-User-Name'] = request.state.user.get('name', '')
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Make the request to the appropriate service
-            if request.method == "GET":
-                response = await client.get(full_url, headers=headers, params=request.query_params)
-            elif request.method == "POST":
-                body = await request.json()
-                response = await client.post(full_url, json=body, headers=headers)
-            elif request.method == "PUT":
-                body = await request.json()
-                response = await client.put(full_url, json=body, headers=headers)
-            elif request.method == "DELETE":
-                response = await client.delete(full_url, headers=headers)
-            else:
-                raise HTTPException(status_code=405, detail="Method not allowed")
-            
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                headers=dict(response.headers)
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Generic proxy error for path '{path}': {e}")
-        raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}")
 
 # =================================
 # CHAT PROXY ENDPOINTS
