@@ -102,7 +102,7 @@ async def login_user(request: Request):
 async def proxy_user_profile(request: Request):
     """Proxy user profile requests to configuration service"""
     try:
-        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/configuration/users/profile"
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/users/profile"
         async with httpx.AsyncClient(timeout=30.0) as client:
             headers = dict(request.headers)
             headers.pop("host", None)
@@ -127,7 +127,7 @@ async def proxy_user_profile(request: Request):
 async def proxy_update_user_profile(request: Request):
     """Proxy update user profile requests to configuration service"""
     try:
-        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/configuration/users/profile"
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/users/profile"
         body = await request.json()
         async with httpx.AsyncClient(timeout=30.0) as client:
             headers = dict(request.headers)
@@ -153,7 +153,7 @@ async def proxy_update_user_profile(request: Request):
 async def proxy_get_users(request: Request):
     """Proxy get users requests to configuration service"""
     try:
-        config_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/configuration/users"
+        config_url = f"{get_settings().configuration_service_url}/api/v1/configuration/users"
         async with httpx.AsyncClient(timeout=30.0) as client:
             headers = dict(request.headers)
             headers.pop("host", None)
@@ -422,7 +422,7 @@ async def websocket_message_endpoint(request: Request):
 async def proxy_customer_sse(session_id: str, request: Request):
     """Proxy customer SSE connections to configuration service"""
     try:
-        sse_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/configuration/chat/{session_id}/events"
+        sse_url = f"{get_settings().configuration_service_url}/api/v1/configuration/chat/{session_id}/events"
         async with httpx.AsyncClient(timeout=300.0) as client:
             headers = dict(request.headers)
             headers.pop("host", None)
@@ -451,7 +451,7 @@ async def proxy_customer_sse(session_id: str, request: Request):
 async def proxy_agent_sse(session_id: str, request: Request):
     """Proxy agent SSE connections to configuration service"""
     try:
-        sse_url = f"{get_settings().CONFIGURATION_SERVICE_URL}/api/v1/configuration/admin/chat-sessions/{session_id}/events"
+        sse_url = f"{get_settings().configuration_service_url}/api/v1/configuration/admin/chat-sessions/{session_id}/events"
         async with httpx.AsyncClient(timeout=300.0) as client:
             headers = dict(request.headers)
             headers.pop("host", None)
@@ -523,7 +523,7 @@ async def chat_stream_proxy(request: Request):
                         })
                     
                     response = await client.post(
-                        f"{get_settings().CHATBOT_ORCHESTRATION_URL}/api/v1/chatbot/chat/stream",
+                        f"{get_settings().chatbot_orchestration_url}/api/v1/chatbot/chat/stream",
                         content=body,
                         headers=headers
                     )
@@ -579,7 +579,7 @@ async def suggested_messages_endpoint(request: Request):
         headers.pop('content-length', None)
         headers.pop('Content-Length', None)
 
-        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/api/v1/chatbot/suggested-messages"
+        target_url = f"{get_settings().chatbot_orchestration_url}/api/v1/chatbot/suggested-messages"
         
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -611,7 +611,7 @@ async def list_sessions_endpoint(request: Request):
         ]
         headers = {k: v for k, v in headers.items() if k.lower() not in hop_by_hop_headers and k.lower() not in ['host', 'content-length']}
         
-        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/api/v1/chatbot/sessions"
+        target_url = f"{get_settings().chatbot_orchestration_url}/api/v1/chatbot/sessions"
         
         async with httpx.AsyncClient() as client:
             resp = await client.get(target_url, headers=headers, timeout=10.0)
@@ -635,7 +635,7 @@ async def delete_session_endpoint(session_id: str, request: Request):
         ]
         headers = {k: v for k, v in headers.items() if k.lower() not in hop_by_hop_headers and k.lower() not in ['host', 'content-length']}
         
-        target_url = f"{get_settings().CHATBOT_ORCHESTRATION_URL}/api/v1/chatbot/sessions/{session_id}"
+        target_url = f"{get_settings().chatbot_orchestration_url}/api/v1/chatbot/sessions/{session_id}"
         
         async with httpx.AsyncClient() as client:
             resp = await client.delete(target_url, headers=headers, timeout=10.0)
