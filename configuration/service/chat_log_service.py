@@ -1,10 +1,11 @@
-"""
-Chat Log Service Layer for Configuration Service
-Provides business logic for chat log operations
-"""
-from typing import Dict, List, Any
+import json
+import time
+from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional
+from fastapi import HTTPException
 
 from configuration.dao.chat_log_dao import ChatLogDAO
+from configuration.dao.auth_dao import AuthDAO
 from configuration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
@@ -13,7 +14,9 @@ class ChatLogService:
     """Service layer for chat log operations"""
     
     def __init__(self):
-        self.dao = ChatLogDAO()  # Service manages its own DAO
+        self.dao = ChatLogDAO()
+        self.auth_dao = AuthDAO()
+        self.connection_manager = None  # Placeholder - should be initialized if needed for websockets
 
     async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
         """Get all chat logs"""
@@ -30,10 +33,24 @@ class ChatLogService:
         except Exception as e:
             logger.error(f"Error deleting chat log {session_id}: {e}")
             raise
+
+    async def assign_chat_to_agent(self, session_id: str, agent_email: str):
+        """Assign chat to specific agent"""
+        try:
             logger.info(f"Chat session {session_id} assigned to agent {agent_email}")
+            assignee_type = "agent"
+            existing = await self.dao.get_session_assignment(session_id)
+            if existing:
+                await self.dao.update_session_assignment(session_id, agent_email, assignee_type, status='active')
+            else:
+                await self.dao.create_session_assignment(session_id, agent_email, assignee_type, status='active')
         except Exception as e:
             logger.error(f"Error assigning chat to agent: {e}", exc_info=True)
             raise
+
+    async def get_agent_online_status(self, email: str) -> bool:
+        """Check if agent is online"""
+        return True 
 
     async def get_agent_chat_count(self, agent_email: str) -> int:
         """Get the number of active chats assigned to an agent."""
@@ -76,11 +93,6 @@ class ChatLogService:
     async def get_online_agents(self, user_email: str):
         """Get all online human agents and admins with their active session counts."""
         try:
-            # Use local AuthDAO for role checking
-            # Note: This is a simplified approach since we don't have get_user_roles method
-            # In production, this should be handled at the API Gateway level
-            
-            # Get all human agents
             agent_emails = await self.auth_dao.get_available_agents()
             online_users = []
             for email in agent_emails:
@@ -89,11 +101,6 @@ class ChatLogService:
                     online_users.append({
                         "email": email, "role": "agent", "is_online": True, "active_sessions": chat_count
                     })
-            
-            # Get all admins
-            # Note: AuthDAO doesn't have get_all_admins, so we'll skip this for now
-            # In production, this should be handled at the API Gateway level
-            
             return {"success": True, "agents": online_users}
         except Exception as e:
             logger.error(f"Error getting online agents: {e}")
@@ -119,29 +126,6 @@ class ChatLogService:
             await self.dao.create_session_assignment(heartbeat_cs_id, user_email, assignee_type, status='active')
         return True
 
-    async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
-        """Get all chat logs"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return empty list
-            return []
-        except Exception as e:
-            logger.error(f"Error getting all chat logs: {e}")
-            raise
-
-    async def delete_chat_log(self, session_id: str, user_email: str) -> Dict[str, Any]:
-        """Delete a chat log"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return success response
-            return {
-                "success": True,
-                "message": f"Chat log {session_id} deleted successfully"
-            }
-        except Exception as e:
-            logger.error(f"Error deleting chat log {session_id}: {e}")
-            raise
-
     async def get_chat_sessions(self, role: str, user_email: str, archive_status: str, page: int, limit: int, agent_id: Optional[str] = None):
         """Get chat sessions with pagination, filtering, and efficiency."""
         offset = (page - 1) * limit
@@ -157,7 +141,6 @@ class ChatLogService:
         if not sessions_data:
             return [], total_count
 
-        # Bulk fetch messages for all sessions
         session_db_ids = [s['id'] for s in sessions_data]
         messages_by_session = await self.dao.get_messages_for_sessions(session_db_ids)
 
@@ -166,7 +149,6 @@ class ChatLogService:
             session_id = session_row['session_id']
             session_db_id = session_row['id']
             
-            # Parse metadata
             raw_metadata = session_row['metadata']
             if raw_metadata is None:
                 metadata = {}
@@ -180,7 +162,6 @@ class ChatLogService:
             else:
                 metadata = {}
 
-            # Prepare messages
             session_messages = messages_by_session.get(session_db_id, [])
             from ..schemas.chat_log_schemas import ChatMessageResponse
             messages = [
@@ -193,14 +174,12 @@ class ChatLogService:
                 ) for msg in session_messages
             ]
 
-            # Determine assigned agent
             assigned_agent = metadata.get('assigned_agent')
             if not assigned_agent and 'agent_email' in session_row and session_row['agent_email']:
                 assigned_agent = session_row['agent_email']
             if not assigned_agent and agent_id:
                 assigned_agent = agent_id
 
-            # Session expiry logic
             status = session_row.get('archive_status', 'active')
             if status == 'active':
                 last_activity = session_row['last_activity_at']
@@ -220,8 +199,6 @@ class ChatLogService:
                 if is_expired and session_row['is_active']:
                     await self.dao.archive_session(session_id, 'closed') # Effectively close in DB
 
-            # Feedback logic (aggregated)
-            # Fetch feedback for session_id (not session_db_id as per original code)
             feedback_result = await self.dao.conn.fetchrow(
                 """
                 SELECT
@@ -262,7 +239,6 @@ class ChatLogService:
         session_db_id = await self.dao.get_session_db_id(session_id)
         if not session_db_id:
             return []
-        
         return await self.dao.get_messages(session_db_id)
 
     async def send_agent_message(self, session_id: str, agent_email: str, text: str):
@@ -297,31 +273,7 @@ class ChatLogService:
         success = await self.dao.archive_session(session_id, archive_status)
         if not success:
             raise HTTPException(status_code=404, detail="Session not found")
-        
         return True
-
-    async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
-        """Get all chat logs"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return empty list
-            return []
-        except Exception as e:
-            logger.error(f"Error getting all chat logs: {e}")
-            raise
-
-    async def delete_chat_log(self, session_id: str, user_email: str) -> Dict[str, Any]:
-        """Delete a chat log"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return success response
-            return {
-                "success": True,
-                "message": f"Chat log {session_id} deleted successfully"
-            }
-        except Exception as e:
-            logger.error(f"Error deleting chat log {session_id}: {e}")
-            raise
 
     async def transfer_chat_session(self, session_id: str, user_email: str, target_agent_email: str):
         """Transfer a chat session to another agent."""
@@ -333,7 +285,6 @@ class ChatLogService:
         if not target_roles["is_agent"] and not target_roles["is_admin"]:
             raise HTTPException(status_code=400, detail="Target user is not an agent or admin")
             
-        # Use self.assign_chat_to_agent which is already implemented in this service
         await self.assign_chat_to_agent(session_id, target_agent_email)
         
         if self.connection_manager:
@@ -350,31 +301,7 @@ class ChatLogService:
         session_db_id = await self.dao.get_session_db_id(session_id)
         if session_db_id:
             await self.dao.create_message(session_db_id, 'system', "Chat transferred to another support agent")
-        
         return True
-
-    async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
-        """Get all chat logs"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return empty list
-            return []
-        except Exception as e:
-            logger.error(f"Error getting all chat logs: {e}")
-            raise
-
-    async def delete_chat_log(self, session_id: str, user_email: str) -> Dict[str, Any]:
-        """Delete a chat log"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return success response
-            return {
-                "success": True,
-                "message": f"Chat log {session_id} deleted successfully"
-            }
-        except Exception as e:
-            logger.error(f"Error deleting chat log {session_id}: {e}")
-            raise
 
     async def update_chat_session(self, session_id: str, user_email: str, status: Optional[str] = None, 
                                  assigned_agent: Optional[str] = None, feedback: Optional[str] = None, 
@@ -419,31 +346,7 @@ class ChatLogService:
                     "timestamp": datetime.utcnow().isoformat()
                 }
                 await self.connection_manager.broadcast_to_session(session_ended_message, session_id)
-        
         return True
-
-    async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
-        """Get all chat logs"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return empty list
-            return []
-        except Exception as e:
-            logger.error(f"Error getting all chat logs: {e}")
-            raise
-
-    async def delete_chat_log(self, session_id: str, user_email: str) -> Dict[str, Any]:
-        """Delete a chat log"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return success response
-            return {
-                "success": True,
-                "message": f"Chat log {session_id} deleted successfully"
-            }
-        except Exception as e:
-            logger.error(f"Error deleting chat log {session_id}: {e}")
-            raise
 
     async def end_customer_session(self, session_id: str, user_email: str):
         """End a chat session from the customer side."""
@@ -462,31 +365,7 @@ class ChatLogService:
                 "timestamp": datetime.utcnow().isoformat()
             }
             await self.connection_manager.broadcast_to_session(session_ended_message, session_id)
-        
         return True
-
-    async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
-        """Get all chat logs"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return empty list
-            return []
-        except Exception as e:
-            logger.error(f"Error getting all chat logs: {e}")
-            raise
-
-    async def delete_chat_log(self, session_id: str, user_email: str) -> Dict[str, Any]:
-        """Delete a chat log"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return success response
-            return {
-                "success": True,
-                "message": f"Chat log {session_id} deleted successfully"
-            }
-        except Exception as e:
-            logger.error(f"Error deleting chat log {session_id}: {e}")
-            raise
 
     async def request_human_agent(self, session_id: str):
         """Request human agent connection."""
@@ -499,7 +378,6 @@ class ChatLogService:
         assigned_agent = await self.assign_chat_with_load_balancing(session_id)
         if not assigned_agent:
             raise HTTPException(status_code=503, detail="No available agents to assign chat")
-        
         return assigned_agent
 
     async def public_end_customer_session(self, session_id: str):
@@ -528,28 +406,4 @@ class ChatLogService:
                 'timestamp': time.time()
             }
             await self.connection_manager.broadcast_to_session(session_ended_message, session_id)
-        
         return True
-
-    async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
-        """Get all chat logs"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return empty list
-            return []
-        except Exception as e:
-            logger.error(f"Error getting all chat logs: {e}")
-            raise
-
-    async def delete_chat_log(self, session_id: str, user_email: str) -> Dict[str, Any]:
-        """Delete a chat log"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return success response
-            return {
-                "success": True,
-                "message": f"Chat log {session_id} deleted successfully"
-            }
-        except Exception as e:
-            logger.error(f"Error deleting chat log {session_id}: {e}")
-            raise

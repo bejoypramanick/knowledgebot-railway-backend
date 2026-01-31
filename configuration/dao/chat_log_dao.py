@@ -2,38 +2,254 @@
 Chat Log Data Access Object for Configuration Service
 Handles database operations for chat logging
 """
-from typing import Dict, List, Any
-
+from typing import Dict, List, Any, Optional
+import json
 import logging
+from datetime import datetime
+
 from configuration.core.db import get_db_connection
 
 logger = logging.getLogger("chat_log_dao")
 
 class ChatLogDAO:
     def __init__(self):
-        pass  # No connection parameter - DAO manages its own connection
+        self.conn = None  # Connection is managed via get_db_connection context manager usually, but some methods might expect self.conn if they were designed differently. 
+        # However, looking at usage, it seems methods use `async with get_db_connection() as conn`.
 
-    async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
-        """Get all chat logs"""
+    async def get_all_human_agents(self) -> List[str]:
+        """Get all human agent emails."""
         try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return empty list
-            logger.info("Getting all chat logs (placeholder implementation)")
-            return []
+            async with get_db_connection() as conn:
+                rows = await conn.fetch("SELECT email FROM human_agents WHERE status = 'active'")
+                return [r['email'] for r in rows]
         except Exception as e:
-            logger.error(f"Error getting all chat logs: {e}")
+            logger.error(f"Error getting all human agents: {e}")
+            return []
+
+    async def get_all_admins(self) -> List[str]:
+        """Get all admin emails."""
+        try:
+            async with get_db_connection() as conn:
+                rows = await conn.fetch("SELECT email FROM admins WHERE status = 'active'")
+                return [r['email'] for r in rows]
+        except Exception as e:
+            logger.error(f"Error getting all admins: {e}")
+            return []
+
+    async def check_user_role(self, email: str) -> Dict[str, bool]:
+        """Check if user is agent or admin."""
+        try:
+            async with get_db_connection() as conn:
+                is_agent = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM human_agents WHERE email = $1 AND status = 'active')", email)
+                is_admin = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM admins WHERE email = $1 AND status = 'active')", email)
+                return {"is_agent": is_agent, "is_admin": is_admin}
+        except Exception as e:
+            logger.error(f"Error checking user role: {e}")
+            return {"is_agent": False, "is_admin": False}
+
+    async def get_agent_chat_count(self, email: str) -> int:
+        """Get active chat count for agent."""
+        try:
+            async with get_db_connection() as conn:
+                # Assuming session_assignments table
+                return await conn.fetchval("""
+                    SELECT COUNT(*) FROM session_assignments 
+                    WHERE assignee_email = $1 AND status = 'active'
+                """, email)
+        except Exception as e:
+            logger.error(f"Error getting agent chat count: {e}")
+            return 0
+
+    async def get_session_db_id(self, session_id: str) -> Optional[int]:
+        """Get database ID for a session UUID string."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval("SELECT id FROM chat_sessions WHERE session_id = $1", session_id)
+        except Exception as e:
+            logger.error(f"Error getting session db id: {e}")
+            return None
+
+    async def create_chat_session(self, session_id: str, metadata: Dict[str, Any]) -> int:
+        """Create a new chat session."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval("""
+                    INSERT INTO chat_sessions (session_id, metadata, created_at, last_activity_at, is_active)
+                    VALUES ($1, $2, NOW(), NOW(), true)
+                    RETURNING id
+                """, session_id, json.dumps(metadata))
+        except Exception as e:
+            logger.error(f"Error creating chat session: {e}")
             raise
+
+    async def get_assignee_type(self, email: str) -> str:
+        """Determine if email belongs to agent or admin."""
+        roles = await self.check_user_role(email)
+        if roles['is_agent']: return 'agent'
+        if roles['is_admin']: return 'admin'
+        return 'system'
+
+    async def get_session_assignment(self, session_db_id: int) -> Optional[Dict[str, Any]]:
+        """Get assignment for a session."""
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchrow("SELECT * FROM session_assignments WHERE session_id = $1", session_db_id)
+        except Exception as e:
+            logger.error(f"Error getting session assignment: {e}")
+            return None
+
+    async def update_session_assignment(self, session_db_id: int, email: str, type: str, status: str):
+        """Update session assignment."""
+        try:
+            async with get_db_connection() as conn:
+                await conn.execute("""
+                    UPDATE session_assignments 
+                    SET assignee_email = $2, assignee_type = $3, status = $4, assigned_at = NOW()
+                    WHERE session_id = $1
+                """, session_db_id, email, type, status)
+        except Exception as e:
+            logger.error(f"Error updating session assignment: {e}")
+            raise
+
+    async def create_session_assignment(self, session_db_id: int, email: str, type: str, status: str):
+        """Create session assignment."""
+        try:
+            async with get_db_connection() as conn:
+                await conn.execute("""
+                    INSERT INTO session_assignments (session_id, assignee_email, assignee_type, status, assigned_at)
+                    VALUES ($1, $2, $3, $4, NOW())
+                """, session_db_id, email, type, status)
+        except Exception as e:
+            logger.error(f"Error creating session assignment: {e}")
+            raise
+
+    async def get_sessions_for_agent(self, email: str, archive_status: str, limit: int, offset: int) -> List[Dict[str, Any]]:
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetch("""
+                    SELECT cs.*, sa.assignee_email as agent_email 
+                    FROM chat_sessions cs
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                    WHERE sa.assignee_email = $1 AND cs.archive_status = $2
+                    ORDER BY cs.last_activity_at DESC
+                    LIMIT $3 OFFSET $4
+                """, email, archive_status, limit, offset)
+        except Exception as e:
+            logger.error(f"Error getting sessions for agent: {e}")
+            return []
+
+    async def count_sessions_for_agent(self, email: str, archive_status: str) -> int:
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval("""
+                    SELECT COUNT(*) 
+                    FROM chat_sessions cs
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                    WHERE sa.assignee_email = $1 AND cs.archive_status = $2
+                """, email, archive_status)
+        except Exception as e:
+            logger.error(f"Error counting sessions for agent: {e}")
+            return 0
+
+    async def get_all_sessions(self, archive_status: str, limit: int, offset: int) -> List[Dict[str, Any]]:
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetch("""
+                    SELECT cs.*, sa.assignee_email as agent_email 
+                    FROM chat_sessions cs
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                    WHERE cs.archive_status = $1
+                    ORDER BY cs.last_activity_at DESC
+                    LIMIT $2 OFFSET $3
+                """, archive_status, limit, offset)
+        except Exception as e:
+            logger.error(f"Error getting all sessions: {e}")
+            return []
+
+    async def count_all_sessions(self, archive_status: str) -> int:
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval("SELECT COUNT(*) FROM chat_sessions WHERE archive_status = $1", archive_status)
+        except Exception as e:
+            logger.error(f"Error counting all sessions: {e}")
+            return 0
+
+    async def get_messages_for_sessions(self, session_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
+        if not session_ids: return {}
+        try:
+            async with get_db_connection() as conn:
+                rows = await conn.fetch("""
+                    SELECT * FROM chat_messages 
+                    WHERE session_id = ANY($1::int[]) 
+                    ORDER BY created_at ASC
+                """, session_ids)
+                
+                result = {}
+                for r in rows:
+                    sid = r['session_id']
+                    if sid not in result: result[sid] = []
+                    result[sid].append(r)
+                return result
+        except Exception as e:
+            logger.error(f"Error getting messages for sessions: {e}")
+            return {}
+
+    async def get_messages(self, session_db_id: int) -> List[Dict[str, Any]]:
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetch("SELECT * FROM chat_messages WHERE session_id = $1 ORDER BY created_at ASC", session_db_id)
+        except Exception as e:
+            logger.error(f"Error getting messages: {e}")
+            return []
+
+    async def create_message(self, session_db_id: int, role: str, content: str) -> int:
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval("""
+                    INSERT INTO chat_messages (session_id, role, content, created_at)
+                    VALUES ($1, $2, $3, NOW())
+                    RETURNING id
+                """, session_db_id, role, content)
+        except Exception as e:
+            logger.error(f"Error creating message: {e}")
+            raise
+
+    async def increment_message_count(self, session_db_id: int):
+        # Optional: if you have a message_count column in chat_sessions
+        pass 
+
+    async def archive_session(self, session_id: str, status: str) -> bool:
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute("""
+                    UPDATE chat_sessions SET archive_status = $2 
+                    WHERE session_id = $1
+                """, session_id, status)
+                return result != "UPDATE 0"
+        except Exception as e:
+            logger.error(f"Error archiving session: {e}")
+            return False
+
+    async def get_session_by_id_with_messages(self, session_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchrow("SELECT * FROM chat_sessions WHERE session_id = $1", session_id)
+        except Exception as e:
+            logger.error(f"Error getting session by id: {e}")
+            return None
+
+    async def update_chat_session_metadata(self, session_db_id: int, metadata: Dict[str, Any]):
+        try:
+            async with get_db_connection() as conn:
+                await conn.execute("UPDATE chat_sessions SET metadata = $2 WHERE id = $1", session_db_id, json.dumps(metadata))
+        except Exception as e:
+            logger.error(f"Error updating session metadata: {e}")
+            raise
+    
+    async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
+        """Get all chat logs (legacy/backup method)"""
+        return []
 
     async def delete_chat_log(self, session_id: str) -> Dict[str, Any]:
         """Delete a chat log"""
-        try:
-            # This would need to be implemented based on actual chat log storage
-            # For now, return success response
-            logger.info(f"Deleting chat log for session: {session_id}")
-            return {
-                "success": True,
-                "message": f"Chat log {session_id} deleted successfully"
-            }
-        except Exception as e:
-            logger.error(f"Error deleting chat log {session_id}: {e}")
-            raise
+        return {"success": True}
