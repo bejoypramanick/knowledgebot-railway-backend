@@ -25,7 +25,6 @@ from ..schemas.models import (
     WidgetConfigRequest
 )
 from ..core.correlation_id import get_correlation_id
-from ..core.logging_config import set_correlation_id
 
 # Version: 2.2 - Enhanced debugging with version check
 # This version includes detailed logging for get_user_profile debugging
@@ -54,9 +53,7 @@ async def get_version():
 async def test_endpoint():
     """Simple test endpoint without authentication"""
     correlation_id = get_correlation_id()
-    set_correlation_id(correlation_id)  # Set in logging context
-    
-    logger.info("TEST ENDPOINT CALLED - SERVICE IS WORKING!")
+    logger.info(f"🔍 [{correlation_id}] TEST ENDPOINT CALLED - SERVICE IS WORKING!")
     return {
         "message": "Configuration service is working!",
         "correlation_id": correlation_id,
@@ -68,14 +65,12 @@ async def test_endpoint():
 async def get_current_user(request: Request):
     """Get current user from request state or headers (set by API Gateway middleware)"""
     correlation_id = get_correlation_id()
-    set_correlation_id(correlation_id)  # Set in logging context
-    
-    logger.info("get_current_user called")
-    logger.info(f"Request headers: {dict(request.headers)}")
+    logger.info(f"🔍 [{correlation_id}] get_current_user called")
+    logger.info(f"🔍 [{correlation_id}] Request headers: {dict(request.headers)}")
     
     # First try request.state (direct API Gateway access)
     if hasattr(request.state, 'user'):
-        logger.info(f"Found user in request.state: {request.state.user}")
+        logger.info(f"🔍 [{correlation_id}] Found user in request.state: {request.state.user}")
         return request.state.user
     
     # Then try headers (proxied from API Gateway)
@@ -83,7 +78,7 @@ async def get_current_user(request: Request):
     user_email = request.headers.get('X-User-Email')
     user_name = request.headers.get('X-User-Name')
     
-    logger.info(f"Headers - UID: {user_uid}, Email: {user_email}, Name: {user_name}")
+    logger.info(f"🔍 [{correlation_id}] Headers - UID: {user_uid}, Email: {user_email}, Name: {user_name}")
     
     if user_email:
         user_data = {
@@ -92,12 +87,12 @@ async def get_current_user(request: Request):
             "name": user_name or user_email,
             "picture": None  # Not forwarded in headers
         }
-        logger.info(f"Returning user from headers: {user_data}")
+        logger.info(f"🔍 [{correlation_id}] Returning user from headers: {user_data}")
         return user_data
     
     # This should not happen if API Gateway is properly configured
-    logger.error("No user found in request.state or headers!")
-    logger.error(f"Available headers: {list(request.headers.keys())}")
+    logger.error(f"🔍 [{correlation_id}] No user found in request.state or headers!")
+    logger.error(f"🔍 [{correlation_id}] Available headers: {list(request.headers.keys())}")
     raise HTTPException(status_code=401, detail="User not found in request state or headers")
 
 # Initialize services
@@ -420,30 +415,28 @@ async def get_feedback():
 async def get_user_profile(user: dict = Depends(get_current_user)):
     """Get user profile information"""
     correlation_id = get_correlation_id()
-    set_correlation_id(correlation_id)  # Set in logging context
-    
-    logger.info("GET /users/profile called")
-    logger.info(f"User data: {user}")
+    logger.info(f"🔍 [{correlation_id}] GET /users/profile called")
+    logger.info(f"🔍 [{correlation_id}] User data: {user}")
     
     try:
         # Get user's actual role from database
         user_email = user.get("email")
-        logger.info(f"Getting role for user email: {user_email}")
+        logger.info(f"🔍 [{correlation_id}] Getting role for user email: {user_email}")
         
         if not user_email:
-            logger.error(f"No user email found in user data: {user}")
+            logger.error(f"🔍 [{correlation_id}] No user email found in user data: {user}")
             raise HTTPException(status_code=400, detail="User email not found")
         
-        logger.info("About to call auth_service.get_user_role")
+        logger.info(f"🔍 [{correlation_id}] About to call auth_service.get_user_role")
         role_result = await auth_service.get_user_role(user_email)
-        logger.info(f"Role result: {role_result}")
+        logger.info(f"🔍 [{correlation_id}] Role result: {role_result}")
         
         user_roles = role_result.get("roles", ["user"])
-        logger.info(f"User roles: {user_roles}")
+        logger.info(f"🔍 [{correlation_id}] User roles: {user_roles}")
         
         # Determine primary role (admin > human_agent > user)
         primary_role = "admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user")
-        logger.info(f"Primary role: {primary_role}")
+        logger.info(f"🔍 [{correlation_id}] Primary role: {primary_role}")
         
         # Return authenticated user profile with actual role
         profile = {
@@ -458,17 +451,17 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
                 "notifications": True
             }
         }
-        logger.info("User profile created successfully")
+        logger.info(f"🔍 [{correlation_id}] User profile created successfully")
         return {"success": True, "data": profile}
     except HTTPException:
         # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        logger.error(f"Error getting user profile: {e}")
-        logger.error(f"Error type: {type(e)}")
-        logger.error(f"Error details: {str(e)}")
+        logger.error(f"❌ [{correlation_id}] Error getting user profile: {e}")
+        logger.error(f"❌ [{correlation_id}] Error type: {type(e)}")
+        logger.error(f"❌ [{correlation_id}] Error details: {str(e)}")
         import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"❌ [{correlation_id}] Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/users/profile")
