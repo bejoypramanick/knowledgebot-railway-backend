@@ -2,24 +2,63 @@
 Configuration Service - Handles chatbot and widget configuration management
 """
 import datetime
-import os
 import sys
-from contextlib import asynccontextmanager
+import os
 
-from dotenv import load_dotenv
-from fastapi import FastAPI, Request
+# VERY EARLY LOGGING - Before any other imports
+print("🚀 CONFIGURATION SERVICE: STARTING EXECUTION")
+print(f"🚀 Python version: {sys.version}")
+print(f"🚀 Working directory: {os.getcwd()}")
+print(f"🚀 Script location: {__file__}")
+
+try:
+    print("🚀 IMPORTING FASTAPI...")
+    from fastapi import FastAPI, Request
+    print("✅ FASTAPI IMPORTED SUCCESSFULLY")
+except Exception as e:
+    print(f"❌ FASTAPI IMPORT FAILED: {e}")
+    sys.exit(1)
+
+try:
+    print("🚀 IMPORTING DOTENV...")
+    from dotenv import load_dotenv
+    print("✅ DOTENV IMPORTED SUCCESSFULLY")
+except Exception as e:
+    print(f"❌ DOTENV IMPORT FAILED: {e}")
+    sys.exit(1)
+
+try:
+    print("🚀 LOADING DOTENV...")
+    load_dotenv()
+    print("✅ DOTENV LOADED SUCCESSFULLY")
+except Exception as e:
+    print(f"❌ DOTENV LOADING FAILED: {e}")
+    sys.exit(1)
+
+from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 
-# Import Routers
-from configuration.routers import router as config_router
-from configuration.core.database_initializer import database_initializer
-from configuration.core.db import close_databases, railway_db
-from configuration.core.logging_config import auto_configure_logging
-from configuration.core.utils import (service_status, validate_environment,
-                          wait_for_railway_network)
-from configuration.core.correlation_middleware import CorrelationIDMiddleware
+# Import core modules
+try:
+    print("🚀 IMPORTING CORE MODULES...")
+    from configuration.core.logging_config import auto_configure_logging
+    from configuration.core.utils import validate_environment, wait_for_railway_network, service_status
+    from configuration.core.correlation_middleware import CorrelationIDMiddleware
+    from configuration.core.database_initializer import database_initializer
+    from configuration.core.db import close_databases, railway_db
+    print("✅ CORE MODULES IMPORTED SUCCESSFULLY")
+except Exception as e:
+    print(f"❌ CORE MODULES IMPORT FAILED: {e}")
+    sys.exit(1)
 
-load_dotenv()
+# Import routers and services
+try:
+    print("🚀 IMPORTING ROUTERS AND SERVICES...")
+    from configuration.routers import router as config_router
+    print("✅ ROUTERS AND SERVICES IMPORTED SUCCESSFULLY")
+except Exception as e:
+    print(f"❌ ROUTERS AND SERVICES IMPORT FAILED: {e}")
+    sys.exit(1)
 
 # Configure Railway-compatible logging
 logger = auto_configure_logging("configuration")
