@@ -17,7 +17,7 @@ from starlette.status import HTTP_503_SERVICE_UNAVAILABLE
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from chatbot_orchestration.core.logging_config import get_railway_logger
-from api_gateway.core.correlation_id import get_correlation_id, add_correlation_id_headers
+from shared.correlation_id import get_correlation_id, add_correlation_id_headers
 
 logger = get_railway_logger(__name__)
 

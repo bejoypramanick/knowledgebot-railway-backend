@@ -9,7 +9,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from api_gateway.core.firebase_auth import verify_firebase_token
 from api_gateway.core.logging_config import get_railway_logger
-from api_gateway.core.correlation_id import get_correlation_id, add_correlation_id_headers
+from shared.correlation_id import get_correlation_id, add_correlation_id_headers
 
 logger = get_railway_logger(__name__)
 

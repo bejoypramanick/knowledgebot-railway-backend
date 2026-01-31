@@ -8,7 +8,7 @@ import asyncpg
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from knowledgebase_ingestion.core.logging_config import get_railway_logger
-from api_gateway.core.correlation_id import get_correlation_id
+from shared.correlation_id import get_correlation_id
 
 logger = get_railway_logger(__name__)
 
