@@ -114,41 +114,45 @@ async def generic_proxy_handler(request: Request, path: str):
         # Remove /api/v1/ prefix for routing logic
         clean_path = path.replace("/api/v1/", "") if path.startswith("/api/v1/") else path
         
+        # Remove gateway/ prefix for backend service routing
+        backend_path = clean_path.replace("gateway/", "") if clean_path.startswith("gateway/") else clean_path
+        
         # Handle admin endpoints that are actually in configuration service
-        if clean_path.startswith("admin/agents/online") or clean_path.startswith("admin/performance/metrics") or clean_path.startswith("admin/chat-sessions"):
+        if backend_path.startswith("admin/agents/online") or backend_path.startswith("admin/performance/metrics") or backend_path.startswith("admin/chat-sessions"):
             service_url = get_settings().configuration_service_url
             logger.info(f"✅ Routing admin endpoint to configuration service: {service_url}")
-        elif clean_path.startswith("admin/"):
+        elif backend_path.startswith("admin/"):
             service_url = get_settings().configuration_service_url
             logger.info(f"✅ Routing admin endpoint to configuration service: {service_url}")
-        elif clean_path.startswith("users/unique-id"):
+        elif backend_path.startswith("users/unique-id"):
             service_url = get_settings().configuration_service_url
             logger.info(f"✅ Routing users endpoint to configuration service: {service_url}")
-        elif clean_path.startswith("configuration/"):
+        elif backend_path.startswith("configuration/"):
             service_url = get_settings().configuration_service_url
             logger.info(f"✅ Routing to configuration service: {service_url}")
-        elif clean_path.startswith("chatbot/"):
+        elif backend_path.startswith("chatbot/"):
             service_url = get_settings().chatbot_orchestration_url
             logger.info(f"✅ Routing to chatbot service: {service_url}")
-        elif clean_path.startswith("knowledgebase/"):
+        elif backend_path.startswith("knowledgebase/"):
             service_url = get_settings().knowledgebase_ingestion_url
             logger.info(f"✅ Routing to knowledgebase service: {service_url}")
-        elif clean_path.startswith("webcrawl/"):
+        elif backend_path.startswith("webcrawl/"):
             service_url = get_settings().website_crawling_url
             logger.info(f"✅ Routing to webcrawl service: {service_url}")
         else:
-            logger.error(f"❌ Unknown path: {clean_path}")
+            logger.error(f"❌ Unknown path: {backend_path}")
             return JSONResponse(
                 status_code=404,
-                content={"error": f"Unknown path: {clean_path}"}
+                content={"error": f"Unknown path: {backend_path}"}
             )
         
-        # Construct full URL
-        full_url = f"{service_url}/api/v1/{clean_path}"
+        # Construct full URL using backend_path (without gateway/ prefix)
+        full_url = f"{service_url}/api/v1/{backend_path}"
         logger.info(f"🌐 Making {request.method} request to: {full_url}")
         logger.info(f"🔍 Service URL: {service_url}")
         logger.info(f"🔍 Original path: {path}")
         logger.info(f"🔍 Clean path: {clean_path}")
+        logger.info(f"🔍 Backend path: {backend_path}")
         
         # Prepare headers
         headers = dict(request.headers)
