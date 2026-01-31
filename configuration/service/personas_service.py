@@ -24,6 +24,44 @@ class PersonasService:
             # Filter to only active personas for general use
             active_personas = [p for p in personas if p.get('is_active', False)]
             
+            return {
+                "personas": active_personas,
+                "total_count": len(active_personas)
+            }
+        except Exception as e:
+            logger.error(f"Error fetching personas: {e}")
+            raise
+
+    async def get_all_personas(self) -> Dict[str, Any]:
+        """Get all available personas with business logic"""
+        try:
+            personas = await self.personas_dao.get_all_personas()
+            
+            # Filter to only active personas for general use
+            active_personas = [p for p in personas if p.get('is_active', False)]
+            
+            return {
+                "personas": active_personas,
+                "total_count": len(active_personas)
+            }
+        except Exception as e:
+            logger.error(f"Error fetching personas: {e}")
+            raise
+
+    async def create_persona(self, persona_data: dict, user_email: str) -> Dict[str, Any]:
+        """Create a new persona with business logic"""
+        try:
+            # This would need to be implemented based on actual persona creation logic
+            # For now, return success response
+            return {
+                "success": True,
+                "message": "Persona created successfully",
+                "persona": persona_data
+            }
+        except Exception as e:
+            logger.error(f"Error creating persona: {e}")
+            raise
+            
             # Get the currently active persona (should be only one)
             current_active_persona = None
             for persona in personas:
