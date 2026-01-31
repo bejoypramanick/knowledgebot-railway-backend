@@ -71,11 +71,7 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
             "/favicon.ico",  # Favicon
             "/auth/login",  # Login endpoint
             "/auth/verify",  # Token verification endpoint
-            "/gateway-check",  # Gateway diagnostic endpoint
-            "/api/v1/knowledgebase/health",  # Knowledgebase service health check
-            "/api/v1/knowledgebase/files",  # Knowledgebase files list
-            "/api/v1/knowledgebase/upload/constraints",  # Knowledgebase upload constraints
-            "/api/v1/configuration/performance/metrics",  # Performance metrics endpoint
+            "/gateway-check"  # Gateway diagnostic endpoint
         ]
     
     async def dispatch(self, request, call_next):
