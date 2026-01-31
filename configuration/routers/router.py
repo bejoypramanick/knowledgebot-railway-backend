@@ -66,10 +66,12 @@ token_usage_service = TokenUsageService()
 # =================================
 
 @router.get("/chatbot")
-async def get_chatbot_config():
-    """Get complete chatbot configuration"""
+async def get_chatbot_config(cache: bool = True):
+    """Get complete chatbot configuration with caching support"""
     try:
-        config = await config_service.get_chatbot_config()
+        logger.info(f"🔍 GET /chatbot called with cache={cache}")
+        config = await config_service.get_chatbot_config(use_cache=cache)
+        logger.info(f"✅ Chatbot config retrieved successfully (cache={cache})")
         return {"success": True, "data": config}
     except Exception as e:
         logger.error(f"Error getting chatbot config: {e}")

@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     chatbot_orchestration_url: str = os.getenv("CHATBOT_ORCHESTRATION_URL", "http://localhost:8000")
     knowledgebase_ingestion_url: str = os.getenv("KNOWLEDGEBASE_INGESTION_URL", "http://localhost:8000")
     website_crawling_url: str = os.getenv("WEBSITE_CRAWLING_URL", "http://localhost:8000")
+    admin_service_url: str = os.getenv("ADMIN_SERVICE_URL", "http://localhost:8000")
     
     # Firebase Configuration
     firebase_project_id: Optional[str] = None

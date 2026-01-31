@@ -119,6 +119,9 @@ async def generic_proxy_handler(request: Request, path: str):
         elif path.startswith("webcrawl/"):
             service_url = get_settings().website_crawling_url
             logger.info(f"✅ Routing to webcrawl service: {service_url}")
+        elif path.startswith("admin/"):
+            service_url = get_settings().admin_service_url
+            logger.info(f"✅ Routing to admin service: {service_url}")
         else:
             logger.error(f"❌ Unknown service path: '{path}'")
             raise HTTPException(status_code=404, detail=f"Unknown service path: {path}")
