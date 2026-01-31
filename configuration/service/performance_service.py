@@ -23,11 +23,3 @@ class PerformanceService:
         except Exception as e:
             logger.error(f"Error fetching performance metrics: {e}")
             raise
-    
-    async def get_chat_statistics(self) -> Dict[str, Any]:
-        """Get chat statistics"""
-        try:
-            return await self.performance_dao.get_chat_statistics()
-        except Exception as e:
-            logger.error(f"Error fetching chat statistics: {e}")
-            raise

@@ -26,11 +26,11 @@ class FeedbackService:
             logger.error(f"Error submitting feedback: {e}")
             raise
     
-    async def get_feedback_stats(self) -> Dict[str, Any]:
-        """Get feedback statistics"""
+    async def get_all_feedback(self) -> List[Dict[str, Any]]:
+        """Get all feedback"""
         try:
-            stats = await self.feedback_dao.get_feedback_stats()
-            return stats
+            feedback_list = await self.feedback_dao.get_all_feedback()
+            return feedback_list
         except Exception as e:
-            logger.error(f"Error fetching feedback stats: {e}")
+            logger.error(f"Error getting all feedback: {e}")
             raise

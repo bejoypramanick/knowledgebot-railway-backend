@@ -16,6 +16,38 @@ class NotificationsService:
     def __init__(self, notifications_dao: NotificationsDAO):
         self.notifications_dao = notifications_dao
     
+    async def get_settings(self) -> Dict[str, Any]:
+        """Get notification settings"""
+        try:
+            settings = await self.notifications_dao.get_settings()
+            return settings
+        except Exception as e:
+            logger.error(f"Error getting notification settings: {e}")
+            raise
+    
+    async def update_settings(self, settings: Dict[str, Any], user_email: str) -> Dict[str, Any]:
+        """Update notification settings"""
+        try:
+            result = await self.notifications_dao.update_settings(settings, user_email)
+            return {"success": True, "message": "Settings updated successfully", "data": result}
+        except Exception as e:
+            logger.error(f"Error updating notification settings: {e}")
+            raise
+    
+    async def send_notification(self, notification: Dict[str, Any], user_email: str) -> Dict[str, Any]:
+        """Send a notification"""
+        try:
+            result = await self.create_notification(
+                notification.get("title", "Notification"),
+                notification.get("message", ""),
+                notification.get("type", "info"),
+                user_email
+            )
+            return {"success": True, "message": "Notification sent successfully", "notification_id": result["notification_id"]}
+        except Exception as e:
+            logger.error(f"Error sending notification: {e}")
+            raise
+    
     async def create_notification(self, title: str, message: str, notification_type: str = 'info', user_email: str = None) -> Dict[str, Any]:
         """Create a notification"""
         try:
@@ -24,21 +56,4 @@ class NotificationsService:
             return {"success": True, "notification_id": notification_id}
         except Exception as e:
             logger.error(f"Error creating notification: {e}")
-            raise
-    
-    async def get_notifications(self, limit: int = 50, offset: int = 0, unread_only: bool = False, user_email: str = None) -> List[Dict[str, Any]]:
-        """Get notifications for a user"""
-        try:
-            return await self.notifications_dao.get_notifications(limit, offset, unread_only, user_email)
-        except Exception as e:
-            logger.error(f"Error fetching notifications: {e}")
-            raise
-    
-    async def mark_notification_read(self, notification_id: str) -> bool:
-        """Mark notification as read"""
-        try:
-            await self.notifications_dao.mark_notification_read(notification_id)
-            return True
-        except Exception as e:
-            logger.error(f"Error marking notification as read: {e}")
             raise
