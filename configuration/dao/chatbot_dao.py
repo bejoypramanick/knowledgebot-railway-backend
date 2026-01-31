@@ -49,13 +49,13 @@ class ChatbotDAO:
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables 
                         WHERE table_schema = 'public' 
-                        AND table_name = 'chatbot_personas'
+                        AND table_name = 'persona_configurations'
                     )
                     """
                 )
                 
                 if not table_exists:
-                    logger.warning("chatbot_personas table does not exist, returning fallback persona")
+                    logger.warning("persona_configurations table does not exist, returning fallback persona")
                     return {
                         'persona_name': 'KnowledgeBot',
                         'persona_description': 'A helpful AI assistant for knowledge management',
@@ -66,15 +66,20 @@ class ChatbotDAO:
                 # Try to get active persona from database
                 persona = await conn.fetchrow(
                     """
-                    SELECT persona_name, persona_description, system_prompt, is_active
-                    FROM chatbot_personas
+                    SELECT persona_name, system_prompt, is_active
+                    FROM persona_configurations
                     WHERE is_active = true
                     LIMIT 1
                     """
                 )
                 
                 if persona:
-                    return dict(persona)
+                    return {
+                        'persona_name': persona['persona_name'],
+                        'persona_description': f"AI assistant: {persona['persona_name']}",
+                        'is_active': persona['is_active'],
+                        'system_prompt': persona['system_prompt']
+                    }
                 else:
                     # Fallback to default persona if no active persona found
                     return {
@@ -123,16 +128,13 @@ class ChatbotDAO:
         async with get_db_connection() as conn:
             await conn.execute("UPDATE llm_providers SET token_used = $1 WHERE provider_name = $2", used, provider)
 
-    async def update_metadata(self, hil_enabled: bool, response_policy: int):
-        async with get_db_connection() as conn:
-            await conn.execute(
-                """
-                UPDATE configuration_metadata
-                SET hil_enabled = $1, response_policy = $2, updated_at = NOW()
-                WHERE id = 1
-                """,
-                hil_enabled, response_policy
-            )
+    async def update_metadata(self, **kwargs):
+        """Update chatbot metadata with dynamic parameters"""
+        if not kwargs:
+            return
+        
+        # Use the existing upsert method which handles dynamic updates
+        await self.upsert_configuration_metadata(kwargs)
 
     async def upsert_notification_setting(self, name: str, enabled: bool):
         async with get_db_connection() as conn:
