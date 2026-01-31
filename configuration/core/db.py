@@ -8,7 +8,6 @@ import asyncpg
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from configuration.core.logging_config import get_railway_logger
-from configuration.core.correlation_id import get_correlation_id
 
 logger = get_railway_logger(__name__)
 
@@ -200,20 +199,16 @@ class DatabaseManager:
 # Standard entry point for all services
 @asynccontextmanager
 async def get_db_connection():
-    """Single source of truth for getting a DB connection with correlation ID logging."""
-    correlation_id = get_correlation_id()
+    """Single source of truth for getting a DB connection."""
     manager = await DatabaseManager.get_instance()
     
-    if correlation_id:
-        logger.info(f"🔍 [{correlation_id}] Acquiring database connection")
+    logger.info("🔍 Acquiring database connection")
     
     async with manager.connection() as conn:
-        if correlation_id:
-            logger.info(f"🔍 [{correlation_id}] Database connection acquired")
+        logger.info("🔍 Database connection acquired")
         yield conn
         
-    if correlation_id:
-        logger.info(f"🔍 [{correlation_id}] Database connection released")
+    logger.info("🔍 Database connection released")
 
 # Initialization helper
 async def init_railway_db(url: Optional[str] = None):
