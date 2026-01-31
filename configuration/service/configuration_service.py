@@ -522,12 +522,14 @@ class ConfigurationService:
             logger.info(f"🔍 Saving chatbot config: {config_data}")
             
             # Update metadata if provided
-            if 'display_name' in config_data or 'description' in config_data:
+            if 'display_name' in config_data or 'description' in config_data or 'response_policy' in config_data:
                 metadata_updates = {}
                 if 'display_name' in config_data:
                     metadata_updates['display_name'] = config_data['display_name']
                 if 'description' in config_data:
                     metadata_updates['description'] = config_data['description']
+                if 'response_policy' in config_data:
+                    metadata_updates['response_policy'] = config_data['response_policy']
                 await self.update_metadata(**metadata_updates)
             
             # Update admin emails if provided
