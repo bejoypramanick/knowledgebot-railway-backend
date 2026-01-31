@@ -3,7 +3,7 @@ import asyncpg
 
 from configuration.core.logging_config import get_railway_logger
 from configuration.core.db import get_db_connection
-from configuration.core.db_logger import execute_with_logging, fetchrow_with_logging
+from configuration.core.db_logger import execute_with_logging, fetchrow_with_logging, fetch_with_logging
 
 logger = get_railway_logger(__name__)
 
@@ -331,26 +331,32 @@ class ChatbotDAO:
                 added_emails = []
                 for email in to_add:
                     try:
-                        await conn.execute(
-                            "INSERT INTO admins (email, status) VALUES ($1, 'active')",
-                            email
+                        await execute_with_logging(
+                            conn, 
+                            "INSERT INTO admins (email, status) VALUES ($1, 'active')", 
+                            email, 
+                            operation="INSERT_ADMIN"
                         )
                         added_emails.append(email)
                         logger.info(f"Added admin: {email}")
                     except asyncpg.exceptions.UniqueViolationError:
                         # Admin already exists, just update status
-                        await conn.execute(
-                            "UPDATE admins SET status = 'active' WHERE email = $1",
-                            email
+                        await execute_with_logging(
+                            conn, 
+                            "UPDATE admins SET status = 'active' WHERE email = $1", 
+                            email, 
+                            operation="UPDATE_ADMIN_STATUS"
                         )
                         added_emails.append(email)
                 
                 # Remove admins (hard delete from database)
                 removed_emails = []
                 for email in to_remove:
-                    await conn.execute(
-                        "DELETE FROM admins WHERE email = $1",
-                        email
+                    await execute_with_logging(
+                        conn, 
+                        "DELETE FROM admins WHERE email = $1", 
+                        email, 
+                        operation="DELETE_ADMIN"
                     )
                     removed_emails.append(email)
                     logger.info(f"Deleted admin from database: {email}")

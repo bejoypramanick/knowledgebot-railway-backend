@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 
 from configuration.core.db import get_db_connection
+from configuration.core.db_logger import execute_with_logging
 from configuration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
@@ -78,43 +79,38 @@ class NotificationsDAO:
     async def mark_notification_read(self, notification_id: str, user_email: str) -> int:
         """Mark a specific notification as read."""
         async with get_db_connection() as conn:
-            return await conn.execute(
-                """
+            query = """
                 UPDATE notifications
                 SET is_read = TRUE, read_at = CURRENT_TIMESTAMP
                 WHERE id = $1 AND user_email = $2 AND is_read = FALSE
-                """,
-                notification_id, user_email
-            )
+            """
+            params = [notification_id, user_email]
+            return await execute_with_logging(conn, query, *params, operation="MARK_NOTIFICATION_READ")
 
     async def mark_all_notifications_read(self, user_email: str) -> int:
         """Mark all notifications as read for a user."""
         async with get_db_connection() as conn:
-            return await conn.execute(
-                """
+            query = """
                 UPDATE notifications
                 SET is_read = TRUE, read_at = CURRENT_TIMESTAMP
                 WHERE user_email = $1 AND is_read = FALSE
-                """,
-                user_email
-            )
+            """
+            return await execute_with_logging(conn, query, user_email, operation="MARK_ALL_NOTIFICATIONS_READ")
 
     async def mark_multiple_notifications_read(self, notification_ids: List[str], user_email: str) -> int:
         """Mark multiple notifications as read for a user."""
         async with get_db_connection() as conn:
-            return await conn.execute(
-                """
+            query = """
                 UPDATE notifications
                 SET is_read = TRUE, read_at = CURRENT_TIMESTAMP
                 WHERE id = ANY($1::uuid[]) AND user_email = $2 AND is_read = FALSE
-                """,
-                notification_ids, user_email
-            )
+            """
+            params = [notification_ids, user_email]
+            return await execute_with_logging(conn, query, *params, operation="MARK_MULTIPLE_NOTIFICATIONS_READ")
 
     async def delete_notification(self, notification_id: str, user_email: str) -> int:
         """Delete a specific notification."""
         async with get_db_connection() as conn:
-            return await conn.execute(
-                "DELETE FROM notifications WHERE id = $1 AND user_email = $2",
-                notification_id, user_email
-            )
+            query = "DELETE FROM notifications WHERE id = $1 AND user_email = $2"
+            params = [notification_id, user_email]
+            return await execute_with_logging(conn, query, *params, operation="DELETE_NOTIFICATION")

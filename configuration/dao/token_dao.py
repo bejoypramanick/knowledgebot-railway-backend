@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 
 from configuration.core.db import get_db_connection
+from configuration.core.db_logger import execute_with_logging
 from configuration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
@@ -13,16 +14,15 @@ class TokenDAO:
         """Update LLM token usage for a provider."""
         try:
             async with get_db_connection() as conn:
-                await conn.execute(
-                    """
+                query = """
                     INSERT INTO llm_providers (provider_name, token_used, token_limit, is_active)
                     VALUES ($1, $2, $3, true)
                     ON CONFLICT (provider_name) DO UPDATE SET
                     token_used = llm_providers.token_used + EXCLUDED.token_used,
                     updated_at = NOW()
-                    """,
-                    provider, total_tokens, default_limit
-                )
+                """
+                params = [provider, total_tokens, default_limit]
+                await execute_with_logging(conn, query, *params, operation="UPDATE_LLM_USAGE")
         except Exception as e:
             logger.error(f"Error updating LLM usage: {e}")
             raise
@@ -33,17 +33,15 @@ class TokenDAO:
         """Log detailed token usage for a specific API call."""
         try:
             async with get_db_connection() as conn:
-                await conn.execute(
-                    """
+                query = """
                     INSERT INTO token_usage_log 
                     (session_id, message_id, provider, model, prompt_tokens, completion_tokens, 
                      total_tokens, api_call_type, request_metadata, created_at)
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-                    """,
-                    session_id, message_id, provider, model, prompt_tokens, 
-                    completion_tokens, total_tokens, api_call_type, 
-                    request_metadata
-                )
+                """
+                params = [session_id, message_id, provider, model, prompt_tokens, 
+                          completion_tokens, total_tokens, api_call_type, request_metadata]
+                await execute_with_logging(conn, query, *params, operation="LOG_TOKEN_USAGE")
         except Exception as e:
             logger.error(f"Error logging token usage: {e}")
             raise

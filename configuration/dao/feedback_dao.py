@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 
 from configuration.core.db import get_db_connection
+from configuration.core.db_logger import execute_with_logging
 from configuration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
@@ -31,8 +32,7 @@ class FeedbackDAO:
         """Submit feedback for a chat message."""
         try:
             async with get_db_connection() as conn:
-                await conn.execute(
-                    """
+                query = """
                     INSERT INTO message_feedback 
                     (message_id, session_id, feedback, user_email, created_at)
                     VALUES ($1, $2, $3, $4, NOW())
@@ -40,9 +40,9 @@ class FeedbackDAO:
                     feedback = EXCLUDED.feedback,
                     user_email = EXCLUDED.user_email,
                     created_at = EXCLUDED.created_at
-                    """,
-                    message_id, session_id, feedback, user_email
-                )
+                """
+                params = [message_id, session_id, feedback, user_email]
+                await execute_with_logging(conn, query, *params, operation="SUBMIT_FEEDBACK")
         except Exception as e:
             logger.error(f"Error submitting feedback: {e}")
             raise
