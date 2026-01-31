@@ -2,12 +2,12 @@
 Authentication Data Access Object for Configuration Service
 Handles database operations for user authentication and role management
 """
+import logging
 from typing import Any, Dict, List, Optional
 
 from configuration.core.db import get_db_connection
-from configuration.core.otel_logger import get_otel_logger
 
-logger = get_otel_logger("auth_dao", "configuration")
+logger = logging.getLogger("auth_dao")
 
 class AuthDAO:
     def __init__(self):
@@ -24,10 +24,10 @@ class AuthDAO:
         try:
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, email)
-                logger.log_db_query(query, {"email": email}, result)
+                logger.info(f"🔍 [DB QUERY] check_admin_exists: {query.strip()} | PARAMS: email={email}")
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"email": email}, error=e)
+            logger.error(f"❌ [DB ERROR] check_admin_exists: {e}")
             return None
 
     async def check_human_agent_exists(self, email: str) -> bool:

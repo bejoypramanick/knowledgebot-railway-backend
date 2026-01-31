@@ -2,12 +2,12 @@
 Feedback Data Access Object for Configuration Service
 Handles database operations for user feedback
 """
+import logging
 from typing import Dict, List, Any, Optional
 
-from configuration.core.otel_logger import get_otel_logger
 from configuration.core.db import get_db_connection
 
-logger = get_otel_logger("feedback_dao", "configuration")
+logger = logging.getLogger("feedback_dao")
 
 class FeedbackDAO:
     def __init__(self):
@@ -23,11 +23,11 @@ class FeedbackDAO:
         
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute(query, message_id, session_id, feedback, user_email)
-                logger.log_db_query(query, params, result)
+                await conn.execute(query, message_id, session_id, feedback, user_email)
+                logger.info(f"🔍 [DB QUERY] create_feedback: {query.strip()} | PARAMS: {params}")
                 logger.info(f"Feedback submitted for message {message_id}")
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.error(f"❌ [DB ERROR] create_feedback: {e}")
             raise
 
     async def get_all_feedback(self) -> List[Dict[str, Any]]:
@@ -41,8 +41,8 @@ class FeedbackDAO:
         try:
             async with get_db_connection() as conn:
                 records = await conn.fetch(query)
-                logger.log_db_query(query, None, records)
+                logger.info(f"🔍 [DB QUERY] get_all_feedback: {query.strip()} | FOUND: {len(records)} records")
                 return records
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            logger.error(f"❌ [DB ERROR] get_all_feedback: {e}")
             raise

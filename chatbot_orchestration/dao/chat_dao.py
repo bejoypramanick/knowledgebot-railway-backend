@@ -4,10 +4,10 @@ Handles database operations for chat sessions and messages
 """
 from typing import Dict, List, Any, Optional
 
+import logging
 from chatbot_orchestration.core.db import get_db_connection
-from chatbot_orchestration.core.otel_logger import get_otel_logger
 
-logger = get_otel_logger("chat_dao", "chatbot-orchestration")
+logger = logging.getLogger("chat_dao")
 
 class ChatDAO:
     """Unified Data Access Object for all chat operations"""
@@ -26,7 +26,7 @@ class ChatDAO:
         try:
             async with get_db_connection() as conn:
                 record = await conn.fetchrow(query, session_id)
-                logger.log_db_query(query, {"session_id": session_id}, record)
+                logger.info(f"🔍 [DB QUERY] get_session_metadata: {query.strip()} | PARAMS: session_id={session_id}")
                 
                 if record:
                     return {
@@ -39,7 +39,7 @@ class ChatDAO:
                 else:
                     return None
         except Exception as e:
-            logger.log_db_query(query, {"session_id": session_id}, error=e)
+            logger.error(f"❌ [DB ERROR] get_session_metadata: {e}")
             return None
 
     async def get_chat_history(self, session_id: str) -> List[Dict[str, Any]]:

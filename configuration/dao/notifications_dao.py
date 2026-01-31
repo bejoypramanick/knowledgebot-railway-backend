@@ -2,11 +2,12 @@
 Notifications Data Access Object for Configuration Service
 Handles database operations for user notifications
 """
+import logging
 from typing import Dict, List, Any, Optional
 
-from configuration.core.otel_logger import get_otel_logger
+from configuration.core.db import get_db_connection
 
-logger = get_otel_logger("notifications_dao", "configuration")
+logger = logging.getLogger("notifications_dao")
 
 class NotificationsDAO:
     def __init__(self):
@@ -24,10 +25,10 @@ class NotificationsDAO:
         try:
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query)
-                logger.log_db_query(query, None, result)
+                logger.info(f"🔍 [DB QUERY] get_settings: {query.strip()}")
                 return dict(result) if result else {}
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            logger.error(f"❌ [DB ERROR] get_settings: {e}")
             return {}
 
     async def update_settings(self, settings: Dict[str, Any], user_email: str) -> Dict[str, Any]:

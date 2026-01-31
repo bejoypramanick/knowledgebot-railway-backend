@@ -2,11 +2,12 @@
 Chatbot Data Access Object for Configuration Service
 Handles database operations for chatbot configuration management
 """
+import logging
 from typing import Dict, List, Any, Optional
 
-from configuration.core.otel_logger import get_otel_logger
+from configuration.core.db import get_db_connection
 
-logger = get_otel_logger("chatbot_dao", "configuration")
+logger = logging.getLogger("chatbot_dao")
 
 class ChatbotDAO:
     def __init__(self):
@@ -23,10 +24,10 @@ class ChatbotDAO:
         try:
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query)
-                logger.log_db_query(query, None, result)
+                logger.info(f"🔍 [DB QUERY] get_metadata: {query.strip()}")
                 return result
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            logger.error(f"❌ [DB ERROR] get_metadata: {e}")
             return None
 
     async def update_metadata(self, **kwargs):
@@ -47,7 +48,7 @@ class ChatbotDAO:
                         WHERE id = 1
                     """
                     result = await conn.execute(query, *params)
-                    logger.log_db_query(query, {"params": params, "kwargs": kwargs}, result)
+                    logger.info(f"🔍 [DB QUERY] update_metadata: {query.strip()} | PARAMS: {kwargs}")
                     logger.info(f"Updated chatbot metadata: {kwargs}")
         except Exception as e:
             logger.error(f"Error updating chatbot metadata: {e}")
