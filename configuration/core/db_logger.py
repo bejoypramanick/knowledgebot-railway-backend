@@ -24,9 +24,16 @@ def log_query(query: str, params: Optional[List[Any]] = None, result: Optional[A
 
 async def execute_with_logging(conn: asyncpg.Connection, query: str, *params, operation: str = "EXECUTE"):
     """Execute query with consistent logging"""
+    logger.info(f"🔍 DEBUG: execute_with_logging called for operation={operation}")
+    logger.info(f"🔍 DEBUG: Query={query.strip()}")
+    logger.info(f"🔍 DEBUG: Params={list(params) if params else None}")
+    
     log_query(query, list(params) if params else None, operation=operation)
+    logger.info(f"🔍 DEBUG: About to execute query")
     result = await conn.execute(query, *params)
+    logger.info(f"🔍 DEBUG: Query executed, result={result}")
     log_query(query, list(params) if params else None, result, operation)
+    logger.info(f"🔍 DEBUG: execute_with_logging completed")
     return result
 
 async def fetch_with_logging(conn: asyncpg.Connection, query: str, *params, operation: str = "FETCH"):

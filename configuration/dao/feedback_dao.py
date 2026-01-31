@@ -31,6 +31,7 @@ class FeedbackDAO:
     async def submit_feedback(self, message_id: str, session_id: str, feedback: str, user_email: str):
         """Submit feedback for a chat message."""
         try:
+            logger.info(f"🔍 DEBUG: submit_feedback called with message_id={message_id}, session_id={session_id}, feedback={feedback}, user_email={user_email}")
             async with get_db_connection() as conn:
                 query = """
                     INSERT INTO message_feedback 
@@ -42,7 +43,9 @@ class FeedbackDAO:
                     created_at = EXCLUDED.created_at
                 """
                 params = [message_id, session_id, feedback, user_email]
+                logger.info(f"🔍 DEBUG: About to call execute_with_logging")
                 await execute_with_logging(conn, query, *params, operation="SUBMIT_FEEDBACK")
+                logger.info(f"🔍 DEBUG: execute_with_logging completed")
         except Exception as e:
             logger.error(f"Error submitting feedback: {e}")
             raise
