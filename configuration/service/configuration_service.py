@@ -520,5 +520,58 @@ class ConfigurationService:
             logger.error(f"Error activating persona '{persona_name}': {e}")
             raise
 
+    async def save_chatbot_config(self, config_data: Dict[str, Any]):
+        """Save complete chatbot configuration"""
+        try:
+            logger.info(f"🔍 Saving chatbot config: {config_data}")
+            
+            # Update metadata if provided
+            if 'display_name' in config_data or 'description' in config_data:
+                metadata_updates = {}
+                if 'display_name' in config_data:
+                    metadata_updates['display_name'] = config_data['display_name']
+                if 'description' in config_data:
+                    metadata_updates['description'] = config_data['description']
+                await self.update_metadata(**metadata_updates)
+            
+            # Update admin emails if provided
+            if 'admin_emails' in config_data and config_data['admin_emails']:
+                await self.sync_admin_emails(config_data['admin_emails'])
+            
+            # Update human agents if provided
+            if 'human_agents' in config_data and config_data['human_agents']:
+                await self.sync_human_agent_emails(config_data['human_agents'])
+            
+            # Update persona if provided
+            if 'persona' in config_data and 'selected_persona' in config_data['persona']:
+                await self.activate_persona(config_data['persona']['selected_persona'])
+            
+            # Update notifications if provided
+            if 'notifications' in config_data:
+                notifications = config_data['notifications']
+                # Update notification settings here as needed
+                pass
+            
+            # Update security if provided
+            if 'security' in config_data:
+                security = config_data['security']
+                # Update security settings here as needed
+                pass
+            
+            # Update LLM tokens if provided
+            if 'llm_tokens' in config_data:
+                llm_tokens = config_data['llm_tokens']
+                for provider, tokens in llm_tokens.items():
+                    if 'limit' in tokens:
+                        await self.update_llm_tokens(provider, tokens['limit'])
+                    if 'used' in tokens:
+                        await self.update_llm_used_tokens(provider, tokens['used'])
+            
+            logger.info("✅ Chatbot config saved successfully")
+            
+        except Exception as e:
+            logger.error(f"❌ Error saving chatbot config: {e}")
+            raise
+
 # Singleton instance
 configuration_service = ConfigurationService()
