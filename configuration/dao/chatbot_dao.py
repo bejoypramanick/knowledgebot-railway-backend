@@ -4,7 +4,6 @@ import asyncpg
 from configuration.core.logging_config import get_railway_logger
 from configuration.core.db import get_db_connection
 from configuration.core.db_logger import execute_with_logging, fetchrow_with_logging, fetch_with_logging
-from configuration.core.correlation_id import get_correlation_id
 
 logger = get_railway_logger(__name__)
 
@@ -134,18 +133,15 @@ class ChatbotDAO:
 
     async def update_metadata(self, **kwargs):
         """Update chatbot metadata with dynamic parameters"""
-        correlation_id = get_correlation_id()
-        correlation_prefix = f"[{correlation_id}] " if correlation_id else ""
-        
-        logger.info(f"🔍 {correlation_prefix}DAO update_metadata called with kwargs: {kwargs}")
+        logger.info(f"🔍 DAO update_metadata called with kwargs: {kwargs}")
         if not kwargs:
-            logger.info(f"🔍 {correlation_prefix}No kwargs provided, returning early")
+            logger.info(f"🔍 No kwargs provided, returning early")
             return
         
-        logger.info(f"🔍 {correlation_prefix}Calling upsert_configuration_metadata with: {kwargs}")
+        logger.info(f"🔍 Calling upsert_configuration_metadata with: {kwargs}")
         # Use the existing upsert method which handles dynamic updates
         await self.upsert_configuration_metadata(kwargs)
-        logger.info(f"✅ {correlation_prefix}DAO update_metadata completed successfully")
+        logger.info(f"✅ DAO update_metadata completed successfully")
 
     async def upsert_notification_setting(self, name: str, enabled: bool):
         async with get_db_connection() as conn:
@@ -187,12 +183,9 @@ class ChatbotDAO:
 
     async def upsert_configuration_metadata(self, updates_dict: Dict[str, Any]):
         """Upsert configuration metadata using proper PostgreSQL syntax"""
-        correlation_id = get_correlation_id()
-        correlation_prefix = f"[{correlation_id}] " if correlation_id else ""
-        
-        logger.info(f"🔍 {correlation_prefix}DAO upsert_configuration_metadata called with: {updates_dict}")
+        logger.info(f"🔍 DAO upsert_configuration_metadata called with: {updates_dict}")
         if not updates_dict:
-            logger.info(f"🔍 {correlation_prefix}No updates_dict provided, returning early")
+            logger.info(f"🔍 No updates_dict provided, returning early")
             return
         
         # Build column lists and values
@@ -226,12 +219,12 @@ class ChatbotDAO:
         # Execute with id=1 as the first parameter
         all_values = [1] + values
         
-        logger.info(f"🔍 {correlation_prefix}Executing SQL query: {query.strip()}")
-        logger.info(f"🔍 {correlation_prefix}SQL parameters: {all_values}")
+        logger.info(f"🔍 Executing SQL query: {query.strip()}")
+        logger.info(f"🔍 SQL parameters: {all_values}")
         
         async with get_db_connection() as conn:
             result = await execute_with_logging(conn, query, *all_values, operation="UPSERT_CONFIGURATION_METADATA")
-            logger.info(f"✅ {correlation_prefix}DAO upsert_configuration_metadata completed with result: {result}")
+            logger.info(f"✅ DAO upsert_configuration_metadata completed with result: {result}")
             return result
     
     def _get_postgres_type(self, column_name: str) -> str:
