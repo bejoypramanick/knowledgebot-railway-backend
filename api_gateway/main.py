@@ -66,6 +66,7 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
             "/",
             "/health",
             "/gateway/health",
+            "/api/v1/gateway/configuration/health",
             "/docs",
             "/redoc",
             "/openapi.json",
@@ -75,8 +76,11 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
         ]
     
     async def dispatch(self, request, call_next):
-        # Skip auth for excluded paths
-        if request.url.path in self.exclude_paths or request.method == "OPTIONS":
+        # Skip auth for excluded paths and any health endpoint
+        path = request.url.path
+        if (path in self.exclude_paths or 
+            path.endswith("/health") or 
+            request.method == "OPTIONS"):
             return await call_next(request)
         
         # Get token from Authorization header
