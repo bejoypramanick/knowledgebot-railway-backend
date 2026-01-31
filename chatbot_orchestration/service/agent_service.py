@@ -6,8 +6,7 @@ from google.genai import types
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 
-from chatbot_orchestration.dao.chat_dao import LocalChatDAO
-from ..dao.chat_dao import SharedChatDAO
+from chatbot_orchestration.dao.chat_dao import ChatDAO
 from chatbot_orchestration.core.logging_config import get_railway_logger
 
 from ..core.ai import MODEL_NAME, get_genai_client
@@ -20,8 +19,7 @@ class PydanticAIGatewayService:
     
     def __init__(self):
         self.genai_client = None
-        self.local_chat_dao = LocalChatDAO()  # For orchestration-specific methods
-        self.shared_chat_dao = SharedChatDAO()  # For shared chat sessions methods
+        self.chat_dao = ChatDAO()  # Unified ChatDAO for all chat operations
         
     async def initialize(self):
         if not self.genai_client:
@@ -31,7 +29,7 @@ class PydanticAIGatewayService:
         logger.info(f"🔍 Retrieving session metadata for session: {session_id}")
         
         try:
-            session_data = await self.local_chat_dao.get_session_metadata(session_id)
+            session_data = await self.chat_dao.get_session_metadata(session_id)
             
             if not session_data:
                 return {'session_id': session_id, 'is_new_session': True}
