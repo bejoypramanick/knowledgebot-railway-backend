@@ -12,13 +12,16 @@ class AuthDAO:
     async def add_admin(self, email: str) -> None:
         """Add a new admin."""
         async with get_db_connection() as conn:
-            await conn.execute(
-                """
+            query = """
                 INSERT INTO admins (email, status, created_by_email)
                 VALUES ($1, 'active', $2)
-                """,
-                email, 'system'
-            )
+                ON CONFLICT (email) DO NOTHING
+            """
+            params = [email, 'system']
+            logger.info(f" Executing SQL Query: {query}")
+            logger.info(f" Query Parameters: {params}")
+            result = await conn.execute(query, *params)
+            logger.info(f" Admin add completed. Result: {result}")
 
     async def remove_admin(self, email: str) -> None:
         """Remove an admin by setting status to removed."""
