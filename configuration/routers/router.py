@@ -52,8 +52,13 @@ async def get_version():
 # Simple function to get current user from request state or headers (set by API Gateway middleware)
 async def get_current_user(request: Request):
     """Get current user from request state or headers (set by API Gateway middleware)"""
+    correlation_id = get_correlation_id()
+    logger.info(f"🔍 [{correlation_id}] get_current_user called")
+    logger.info(f"🔍 [{correlation_id}] Request headers: {dict(request.headers)}")
+    
     # First try request.state (direct API Gateway access)
     if hasattr(request.state, 'user'):
+        logger.info(f"🔍 [{correlation_id}] Found user in request.state: {request.state.user}")
         return request.state.user
     
     # Then try headers (proxied from API Gateway)
@@ -61,15 +66,21 @@ async def get_current_user(request: Request):
     user_email = request.headers.get('X-User-Email')
     user_name = request.headers.get('X-User-Name')
     
+    logger.info(f"🔍 [{correlation_id}] Headers - UID: {user_uid}, Email: {user_email}, Name: {user_name}")
+    
     if user_email:
-        return {
+        user_data = {
             "uid": user_uid,
             "email": user_email,
             "name": user_name or user_email,
             "picture": None  # Not forwarded in headers
         }
+        logger.info(f"🔍 [{correlation_id}] Returning user from headers: {user_data}")
+        return user_data
     
     # This should not happen if API Gateway is properly configured
+    logger.error(f"🔍 [{correlation_id}] No user found in request.state or headers!")
+    logger.error(f"🔍 [{correlation_id}] Available headers: {list(request.headers.keys())}")
     raise HTTPException(status_code=401, detail="User not found in request state or headers")
 
 # Initialize services
