@@ -1,13 +1,13 @@
 """
-Shared OpenTelemetry Configuration for All Services
-Provides centralized OTel setup that can be imported by any service
+Shared Minimal OpenTelemetry Configuration for All Services
+Provides centralized minimal OTel setup that can be imported by any service
 """
 import os
 from api_gateway.core.otel_config import configure_otel
 
 def setup_opentelemetry_for_service(service_name: str, service_version: str = "1.0.0") -> bool:
     """
-    Setup OpenTelemetry for any service in the KnowledgeBot backend
+    Setup minimal OpenTelemetry for any service in the KnowledgeBot backend
     
     Args:
         service_name: Name of the service (e.g., "chatbot-orchestration", "configuration")
@@ -20,11 +20,11 @@ def setup_opentelemetry_for_service(service_name: str, service_version: str = "1
     os.environ["SERVICE_NAME"] = service_name
     os.environ["SERVICE_VERSION"] = service_version
     
-    # Configure OpenTelemetry
+    # Configure minimal OpenTelemetry
     success = configure_otel(service_name, service_version)
     
     if success:
-        print(f"✅ OpenTelemetry configured for {service_name}")
+        print(f"✅ Minimal OpenTelemetry configured for {service_name}")
     else:
         print(f"❌ Failed to configure OpenTelemetry for {service_name}")
     

@@ -1,15 +1,15 @@
 """
-OpenTelemetry Configuration for KnowledgeBot Backend
-Provides centralized OTel setup for all microservices with Railway console integration
+Minimal OpenTelemetry Configuration for Railway Console
+Provides OTel setup that logs spans directly to console for Railway capture
 """
 import os
+import sys
 import logging
 from typing import Optional
-from opentelemetry import trace, metrics, baggage
+from opentelemetry import trace, metrics
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.metrics import MeterProvider
-from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
@@ -18,7 +18,6 @@ from opentelemetry.propagate import set_global_textmap
 from opentelemetry.semconv.trace import SpanKind
 from opentelemetry import context as context_api
 from opentelemetry.exporter.console.trace import ConsoleSpanExporter
-from opentelemetry.exporter.console.metric_exporter import ConsoleMetricExporter
 
 # Service configuration
 SERVICE_NAME = os.getenv("SERVICE_NAME", "knowledgebot-service")
@@ -26,8 +25,8 @@ SERVICE_VERSION = os.getenv("SERVICE_VERSION", "1.0.0")
 
 logger = logging.getLogger(__name__)
 
-class OpenTelemetryConfig:
-    """Centralized OpenTelemetry configuration for Railway"""
+class MinimalOpenTelemetryConfig:
+    """Minimal OpenTelemetry configuration for Railway console"""
     
     def __init__(self, service_name: str, service_version: str = "1.0.0"):
         self.service_name = service_name
@@ -35,7 +34,7 @@ class OpenTelemetryConfig:
         self._configured = False
         
     def configure(self) -> bool:
-        """Configure OpenTelemetry for Railway console"""
+        """Configure minimal OpenTelemetry for Railway console"""
         if self._configured:
             logger.info("🔍 OpenTelemetry already configured")
             return True
@@ -50,11 +49,8 @@ class OpenTelemetryConfig:
                 "provider": "railway"
             })
             
-            # Configure tracing
+            # Configure minimal tracing with console output
             self._configure_tracing(resource)
-            
-            # Configure metrics
-            self._configure_metrics(resource)
             
             # Configure auto-instrumentation
             self._configure_auto_instrumentation()
@@ -63,7 +59,7 @@ class OpenTelemetryConfig:
             set_global_textmap()
             
             self._configured = True
-            logger.info(f"✅ OpenTelemetry configured for {self.service_name}")
+            logger.info(f"✅ Minimal OpenTelemetry configured for {self.service_name}")
             return True
             
         except Exception as e:
@@ -71,34 +67,18 @@ class OpenTelemetryConfig:
             return False
     
     def _configure_tracing(self, resource: Resource):
-        """Configure OpenTelemetry tracing"""
+        """Configure minimal tracing with console output"""
         # Configure console exporter for Railway console
-        console_exporter = ConsoleSpanExporter()
+        console_exporter = ConsoleSpanExporter(out=sys.stdout)
         
-        # Configure tracer provider
+        # Configure tracer provider with SimpleSpanProcessor for immediate output
         tracer_provider = TracerProvider(resource=resource)
-        span_processor = BatchSpanProcessor(console_exporter)
+        span_processor = SimpleSpanProcessor(console_exporter)
         tracer_provider.add_span_processor(span_processor)
         
         # Set global tracer provider
         trace.set_tracer_provider(tracer_provider)
-        logger.info("🔍 OpenTelemetry tracing configured for Railway console")
-    
-    def _configure_metrics(self, resource: Resource):
-        """Configure OpenTelemetry metrics"""
-        # Configure console exporter for Railway console
-        console_exporter = ConsoleMetricExporter()
-        
-        # Configure metric reader
-        metric_reader = PeriodicExportingMetricReader(
-            exporter=console_exporter,
-            export_interval_millis=30000  # Export every 30 seconds
-        )
-        
-        # Configure meter provider
-        meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
-        metrics.set_meter_provider(meter_provider)
-        logger.info("🔍 OpenTelemetry metrics configured for Railway console")
+        logger.info("🔍 Minimal OpenTelemetry tracing configured for Railway console")
     
     def _configure_auto_instrumentation(self):
         """Configure auto-instrumentation for common libraries"""
@@ -110,14 +90,14 @@ class OpenTelemetryConfig:
             logger.warning(f"⚠️ FastAPI instrumentation failed: {e}")
         
         try:
-            # HTTPX instrumentation
+            # HTTPX instrumentation for inter-service calls
             HTTPXClientInstrumentor.instrument()
             logger.info("🔍 HTTPX instrumentation enabled")
         except Exception as e:
             logger.warning(f"⚠️ HTTPX instrumentation failed: {e}")
         
         try:
-            # AsyncPG instrumentation
+            # AsyncPG instrumentation for database calls
             AsyncPGInstrumentor.instrument()
             logger.info("🔍 AsyncPG instrumentation enabled")
         except Exception as e:
@@ -130,31 +110,19 @@ class OpenTelemetryConfig:
         
         tracer_name = f"{self.service_name}.{name}" if name else self.service_name
         return trace.get_tracer(tracer_name)
-    
-    def get_meter(self, name: str = None):
-        """Get a meter instance"""
-        if not self._configured:
-            self.configure()
-        
-        meter_name = f"{self.service_name}.{name}" if name else self.service_name
-        return metrics.get_meter(meter_name)
 
 # Global OTel configuration instance
-otel_config = OpenTelemetryConfig(SERVICE_NAME, SERVICE_VERSION)
+otel_config = MinimalOpenTelemetryConfig(SERVICE_NAME, SERVICE_VERSION)
 
 # Convenience functions
 def get_tracer(name: str = None):
     """Get tracer for current service"""
     return otel_config.get_tracer(name)
 
-def get_meter(name: str = None):
-    """Get meter for current service"""
-    return otel_config.get_meter(name)
-
 def configure_otel(service_name: str, service_version: str = "1.0.0") -> bool:
     """Configure OpenTelemetry for a specific service"""
     global otel_config
-    otel_config = OpenTelemetryConfig(service_name, service_version)
+    otel_config = MinimalOpenTelemetryConfig(service_name, service_version)
     return otel_config.configure()
 
 # Span context helpers
