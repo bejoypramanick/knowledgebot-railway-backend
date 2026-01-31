@@ -95,19 +95,19 @@ async def login_user(request: Request):
         raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
 
 # =================================
-# GENERIC SERVICE PROXY HANDLER (must be first to catch all requests)
+# GENERIC SERVICE PROXY HANDLER (catches ALL requests)
 # =================================
 
 @router.api_route("/{path:path}")
 async def generic_proxy_handler(request: Request, path: str):
-    """Generic proxy handler that routes requests to appropriate services"""
+    """Generic proxy handler that routes ALL requests to appropriate services"""
     try:
         import httpx
         from ..core.config import get_settings
         
-        # Skip auth endpoints
+        # Skip auth endpoints - handle them specifically
         if path.startswith("auth/"):
-            raise HTTPException(status_code=404, detail=f"Auth endpoints not found: {path}")
+            return await handle_auth_endpoints(request, path)
         
         # Determine service based on URL path
         service_url = None
@@ -185,206 +185,40 @@ async def generic_proxy_handler(request: Request, path: str):
         raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}")
 
 # =================================
-# SPECIFIC PROXY ENDPOINTS (for special cases that need custom handling)
+# AUTH ENDPOINTS (only these are specific)
 # =================================
 
-# =================================
-# CONFIGURATION ENDPOINTS
-# =================================
-
-@router.get("/config/settings")
-async def get_api_settings():
-    """Get API configuration settings"""
-    try:
-        settings = get_settings()
+async def handle_auth_endpoints(request: Request, path: str):
+    """Handle authentication endpoints specifically"""
+    if path == "auth/verify" and request.method == "POST":
+        # Get token from Authorization header
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
+        
+        token = auth_header.split(" ")[1]
+        user_data = verify_firebase_token(token)
+        
+        if not user_data:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
         return {
             "success": True,
-            "data": {
-                "environment": settings.environment,
-                "version": settings.version,
-                "debug": settings.debug
+            "user": user_data
+        }
+    elif path.startswith("auth/user/") and request.method == "GET":
+        uid = path.split("/")[-1]
+        try:
+            user_data = get_user_from_firestore(uid)
+            return {
+                "success": True,
+                "user": user_data
             }
-        }
-    except Exception as e:
-        logger.error(f"Error getting API settings: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =================================
-# HEALTH AND MONITORING ENDPOINTS
-# =================================
-
-@router.get("/health")
-async def health_check():
-    """Comprehensive health check for API Gateway"""
-    try:
-        health_status = {
-            "status": "healthy",
-            "service": "api-gateway",
-            "timestamp": "2024-01-01T00:00:00Z",
-            "services": {
-                "firebase": "healthy",
-                "chat": "healthy",
-                "config": "healthy",
-                "knowledgebase": "healthy",
-                "scraping": "healthy"
-            }
-        }
-        return health_status
-    except Exception as e:
-        logger.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/status")
-async def get_service_status():
-    """Get detailed service status"""
-    try:
-        status = {
-            "api_gateway": {
-                "status": "running",
-                "uptime": "0h 0m 0s",
-                "version": "1.0.0"
-            },
-            "dependencies": {
-                "firebase": "connected",
-                "database": "connected",
-                "cache": "connected"
-            }
-        }
-        return {"success": True, "data": status}
-    except Exception as e:
-        logger.error(f"Error getting service status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =================================
-# RATE LIMITING ENDPOINTS
-# =================================
-
-@router.get("/rate-limit/status")
-async def get_rate_limit_status():
-    """Get rate limiting status"""
-    try:
-        # This would typically check Redis or other rate limiting store
-        rate_limit_info = {
-            "enabled": True,
-            "limits": {
-                "requests_per_minute": 100,
-                "requests_per_hour": 1000,
-                "requests_per_day": 10000
-            },
-            "current_usage": {
-                "requests_this_minute": 5,
-                "requests_this_hour": 45,
-                "requests_today": 230
-            }
-        }
-        return {"success": True, "data": rate_limit_info}
-    except Exception as e:
-        logger.error(f"Error getting rate limit status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =================================
-# LOGGING ENDPOINTS
-# =================================
-
-@router.get("/logs/recent")
-async def get_recent_logs(limit: int = 50):
-    """Get recent API logs"""
-    try:
-        # This would typically fetch from a logging service
-        logs = [
-            {
-                "timestamp": "2024-01-01T12:00:00Z",
-                "level": "INFO",
-                "message": "API Gateway started successfully",
-                "service": "api-gateway"
-            }
-        ]
-        return {"success": True, "data": logs[:limit]}
-    except Exception as e:
-        logger.error(f"Error getting recent logs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/logs/error")
-async def log_error(error_data: Dict[str, Any]):
-    """Log an error from client"""
-    try:
-        logger.error(f"Client error: {error_data}")
-        return {"success": True, "message": "Error logged successfully"}
-    except Exception as e:
-        logger.error(f"Error logging client error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =================================
-# METRICS ENDPOINTS
-# =================================
-
-@router.get("/metrics/overview")
-async def get_metrics_overview():
-    """Get API metrics overview"""
-    try:
-        metrics = {
-            "requests": {
-                "total": 10000,
-                "today": 500,
-                "this_hour": 25
-            },
-            "errors": {
-                "total": 50,
-                "rate": 0.5,
-                "recent": []
-            },
-            "performance": {
-                "avg_response_time": "120ms",
-                "p95_response_time": "250ms",
-                "p99_response_time": "500ms"
-            }
-        }
-        return {"success": True, "data": metrics}
-    except Exception as e:
-        logger.error(f"Error getting metrics: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =================================
-# INCLUDE OTHER ROUTERS
-# =================================
-
-# Note: All routers are included in main.py to avoid circular imports
-# This router only contains API Gateway specific endpoints
-
-# =================================
-# MIDDLEWARE ENDPOINTS
-# =================================
-
-@router.get("/middleware/cors")
-async def get_cors_status():
-    """Get CORS configuration status"""
-    try:
-        cors_config = {
-            "enabled": True,
-            "allowed_origins": ["*"],
-            "allowed_methods": ["GET", "POST", "PUT", "DELETE"],
-            "allowed_headers": ["*"],
-            "max_age": 3600
-        }
-        return {"success": True, "data": cors_config}
-    except Exception as e:
-        logger.error(f"Error getting CORS status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/middleware/auth")
-async def get_auth_status():
-    """Get authentication middleware status"""
-    try:
-        auth_status = {
-            "enabled": True,
-            "required_paths": ["/api/v1/chat", "/api/v1/config"],
-            "public_paths": ["/api/v1/health", "/api/v1/auth/login"],
-            "firebase_project": "your-project-id"
-        }
-        return {"success": True, "data": auth_status}
-    except Exception as e:
-        logger.error(f"Error getting auth status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        except Exception as e:
+            logger.error(f"Error getting user by UID {uid}: {e}")
+            raise HTTPException(status_code=500, detail=f"Error getting user: {str(e)}")
+    else:
+        raise HTTPException(status_code=404, detail=f"Auth endpoint not found: {path}")
 
 # =================================
 # SSE ENDPOINTS
