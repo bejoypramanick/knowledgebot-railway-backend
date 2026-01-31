@@ -15,15 +15,20 @@ class ChatbotDAO:
 
     async def get_metadata(self) -> Optional[Dict[str, Any]]:
         """Get chatbot metadata."""
+        query = """
+            SELECT id, display_name, description, version, created_at, updated_at
+            FROM chatbot_metadata
+            WHERE id = 1
+        """
+        logger.info(f"🔍 [DB QUERY] get_metadata: {query.strip()} | PARAMS: None")
+        
         try:
             async with get_db_connection() as conn:
-                return await conn.fetchrow("""
-                    SELECT id, display_name, description, version, created_at, updated_at
-                    FROM chatbot_metadata
-                    WHERE id = 1
-                """)
+                result = await conn.fetchrow(query)
+                logger.info(f"✅ [DB RESULT] get_metadata: Found metadata={result is not None}")
+                return result
         except Exception as e:
-            logger.error(f"Error fetching chatbot metadata: {e}")
+            logger.error(f"❌ [DB ERROR] get_metadata: {e}")
             return None
 
     async def update_metadata(self, **kwargs):

@@ -161,37 +161,49 @@ class AuthDAO:
 
     async def remove_human_agent(self, email: str) -> None:
         """Remove a human agent by setting status to removed."""
+        query = """
+            UPDATE human_agents 
+            SET status = 'removed', updated_at = NOW() 
+            WHERE email = $1
+        """
+        logger.info(f"🔍 [DB QUERY] remove_human_agent: {query.strip()} | PARAMS: email={email}")
+        
         try:
             async with get_db_connection() as conn:
-                await conn.execute("""
-                    UPDATE human_agents 
-                    SET status = 'removed', updated_at = NOW() 
-                    WHERE email = $1
-                """, email)
+                result = await conn.execute(query, email)
+                logger.info(f"✅ [DB RESULT] remove_human_agent: Rows affected={result}")
         except Exception as e:
-            logger.error(f"Error removing human agent: {e}")
+            logger.error(f"❌ [DB ERROR] remove_human_agent: {e}")
             raise
 
     async def create_human_agent(self, email: str) -> str:
         """Create a new human agent."""
+        query = """
+            INSERT INTO human_agents (email, status, created_by_email, created_at)
+            VALUES ($1, 'active', 'system', NOW())
+            RETURNING id
+        """
+        logger.info(f"🔍 [DB QUERY] create_human_agent: {query.strip()} | PARAMS: email={email}")
+        
         try:
             async with get_db_connection() as conn:
-                return await conn.fetchval("""
-                    INSERT INTO human_agents (email, status, created_by_email, created_at)
-                    VALUES ($1, 'active', 'system', NOW())
-                    RETURNING id
-                """, email)
+                result = await conn.fetchval(query, email)
+                logger.info(f"✅ [DB RESULT] create_human_agent: Agent created with id={result}")
+                return result
         except Exception as e:
-            logger.error(f"Error creating human agent: {e}")
+            logger.error(f"❌ [DB ERROR] create_human_agent: {e}")
             raise
 
     async def execute_role_query(self, query: str, email: str) -> List[Dict[str, Any]]:
         """Execute role query."""
+        logger.info(f"🔍 [DB QUERY] execute_role_query: {query.strip()} | PARAMS: email={email}")
+        
         try:
             async with get_db_connection() as conn:
                 # This would need to be implemented based on actual requirements
                 # For now, return empty list
+                logger.info(f"✅ [DB RESULT] execute_role_query: Query executed, no results")
                 return []
         except Exception as e:
-            logger.error(f"Error executing role query: {e}")
+            logger.error(f"❌ [DB ERROR] execute_role_query: {e}")
             raise
