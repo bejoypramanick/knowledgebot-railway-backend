@@ -391,6 +391,11 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
         user_email = user.get("email")
         logger.info(f"🔍 [{correlation_id}] Getting role for user email: {user_email}")
         
+        if not user_email:
+            logger.error(f"🔍 [{correlation_id}] No user email found in user data: {user}")
+            raise HTTPException(status_code=400, detail="User email not found")
+        
+        logger.info(f"🔍 [{correlation_id}] About to call auth_service.get_user_role")
         role_result = await auth_service.get_user_role(user_email)
         logger.info(f"🔍 [{correlation_id}] Role result: {role_result}")
         
@@ -416,6 +421,9 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
         }
         logger.info(f"🔍 [{correlation_id}] User profile created successfully")
         return {"success": True, "data": profile}
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
         logger.error(f"❌ [{correlation_id}] Error getting user profile: {e}")
         logger.error(f"❌ [{correlation_id}] Error type: {type(e)}")
