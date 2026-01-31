@@ -15,15 +15,20 @@ class AuthDAO:
 
     async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
         """Check if admin exists for given email."""
+        query = """
+            SELECT email, status, created_at 
+            FROM admins 
+            WHERE email = $1 AND status = 'active'
+        """
+        logger.info(f"🔍 [DB QUERY] check_admin_exists: {query.strip()} | PARAMS: email={email}")
+        
         try:
             async with get_db_connection() as conn:
-                return await conn.fetchrow("""
-                    SELECT email, status, created_at 
-                    FROM admins 
-                    WHERE email = $1 AND status = 'active'
-                """, email)
+                result = await conn.fetchrow(query, email)
+                logger.info(f"✅ [DB RESULT] check_admin_exists: Found admin={result is not None}")
+                return result
         except Exception as e:
-            logger.error(f"Error checking admin exists: {e}")
+            logger.error(f"❌ [DB ERROR] check_admin_exists: {e}")
             return None
 
     async def check_human_agent_exists(self, email: str) -> bool:

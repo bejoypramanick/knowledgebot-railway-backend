@@ -17,13 +17,17 @@ class ChatDAO:
 
     async def get_session_metadata(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get session metadata from database"""
+        query = """
+            SELECT session_id, metadata, created_at, last_activity_at
+            FROM chat_sessions 
+            WHERE session_id = $1
+        """
+        logger.info(f"🔍 [DB QUERY] get_session_metadata: {query.strip()} | PARAMS: session_id={session_id}")
+        
         try:
             async with get_db_connection() as conn:
-                record = await conn.fetchrow("""
-                    SELECT session_id, metadata, created_at, last_activity_at
-                    FROM chat_sessions 
-                    WHERE session_id = $1
-                """, session_id)
+                record = await conn.fetchrow(query, session_id)
+                logger.info(f"✅ [DB RESULT] get_session_metadata: Found session={record is not None}")
                 
                 if record:
                     return {
@@ -36,48 +40,56 @@ class ChatDAO:
                 else:
                     return None
         except Exception as e:
-            logger.error(f"Error getting session metadata for {session_id}: {e}")
+            logger.error(f"❌ [DB ERROR] get_session_metadata for {session_id}: {e}")
             return None
 
     async def get_chat_history(self, session_id: str) -> List[Dict[str, Any]]:
         """Get chat history for a session"""
+        query = """
+            SELECT message_id, sender_type, sender_email, message_content, metadata, created_at
+            FROM chat_messages
+            WHERE session_id = $1
+            ORDER BY created_at ASC
+        """
+        logger.info(f"🔍 [DB QUERY] get_chat_history: {query.strip()} | PARAMS: session_id={session_id}")
+        
         try:
             async with get_db_connection() as conn:
-                records = await conn.fetch("""
-                    SELECT message_id, sender_type, sender_email, message_content, metadata, created_at
-                    FROM chat_messages
-                    WHERE session_id = $1
-                    ORDER BY created_at ASC
-                """, session_id)
+                records = await conn.fetch(query, session_id)
+                logger.info(f"✅ [DB RESULT] get_chat_history: Found {len(records)} messages")
                 return [dict(record) for record in records]
         except Exception as e:
-            logger.error(f"Error getting chat history for session {session_id}: {e}")
+            logger.error(f"❌ [DB ERROR] get_chat_history for session {session_id}: {e}")
             return []
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete a chat session"""
+        query = "DELETE FROM chat_sessions WHERE session_id = $1"
+        logger.info(f"🔍 [DB QUERY] delete_session: {query.strip()} | PARAMS: session_id={session_id}")
+        
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute(
-                    "DELETE FROM chat_sessions WHERE session_id = $1",
-                    session_id
-                )
-                logger.info(f"Deleted chat session: {session_id}")
+                result = await conn.execute(query, session_id)
+                logger.info(f"✅ [DB RESULT] delete_session: Deleted session, rows affected={result}")
                 return True
         except Exception as e:
-            logger.error(f"Error deleting session {session_id}: {e}")
+            logger.error(f"❌ [DB ERROR] delete_session {session_id}: {e}")
             return False
 
     async def get_all_sessions(self) -> List[Dict[str, Any]]:
         """Get all chat sessions"""
+        query = """
+            SELECT session_id, user_email, metadata, created_at, last_activity_at
+            FROM chat_sessions
+            ORDER BY last_activity_at DESC
+        """
+        logger.info(f"🔍 [DB QUERY] get_all_sessions: {query.strip()} | PARAMS: None")
+        
         try:
             async with get_db_connection() as conn:
-                records = await conn.fetch("""
-                    SELECT session_id, user_email, metadata, created_at, last_activity_at
-                    FROM chat_sessions
-                    ORDER BY last_activity_at DESC
-                """)
+                records = await conn.fetch(query)
+                logger.info(f"✅ [DB RESULT] get_all_sessions: Found {len(records)} sessions")
                 return [dict(record) for record in records]
         except Exception as e:
-            logger.error(f"Error getting all sessions: {e}")
+            logger.error(f"❌ [DB ERROR] get_all_sessions: {e}")
             return []
