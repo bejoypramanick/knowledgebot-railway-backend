@@ -69,7 +69,7 @@ token_usage_service = TokenUsageService()
 async def get_chatbot_config():
     """Get complete chatbot configuration"""
     try:
-        config = await config_service.get_chatbot_config_with_transform()
+        config = await config_service.get_chatbot_config()
         return {"success": True, "data": config}
     except Exception as e:
         logger.error(f"Error getting chatbot config: {e}")
@@ -93,7 +93,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
 async def get_widget_config():
     """Get widget configuration"""
     try:
-        config = await config_service.get_widget_config_with_transform()
+        config = await config_service.get_widget_config()
         return {"success": True, "data": config}
     except Exception as e:
         logger.error(f"Error getting widget config: {e}")
