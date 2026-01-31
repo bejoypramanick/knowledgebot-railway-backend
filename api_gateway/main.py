@@ -13,10 +13,14 @@ from fastapi.responses import JSONResponse
 load_dotenv()
 
 # Configure Railway-compatible logging
-from api_gateway.core.logging_config import auto_configure_logging
-from api_gateway.core.otel_logger import get_otel_logger
+# Configure Shared Telemetry
+import logging
+from shared.telemetry import setup_telemetry, instrument_fastapi
 
-logger = auto_configure_logging("api_gateway")
+# Initialize Telemetry (Logging + Tracing)
+# This configures root logger, so standard logging works immediately
+setup_telemetry("api-gateway")
+logger = logging.getLogger("api_gateway")
 
 from api_gateway.core.config import get_settings
 from api_gateway.core.auth_middleware import get_current_user
@@ -31,14 +35,7 @@ from api_gateway.core.utils import (register_fastapi_exception_handlers,
 
 setup_global_exception_logging("api_gateway")
 
-# Configure minimal OpenTelemetry AFTER middleware setup but BEFORE app starts
-from api_gateway.core.shared_otel import setup_opentelemetry_for_service
-setup_opentelemetry_for_service("api-gateway", "1.0.0")
-
-# Configure Railway-compatible logging with OpenTelemetry
-from api_gateway.core.otel_logger import get_otel_logger
-
-logger = get_otel_logger("api_gateway", "api-gateway")
+# OpenTelemetry setup is now handled at the top level via shared.telemetry
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -46,6 +43,7 @@ async def lifespan(app: FastAPI):
     try:
         settings = get_settings()
         # Startup
+        instrument_fastapi(app, "api-gateway")
         logger.info(f"🚀 API Gateway ({settings.service_identity}) started successfully")
         yield
         # Shutdown

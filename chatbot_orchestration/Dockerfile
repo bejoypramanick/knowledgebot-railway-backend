@@ -22,6 +22,7 @@ RUN echo "✅ Python Dependencies installed successfully"
 
 # Build Stage 3: Application Code
 RUN echo "📂 --- Copying Application Code ---"
+COPY shared/ ./shared/
 COPY chatbot_orchestration/ ./chatbot_orchestration/
 RUN echo "✅ Code copied"
 

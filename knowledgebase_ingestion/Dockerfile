@@ -42,6 +42,7 @@ RUN echo "🐍 Installing Python dependencies..." && \
     pip list | grep -E "(fastapi|uvicorn|google-genai|boto3)"
 
 # Copy application code with logging
+COPY shared/ ./shared/
 COPY knowledgebase_ingestion/ ./knowledgebase_ingestion/
 RUN echo "📁 Application code copied" && \
     ls -la knowledgebase_ingestion/ && \

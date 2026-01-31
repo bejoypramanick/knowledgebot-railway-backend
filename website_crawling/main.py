@@ -7,14 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 # Configure OpenTelemetry for Railway
-from api_gateway.core.shared_otel import setup_opentelemetry_for_service
-setup_opentelemetry_for_service("website-crawling", "1.0.0")
+# Configure Shared Telemetry
+import logging
+from shared.telemetry import setup_telemetry, instrument_fastapi
 
-# Configure Railway-compatible logging with OpenTelemetry
-from website_crawling.core.logging_config import auto_configure_logging
-from website_crawling.core.otel_logger import get_otel_logger
-
-logger = get_otel_logger("website_crawling", "website-crawling")
+# Initialize Telemetry
+setup_telemetry("website-crawling")
+logger = logging.getLogger("website_crawling")
 
 from website_crawling.core import db
 from website_crawling.core.config import settings
@@ -30,6 +29,7 @@ setup_global_exception_logging("website_scraping")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
+    instrument_fastapi(app, "website-crawling")
     try:
         # Initialize database using centralized initializer
         if settings.railway_postgres_url:

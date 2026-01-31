@@ -16,6 +16,7 @@ COPY website_crawling/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
+COPY shared/ ./shared/
 COPY website_crawling/ ./website_crawling/
 
 # Set working directory

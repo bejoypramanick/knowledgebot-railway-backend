@@ -5,14 +5,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 # Configure OpenTelemetry for Railway
-from api_gateway.core.shared_otel import setup_opentelemetry_for_service
-setup_opentelemetry_for_service("chatbot-orchestration", "1.0.0")
+# Configure Shared Telemetry
+import logging
+from shared.telemetry import setup_telemetry, instrument_fastapi
 
-# Configure Railway-compatible logging with OpenTelemetry
-from chatbot_orchestration.core.logging_config import auto_configure_logging
-from chatbot_orchestration.core.otel_logger import get_otel_logger
-
-logger = get_otel_logger("chatbot_orchestration", "chatbot-orchestration")
+# Initialize Telemetry
+setup_telemetry("chatbot-orchestration")
+logger = logging.getLogger("chatbot_orchestration")
 
 from chatbot_orchestration.routers import router
 from chatbot_orchestration.service.agent_service import pydantic_ai_service
@@ -24,6 +23,8 @@ async def lifespan(app: FastAPI):
     Lifecycle manager for the Chatbot Orchestration Service.
     Handles startup initialization and shutdown cleanup.
     """
+    # Startup
+    instrument_fastapi(app, "chatbot-orchestration")
     logger.info("🚀 Chatbot Orchestration Service starting up...")
     
     # Initialize Pydantic AI Service (and DBs lazily)

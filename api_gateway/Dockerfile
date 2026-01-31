@@ -40,6 +40,7 @@ RUN echo "🐍 Installing Python dependencies..." && \
     pip list | grep -E "(fastapi|uvicorn|httpx|pydantic)"
 
 # Copy application code with logging
+COPY shared/ ./shared/
 COPY api_gateway/ ./api_gateway/
 RUN echo "📁 Application code copied" && \
     ls -la api_gateway/ && \

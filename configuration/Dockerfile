@@ -38,6 +38,7 @@ RUN echo "🐍 Installing Python dependencies..." && \
     echo "✅ Python dependencies installed"
 
 # Copy application code
+COPY shared/ ./shared/
 COPY configuration/ ./configuration/
 RUN echo "📁 Application code copied"
 

@@ -7,14 +7,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 # Configure OpenTelemetry for Railway
-from api_gateway.core.shared_otel import setup_opentelemetry_for_service
-setup_opentelemetry_for_service("knowledgebase-ingestion", "1.0.0")
+# Configure Shared Telemetry
+import logging
+from shared.telemetry import setup_telemetry, instrument_fastapi
 
-# Configure Railway-compatible logging with OpenTelemetry
-from knowledgebase_ingestion.core.logging_config import auto_configure_logging
-from knowledgebase_ingestion.core.otel_logger import get_otel_logger
-
-logger = get_otel_logger("knowledgebase_ingestion", "knowledgebase-ingestion")
+# Initialize Telemetry
+setup_telemetry("knowledgebase-ingestion")
+logger = logging.getLogger("knowledgebase_ingestion")
 
 from knowledgebase_ingestion.core.ai import get_genai_client
 from knowledgebase_ingestion.routers import router
@@ -30,6 +29,7 @@ setup_global_exception_logging("knowledgebase_ingestion")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
+    instrument_fastapi(app, "knowledgebase-ingestion")
     try:
         # Initialize database using centralized initializer
         if settings.railway_postgres_url:

@@ -12,15 +12,13 @@ print(f"🚀 Working directory: {os.getcwd()}")
 print(f"🚀 Script location: {__file__}")
 print("🚀 FORCING RAILWAY REDEPLOY - ENHANCED DEBUGGING ACTIVE")
 
-# Configure OpenTelemetry for Railway
-from api_gateway.core.shared_otel import setup_opentelemetry_for_service
-setup_opentelemetry_for_service("configuration", "1.0.0")
+# Configure Shared Telemetry
+import logging
+from shared.telemetry import setup_telemetry, instrument_fastapi
 
-# Configure Railway-compatible logging with OpenTelemetry
-from configuration.core.logging_config import auto_configure_logging
-from configuration.core.otel_logger import get_otel_logger
-
-logger = get_otel_logger("configuration", "configuration")
+# Initialize Telemetry
+setup_telemetry("configuration")
+logger = logging.getLogger("configuration")
 
 # Import routers and services
 try:
@@ -33,16 +31,8 @@ except Exception as e:
     print(f"❌ TRACEBACK: {traceback.format_exc()}")
     sys.exit(1)
 
-# Configure Railway-compatible logging
-try:
-    print("🚀 CONFIGURING RAILWAY LOGGING...")
-    logger = auto_configure_logging("configuration")
-    print("✅ RAILWAY LOGGING CONFIGURED SUCCESSFULLY")
-except Exception as e:
-    print(f"❌ RAILWAY LOGGING CONFIGURATION FAILED: {e}")
-    import traceback
-    print(f"❌ TRACEBACK: {traceback.format_exc()}")
-    sys.exit(1)
+# Logging is already configured via setup_telemetry
+print("✅ RAILWAY TELEMETRY CONFIGURED SUCCESSFULLY")
 
 # Log startup diagnostics
 logger.info("="*60)
@@ -70,6 +60,7 @@ logger.info(f"🔍 PORT being used: {PORT}")
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events with Railway fixes."""
     try:
+        instrument_fastapi(app, "configuration")
         logger.info("🚀 LIFESPAN: Starting application startup sequence")
         service_status.set_status("starting")
         logger.info("🚀 LIFESPAN: Service status set to 'starting'")
