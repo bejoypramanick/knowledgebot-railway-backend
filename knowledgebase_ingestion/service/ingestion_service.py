@@ -4,9 +4,9 @@ Provides business logic for file ingestion operations
 """
 from typing import Dict
 
-from knowledgebase_ingestion.core.otel_logger import get_otel_logger
+import logging
 
-logger = get_otel_logger("ingestion_service", "knowledgebase-ingestion")
+logger = logging.getLogger("ingestion_service")
 
 async def process_with_gemini(tmp_path: str, file_display_name: str, original_filename: str, mime_type: str, user_email: str = None):
     """Process file with Gemini - placeholder implementation"""

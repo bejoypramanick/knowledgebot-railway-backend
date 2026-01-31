@@ -4,9 +4,9 @@ Provides business logic for web crawling operations
 """
 from typing import Any, Dict, List, Optional
 
-from website_crawling.core.otel_logger import get_otel_logger
+import logging
 
-logger = get_otel_logger("crawler_service", "website-crawling")
+logger = logging.getLogger("crawler_service")
 
 from ..dao.scraping_dao import ScrapingDAO
 
