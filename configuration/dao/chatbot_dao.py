@@ -19,15 +19,14 @@ class ChatbotDAO:
             FROM chatbot_metadata
             WHERE id = 1
         """
-        logger.info(f"🔍 [DB QUERY] get_metadata: {query.strip()} | PARAMS: None")
         
         try:
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query)
-                logger.info(f"✅ [DB RESULT] get_metadata: Found metadata={result is not None}")
+                logger.log_db_query(query, None, result)
                 return result
         except Exception as e:
-            logger.error(f"❌ [DB ERROR] get_metadata: {e}")
+            logger.log_db_query(query, None, error=e)
             return None
 
     async def update_metadata(self, **kwargs):
@@ -42,11 +41,13 @@ class ChatbotDAO:
                     params.append(value)
                 
                 if set_clauses:
-                    await conn.execute(f"""
+                    query = f"""
                         UPDATE chatbot_metadata 
                         SET {', '.join(set_clauses)}, updated_at = NOW()
                         WHERE id = 1
-                    """, *params)
+                    """
+                    result = await conn.execute(query, *params)
+                    logger.log_db_query(query, {"params": params, "kwargs": kwargs}, result)
                     logger.info(f"Updated chatbot metadata: {kwargs}")
         except Exception as e:
             logger.error(f"Error updating chatbot metadata: {e}")

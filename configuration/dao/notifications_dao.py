@@ -14,17 +14,20 @@ class NotificationsDAO:
 
     async def get_settings(self) -> Dict[str, Any]:
         """Get notification settings."""
+        query = """
+            SELECT email_notifications, push_notifications, in_app_notifications, 
+                   notification_frequency, quiet_hours_enabled, quiet_hours_start, quiet_hours_end
+            FROM notification_settings
+            WHERE id = 1
+        """
+        
         try:
             async with get_db_connection() as conn:
-                result = await conn.fetchrow("""
-                    SELECT email_notifications, push_notifications, in_app_notifications, 
-                           notification_frequency, quiet_hours_enabled, quiet_hours_start, quiet_hours_end
-                    FROM notification_settings
-                    WHERE id = 1
-                """)
+                result = await conn.fetchrow(query)
+                logger.log_db_query(query, None, result)
                 return dict(result) if result else {}
         except Exception as e:
-            logger.error(f"Error getting notification settings: {e}")
+            logger.log_db_query(query, None, error=e)
             return {}
 
     async def update_settings(self, settings: Dict[str, Any], user_email: str) -> Dict[str, Any]:
