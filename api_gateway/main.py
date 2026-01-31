@@ -12,10 +12,15 @@ from fastapi.responses import JSONResponse
 # Load environment variables
 load_dotenv()
 
-# Configure Railway-compatible logging
-from api_gateway.core.logging_config import auto_configure_logging
+# Configure OpenTelemetry for Railway
+from api_gateway.core.otel_config import configure_otel
+configure_otel("api-gateway", "1.0.0")
 
-logger = auto_configure_logging("api_gateway")
+# Configure Railway-compatible logging with OpenTelemetry
+from api_gateway.core.logging_config import auto_configure_logging
+from api_gateway.core.otel_logger import get_otel_logger
+
+logger = get_otel_logger("api_gateway", "api-gateway")
 
 from api_gateway.core.config import get_settings
 from api_gateway.core.auth_middleware import get_current_user
@@ -25,7 +30,6 @@ from api_gateway.routers import router as api_router
 # We'll use HTTP proxy calls to communicate with other services
 from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
-from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
 from api_gateway.core.utils import (register_fastapi_exception_handlers,
                           setup_global_exception_logging)
 
@@ -129,7 +133,6 @@ register_fastapi_exception_handlers(app, "api_gateway")
 
 # Middleware
 app.middleware("http")(log_requests_middleware)
-app.add_middleware(CorrelationIDMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
