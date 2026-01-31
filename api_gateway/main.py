@@ -21,31 +21,8 @@ from api_gateway.core.config import get_settings
 from api_gateway.core.auth_middleware import get_current_user
 # Import routers and config
 from api_gateway.routers import router as api_router
-try:
-    from chatbot_orchestration.routers import router as chat_router
-except ImportError:
-    # Fallback if running in different context
-    chat_router = None
-    logger.warning("Could not import chatbot_orchestration router - running in standalone mode")
-try:
-    from configuration.routers import router as config_router
-    logger.info(f"✅ Configuration router imported successfully: {config_router}")
-except ImportError as e:
-    # Fallback if running in different context
-    config_router = None
-    logger.warning(f"Could not import configuration router - running in standalone mode: {e}")
-try:
-    from knowledgebase_ingestion.routers import router as knowledgebase_router
-except ImportError:
-    # Fallback if running in different context
-    knowledgebase_router = None
-    logger.warning("Could not import knowledgebase_ingestion router - running in standalone mode")
-try:
-    from website_crawling.routers import router as webcrawl_router
-except ImportError:
-    # Fallback if running in different context
-    webcrawl_router = None
-    logger.warning("Could not import website_crawling router - running in standalone mode")
+# Note: Service routers run in separate containers on Railway, so we can't import them directly
+# We'll use HTTP proxy calls to communicate with other services
 from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
 from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
@@ -200,30 +177,7 @@ async def chat_confusion_detector(request: Request):
 # Include Routers
 app.include_router(api_router, prefix="/api/v1/gateway")  
 logger.info(f"🔧 API Gateway router included with /api/v1/gateway prefix")
-
-if chat_router:
-    app.include_router(chat_router, prefix="/api/v1/gateway/chatbot") 
-    logger.info(f"🤖 Chatbot router included with /api/v1/gateway/chatbot prefix")
-else:
-    logger.warning("⚠️ Chatbot router is None - not included")
-
-if config_router:
-    app.include_router(config_router, prefix="/api/v1/gateway/configuration") 
-    logger.info(f"⚙️ Configuration router included with /api/v1/gateway/configuration prefix")
-else:
-    logger.warning("⚠️ Configuration router is None - not included")
-
-if knowledgebase_router:
-    app.include_router(knowledgebase_router, prefix="/api/v1/gateway/knowledgebase") 
-    logger.info(f"📚 Knowledgebase router included with /api/v1/gateway/knowledgebase prefix")
-else:
-    logger.warning("⚠️ Knowledgebase router is None - not included")
-
-if webcrawl_router:
-    app.include_router(webcrawl_router, prefix="/api/v1/gateway/webcrawl") 
-    logger.info(f"🕷️ Webcrawl router included with /api/v1/gateway/webcrawl prefix")
-else:
-    logger.warning("⚠️ Webcrawl router is None - not included") 
+logger.info("📋 Note: Service endpoints will be proxied via HTTP calls to separate containers") 
 
 # Add app-level endpoints
 @app.get("/")
