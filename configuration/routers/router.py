@@ -415,6 +415,16 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
         logger.info("🔍 About to call auth_service.get_user_role")
         role_result = await auth_service.get_user_role(user_email)
         logger.info(f"🔍 Role result: {role_result}")
+        logger.info(f"🔍 Role result type: {type(role_result)}")
+        
+        # Check if role_result is serializable
+        import json
+        try:
+            json.dumps(role_result)
+            logger.info("✅ Role result is JSON serializable")
+        except Exception as e:
+            logger.error(f"❌ Role result is NOT JSON serializable: {e}")
+            logger.error(f"❌ Role result details: {dir(role_result)}")
         
         user_roles = role_result.get("roles", ["user"])
         logger.info(f"🔍 User roles: {user_roles}")
@@ -437,6 +447,14 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
             }
         }
         logger.info("🔍 User profile created successfully")
+        
+        # Check if profile is serializable
+        try:
+            json.dumps(profile)
+            logger.info("✅ Profile is JSON serializable")
+        except Exception as e:
+            logger.error(f"❌ Profile is NOT JSON serializable: {e}")
+        
         return {"success": True, "data": profile}
     except HTTPException:
         # Re-raise HTTP exceptions as-is
