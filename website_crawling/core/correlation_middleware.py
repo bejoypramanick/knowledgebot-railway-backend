@@ -5,7 +5,7 @@ Ensures every request has a correlation ID for tracing across services.
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .correlation_id import (
+from api_gateway.core.correlation_id import (
     CORRELATION_ID_HEADER,
     extract_or_generate_correlation_id,
     set_correlation_id

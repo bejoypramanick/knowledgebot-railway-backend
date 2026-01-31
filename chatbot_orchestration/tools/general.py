@@ -4,7 +4,7 @@ from typing import Annotated
 import httpx
 
 from chatbot_orchestration.core.logging_config import get_railway_logger
-from chatbot_orchestration.core.correlation_id import get_correlation_id, add_correlation_id_headers
+from api_gateway.core.correlation_id import get_correlation_id, add_correlation_id_headers
 
 from ..core.dependencies import ChatSessionDeps
 from ..service.file_service import FileService
