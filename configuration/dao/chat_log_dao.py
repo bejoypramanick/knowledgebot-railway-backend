@@ -4,10 +4,10 @@ Handles database operations for chat logging
 """
 from typing import Dict, List, Any
 
+import logging
 from configuration.core.db import get_db_connection
-from configuration.core.otel_logger import get_otel_logger
 
-logger = get_otel_logger("chat_log_dao", "configuration")
+logger = logging.getLogger("chat_log_dao")
 
 class ChatLogDAO:
     def __init__(self):

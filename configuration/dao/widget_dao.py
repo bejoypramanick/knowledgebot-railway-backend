@@ -4,10 +4,10 @@ Handles database operations for widget configuration
 """
 from typing import Dict, List, Any, Optional
 
-from configuration.core.otel_logger import get_otel_logger
+import logging
 from configuration.core.db import get_db_connection
 
-logger = get_otel_logger("widget_dao", "configuration")
+logger = logging.getLogger("widget_dao")
 
 class WidgetDAO:
     def __init__(self):

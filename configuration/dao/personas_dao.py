@@ -5,11 +5,11 @@ Handles database operations for chatbot personas
 from typing import Dict, List, Any, Optional
 import asyncpg
 
-from configuration.core.otel_logger import get_otel_logger
+import logging
 from configuration.core.db import get_db_connection
 from configuration.core.db_logger import fetch_with_logging
 
-logger = get_otel_logger("personas_dao", "configuration")
+logger = logging.getLogger("personas_dao")
 
 class PersonasDAO:
     """Data Access Object for personas operations"""
