@@ -24,6 +24,7 @@ from ..schemas.models import (
     FeedbackRequest,
     WidgetConfigRequest
 )
+from ..core.correlation_id import get_correlation_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
