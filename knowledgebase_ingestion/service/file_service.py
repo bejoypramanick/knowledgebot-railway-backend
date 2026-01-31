@@ -202,6 +202,44 @@ class FileService:
             logger.error(f"Error processing file upload: {e}")
             raise
 
+    async def get_all_files(self) -> list:
+        """Get all uploaded files from the database."""
+        try:
+            if not db.railway_db:
+                logger.warning("Database not available - returning empty list")
+                return []
+            
+            files = await db.railway_db.fetch(
+                """SELECT id, original_filename, display_name, file_extension, mime_type, 
+                   size_bytes, sha256_hash, gemini_state, processed_at, created_at, version
+                   FROM file_uploads 
+                   ORDER BY created_at DESC"""
+            )
+            
+            # Convert to list of dicts
+            result = []
+            for file in files:
+                result.append({
+                    "id": str(file['id']),
+                    "original_filename": file['original_filename'],
+                    "display_name": file['display_name'],
+                    "file_extension": file['file_extension'],
+                    "mime_type": file['mime_type'],
+                    "size_bytes": file['size_bytes'],
+                    "sha256_hash": file['sha256_hash'],
+                    "gemini_state": file['gemini_state'],
+                    "processed_at": file['processed_at'].isoformat() if file['processed_at'] else None,
+                    "created_at": file['created_at'].isoformat() if file['created_at'] else None,
+                    "version": file.get('version', 1)
+                })
+            
+            logger.info(f"Retrieved {len(result)} files from database")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error getting all files: {e}")
+            return []
+
     async def handle_duplicate_check(self, sha256_hash: str, original_filename: str, replace_existing: bool = False) -> dict:
         """Handle duplicate file checking logic"""
         try:
