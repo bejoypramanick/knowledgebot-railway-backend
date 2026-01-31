@@ -27,6 +27,12 @@ except ImportError:
     # Fallback if running in different context
     chat_router = None
     logger.warning("Could not import chatbot_orchestration router - running in standalone mode")
+try:
+    from configuration.routers import router as config_router
+except ImportError:
+    # Fallback if running in different context
+    config_router = None
+    logger.warning("Could not import configuration router - running in standalone mode")
 from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
 from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
@@ -182,6 +188,8 @@ async def chat_confusion_detector(request: Request):
 app.include_router(api_router, prefix="/api/v1/gateway")  
 if chat_router:
     app.include_router(chat_router) 
+if config_router:
+    app.include_router(config_router) 
 
 # Add app-level endpoints
 @app.get("/")
