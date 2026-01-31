@@ -1,14 +1,14 @@
 """
-Crawler Service Layer
-Provides business logic for website crawling operations
+Website Crawling Service Layer for Website Crawling
+Provides business logic for web crawling operations
 """
 from typing import Any, Dict, List, Optional
 
-from website_crawling.core.logging_config import get_railway_logger
+from website_crawling.core.otel_logger import get_otel_logger
+
+logger = get_otel_logger("crawler_service", "website-crawling")
 
 from ..dao.scraping_dao import ScrapingDAO
-
-logger = get_railway_logger(__name__)
 
 class CrawlerService:
     """Service layer for website crawling"""
