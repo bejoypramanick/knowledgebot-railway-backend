@@ -59,20 +59,22 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, exclude_paths=None):
         super().__init__(app)
         self.exclude_paths = exclude_paths or [
-            "/",
-            "/health",
-            "/gateway/health",
-            "/api/v1/gateway/configuration/health",
-            "/docs",
-            "/redoc",
-            "/openapi.json",
-            "/favicon.ico",
-            "/auth/login",
-            "/auth/verify"
+            "/",  # Root endpoint
+            "/health",  # General health check
+            "/gateway/health",  # Gateway health check
+            "/api/v1/gateway/configuration/health",  # Configuration service health
+            "/docs",  # API documentation
+            "/redoc",  # ReDoc documentation
+            "/openapi.json",  # OpenAPI schema
+            "/favicon.ico",  # Favicon
+            "/auth/login",  # Login endpoint
+            "/auth/verify",  # Token verification endpoint
+            "/gateway-check"  # Gateway diagnostic endpoint
         ]
     
     async def dispatch(self, request, call_next):
         # Skip auth for excluded paths and any health endpoint
+        # ALL OTHER PATHS REQUIRE AUTHENTICATION
         path = request.url.path
         if (path in self.exclude_paths or 
             path.endswith("/health") or 
