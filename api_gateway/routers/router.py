@@ -94,6 +94,10 @@ async def login_user(request: Request):
 @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
 async def generic_proxy_handler(request: Request, path: str):
     """Generic proxy handler that routes ALL requests to appropriate services"""
+    # Log every incoming request for debugging
+    correlation_id = request.headers.get("X-Correlation-ID", "no-correlation-id")
+    logger.info(f"🔍 [{correlation_id}] API Gateway received {request.method} {request.url.path}")
+    
     try:
         import httpx
         from ..core.config import get_settings
