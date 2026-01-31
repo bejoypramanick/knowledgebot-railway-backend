@@ -498,13 +498,14 @@ class ConfigurationService:
     async def activate_persona(self, persona_name: str) -> bool:
         """Activate a specific persona by deactivating all others and activating the selected one."""
         try:
-            # Get the current persona to get its system prompt
-            current_persona = await self.get_active_persona()
+            # Use a default system prompt for the persona
+            # In a real implementation, you might want to fetch this from a personas table
+            default_system_prompt = f"You are {persona_name}, a helpful AI assistant. Your role is to assist users with their questions and provide accurate, helpful responses."
             
             # Use the DAO method to activate the persona
             await self._chatbot_dao.upsert_persona(
                 persona_name=persona_name,
-                system_prompt=current_persona.get('system_prompt', '') if current_persona else '',
+                system_prompt=default_system_prompt,
                 is_active=True
             )
             
@@ -544,14 +545,45 @@ class ConfigurationService:
             # Update notifications if provided
             if 'notifications' in config_data:
                 notifications = config_data['notifications']
-                # Update notification settings here as needed
-                pass
+                if isinstance(notifications, dict):
+                    if 'user_interactions_enabled' in notifications:
+                        await self._chatbot_dao.upsert_notification_setting(
+                            'user_interactions_enabled', 
+                            notifications['user_interactions_enabled']
+                        )
+                    if 'error_alerts_enabled' in notifications:
+                        await self._chatbot_dao.upsert_notification_setting(
+                            'error_alerts_enabled', 
+                            notifications['error_alerts_enabled']
+                        )
+                    if 'feedback_requests_enabled' in notifications:
+                        await self._chatbot_dao.upsert_notification_setting(
+                            'feedback_requests_enabled', 
+                            notifications['feedback_requests_enabled']
+                        )
             
             # Update security if provided
             if 'security' in config_data:
                 security = config_data['security']
-                # Update security settings here as needed
-                pass
+                if isinstance(security, dict):
+                    if 'response_timeout' in security:
+                        await self._chatbot_dao.upsert_security_setting(
+                            'response_timeout', 
+                            str(security['response_timeout']), 
+                            'integer'
+                        )
+                    if 'remove_pii' in security:
+                        await self._chatbot_dao.upsert_security_setting(
+                            'remove_pii', 
+                            str(security['remove_pii']).lower(), 
+                            'boolean'
+                        )
+                    if 'restrict_config' in security:
+                        await self._chatbot_dao.upsert_security_setting(
+                            'restrict_config', 
+                            str(security['restrict_config']).lower(), 
+                            'boolean'
+                        )
             
             # Update LLM tokens if provided
             if 'llm_tokens' in config_data:
