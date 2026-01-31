@@ -13,7 +13,6 @@ import httpx
 
 from ..core.firebase_auth import verify_firebase_token, get_user_from_firestore
 from ..core.config import get_settings
-from ..core.sse import sse_generator, sse_manager
 from ..core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
