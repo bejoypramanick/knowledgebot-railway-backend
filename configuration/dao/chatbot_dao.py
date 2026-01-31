@@ -73,7 +73,7 @@ class ChatbotDAO:
                     LIMIT 1
                 """
                 
-                persona = await fetchrow_with_logging(conn, query, operation="GET_ACTIVE_PERSONA")
+                persona = await conn.fetchrow(query)
                 
                 if persona:
                     return {
@@ -86,19 +86,13 @@ class ChatbotDAO:
                     # Fallback to default persona if no active persona found
                     return {
                         'persona_name': 'KnowledgeBot',
-                        'persona_description': 'A helpful AI assistant for knowledge management',
+                        'persona_description': 'AI assistant',
                         'is_active': True,
                         'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
                     }
         except Exception as e:
-            logger.error(f"Error getting active persona: {e}")
-            # Return fallback persona in case of database error
-            return {
-                'persona_name': 'KnowledgeBot',
-                'persona_description': 'A helpful AI assistant for knowledge management',
-                'is_active': True,
-                'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
-            }
+            logger.error(f"Error fetching active persona: {e}")
+            return None
 
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
         """Get LLM providers for this service."""
@@ -122,26 +116,14 @@ class ChatbotDAO:
                 token_limit = EXCLUDED.token_limit, updated_at = NOW()
             """
             params = [provider, limit]
-            await execute_with_logging(conn, query, *params, operation="ADD_LLM_PROVIDER")
+            await conn.execute(query, *params)
 
     async def update_llm_used_tokens(self, provider: str, used: int):
         """Update LLM token usage for this service."""
         async with get_db_connection() as conn:
             query = "UPDATE llm_providers SET token_used = $1 WHERE provider_name = $2"
             params = [used, provider]
-            await execute_with_logging(conn, query, *params, operation="UPDATE_LLM_USED_TOKENS")
-
-    async def update_metadata(self, **kwargs):
-        """Update chatbot metadata with dynamic parameters"""
-        logger.info(f"🔍 DAO update_metadata called with kwargs: {kwargs}")
-        if not kwargs:
-            logger.info(f"🔍 No kwargs provided, returning early")
-            return
-        
-        logger.info(f"🔍 Calling upsert_configuration_metadata with: {kwargs}")
-        # Use the existing upsert method which handles dynamic updates
-        await self.upsert_configuration_metadata(kwargs)
-        logger.info(f"✅ DAO update_metadata completed successfully")
+            await conn.execute(query, *params)
 
     async def upsert_notification_setting(self, name: str, enabled: bool):
         async with get_db_connection() as conn:
@@ -152,7 +134,7 @@ class ChatbotDAO:
                 is_enabled = EXCLUDED.is_enabled, updated_at = NOW()
             """
             params = [name, enabled]
-            await execute_with_logging(conn, query, *params, operation="UPSERT_NOTIFICATION_SETTING")
+            await conn.execute(query, *params)
 
     async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'text'):
         async with get_db_connection() as conn:
@@ -163,14 +145,14 @@ class ChatbotDAO:
                 setting_value = EXCLUDED.setting_value, updated_at = NOW()
             """
             params = [name, value, setting_type]
-            await execute_with_logging(conn, query, *params, operation="UPSERT_SECURITY_SETTING")
+            await conn.execute(query, *params)
 
     async def upsert_persona(self, persona_name: str, system_prompt: str, is_active: bool = True):
         async with get_db_connection() as conn:
             async with conn.transaction():
                 if is_active:
                     deactivate_query = "UPDATE persona_configurations SET is_active = false"
-                    await execute_with_logging(conn, deactivate_query, operation="DEACTIVATE_ALL_PERSONAS")
+                    await conn.execute(deactivate_query)
                 
                 upsert_query = """
                     INSERT INTO persona_configurations (persona_name, system_prompt, is_active)
@@ -179,62 +161,7 @@ class ChatbotDAO:
                     system_prompt = EXCLUDED.system_prompt, is_active = EXCLUDED.is_active, updated_at = NOW()
                 """
                 params = [persona_name, system_prompt, is_active]
-                result = await execute_with_logging(conn, upsert_query, *params, operation="UPSERT_PERSONA")
-
-    async def upsert_configuration_metadata(self, updates_dict: Dict[str, Any]):
-        """Upsert configuration metadata using proper PostgreSQL syntax"""
-        logger.info(f"🔍 DAO upsert_configuration_metadata called with: {updates_dict}")
-        if not updates_dict:
-            logger.info(f"🔍 No updates_dict provided, returning early")
-            return
-        
-        # Build column lists and values
-        columns = list(updates_dict.keys())
-        values = list(updates_dict.values())
-        
-        # Build the INSERT query with proper type casting
-        column_definitions = []
-        value_placeholders = []
-        update_clauses = []
-        
-        for i, (column, value) in enumerate(updates_dict.items()):
-            # Determine PostgreSQL type
-            if column == 'hil_enabled':
-                pg_type = 'boolean'
-            elif column == 'response_policy':
-                pg_type = 'integer'
-            else:
-                pg_type = 'text'
-            
-            column_definitions.append(column)
-            value_placeholders.append(f'${i+2}::{pg_type}')
-            update_clauses.append(f"{column} = EXCLUDED.{column}")
-        
-        query = f"""
-        INSERT INTO configuration_metadata (id, {', '.join(column_definitions)})
-        VALUES ($1, {', '.join(value_placeholders)})
-        ON CONFLICT (id) DO UPDATE SET {', '.join(update_clauses)}, updated_at = CURRENT_TIMESTAMP
-        """
-        
-        # Execute with id=1 as the first parameter
-        all_values = [1] + values
-        
-        logger.info(f"🔍 Executing SQL query: {query.strip()}")
-        logger.info(f"🔍 SQL parameters: {all_values}")
-        
-        async with get_db_connection() as conn:
-            result = await execute_with_logging(conn, query, *all_values, operation="UPSERT_CONFIGURATION_METADATA")
-            logger.info(f"✅ DAO upsert_configuration_metadata completed with result: {result}")
-            return result
-    
-    def _get_postgres_type(self, column_name: str) -> str:
-        """Get PostgreSQL type for configuration metadata columns"""
-        type_mapping = {
-            'hil_enabled': 'boolean',
-            'response_policy': 'integer',
-            'default_user_role': 'text'
-        }
-        return type_mapping.get(column_name, 'text')
+                await conn.execute(upsert_query, *params)
 
     async def upsert_notification_setting_with_desc(self, name: str, enabled: bool, description: str):
         async with get_db_connection() as conn:
@@ -245,7 +172,7 @@ class ChatbotDAO:
                 is_enabled = EXCLUDED.is_enabled, description = EXCLUDED.description, updated_at = NOW()
             """
             params = [name, enabled, description]
-            await execute_with_logging(conn, query, *params, operation="UPSERT_NOTIFICATION_SETTING_WITH_DESC")
+            await conn.execute(query, *params)
 
     async def upsert_security_setting_with_desc(self, name: str, value: str, setting_type: str, description: str):
         async with get_db_connection() as conn:
@@ -257,9 +184,8 @@ class ChatbotDAO:
                 description = EXCLUDED.description, updated_at = NOW()
             """
             params = [name, value, setting_type, description]
-            await execute_with_logging(conn, query, *params, operation="UPSERT_SECURITY_SETTING_WITH_DESC")
+            await conn.execute(query, *params)
 
-    # Human Agent Management Methods
     async def create_human_agent(self, email: str) -> int:
         """Create a new human agent and return the ID. Returns existing ID if email already exists."""
         async with get_db_connection() as conn:
@@ -339,32 +265,26 @@ class ChatbotDAO:
                 added_emails = []
                 for email in to_add:
                     try:
-                        await execute_with_logging(
-                            conn, 
-                            "INSERT INTO admins (email, status) VALUES ($1, 'active')", 
-                            email, 
-                            operation="INSERT_ADMIN"
+                        await conn.execute(
+                            "INSERT INTO admins (email, status) VALUES ($1, 'active')",
+                            email
                         )
                         added_emails.append(email)
                         logger.info(f"Added admin: {email}")
                     except asyncpg.exceptions.UniqueViolationError:
                         # Admin already exists, just update status
-                        await execute_with_logging(
-                            conn, 
-                            "UPDATE admins SET status = 'active' WHERE email = $1", 
-                            email, 
-                            operation="UPDATE_ADMIN_STATUS"
+                        await conn.execute(
+                            "UPDATE admins SET status = 'active' WHERE email = $1",
+                            email
                         )
                         added_emails.append(email)
                 
                 # Remove admins (hard delete from database)
                 removed_emails = []
                 for email in to_remove:
-                    await execute_with_logging(
-                        conn, 
-                        "DELETE FROM admins WHERE email = $1", 
-                        email, 
-                        operation="DELETE_ADMIN"
+                    await conn.execute(
+                        "DELETE FROM admins WHERE email = $1",
+                        email
                     )
                     removed_emails.append(email)
                     logger.info(f"Deleted admin from database: {email}")

@@ -1,7 +1,10 @@
-from typing import Any, Dict, List, Optional
+"""
+Notifications Data Access Object for Configuration Service
+Handles database operations for notification management
+"""
+from typing import Dict, Any, Optional
 
 from configuration.core.db import get_db_connection
-from configuration.core.db_logger import execute_with_logging
 from configuration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
@@ -10,107 +13,65 @@ class NotificationsDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def create_notification(self, user_email: str, title: str, message: str, 
-                                notification_type: str, metadata: Optional[Dict] = None) -> str:
+    async def get_settings(self) -> Dict[str, Any]:
+        """Get notification settings."""
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetchrow("""
+                    SELECT email_notifications, push_notifications, in_app_notifications, 
+                           notification_frequency, quiet_hours_enabled, quiet_hours_start, quiet_hours_end
+                    FROM notification_settings
+                    WHERE id = 1
+                """)
+                return dict(result) if result else {}
+        except Exception as e:
+            logger.error(f"Error getting notification settings: {e}")
+            return {}
+
+    async def update_settings(self, settings: Dict[str, Any], user_email: str) -> Dict[str, Any]:
+        """Update notification settings."""
+        try:
+            async with get_db_connection() as conn:
+                await conn.execute("""
+                    INSERT INTO notification_settings 
+                    (id, email_notifications, push_notifications, in_app_notifications, 
+                     notification_frequency, quiet_hours_enabled, quiet_hours_start, quiet_hours_end, 
+                     updated_by, updated_at)
+                    VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                    ON CONFLICT (id) DO UPDATE SET
+                        email_notifications = EXCLUDED.email_notifications,
+                        push_notifications = EXCLUDED.push_notifications,
+                        in_app_notifications = EXCLUDED.in_app_notifications,
+                        notification_frequency = EXCLUDED.notification_frequency,
+                        quiet_hours_enabled = EXCLUDED.quiet_hours_enabled,
+                        quiet_hours_start = EXCLUDED.quiet_hours_start,
+                        quiet_hours_end = EXCLUDED.quiet_hours_end,
+                        updated_by = EXCLUDED.updated_by,
+                        updated_at = EXCLUDED.updated_at
+                """, 
+                    settings.get('email_notifications', False),
+                    settings.get('push_notifications', False),
+                    settings.get('in_app_notifications', False),
+                    settings.get('notification_frequency', 'immediate'),
+                    settings.get('quiet_hours_enabled', False),
+                    settings.get('quiet_hours_start', '22:00'),
+                    settings.get('quiet_hours_end', '08:00'),
+                    user_email
+                )
+                return {"success": True}
+        except Exception as e:
+            logger.error(f"Error updating notification settings: {e}")
+            raise
+
+    async def create_notification(self, title: str, message: str, notification_type: str = 'info', user_email: str = None) -> str:
         """Create a new notification."""
-        async with get_db_connection() as conn:
-            return await conn.fetchval(
-                """
-                INSERT INTO notifications (user_email, title, message, type, metadata)
-                VALUES ($1, $2, $3, $4, $5::jsonb)
-                RETURNING id::text
-                """,
-                user_email, title, message, notification_type, metadata
-            )
-
-    async def get_notification_by_id(self, notification_id: str) -> Optional[Dict[str, Any]]:
-        """Get notification by ID."""
-        async with get_db_connection() as conn:
-            return await conn.fetchrow(
-                """
-                SELECT id, title, message, type, is_read, read_at, metadata, created_at
-                FROM notifications
-                WHERE id = $1
-                """,
-                notification_id
-            )
-
-    async def get_notifications(self, user_email: str, is_read: Optional[bool] = None, 
-                               limit: int = 50, offset: int = 0) -> List[Dict[str, Any]]:
-        """Get notifications for a user with optional filtering."""
-        where_clause = "WHERE user_email = $1"
-        params = [user_email]
-        
-        if is_read is not None:
-            where_clause += f" AND is_read = ${len(params) + 1}"
-            params.append(is_read)
-        
-        query = f"""
-            SELECT id, title, message, type, is_read, read_at, metadata, created_at
-            FROM notifications {where_clause}
-            ORDER BY created_at DESC
-            LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}
-        """
-        params.extend([limit, offset])
-        
-        async with get_db_connection() as conn:
-            return await conn.fetch(query, *params)
-
-    async def get_notifications_count(self, user_email: str, is_read: Optional[bool] = None) -> int:
-        """Get total count of notifications for a user."""
-        where_clause = "WHERE user_email = $1"
-        params = [user_email]
-        
-        if is_read is not None:
-            where_clause += f" AND is_read = ${len(params) + 1}"
-            params.append(is_read)
-        
-        async with get_db_connection() as conn:
-            return await conn.fetchval(f"SELECT COUNT(*) FROM notifications {where_clause}", *params)
-
-    async def get_unread_count(self, user_email: str) -> int:
-        """Get unread notifications count for a user."""
-        async with get_db_connection() as conn:
-            return await conn.fetchval(
-                "SELECT COUNT(*) FROM notifications WHERE user_email = $1 AND is_read = FALSE",
-                user_email
-            )
-
-    async def mark_notification_read(self, notification_id: str, user_email: str) -> int:
-        """Mark a specific notification as read."""
-        async with get_db_connection() as conn:
-            query = """
-                UPDATE notifications
-                SET is_read = TRUE, read_at = CURRENT_TIMESTAMP
-                WHERE id = $1 AND user_email = $2 AND is_read = FALSE
-            """
-            params = [notification_id, user_email]
-            return await execute_with_logging(conn, query, *params, operation="MARK_NOTIFICATION_READ")
-
-    async def mark_all_notifications_read(self, user_email: str) -> int:
-        """Mark all notifications as read for a user."""
-        async with get_db_connection() as conn:
-            query = """
-                UPDATE notifications
-                SET is_read = TRUE, read_at = CURRENT_TIMESTAMP
-                WHERE user_email = $1 AND is_read = FALSE
-            """
-            return await execute_with_logging(conn, query, user_email, operation="MARK_ALL_NOTIFICATIONS_READ")
-
-    async def mark_multiple_notifications_read(self, notification_ids: List[str], user_email: str) -> int:
-        """Mark multiple notifications as read for a user."""
-        async with get_db_connection() as conn:
-            query = """
-                UPDATE notifications
-                SET is_read = TRUE, read_at = CURRENT_TIMESTAMP
-                WHERE id = ANY($1::uuid[]) AND user_email = $2 AND is_read = FALSE
-            """
-            params = [notification_ids, user_email]
-            return await execute_with_logging(conn, query, *params, operation="MARK_MULTIPLE_NOTIFICATIONS_READ")
-
-    async def delete_notification(self, notification_id: str, user_email: str) -> int:
-        """Delete a specific notification."""
-        async with get_db_connection() as conn:
-            query = "DELETE FROM notifications WHERE id = $1 AND user_email = $2"
-            params = [notification_id, user_email]
-            return await execute_with_logging(conn, query, *params, operation="DELETE_NOTIFICATION")
+        try:
+            async with get_db_connection() as conn:
+                return await conn.fetchval("""
+                    INSERT INTO notifications (title, message, notification_type, user_email, created_at)
+                    VALUES ($1, $2, $3, $4, NOW())
+                    RETURNING id
+                """, title, message, notification_type, user_email)
+        except Exception as e:
+            logger.error(f"Error creating notification: {e}")
+            raise
