@@ -156,3 +156,11 @@ class AuthService:
         except Exception as e:
             logger.error(f"Error fetching human agents: {e}")
             raise
+
+    async def get_admin_users(self) -> List[Dict[str, Any]]:
+        """Get all admin users"""
+        try:
+            return await self.auth_dao.get_admins()
+        except Exception as e:
+            logger.error(f"Error fetching admin users: {e}")
+            raise

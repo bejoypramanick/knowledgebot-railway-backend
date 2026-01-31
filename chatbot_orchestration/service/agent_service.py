@@ -197,6 +197,46 @@ class PydanticAIGatewayService:
          if not self.db: return
          await self.db.update_session_metadata(session_id, file_search_store_id, cached_content_id)
 
+    async def process_message(self, message: str, session_id: str) -> str:
+        """Process a chat message and return response"""
+        try:
+            # This would need to be implemented based on actual chat logic
+            # For now, return a simple response
+            return f"Response to: {message}"
+        except Exception as e:
+            logger.error(f"Error processing message: {e}")
+            raise
+
+    async def process_message_stream(self, message: str, session_id: str):
+        """Process a chat message with streaming response"""
+        try:
+            # This would need to be implemented based on actual chat logic
+            # For now, yield a simple response
+            yield f"Response to: {message}"
+        except Exception as e:
+            logger.error(f"Error processing message stream: {e}")
+            raise
+
+    async def get_available_agents(self) -> list:
+        """Get list of available agents"""
+        try:
+            # This would need to be implemented based on actual agent logic
+            # For now, return empty list
+            return []
+        except Exception as e:
+            logger.error(f"Error getting available agents: {e}")
+            raise
+
+    async def get_agent_info(self, agent_id: str) -> dict:
+        """Get information about a specific agent"""
+        try:
+            # This would need to be implemented based on actual agent logic
+            # For now, return empty dict
+            return {}
+        except Exception as e:
+            logger.error(f"Error getting agent info: {e}")
+            raise
+
 pydantic_ai_service = PydanticAIGatewayService()
 
 class SessionStateManager:
