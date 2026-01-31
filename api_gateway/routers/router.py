@@ -107,7 +107,17 @@ async def generic_proxy_handler(request: Request, path: str):
         
         logger.info(f"🔍 Processing path: '{path}'")
         
-        if path.startswith("configuration/"):
+        # Handle admin endpoints that are actually in configuration service
+        if path.startswith("admin/agents/online") or path.startswith("admin/performance/metrics") or path.startswith("admin/chat-sessions"):
+            service_url = get_settings().configuration_service_url
+            logger.info(f"✅ Routing admin endpoint to configuration service: {service_url}")
+        elif path.startswith("admin/"):
+            service_url = get_settings().configuration_service_url
+            logger.info(f"✅ Routing admin endpoint to configuration service: {service_url}")
+        elif path.startswith("users/unique-id"):
+            service_url = get_settings().configuration_service_url
+            logger.info(f"✅ Routing users endpoint to configuration service: {service_url}")
+        elif path.startswith("configuration/"):
             service_url = get_settings().configuration_service_url
             logger.info(f"✅ Routing to configuration service: {service_url}")
         elif path.startswith("chatbot/"):
@@ -119,9 +129,6 @@ async def generic_proxy_handler(request: Request, path: str):
         elif path.startswith("webcrawl/"):
             service_url = get_settings().website_crawling_url
             logger.info(f"✅ Routing to webcrawl service: {service_url}")
-        elif path.startswith("admin/"):
-            service_url = get_settings().admin_service_url
-            logger.info(f"✅ Routing to admin service: {service_url}")
         else:
             logger.error(f"❌ Unknown service path: '{path}'")
             raise HTTPException(status_code=404, detail=f"Unknown service path: {path}")

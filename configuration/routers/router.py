@@ -275,6 +275,41 @@ async def send_notification(notification: Dict[str, Any], request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
+# ADMIN ENDPOINTS
+# =================================
+
+@router.get("/admin/agents/online")
+async def get_online_agents():
+    """Get online agents"""
+    try:
+        # For now, return empty list - this should be implemented with proper agent tracking
+        return {"success": True, "agents": []}
+    except Exception as e:
+        logger.error(f"Error getting online agents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/admin/chat-sessions")
+async def get_admin_chat_sessions(role: str = "admin", status: str = "active", page: int = 1, limit: int = 50):
+    """Get chat sessions for admin"""
+    try:
+        # For now, return empty result - this should be implemented with proper session tracking
+        return {"success": True, "sessions": [], "total_count": 0, "page": page}
+    except Exception as e:
+        logger.error(f"Error getting admin chat sessions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/users/unique-id")
+async def generate_unique_id():
+    """Generate unique user ID"""
+    try:
+        import uuid
+        unique_id = str(uuid.uuid4())
+        return {"success": True, "unique_id": unique_id}
+    except Exception as e:
+        logger.error(f"Error generating unique ID: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =================================
 # PERFORMANCE ENDPOINTS
 # =================================
 

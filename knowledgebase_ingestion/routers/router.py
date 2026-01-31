@@ -74,6 +74,28 @@ async def list_files():
         logger.error(f"Error listing files: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/upload/constraints")
+async def get_upload_constraints():
+    """Get upload constraints"""
+    try:
+        return {
+            "success": True,
+            "constraints": {
+                "max_file_size": 10 * 1024 * 1024,  # 10MB
+                "allowed_types": [
+                    "application/pdf",
+                    "text/plain",
+                    "text/markdown",
+                    "application/msword",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                ],
+                "max_files_per_user": 100
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting upload constraints: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.delete("/files/{file_id}")
 async def delete_file(file_id: str):
     """Delete a file"""
