@@ -1,52 +1,11 @@
-# Append to existing content or rewrite?
-# I will rewrite to include everything.
-
-import asyncio
-import os
-import time
-from datetime import datetime
-from typing import Any, Dict, Optional
-
-from fastapi import HTTPException, UploadFile
-from google.genai import types
+"""
+Ingestion Service Layer for Knowledgebase Ingestion
+Provides business logic for file ingestion operations
+"""
 
 from knowledgebase_ingestion.core.logging_config import get_railway_logger
 
-from ..core.ai import get_genai_client
-from ..schemas.models import BatchDeleteItem, BatchUploadItem, FileInfo
-from ..utils.files import calculate_sha256, stream_to_temp_file
-from ..utils.validation import (detect_mime_type_from_extension,
-                                sanitize_filename, validate_file_extension,
-                                validate_file_size, validate_mime_type)
-from .file_service import FileService
-
 logger = get_railway_logger(__name__)
-
-async def record_metadata(*args, **kwargs):
-    """Wrapper for record_metadata using FileService"""
-    file_service = FileService()
-    return await file_service.record_metadata(*args, **kwargs)
-
-async def delete_existing_file_record(*args, **kwargs):
-    """Wrapper for delete_existing_file_record using FileService"""
-    file_service = FileService()
-    return await file_service.delete_existing_file_record(*args, **kwargs)
-
-async def record_api_usage(*args, **kwargs):
-    """Wrapper for record_api_usage using FileService"""
-    file_service = FileService()
-    return await file_service.record_api_usage(*args, **kwargs)
-
-async def process_with_gemini(tmp_path: str, file_display_name: str, original_filename: str, mime_type: str, user_email: Optional[str] = None):
-    """Upload to Gemini FileSearch and poll for processing completion."""
-    genai_client = get_genai_client()
-    if not genai_client:
-        raise Exception("Gemini client not initialized")
-
-    # Get the file search store from environment
-    file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME")
-    if file_search_store_name:
-        logger.info(f"🔍 Using File Search store: {file_search_store_name}")
     else:
         logger.warning("⚠️ No File Search store configured - uploading to general file storage")
 
