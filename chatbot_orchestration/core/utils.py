@@ -132,41 +132,29 @@ async def make_service_request(
     json: Optional[Dict[str, Any]] = None,
     timeout: float = 30.0
 ) -> Dict[str, Any]:
-    """Make HTTP request to internal service with correlation ID."""
-    # Get correlation ID and add to headers
-    correlation_id = get_correlation_id()
+    """Make HTTP request to internal service."""
     headers = {}
-    if correlation_id:
-        add_correlation_id_headers(headers, correlation_id)
-        logger.info(f"🔍 [{correlation_id}] Making {method} request to {url}")
+    logger.info(f"Making {method} request to {url}")
     
     async with httpx.AsyncClient() as client:
         try:
             response = await client.request(
                 method=method,
                 url=url,
-                data=data,
-                json=json,
                 headers=headers,
+                json=json,
                 timeout=timeout
             )
             response.raise_for_status()
             
-            if correlation_id:
-                logger.info(f"🔍 [{correlation_id}] Received response from {url} (Status: {response.status_code})")
+            logger.info(f"Received response from {url} (Status: {response.status_code})")
             
             return response.json()
         except httpx.HTTPStatusError as e:
-            if correlation_id:
-                logger.error(f"🔍 [{correlation_id}] HTTP error: {e.response.status_code} - {e.response.text}")
-            else:
-                logger.error(f"HTTP error: {e.response.status_code} - {e.response.text}")
+            logger.error(f"HTTP error: {e.response.status_code} - {e.response.text}")
             raise
         except httpx.RequestError as e:
-            if correlation_id:
-                logger.error(f"🔍 [{correlation_id}] Request error: {e}")
-            else:
-                logger.error(f"Request error: {e}")
+            logger.error(f"Request error: {e}")
             raise
 
 

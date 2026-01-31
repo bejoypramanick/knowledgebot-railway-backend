@@ -4,7 +4,6 @@ from typing import Annotated
 import httpx
 
 from chatbot_orchestration.core.logging_config import get_railway_logger
-from api_gateway.core.correlation_id import get_correlation_id, add_correlation_id_headers
 
 from ..core.dependencies import ChatSessionDeps
 from ..service.file_service import FileService
@@ -37,11 +36,8 @@ async def request_human_agent_connection(
         )
         
         # Call the request-human-agent endpoint
-        correlation_id = get_correlation_id()
         headers = {}
-        if correlation_id:
-            add_correlation_id_headers(headers, correlation_id)
-            logger.info(f"🔍 [{correlation_id}] Requesting human agent for session {session_id}")
+        logger.info(f"Requesting human agent for session {session_id}")
         
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
