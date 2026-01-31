@@ -98,6 +98,50 @@ class PerformanceDAO:
             ORDER BY DATE_TRUNC('month', cm.created_at)
         """)
 
+    async def get_performance_metrics(self) -> Dict[str, Any]:
+        """Get comprehensive performance metrics."""
+        try:
+            # Get basic metrics
+            total_interactions = await self.get_total_interactions()
+            total_sessions = await self.get_total_sessions()
+            active_sessions = await self.get_active_sessions()
+            avg_engagement = await self.get_average_engagement_time()
+            sessions_with_human = await self.get_sessions_with_human()
+            
+            # Get AI vs Human metrics
+            ai_handled_chats = await self.get_ai_handled_chats()
+            human_handoffs = await self.get_human_agent_handoffs()
+            
+            # Calculate percentages
+            ai_handled_percentage = (ai_handled_chats / total_interactions * 100) if total_interactions > 0 else 0
+            human_handoff_percentage = (human_handoffs / total_interactions * 100) if total_interactions > 0 else 0
+            
+            # Get interactions over time
+            interactions_over_time = await self.get_interactions_over_time()
+            
+            # Calculate growth (compare with previous period)
+            previous_period_interactions = sum(item['total'] for item in interactions_over_time[:-1]) if len(interactions_over_time) > 1 else 0
+            current_period_interactions = interactions_over_time[-1]['total'] if interactions_over_time else 0
+            interactions_growth = ((current_period_interactions - previous_period_interactions) / previous_period_interactions * 100) if previous_period_interactions > 0 else 0
+            
+            return {
+                "total_interactions": total_interactions,
+                "total_sessions": total_sessions,
+                "active_sessions": active_sessions,
+                "average_engagement_minutes": round(avg_engagement or 0, 2),
+                "sessions_with_human": sessions_with_human,
+                "ai_handled_chats": ai_handled_chats,
+                "human_handoffs": human_handoffs,
+                "ai_handled_percentage": round(ai_handled_percentage, 2),
+                "human_handoff_percentage": round(human_handoff_percentage, 2),
+                "interactions_growth": round(interactions_growth, 2),
+                "interactions_over_time": interactions_over_time,
+                "user_satisfaction": 4.5  # Placeholder - would need feedback data
+            }
+        except Exception as e:
+            logger.error(f"Error getting performance metrics: {e}")
+            raise
+
     # Satisfaction Metrics
     async def get_satisfaction_metrics(self) -> List[Dict[str, Any]]:
         """Get satisfaction metrics over time."""
