@@ -68,10 +68,7 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
             "/openapi.json",
             "/favicon.ico",
             "/auth/login",
-            "/auth/verify",
-            "/api/v1/knowledgebase/files",
-            "/api/v1/knowledgebase/upload/constraints",
-            "/api/v1/knowledgebase/health"
+            "/auth/verify"
         ]
     
     async def dispatch(self, request, call_next):

@@ -21,6 +21,12 @@ router = APIRouter()
 # Initialize services
 file_service = FileService()
 
+def extract_user_from_request(request: Request) -> tuple[str, str]:
+    """Extract user information from request headers forwarded by API Gateway"""
+    user_email = request.headers.get("X-User-Email", "unknown@example.com")
+    user_id = request.headers.get("X-User-UID", "unknown")
+    return user_email, user_id
+
 # =================================
 # FILE UPLOAD ENDPOINTS
 # =================================
@@ -29,6 +35,9 @@ file_service = FileService()
 async def upload_file(file: UploadFile = File(...), request: Request = None):
     """Upload a file to the knowledgebase"""
     try:
+        # Extract authenticated user information
+        user_email, user_id = extract_user_from_request(request)
+        
         # Validate file
         if not file.filename:
             raise HTTPException(status_code=400, detail="No file provided")
@@ -39,7 +48,7 @@ async def upload_file(file: UploadFile = File(...), request: Request = None):
             file_display_name=file.filename,
             original_filename=file.filename,
             mime_type=file.content_type or "application/octet-stream",
-            user_email=None
+            user_email=user_email
         )
         
         # Record metadata
@@ -47,7 +56,7 @@ async def upload_file(file: UploadFile = File(...), request: Request = None):
             filename=file.filename,
             mime_type=file.content_type or "application/octet-stream",
             size=0,  # Will be set by FileService
-            user_id=None,
+            user_id=user_id,
             gemini_file_id=result.get("file_id") if result else None
         )
         
@@ -61,23 +70,33 @@ async def upload_file(file: UploadFile = File(...), request: Request = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/files")
-async def list_files():
+async def list_files(request: Request = None):
     """List all files"""
     try:
+        # Extract authenticated user information
+        user_email, user_id = extract_user_from_request(request)
+        
         files = await file_service.get_all_files()
         
         return {
             "success": True,
-            "files": files
+            "files": files,
+            "user": {
+                "email": user_email,
+                "id": user_id
+            }
         }
     except Exception as e:
         logger.error(f"Error listing files: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/upload/constraints")
-async def get_upload_constraints():
+async def get_upload_constraints(request: Request = None):
     """Get upload constraints"""
     try:
+        # Extract authenticated user information
+        user_email, user_id = extract_user_from_request(request)
+        
         return {
             "success": True,
             "constraints": {
@@ -90,6 +109,10 @@ async def get_upload_constraints():
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 ],
                 "max_files_per_user": 100
+            },
+            "user": {
+                "email": user_email,
+                "id": user_id
             }
         }
     except Exception as e:
