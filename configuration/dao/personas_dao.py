@@ -7,6 +7,7 @@ import asyncpg
 
 from configuration.core.logging_config import get_railway_logger
 from configuration.core.db import get_db_connection
+from configuration.core.db_logger import fetch_with_logging
 
 logger = get_railway_logger(__name__)
 
@@ -23,7 +24,7 @@ class PersonasDAO:
                     FROM public.persona_configurations
                     ORDER BY created_at DESC
                 """
-                rows = await conn.fetch(query)
+                rows = await fetch_with_logging(conn, query, operation="GET_ALL_PERSONAS")
             
             return [dict(row) for row in rows]
         except Exception as e:

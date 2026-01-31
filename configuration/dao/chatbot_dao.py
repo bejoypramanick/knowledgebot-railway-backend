@@ -1,7 +1,9 @@
 from typing import Any, Dict, List, Optional
+import asyncpg
 
-from configuration.core.db import get_db_connection
 from configuration.core.logging_config import get_railway_logger
+from configuration.core.db import get_db_connection
+from configuration.core.db_logger import execute_with_logging, fetchrow_with_logging
 
 logger = get_railway_logger(__name__)
 
@@ -64,14 +66,14 @@ class ChatbotDAO:
                     }
                 
                 # Try to get active persona from database
-                persona = await conn.fetchrow(
-                    """
+                query = """
                     SELECT persona_name, system_prompt, is_active
                     FROM persona_configurations
                     WHERE is_active = true
                     LIMIT 1
-                    """
-                )
+                """
+                
+                persona = await fetchrow_with_logging(conn, query, operation="GET_ACTIVE_PERSONA")
                 
                 if persona:
                     return {
@@ -164,17 +166,17 @@ class ChatbotDAO:
         async with get_db_connection() as conn:
             async with conn.transaction():
                 if is_active:
-                    await conn.execute("UPDATE persona_configurations SET is_active = false")
+                    deactivate_query = "UPDATE persona_configurations SET is_active = false"
+                    await execute_with_logging(conn, deactivate_query, operation="DEACTIVATE_ALL_PERSONAS")
                 
-                await conn.execute(
-                    """
+                upsert_query = """
                     INSERT INTO persona_configurations (persona_name, system_prompt, is_active)
                     VALUES ($1, $2, $3)
                     ON CONFLICT (persona_name) DO UPDATE SET
                     system_prompt = EXCLUDED.system_prompt, is_active = EXCLUDED.is_active, updated_at = NOW()
-                    """,
-                    persona_name, system_prompt, is_active
-                )
+                """
+                params = [persona_name, system_prompt, is_active]
+                result = await execute_with_logging(conn, upsert_query, *params, operation="UPSERT_PERSONA")
 
     async def upsert_configuration_metadata(self, updates_dict: Dict[str, Any]):
         """Upsert configuration metadata using proper PostgreSQL syntax"""
@@ -213,7 +215,7 @@ class ChatbotDAO:
         all_values = [1] + values
         
         async with get_db_connection() as conn:
-            await conn.execute(query, *all_values)
+            result = await execute_with_logging(conn, query, *all_values, operation="UPSERT_CONFIGURATION_METADATA")
     
     def _get_postgres_type(self, column_name: str) -> str:
         """Get PostgreSQL type for configuration metadata columns"""
