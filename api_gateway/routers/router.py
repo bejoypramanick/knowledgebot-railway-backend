@@ -136,56 +136,50 @@ async def generic_proxy_handler(request: Request, path: str):
         # Construct full URL
         full_url = f"{service_url}/api/v1/{path}"
         logger.info(f"🌐 Making {request.method} request to: {full_url}")
+        logger.info(f"🔍 Service URL: {service_url}")
+        logger.info(f"🔍 Request path: {path}")
         
         # Prepare headers
         headers = dict(request.headers)
         headers.pop("host", None)
+        
+        logger.info(f"🔍 Headers being sent: {dict(headers)}")
         
         # Forward user data from request state
         if hasattr(request.state, 'user'):
             headers['X-User-UID'] = request.state.user.get('uid', '')
             headers['X-User-Email'] = request.state.user.get('email', '')
             headers['X-User-Name'] = request.state.user.get('name', '')
+            logger.info(f"🔍 User data forwarded: {request.state.user}")
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # Make the request to the appropriate service
-            logger.info(f"🌐 Making {request.method} request to: {full_url}")
-            
-            if request.method == "GET":
-                logger.info(f"📥 Processing GET request")
-                response = await client.get(full_url, headers=headers, params=request.query_params)
-            elif request.method == "POST":
-                logger.info(f"📤 Processing POST request")
-                try:
-                    body = await request.json()
-                    logger.info(f"📤 POST body: {body}")
-                    response = await client.post(full_url, json=body, headers=headers)
-                except Exception as json_error:
-                    logger.error(f"❌ Error parsing POST body: {json_error}")
-                    raise HTTPException(status_code=400, detail="Invalid JSON in request body")
-            elif request.method == "PUT":
-                logger.info(f"📝 Processing PUT request")
-                body = await request.json()
-                response = await client.put(full_url, json=body, headers=headers)
-            elif request.method == "DELETE":
-                logger.info(f"🗑️ Processing DELETE request")
-                response = await client.delete(full_url, headers=headers)
-            else:
-                logger.error(f"❌ Unsupported method: {request.method}")
-                raise HTTPException(status_code=405, detail="Method not allowed")
-            
-            logger.info(f"✅ Response status: {response.status_code}")
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                headers=dict(response.headers)
-            )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Generic proxy error for path '{path}': {e}")
-        raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                logger.info(f"🔍 About to make HTTP request to: {full_url}")
+                response = await client.request(
+                    method=request.method,
+                    url=full_url,
+                    headers=headers,
+                    content=await request.body(),
+                    params=request.query_params
+                )
+                logger.info(f"✅ Received response from {full_url} (Status: {response.status_code})")
+                return response
+        except httpx.ConnectError as e:
+            logger.error(f"❌ Connection failed to {full_url}: {e}")
+            logger.error(f"❌ Service URL: {service_url}")
+            logger.error(f"❌ This might mean the service is down or not accessible")
+            raise HTTPException(status_code=503, detail=f"Service unavailable: {service_url}")
+        except Exception as e:
+            logger.error(f"❌ Proxy error for path '{path}': {e}")
+            logger.error(f"❌ Full URL: {full_url}")
+            logger.error(f"❌ Service URL: {service_url}")
+            raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}")
+
+# Health check endpoint
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "service": "api_gateway"}
 
 # =================================
 # AUTH ENDPOINTS (only these are specific)
