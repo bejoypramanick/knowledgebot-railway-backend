@@ -1,30 +1,35 @@
-import json
-from datetime import datetime
-from typing import Optional
+"""
+Chat Log Service Layer for Configuration Service
+Provides business logic for chat log operations
+"""
+from typing import Dict, List, Any
 
-from fastapi import HTTPException
-
-from configuration.core.logging_config import get_railway_logger
 from configuration.dao.chat_log_dao import ChatLogDAO
-from configuration.dao.auth_dao import AuthDAO
+from configuration.core.logging_config import get_railway_logger
 
 logger = get_railway_logger(__name__)
 
 class ChatLogService:
-    def __init__(self, connection_manager=None):
-        self.dao = ChatLogDAO()  # Use local ChatLogDAO
-        self.auth_dao = AuthDAO()  # Use local AuthDAO for user operations
-        self.connection_manager = connection_manager
+    """Service layer for chat log operations"""
+    
+    def __init__(self):
+        self.dao = ChatLogDAO()  # Service manages its own DAO
 
-    async def get_agent_online_status(self, agent_email: str) -> bool:
-        """Check if an agent is online by checking their last activity timestamp."""
+    async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
+        """Get all chat logs"""
         try:
-            return await self.dao.get_agent_online_status(agent_email)
+            return await self.dao.get_all_chat_logs()
         except Exception as e:
-            logger.error(f"Error checking agent online status for {agent_email}: {e}")
-            return False
+            logger.error(f"Error getting all chat logs: {e}")
+            raise
 
-    async def assign_chat_to_agent(self, session_id: str, agent_email: str) -> None:
+    async def delete_chat_log(self, session_id: str, user_email: str) -> Dict[str, Any]:
+        """Delete a chat log"""
+        try:
+            return await self.dao.delete_chat_log(session_id)
+        except Exception as e:
+            logger.error(f"Error deleting chat log {session_id}: {e}")
+            raise
         """Assign a chat session to a human agent and send notification."""
         try:
             session_db_id = await self.dao.get_session_db_id(session_id)
