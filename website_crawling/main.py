@@ -6,11 +6,15 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from website_crawling.core.logging_config import auto_configure_logging
-from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
+# Configure OpenTelemetry for Railway
+from api_gateway.core.shared_otel import setup_opentelemetry_for_service
+setup_opentelemetry_for_service("website-crawling", "1.0.0")
 
-# Configure Railway-compatible logging
-logger = auto_configure_logging("website_crawling")
+# Configure Railway-compatible logging with OpenTelemetry
+from website_crawling.core.logging_config import auto_configure_logging
+from website_crawling.core.otel_logger import get_otel_logger
+
+logger = get_otel_logger("website_crawling", "website-crawling")
 
 from website_crawling.core import db
 from website_crawling.core.config import settings

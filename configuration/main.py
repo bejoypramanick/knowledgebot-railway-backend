@@ -12,44 +12,15 @@ print(f"🚀 Working directory: {os.getcwd()}")
 print(f"🚀 Script location: {__file__}")
 print("🚀 FORCING RAILWAY REDEPLOY - ENHANCED DEBUGGING ACTIVE")
 
-try:
-    print("🚀 IMPORTING FASTAPI...")
-    from fastapi import FastAPI, Request
-    print("✅ FASTAPI IMPORTED SUCCESSFULLY")
-except Exception as e:
-    print(f"❌ FASTAPI IMPORT FAILED: {e}")
-    sys.exit(1)
+# Configure OpenTelemetry for Railway
+from api_gateway.core.shared_otel import setup_opentelemetry_for_service
+setup_opentelemetry_for_service("configuration", "1.0.0")
 
-try:
-    print("🚀 IMPORTING DOTENV...")
-    from dotenv import load_dotenv
-    print("✅ DOTENV IMPORTED SUCCESSFULLY")
-except Exception as e:
-    print(f"❌ DOTENV IMPORT FAILED: {e}")
-    sys.exit(1)
+# Configure Railway-compatible logging with OpenTelemetry
+from configuration.core.logging_config import auto_configure_logging
+from configuration.core.otel_logger import get_otel_logger
 
-try:
-    print("🚀 LOADING DOTENV...")
-    load_dotenv()
-    print("✅ DOTENV LOADED SUCCESSFULLY")
-except Exception as e:
-    print(f"❌ DOTENV LOADING FAILED: {e}")
-    sys.exit(1)
-
-from contextlib import asynccontextmanager
-from fastapi.middleware.cors import CORSMiddleware
-
-# Import core modules
-try:
-    print("🚀 IMPORTING CORE MODULES...")
-    from configuration.core.logging_config import auto_configure_logging
-    from configuration.core.utils import validate_environment, wait_for_railway_network, service_status
-    from configuration.core.database_initializer import database_initializer
-    from configuration.core.db import close_databases, railway_db
-    print("✅ CORE MODULES IMPORTED SUCCESSFULLY")
-except Exception as e:
-    print(f"❌ CORE MODULES IMPORT FAILED: {e}")
-    sys.exit(1)
+logger = get_otel_logger("configuration", "configuration")
 
 # Import routers and services
 try:

@@ -5,9 +5,9 @@ Handles database operations for user authentication and role management
 from typing import Any, Dict, List, Optional
 
 from configuration.core.db import get_db_connection
-from configuration.core.logging_config import get_railway_logger
+from configuration.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("auth_dao", "configuration")
 
 class AuthDAO:
     def __init__(self):
@@ -20,15 +20,14 @@ class AuthDAO:
             FROM admins 
             WHERE email = $1 AND status = 'active'
         """
-        logger.info(f"🔍 [DB QUERY] check_admin_exists: {query.strip()} | PARAMS: email={email}")
         
         try:
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, email)
-                logger.info(f"✅ [DB RESULT] check_admin_exists: Found admin={result is not None}")
+                logger.log_db_query(query, {"email": email}, result)
                 return result
         except Exception as e:
-            logger.error(f"❌ [DB ERROR] check_admin_exists: {e}")
+            logger.log_db_query(query, {"email": email}, error=e)
             return None
 
     async def check_human_agent_exists(self, email: str) -> bool:

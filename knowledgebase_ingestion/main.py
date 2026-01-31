@@ -6,11 +6,15 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from knowledgebase_ingestion.core.logging_config import auto_configure_logging
-from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
+# Configure OpenTelemetry for Railway
+from api_gateway.core.shared_otel import setup_opentelemetry_for_service
+setup_opentelemetry_for_service("knowledgebase-ingestion", "1.0.0")
 
-# Configure Railway-compatible logging
-logger = auto_configure_logging("knowledgebase_ingestion")
+# Configure Railway-compatible logging with OpenTelemetry
+from knowledgebase_ingestion.core.logging_config import auto_configure_logging
+from knowledgebase_ingestion.core.otel_logger import get_otel_logger
+
+logger = get_otel_logger("knowledgebase_ingestion", "knowledgebase-ingestion")
 
 from knowledgebase_ingestion.core.ai import get_genai_client
 from knowledgebase_ingestion.routers import router
