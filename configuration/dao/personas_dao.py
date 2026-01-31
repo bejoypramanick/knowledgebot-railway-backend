@@ -21,7 +21,7 @@ class PersonasDAO:
                     SELECT id, persona_name, system_prompt, 
                            is_active, created_at, updated_at
                     FROM public.persona_configurations
-                    ORDER BY persona_name
+                    ORDER BY created_at DESC
                 """
                 rows = await conn.fetch(query)
             

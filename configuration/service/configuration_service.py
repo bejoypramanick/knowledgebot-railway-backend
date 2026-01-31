@@ -365,7 +365,7 @@ class ConfigurationService:
                         "limit": row['token_limit'] or 0
                     }
 
-            # Build persona dict
+            # Initialize persona config with active persona
             persona_config = {
                 "system_prompt": persona.get('system_prompt', '') if persona else "",
                 "selected_persona": persona.get('persona_name', 'KnowledgeBot') if persona else "KnowledgeBot"
@@ -377,6 +377,15 @@ class ConfigurationService:
                 personas_service = PersonasService()
                 personas_response = await personas_service.get_personas()
                 all_personas = personas_response.get('data', {}).get('all_personas', [])
+                
+                # Select the first persona (most recent) as default if no active persona is set
+                if not persona and all_personas:
+                    first_persona = all_personas[0]
+                    persona_config = {
+                        "system_prompt": first_persona.get('system_prompt', ''),
+                        "selected_persona": first_persona.get('persona_name', 'KnowledgeBot')
+                    }
+                    
             except Exception as e:
                 logger.warning(f"Could not fetch personas from database, using fallback: {e}")
                 all_personas = [{
