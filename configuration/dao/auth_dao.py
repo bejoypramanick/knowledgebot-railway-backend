@@ -33,98 +33,130 @@ class AuthDAO:
 
     async def check_human_agent_exists(self, email: str) -> bool:
         """Check if human agent exists"""
+        query = """
+            SELECT COUNT(*) 
+            FROM human_agents 
+            WHERE email = $1 AND status = 'active'
+        """
+        logger.info(f"🔍 [DB QUERY] check_human_agent_exists: {query.strip()} | PARAMS: email={email}")
+        
         try:
             async with get_db_connection() as conn:
-                result = await conn.fetchval("""
-                    SELECT COUNT(*) 
-                    FROM human_agents 
-                    WHERE email = $1 AND status = 'active'
-                """, email)
-                return bool(result)
+                result = await conn.fetchval(query, email)
+                exists = bool(result)
+                logger.info(f"✅ [DB RESULT] check_human_agent_exists: Agent exists={exists}")
+                return exists
         except Exception as e:
-            logger.error(f"Error checking human agent exists: {e}")
+            logger.error(f"❌ [DB ERROR] check_human_agent_exists: {e}")
             return False
 
     async def remove_admin(self, email: str) -> None:
         """Remove an admin by setting status to removed."""
+        query = """
+            UPDATE admins 
+            SET status = 'removed', updated_at = NOW() 
+            WHERE email = $1
+        """
+        logger.info(f"🔍 [DB QUERY] remove_admin: {query.strip()} | PARAMS: email={email}")
+        
         try:
             async with get_db_connection() as conn:
-                await conn.execute("""
-                    UPDATE admins 
-                    SET status = 'removed', updated_at = NOW() 
-                    WHERE email = $1
-                """, email)
+                result = await conn.execute(query, email)
+                logger.info(f"✅ [DB RESULT] remove_admin: Rows affected={result}")
         except Exception as e:
-            logger.error(f"Error removing admin: {e}")
+            logger.error(f"❌ [DB ERROR] remove_admin: {e}")
             raise
 
     async def add_admin(self, email: str) -> None:
         """Add a new admin."""
+        query = """
+            INSERT INTO admins (email, status, created_by_email, created_at)
+            VALUES ($1, 'active', 'system', NOW())
+            ON CONFLICT (email) DO NOTHING
+        """
+        logger.info(f"🔍 [DB QUERY] add_admin: {query.strip()} | PARAMS: email={email}")
+        
         try:
             async with get_db_connection() as conn:
-                await conn.execute("""
-                    INSERT INTO admins (email, status, created_by_email, created_at)
-                    VALUES ($1, 'active', 'system', NOW())
-                    ON CONFLICT (email) DO NOTHING
-                """, email)
+                result = await conn.execute(query, email)
+                logger.info(f"✅ [DB RESULT] add_admin: Admin added, rows affected={result}")
         except Exception as e:
-            logger.error(f"Error adding admin: {e}")
+            logger.error(f"❌ [DB ERROR] add_admin: {e}")
             raise
 
     async def add_human_agent(self, email: str) -> bool:
         """Add a new human agent."""
+        query = """
+            INSERT INTO human_agents (email, status, created_by_email, created_at)
+            VALUES ($1, 'active', 'system', NOW())
+            ON CONFLICT (email) DO NOTHING
+        """
+        logger.info(f"🔍 [DB QUERY] add_human_agent: {query.strip()} | PARAMS: email={email}")
+        
         try:
             async with get_db_connection() as conn:
-                await conn.execute("""
-                    INSERT INTO human_agents (email, status, created_by_email, created_at)
-                    VALUES ($1, 'active', 'system', NOW())
-                    ON CONFLICT (email) DO NOTHING
-                """, email)
+                result = await conn.execute(query, email)
+                logger.info(f"✅ [DB RESULT] add_human_agent: Agent added, rows affected={result}")
                 return True
         except Exception as e:
-            logger.error(f"Error adding human agent: {e}")
+            logger.error(f"❌ [DB ERROR] add_human_agent: {e}")
             return False
 
     async def get_admins(self) -> List[Dict[str, Any]]:
         """Get all admins"""
+        query = """
+            SELECT email, status, created_at, updated_at
+            FROM admins
+            WHERE status = 'active'
+            ORDER BY created_at DESC
+        """
+        logger.info(f"🔍 [DB QUERY] get_admins: {query.strip()} | PARAMS: None")
+        
         try:
             async with get_db_connection() as conn:
-                return await conn.fetch("""
-                    SELECT email, status, created_at, updated_at
-                    FROM admins
-                    WHERE status = 'active'
-                    ORDER BY created_at DESC
-                """)
+                records = await conn.fetch(query)
+                logger.info(f"✅ [DB RESULT] get_admins: Found {len(records)} admins")
+                return records
         except Exception as e:
-            logger.error(f"Error getting admins: {e}")
+            logger.error(f"❌ [DB ERROR] get_admins: {e}")
             raise
 
     async def get_human_agents(self) -> List[Dict[str, Any]]:
         """Get all human agents"""
+        query = """
+            SELECT email, status, created_at, updated_at
+            FROM human_agents
+            WHERE status = 'active'
+            ORDER BY created_at DESC
+        """
+        logger.info(f"🔍 [DB QUERY] get_human_agents: {query.strip()} | PARAMS: None")
+        
         try:
             async with get_db_connection() as conn:
-                return await conn.fetch("""
-                    SELECT email, status, created_at, updated_at
-                    FROM human_agents
-                    WHERE status = 'active'
-                    ORDER BY created_at DESC
-                """)
+                records = await conn.fetch(query)
+                logger.info(f"✅ [DB RESULT] get_human_agents: Found {len(records)} agents")
+                return records
         except Exception as e:
-            logger.error(f"Error getting human agents: {e}")
+            logger.error(f"❌ [DB ERROR] get_human_agents: {e}")
             raise
 
     async def get_available_agents(self) -> List[Dict[str, Any]]:
         """Get available human agents for assignment."""
+        query = """
+            SELECT email, status, created_at
+            FROM human_agents
+            WHERE status = 'active'
+            ORDER BY created_at DESC
+        """
+        logger.info(f"🔍 [DB QUERY] get_available_agents: {query.strip()} | PARAMS: None")
+        
         try:
             async with get_db_connection() as conn:
-                return await conn.fetch("""
-                    SELECT email, status, created_at
-                    FROM human_agents
-                    WHERE status = 'active'
-                    ORDER BY created_at DESC
-                """)
+                records = await conn.fetch(query)
+                logger.info(f"✅ [DB RESULT] get_available_agents: Found {len(records)} available agents")
+                return records
         except Exception as e:
-            logger.error(f"Error getting available agents: {e}")
+            logger.error(f"❌ [DB ERROR] get_available_agents: {e}")
             raise
 
     async def remove_human_agent(self, email: str) -> None:
