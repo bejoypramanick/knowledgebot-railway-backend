@@ -156,28 +156,28 @@ async def generic_proxy_handler(request: Request, path: str):
             headers['X-User-Name'] = request.state.user.get('name', '')
             logger.info(f"🔍 User data forwarded: {request.state.user}")
         
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                logger.info(f"🔍 About to make HTTP request to: {full_url}")
-                response = await client.request(
-                    method=request.method,
-                    url=full_url,
-                    headers=headers,
-                    content=await request.body(),
-                    params=request.query_params
-                )
-                logger.info(f"✅ Received response from {full_url} (Status: {response.status_code})")
-                return response
-        except httpx.ConnectError as e:
-            logger.error(f"❌ Connection failed to {full_url}: {e}")
-            logger.error(f"❌ Service URL: {service_url}")
-            logger.error(f"❌ This might mean the service is down or not accessible")
-            raise HTTPException(status_code=503, detail=f"Service unavailable: {service_url}")
-        except Exception as e:
-            logger.error(f"❌ Proxy error for path '{path}': {e}")
-            logger.error(f"❌ Full URL: {full_url}")
-            logger.error(f"❌ Service URL: {service_url}")
-            raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}")
+        # Make HTTP request to service
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            logger.info(f"🔍 About to make HTTP request to: {full_url}")
+            response = await client.request(
+                method=request.method,
+                url=full_url,
+                headers=headers,
+                content=await request.body(),
+                params=request.query_params
+            )
+            logger.info(f"✅ Received response from {full_url} (Status: {response.status_code})")
+            return response
+    except httpx.ConnectError as e:
+        logger.error(f"❌ Connection failed to {full_url}: {e}")
+        logger.error(f"❌ Service URL: {service_url}")
+        logger.error(f"❌ This might mean the service is down or not accessible")
+        raise HTTPException(status_code=503, detail=f"Service unavailable: {service_url}")
+    except Exception as e:
+        logger.error(f"❌ Proxy error for path '{path}': {e}")
+        logger.error(f"❌ Full URL: {full_url}")
+        logger.error(f"❌ Service URL: {service_url}")
+        raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}")
 
 # Health check endpoint
 @router.get("/health")
