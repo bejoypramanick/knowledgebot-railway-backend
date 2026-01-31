@@ -4,15 +4,16 @@ Provides business logic for file ingestion operations
 """
 from typing import Dict
 
-from knowledgebase_ingestion.core.logging_config import get_railway_logger
+from knowledgebase_ingestion.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("ingestion_service", "knowledgebase-ingestion")
 
 async def process_with_gemini(tmp_path: str, file_display_name: str, original_filename: str, mime_type: str, user_email: str = None):
     """Process file with Gemini - placeholder implementation"""
     try:
         # This would need to be implemented based on actual Gemini processing logic
         # For now, return success response
+        logger.info(f"Processing file with Gemini: {file_display_name}")
         return {
             "success": True,
             "message": f"File {file_display_name} processed successfully",
@@ -27,7 +28,7 @@ async def record_metadata(filename: str, mime_type: str, size: int, user_id: str
     try:
         # This would need to be implemented based on actual metadata storage logic
         # For now, return success response
-        logger.info(f"Recorded metadata for file: {filename}")
+        logger.info(f"Recording metadata for file: {filename}")
         return {
             "success": True,
             "message": f"Metadata recorded for {filename}"
@@ -41,13 +42,13 @@ async def delete_existing_file_record(file_id: str):
     try:
         # This would need to be implemented based on actual file deletion logic
         # For now, return success response
-        logger.info(f"Deleted file record: {file_id}")
+        logger.info(f"Deleting file record: {file_id}")
         return {
             "success": True,
             "message": f"File record {file_id} deleted successfully"
         }
     except Exception as e:
-        logger.error(f"Error deleting file record: {e}")
+        logger.error(f"Error deleting file record: {e}", exc_info=True)
         raise
 
 async def record_api_usage(**kwargs):
@@ -55,19 +56,20 @@ async def record_api_usage(**kwargs):
     try:
         # This would need to be implemented based on actual usage tracking logic
         # For now, return success response
-        logger.info("API usage recorded")
+        logger.info("API usage recorded", **kwargs)
         return {
             "success": True,
             "message": "API usage recorded successfully"
         }
     except Exception as e:
-        logger.error(f"Error recording API usage: {e}")
+        logger.error(f"Error recording API usage: {e}", exc_info=True)
         raise
     if file_display_name != original_filename:
         gemini_display_name = f"{file_display_name} | {original_filename}"
     else:
         gemini_display_name = original_filename
     
+    logger.info(f" [GEMINI] Uploading to FileSearch - Display: {gemini_display_name}, Original: {original_filename}, MIME: {final_mime_type}...")
     logger.info(f"🤖 [GEMINI] Uploading to FileSearch - Display: {gemini_display_name}, Original: {original_filename}, MIME: {final_mime_type}...")
     
     if file_search_store_name:
