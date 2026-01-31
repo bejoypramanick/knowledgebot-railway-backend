@@ -199,13 +199,13 @@ async def chat_confusion_detector(request: Request):
 # Include Routers
 app.include_router(api_router, prefix="/api/v1/gateway")  
 if chat_router:
-    app.include_router(chat_router, prefix="/api/v1/gateway") 
+    app.include_router(chat_router, prefix="/api/v1/gateway/chatbot") 
 if config_router:
-    app.include_router(config_router, prefix="/api/v1/gateway") 
+    app.include_router(config_router, prefix="/api/v1/gateway/configuration") 
 if knowledgebase_router:
-    app.include_router(knowledgebase_router, prefix="/api/v1/gateway") 
+    app.include_router(knowledgebase_router, prefix="/api/v1/gateway/knowledgebase") 
 if webcrawl_router:
-    app.include_router(webcrawl_router, prefix="/api/v1/gateway") 
+    app.include_router(webcrawl_router, prefix="/api/v1/gateway/webcrawl") 
 
 # Add app-level endpoints
 @app.get("/")
