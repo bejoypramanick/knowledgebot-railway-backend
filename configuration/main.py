@@ -163,11 +163,6 @@ async def root():
     """Root endpoint"""
     return {"service": "configuration", "status": "running"}
 
-@app.get("/health")
-async def health_check(request: Request):
-    log_endpoint_request("configuration", "health", request)
-    return {"status": "healthy", "service": "configuration"}
-
 logger.info("✅ All endpoints loaded successfully")
 
 if __name__ == "__main__":

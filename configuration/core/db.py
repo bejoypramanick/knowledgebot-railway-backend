@@ -21,18 +21,26 @@ class DatabaseManager:
     def __init__(self, connection_url: Optional[str] = None):
         self._pool: Optional[asyncpg.Pool] = None
         self._connection_url = connection_url or os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+        
+        # Ensure SSL mode is properly configured for Railway
+        if self._connection_url and 'sslmode=' not in self._connection_url:
+            # For Railway internal connections, prefer require for security
+            self._connection_url += '&sslmode=require' if '?' in self._connection_url else '?sslmode=require'
+        
         self._pool_config = {
-            'min_size': 2,
-            'max_size': 20,
-            'command_timeout': 60.0,
-            'max_inactive_connection_lifetime': 300.0,  # 5 minutes
-            'max_queries': 50000,  # Recreate connection after 50k queries
+            'min_size': 1,  # Reduced for Railway memory limits
+            'max_size': 10,  # Reduced to prevent overwhelming DB
+            'command_timeout': 30.0,  # Reduced timeout
+            'max_inactive_connection_lifetime': 180.0,  # 3 minutes
+            'max_queries': 25000,  # Reduced recreation threshold
             'server_settings': {
                 'timezone': 'UTC',
-                'application_name': 'knowledgebot_backend',
-                'tcp_keepalives_idle': '60',  # Enable TCP keepalives
-                'tcp_keepalives_interval': '30',
-                'tcp_keepalives_count': '3'
+                'application_name': 'knowledgebot_configuration',
+                'tcp_keepalives_idle': '30',  # Shorter keepalives for Railway
+                'tcp_keepalives_interval': '10',
+                'tcp_keepalives_count': '3',
+                'connect_timeout': '10',  # Connection timeout
+                'statement_timeout': '30000'  # 30 second statement timeout
             }
         }
         self._last_health_check = 0
@@ -60,9 +68,17 @@ class DatabaseManager:
 
     @retry(
         stop=stop_after_attempt(5),
-        wait=wait_exponential(multiplier=2, min=1, max=10),
-        retry=lambda e: isinstance(e, (ConnectionRefusedError, OSError, asyncpg.exceptions.ConnectionDoesNotExistError, asyncpg.exceptions.InterfaceError)),
-        before_sleep=lambda rs: logger.warning(f"⏳ DB connect retry {rs.attempt_number}/5...")
+        wait=wait_exponential(multiplier=1, min=1, max=8),  # Faster retries for Railway
+        retry=lambda e: isinstance(e, (
+            ConnectionRefusedError, 
+            OSError, 
+            asyncpg.exceptions.ConnectionDoesNotExistError, 
+            asyncpg.exceptions.InterfaceError,
+            asyncpg.exceptions.ConnectionFailureError,
+            asyncpg.exceptions.PostgresConnectionError,
+            ConnectionResetError
+        )),
+        before_sleep=lambda rs: logger.warning(f"⏳ DB connect retry {rs.attempt_number}/5 after {rs.outcome.exception()}")
     )
     async def _create_pool(self):
         """Internal method to create the pool."""
@@ -117,13 +133,19 @@ class DatabaseManager:
 
         self._last_health_check = now
         try:
-            async with self._pool.acquire(timeout=5.0) as conn:
+            async with self._pool.acquire(timeout=3.0) as conn:  # Shorter timeout
                 await conn.execute("SELECT 1")
-        except Exception as e:
-            logger.warning(f"⚠️ DB pool health check failed: {e}. Attempting recovery...")
+        except (asyncpg.exceptions.ConnectionFailureError, 
+                asyncpg.exceptions.InterfaceError,
+                ConnectionResetError,
+                OSError) as e:
+            logger.warning(f"⚠️ DB pool health check failed ({type(e).__name__}: {e}). Attempting recovery...")
             async with self._lock:
                 await self.close()
                 await self._create_pool()
+        except Exception as e:
+            logger.error(f"❌ Unexpected DB health check error: {e}")
+            # Don't recreate pool for unexpected errors, just log
 
     @asynccontextmanager
     async def connection(self):
