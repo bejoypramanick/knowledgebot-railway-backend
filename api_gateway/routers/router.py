@@ -146,19 +146,32 @@ async def generic_proxy_handler(request: Request, path: str):
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             # Make the request to the appropriate service
+            logger.info(f"🌐 Making {request.method} request to: {full_url}")
+            
             if request.method == "GET":
+                logger.info(f"📥 Processing GET request")
                 response = await client.get(full_url, headers=headers, params=request.query_params)
             elif request.method == "POST":
-                body = await request.json()
-                response = await client.post(full_url, json=body, headers=headers)
+                logger.info(f"📤 Processing POST request")
+                try:
+                    body = await request.json()
+                    logger.info(f"📤 POST body: {body}")
+                    response = await client.post(full_url, json=body, headers=headers)
+                except Exception as json_error:
+                    logger.error(f"❌ Error parsing POST body: {json_error}")
+                    raise HTTPException(status_code=400, detail="Invalid JSON in request body")
             elif request.method == "PUT":
+                logger.info(f"📝 Processing PUT request")
                 body = await request.json()
                 response = await client.put(full_url, json=body, headers=headers)
             elif request.method == "DELETE":
+                logger.info(f"🗑️ Processing DELETE request")
                 response = await client.delete(full_url, headers=headers)
             else:
+                logger.error(f"❌ Unsupported method: {request.method}")
                 raise HTTPException(status_code=405, detail="Method not allowed")
             
+            logger.info(f"✅ Response status: {response.status_code}")
             return Response(
                 content=response.content,
                 status_code=response.status_code,
