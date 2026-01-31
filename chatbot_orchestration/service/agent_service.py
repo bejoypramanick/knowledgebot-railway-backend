@@ -6,8 +6,8 @@ from google.genai import types
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 
-from chatbot_orchestration.dao.chat_dao import ChatDAO as SharedChatDAO
-from ..dao.chat_dao import ChatDAO as LocalChatDAO
+from chatbot_orchestration.dao.chat_dao import LocalChatDAO
+from ..dao.chat_dao import SharedChatDAO
 from chatbot_orchestration.core.logging_config import get_railway_logger
 
 from ..core.ai import MODEL_NAME, get_genai_client
