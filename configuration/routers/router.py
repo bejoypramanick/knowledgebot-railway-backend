@@ -49,6 +49,18 @@ async def get_version():
         "timestamp": "2026-01-31T13:28:00Z"
     }
 
+@router.get("/test")
+async def test_endpoint():
+    """Simple test endpoint without authentication"""
+    correlation_id = get_correlation_id()
+    logger.info(f"🔍 [{correlation_id}] TEST ENDPOINT CALLED - SERVICE IS WORKING!")
+    return {
+        "message": "Configuration service is working!",
+        "correlation_id": correlation_id,
+        "version": "2.2",
+        "timestamp": "2026-01-31T13:35:00Z"
+    }
+
 # Simple function to get current user from request state or headers (set by API Gateway middleware)
 async def get_current_user(request: Request):
     """Get current user from request state or headers (set by API Gateway middleware)"""
