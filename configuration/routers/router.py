@@ -389,7 +389,7 @@ async def generate_unique_id():
 async def get_performance_metrics():
     """Get performance metrics"""
     try:
-        metrics = await performance_service.get_metrics()
+        metrics = await performance_service.get_performance_metrics()
         return {"success": True, "data": metrics}
     except Exception as e:
         logger.error(f"Error getting metrics: {e}")
