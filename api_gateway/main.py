@@ -33,6 +33,18 @@ except ImportError:
     # Fallback if running in different context
     config_router = None
     logger.warning("Could not import configuration router - running in standalone mode")
+try:
+    from knowledgebase_ingestion.routers import router as knowledgebase_router
+except ImportError:
+    # Fallback if running in different context
+    knowledgebase_router = None
+    logger.warning("Could not import knowledgebase_ingestion router - running in standalone mode")
+try:
+    from website_crawling.routers import router as webcrawl_router
+except ImportError:
+    # Fallback if running in different context
+    webcrawl_router = None
+    logger.warning("Could not import website_crawling router - running in standalone mode")
 from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
 from api_gateway.core.correlation_middleware import CorrelationIDMiddleware
@@ -190,6 +202,10 @@ if chat_router:
     app.include_router(chat_router) 
 if config_router:
     app.include_router(config_router) 
+if knowledgebase_router:
+    app.include_router(knowledgebase_router) 
+if webcrawl_router:
+    app.include_router(webcrawl_router) 
 
 # Add app-level endpoints
 @app.get("/")
