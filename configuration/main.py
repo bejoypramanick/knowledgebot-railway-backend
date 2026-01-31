@@ -6,10 +6,11 @@ import sys
 import os
 
 # VERY EARLY LOGGING - Before any other imports
-print("🚀 CONFIGURATION SERVICE: STARTING EXECUTION")
+print("🚀 CONFIGURATION SERVICE: STARTING EXECUTION - VERSION 2.2")
 print(f"🚀 Python version: {sys.version}")
 print(f"🚀 Working directory: {os.getcwd()}")
 print(f"🚀 Script location: {__file__}")
+print("🚀 FORCING RAILWAY REDEPLOY - ENHANCED DEBUGGING ACTIVE")
 
 try:
     print("🚀 IMPORTING FASTAPI...")
