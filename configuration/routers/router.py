@@ -69,7 +69,7 @@ token_usage_service = TokenUsageService()
 async def get_chatbot_config():
     """Get complete chatbot configuration"""
     try:
-        config = await config_service.get_chatbot_config()
+        config = await configuration_service.get_chatbot_config_with_transform()
         return {"success": True, "data": config}
     except Exception as e:
         logger.error(f"Error getting chatbot config: {e}")
@@ -79,12 +79,34 @@ async def get_chatbot_config():
 async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
     """Save chatbot configuration"""
     try:
-        # Use default user since no auth
-        default_user = {"email": "admin@example.com"}
-        result = await config_service.save_chatbot_config(config, default_user)
-        return {"success": True, "message": "Configuration saved successfully"}
+        await configuration_service.save_chatbot_config(config.dict())
+        return {"success": True, "message": "Chatbot configuration saved successfully"}
     except Exception as e:
         logger.error(f"Error saving chatbot config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =================================
+# WIDGET CONFIGURATION ENDPOINTS
+# =================================
+
+@router.get("/widget")
+async def get_widget_config():
+    """Get widget configuration"""
+    try:
+        config = await configuration_service.get_widget_config_with_transform()
+        return {"success": True, "data": config}
+    except Exception as e:
+        logger.error(f"Error getting widget config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/widget")
+async def update_widget_config(config: WidgetConfigRequest, request: Request):
+    """Update widget configuration"""
+    try:
+        await configuration_service.update_widget_config(config.dict())
+        return {"success": True, "message": "Widget configuration updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating widget config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
