@@ -5,6 +5,47 @@ Ensures logs are properly formatted and visible in Railway deployment
 import logging
 import os
 import sys
+from contextvars import ContextVar
+from typing import Optional
+
+
+# Context variable for correlation ID
+correlation_id_context: ContextVar[Optional[str]] = ContextVar('correlation_id', default=None)
+
+
+class CorrelationIDFormatter(logging.Formatter):
+    """
+    Custom formatter that automatically includes correlation ID in log messages.
+    """
+    
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    
+    def format(self, record):
+        # Get correlation ID from context
+        correlation_id = correlation_id_context.get()
+        
+        # Add correlation ID to the record if available
+        if correlation_id:
+            record.correlation_id = correlation_id
+            # Modify the message to include correlation ID
+            if hasattr(record, 'msg') and record.msg:
+                if isinstance(record.msg, str) and not record.msg.startswith(f'[{correlation_id}]'):
+                    record.msg = f'[{correlation_id}] {record.msg}'
+        else:
+            record.correlation_id = 'no-correlation-id'
+        
+        return super().format(record)
+
+
+def set_correlation_id(correlation_id: str):
+    """Set correlation ID in context for current request."""
+    correlation_id_context.set(correlation_id)
+
+
+def get_correlation_id() -> Optional[str]:
+    """Get correlation ID from context."""
+    return correlation_id_context.get()
 
 
 def setup_railway_logging(service_name: str, level: str = "INFO") -> logging.Logger:
@@ -13,7 +54,7 @@ def setup_railway_logging(service_name: str, level: str = "INFO") -> logging.Log
     
     Railway captures stdout/stderr, so we need to:
     1. Configure logging to output to stdout
-    2. Use Railway-compatible log format
+    2. Use Railway-compatible log format with correlation ID
     3. Set appropriate log levels
     4. Ensure all loggers propagate to root
     
@@ -40,8 +81,13 @@ def setup_railway_logging(service_name: str, level: str = "INFO") -> logging.Log
     logger = logging.getLogger(service_name)
     logger.setLevel(numeric_level)
     
-    # Logger will use root logger's handler configured via basicConfig
-    # No additional handler needed to prevent duplicates
+    # Replace the root handler with our correlation ID formatter
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        handler.setFormatter(CorrelationIDFormatter(
+            '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        ))
     
     # Log initialization
     logger.info(f"🚀 Railway logging initialized for service: {service_name}")
@@ -53,7 +99,7 @@ def configure_all_loggers(level: str = "INFO") -> None:
     """
     Configure all common loggers used in the application for Railway.
     
-    This ensures consistent logging across all modules.
+    This ensures consistent logging across all modules with correlation ID support.
     """
     # Common logger names used throughout the application
     logger_names = [
@@ -87,17 +133,17 @@ def configure_all_loggers(level: str = "INFO") -> None:
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, level.upper(), logging.INFO))
     
-    # Add stdout handler to root logger
+    # Add stdout handler to root logger with correlation ID formatter
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(getattr(logging, level.upper(), logging.INFO))
-    formatter = logging.Formatter(
+    formatter = CorrelationIDFormatter(
         '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     handler.setFormatter(formatter)
     root_logger.addHandler(handler)
     
-    print(f"✅ Configured {len(logger_names)} loggers for Railway deployment")
+    print(f"✅ Configured {len(logger_names)} loggers for Railway deployment with correlation ID support")
 
 def get_railway_logger(name: str) -> logging.Logger:
     """
