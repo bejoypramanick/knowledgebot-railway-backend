@@ -50,39 +50,43 @@ class ChatbotDAO:
                     logger.log_db_query(query, params, result)
                     logger.info(f"Updated chatbot metadata: {kwargs}")
         except Exception as e:
-            logger.log_db_query("UPDATE configuration_metadata", kwargs, error=e)
+            logger.log_db_query(query, None, error=e)
             raise
 
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
         """Get widget configuration."""
+        query = """
+            SELECT id, primary_color, chat_icon_url, chat_icon_zoom, 
+                   display_chatbot, align_bubble, auto_show_duration,
+                   chat_bubble_color, profile_picture_url, profile_zoom,
+                   chat_header, chat_welcome_message, suggested_messages
+            FROM widget_config
+            WHERE id = 1
+        """
         try:
             async with get_db_connection() as conn:
-                return await conn.fetchrow("""
-                    SELECT id, primary_color, chat_icon_url, chat_icon_zoom, 
-                           display_chatbot, align_bubble, auto_show_duration,
-                           chat_bubble_color, profile_picture_url, profile_zoom,
-                           keep_showing_suggested, use_primary_for_header,
-                           created_at, updated_at
-                    FROM widget_configuration
-                    WHERE id = 1
-                """)
+                result = await conn.fetchrow(query)
+                logger.log_db_query(query, None, result)
+                return result
         except Exception as e:
-            logger.error(f"Error fetching widget config: {e}")
+            logger.log_db_query(query, None, error=e)
             return None
 
     async def get_suggested_messages(self) -> List[str]:
         """Get suggested messages for the widget."""
+        query = """
+            SELECT message_text 
+            FROM widget_suggested_messages 
+            WHERE is_active = true
+            ORDER BY display_order
+        """
         try:
             async with get_db_connection() as conn:
-                records = await conn.fetch("""
-                    SELECT message_text 
-                    FROM widget_suggested_messages 
-                    WHERE is_active = true
-                    ORDER BY display_order ASC
-                """)
+                records = await conn.fetch(query)
+                logger.log_db_query(query, None, records)
                 return [record['message_text'] for record in records]
         except Exception as e:
-            logger.error(f"Error fetching suggested messages: {e}")
+            logger.log_db_query(query, None, error=e)
             return []
 
     async def update_widget_config(self, config_data: Dict[str, Any]):
@@ -101,27 +105,32 @@ class ChatbotDAO:
                         params.append(value)
                 
                 if set_clauses:
-                    await conn.execute(f"""
+                    query = f"""
                         UPDATE widget_config 
                         SET {', '.join(set_clauses)}, updated_at = NOW()
                         WHERE id = 1
-                    """, *params)
+                    """
+                    result = await conn.execute(query, *params)
+                    logger.log_db_query(query, params, result)
                     logger.info(f"Updated widget config: {config_data}")
         except Exception as e:
-            logger.error(f"Error updating widget config: {e}")
+            logger.log_db_query("UPDATE widget_config", config_data, error=e)
             raise
 
     async def get_notification_settings(self) -> List[Dict[str, Any]]:
         """Get notification settings."""
+        query = """
+            SELECT setting_name, is_enabled, description
+            FROM notification_settings
+            ORDER BY setting_name
+        """
         try:
             async with get_db_connection() as conn:
-                return await conn.fetch("""
-                    SELECT setting_name, is_enabled, description
-                    FROM notification_settings
-                    ORDER BY setting_name
-                """)
+                result = await conn.fetch(query)
+                logger.log_db_query(query, None, result)
+                return [dict(row) for row in result]
         except Exception as e:
-            logger.error(f"Error fetching notification settings: {e}")
+            logger.log_db_query(query, None, error=e)
             return []
 
     async def get_security_settings(self) -> List[Dict[str, Any]]:
@@ -160,31 +169,44 @@ class ChatbotDAO:
             return None
 
     async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'text'):
-        async with get_db_connection() as conn:
-            query = """
-                INSERT INTO security_settings (setting_name, setting_value, setting_type)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (setting_name) DO UPDATE SET
-                setting_value = EXCLUDED.setting_value, updated_at = NOW()
-            """
-            params = [name, value, setting_type]
-            await conn.execute(query, *params)
+        """Upsert security setting."""
+        query = """
+            INSERT INTO security_settings (setting_name, setting_value, setting_type)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (setting_name) DO UPDATE SET
+            setting_value = EXCLUDED.setting_value, updated_at = NOW()
+        """
+        params = [name, value, setting_type]
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, params, result)
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            raise
 
     async def upsert_persona(self, persona_name: str, system_prompt: str, is_active: bool = True):
-        async with get_db_connection() as conn:
-            async with conn.transaction():
-                if is_active:
-                    deactivate_query = "UPDATE persona_configurations SET is_active = false"
-                    await conn.execute(deactivate_query)
-                
-                upsert_query = """
-                    INSERT INTO persona_configurations (persona_name, system_prompt, is_active)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (persona_name) DO UPDATE SET
-                    system_prompt = EXCLUDED.system_prompt, is_active = EXCLUDED.is_active, updated_at = NOW()
-                """
-                params = [persona_name, system_prompt, is_active]
-                await conn.execute(upsert_query, *params)
+        """Upsert persona configuration."""
+        try:
+            async with get_db_connection() as conn:
+                async with conn.transaction():
+                    if is_active:
+                        deactivate_query = "UPDATE persona_configurations SET is_active = false"
+                        deactivate_result = await conn.execute(deactivate_query)
+                        logger.log_db_query(deactivate_query, None, deactivate_result)
+                    
+                    upsert_query = """
+                        INSERT INTO persona_configurations (persona_name, system_prompt, is_active)
+                        VALUES ($1, $2, $3)
+                        ON CONFLICT (persona_name) DO UPDATE SET
+                        system_prompt = EXCLUDED.system_prompt, is_active = EXCLUDED.is_active, updated_at = NOW()
+                    """
+                    params = [persona_name, system_prompt, is_active]
+                    result = await conn.execute(upsert_query, *params)
+                    logger.log_db_query(upsert_query, params, result)
+        except Exception as e:
+            logger.log_db_query("UPSERT persona_configurations", {"persona_name": persona_name, "system_prompt": system_prompt, "is_active": is_active}, error=e)
+            raise
 
     async def upsert_notification_setting_with_desc(self, name: str, enabled: bool, description: str):
         async with get_db_connection() as conn:
@@ -211,56 +233,63 @@ class ChatbotDAO:
 
     async def create_human_agent(self, email: str) -> int:
         """Create a new human agent and return the ID. Returns existing ID if email already exists."""
-        async with get_db_connection() as conn:
-            # Try to insert first
-            try:
-                return await conn.fetchval(
+        try:
+            async with get_db_connection() as conn:
+                # Try to insert first
+                try:
+                    insert_query = """
+                        INSERT INTO human_agents (email)
+                        VALUES ($1)
+                        RETURNING id
                     """
-                    INSERT INTO human_agents (email)
-                    VALUES ($1)
-                    RETURNING id
-                    """,
-                    email
-                )
-            except asyncpg.exceptions.UniqueViolationError:
-                # If email already exists, return the existing ID
-                return await conn.fetchval(
+                    result = await conn.fetchval(insert_query, email)
+                    logger.log_db_query(insert_query, {"email": email}, result)
+                    return result
+                except asyncpg.exceptions.UniqueViolationError:
+                    # If email already exists, return the existing ID
+                    select_query = """
+                        SELECT id FROM human_agents WHERE email = $1
                     """
-                    SELECT id FROM human_agents WHERE email = $1
-                    """,
-                    email
-                )
+                    result = await conn.fetchval(select_query, email)
+                    logger.log_db_query(select_query, {"email": email}, result)
+                    return result
+        except Exception as e:
+            logger.log_db_query("CREATE/SELECT human_agents", {"email": email}, error=e)
+            raise
 
     async def delete_human_agent(self, email: str):
         """Delete a human agent by email."""
-        async with get_db_connection() as conn:
-            await conn.execute(
-                "DELETE FROM human_agents WHERE email = $1",
-                email
-            )
+        query = "DELETE FROM human_agents WHERE email = $1"
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, email)
+                logger.log_db_query(query, {"email": email}, result)
+        except Exception as e:
+            logger.log_db_query(query, {"email": email}, error=e)
+            raise
 
     async def get_human_agents(self) -> List[str]:
         """Get all human agent emails."""
+        query = "SELECT email FROM human_agents"
         try:
             async with get_db_connection() as conn:
-                results = await conn.fetch(
-                    "SELECT email FROM human_agents"
-                )
+                results = await conn.fetch(query)
+                logger.log_db_query(query, None, results)
                 return [row['email'] for row in results]
         except Exception as e:
-            logger.error(f"Error getting human agents: {e}")
+            logger.log_db_query(query, None, error=e)
             return []
 
     async def get_admins(self) -> List[str]:
         """Get all admin emails."""
+        query = "SELECT email FROM admins WHERE status = 'active'"
         try:
             async with get_db_connection() as conn:
-                results = await conn.fetch(
-                    "SELECT email FROM admins WHERE status = 'active'"
-                )
+                results = await conn.fetch(query)
+                logger.log_db_query(query, None, results)
                 return [row['email'] for row in results]
         except Exception as e:
-            logger.error(f"Error getting admins: {e}")
+            logger.log_db_query(query, None, error=e)
             return []
 
     async def sync_admin_emails(self, ui_emails: List[str]) -> Dict[str, List[str]]:
