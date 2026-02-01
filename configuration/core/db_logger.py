@@ -4,10 +4,9 @@ Provides consistent logging for all database operations across microservices
 """
 from typing import Any, List, Optional, Union
 import asyncpg
+import logging
 
-from .logging_config import get_railway_logger
-
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 def log_query(query: str, params: Optional[List[Any]] = None, result: Optional[Any] = None, operation: str = "EXECUTE"):
     """Log database query with parameters and results"""
