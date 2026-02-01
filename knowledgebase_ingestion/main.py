@@ -23,6 +23,7 @@ from knowledgebase_ingestion.core.config import settings
 from knowledgebase_ingestion.core.utils import (log_endpoint_request,
                           register_fastapi_exception_handlers,
                           setup_global_exception_logging)
+from shared.middleware import CorrelationIDMiddleware
 
 setup_global_exception_logging("knowledgebase_ingestion")
 
