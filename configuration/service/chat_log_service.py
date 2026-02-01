@@ -6,9 +6,9 @@ from fastapi import HTTPException
 
 from configuration.dao.chat_log_dao import ChatLogDAO
 from configuration.dao.auth_dao import AuthDAO
-from configuration.core.logging_config import get_railway_logger
+from configuration.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("chat_log_service", "configuration")
 
 class ChatLogService:
     """Service layer for chat log operations"""

@@ -4,11 +4,11 @@ Provides business logic for authentication operations
 """
 from typing import Any, Dict, List, Optional
 
-from configuration.core.logging_config import get_railway_logger
+from configuration.core.otel_logger import get_otel_logger
 
 from ..dao.auth_dao import AuthDAO
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("auth_service", "configuration")
 
 class AuthService:
     """Service layer for authentication"""

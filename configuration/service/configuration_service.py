@@ -2,10 +2,11 @@
 Configuration Service for Configuration Management
 Provides business logic layer between routers and DAO
 """
+from typing import Any, Dict, List, Optional
 
-from configuration.core.logging_config import get_railway_logger
+from configuration.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("configuration_service", "configuration")
 
 class ConfigurationService:
     """Service layer for configuration operations"""
