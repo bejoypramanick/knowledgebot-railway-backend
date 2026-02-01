@@ -16,9 +16,7 @@ from fastapi.responses import JSONResponse
 from starlette.status import HTTP_503_SERVICE_UNAVAILABLE
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from website_crawling.core.logging_config import get_railway_logger
-
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 # Enhanced retry configuration for Railway network issues
@@ -181,8 +179,8 @@ def setup_global_exception_logging(service_name: str) -> None:
     - asyncio event loop exception handler to capture async errors
     - SIGTERM / SIGINT handlers that dump python tracebacks for diagnostics
     """
-    # Use Railway-compatible logger
-    svc_logger = get_railway_logger(service_name)
+    # Use standard logger with OpenTelemetry integration
+    svc_logger = logging.getLogger(service_name)
 
     def _excepthook(exc_type, exc_value, exc_tb):
         # Log an uncaught exception with full traceback

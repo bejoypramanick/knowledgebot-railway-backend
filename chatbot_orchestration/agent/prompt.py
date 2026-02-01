@@ -1,11 +1,10 @@
 from typing import Optional
-
-from chatbot_orchestration.core.logging_config import get_railway_logger
+import logging
 
 from ..core.ai import MODEL_NAME
 from ..core.cache import cache_system_prompt, get_cached_system_prompt
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> str:
     """Generate dynamic system prompt with intelligent data source routing."""
