@@ -42,8 +42,6 @@ async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     try:
         settings = get_settings()
-        # Startup
-        instrument_fastapi(app, "api-gateway")
         logger.info(f"🚀 API Gateway ({settings.service_identity}) started successfully")
         yield
         # Shutdown
@@ -59,6 +57,9 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+# Instrument FastAPI for OpenTelemetry immediately after app creation
+instrument_fastapi(app, "api-gateway")
 
 # Add Firebase authentication middleware
 class FirebaseAuthMiddleware(BaseHTTPMiddleware):

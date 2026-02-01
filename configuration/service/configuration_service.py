@@ -373,7 +373,8 @@ class ConfigurationService:
             # Get all available personas (with fallback)
             try:
                 personas_service = PersonasService()
-                all_personas = await personas_service.get_all_personas()
+                personas_response = await personas_service.get_all_personas()
+                all_personas = personas_response.get('personas', [])
                 
                 # Select the first persona (most recent) as default if no active persona is set
                 if not persona and all_personas:
@@ -391,6 +392,12 @@ class ConfigurationService:
                     'is_active': True,
                     'system_prompt': 'You are KnowledgeBot, a helpful AI assistant specialized in knowledge management. Your role is to help users find information, answer questions based on available documents, and provide clear, accurate responses. Be friendly, professional, and always try to be helpful.'
                 }]
+            
+            # Wrap personas in expected format for frontend
+            available_personas = {
+                "personas": all_personas,
+                "total_count": len(all_personas)
+            }
 
             # Build final configuration
             data = {
@@ -405,7 +412,7 @@ class ConfigurationService:
                     "backup_logs": False  # This was removed from old schema, keeping default
                 },
                 "persona": persona_config,
-                "available_personas": all_personas,
+                "available_personas": available_personas,
                 "llm_tokens": llm_tokens
             }
 
