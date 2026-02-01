@@ -5,6 +5,8 @@ Provides business logic layer between routers and DAO
 from typing import Any, Dict, List, Optional
 
 from configuration.core.otel_logger import get_otel_logger
+from configuration.dao.chatbot_dao import ChatbotDAO
+from configuration.dao.auth_dao import AuthDAO
 
 logger = get_otel_logger("configuration_service", "configuration")
 
@@ -12,7 +14,16 @@ class ConfigurationService:
     """Service layer for configuration operations"""
     
     def __init__(self):
-        pass  # Service manages its own dependencies
+        self._chatbot_dao = ChatbotDAO()
+        self._auth_dao = AuthDAO()
+    
+    async def get_metadata(self) -> Optional[Dict[str, Any]]:
+        """Get chatbot metadata"""
+        try:
+            return await self._chatbot_dao.get_metadata()
+        except Exception as e:
+            logger.error(f"Error getting metadata: {e}")
+            return None
     
     async def update_metadata(self, **kwargs):
         """Update chatbot metadata"""
