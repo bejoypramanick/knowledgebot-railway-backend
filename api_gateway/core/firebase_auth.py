@@ -5,12 +5,11 @@ Verifies Firebase Auth tokens and manages user data in Firestore.
 import os
 from typing import Any, Dict, Optional
 
+import logging
 import firebase_admin
 from firebase_admin import auth, credentials, firestore
 
-from api_gateway.core.logging_config import get_railway_logger
-
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # Global Firebase app instance (for Auth and Firestore)
 _firebase_app = None

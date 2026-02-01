@@ -3,19 +3,16 @@ Consolidated API Gateway Router
 All API Gateway endpoints in one file for easier debugging
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse, Response
-from typing import Dict, List, Any, Optional
 import logging
-import json
-import time
-import httpx
+from typing import Dict, Any
+from httpx import AsyncClient
 
 from ..core.firebase_auth import verify_firebase_token, get_user_from_firestore
 from ..core.config import get_settings
-from ..core.logging_config import get_railway_logger
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # =================================

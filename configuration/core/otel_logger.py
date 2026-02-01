@@ -27,33 +27,23 @@ class OpenTelemetryLogger:
         return None
     
     def _log_with_context(self, level: int, message: str, extra: Dict[str, Any] = None):
-        """Log message with OpenTelemetry context"""
-        span_context = self._get_span_context()
-        
-        # Create log prefix with trace context for Railway console
-        prefix = f"[{self.service_name}]"
-        if span_context:
-            prefix += f"[trace:{span_context['trace_id'][:8]}]"
-        
-        # Format message with context
-        formatted_message = f"{prefix} {message}"
+        """Log message with OpenTelemetry context using standard logging"""
+        # Use the standard logger which will automatically include otelTraceID and otelSpanID
+        # due to the LoggingInstrumentor setup in shared/telemetry.py
+        self.logger.log(level, message, extra=extra or {})
         
         # Add span attributes if span exists
-        if span_context:
-            span = trace.get_current_span()
-            if span:
-                # Add log entry as span event
-                span.add_event(
-                    name="log",
-                    attributes={
-                        "log.level": logging.getLevelName(level),
-                        "log.message": message,
-                        "log.logger": self.logger.name
-                    }
-                )
-        
-        # Log with formatted message
-        self.logger.log(level, formatted_message)
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            # Add log entry as span event
+            span.add_event(
+                name="log",
+                attributes={
+                    "log.level": logging.getLevelName(level),
+                    "log.message": message,
+                    "log.logger": self.logger.name
+                }
+            )
     
     def info(self, message: str, **kwargs):
         """Info level log with OTel context"""

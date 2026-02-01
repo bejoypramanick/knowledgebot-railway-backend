@@ -7,6 +7,7 @@ import signal
 import sys
 import time
 import traceback
+from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
 import httpx
@@ -19,7 +20,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from api_gateway.core.logging_config import get_railway_logger
 from shared.correlation_id import get_correlation_id, add_correlation_id_headers
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 # Enhanced retry configuration for Railway network issues
@@ -200,8 +201,8 @@ def setup_global_exception_logging(service_name: str) -> None:
     - asyncio event loop exception handler to capture async errors
     - SIGTERM / SIGINT handlers that dump python tracebacks for diagnostics
     """
-    # Use Railway-compatible logger
-    svc_logger = get_railway_logger(service_name)
+    # Use standard logger with OpenTelemetry integration
+    svc_logger = logging.getLogger(service_name)
 
     def _excepthook(exc_type, exc_value, exc_tb):
         # Log an uncaught exception with full traceback

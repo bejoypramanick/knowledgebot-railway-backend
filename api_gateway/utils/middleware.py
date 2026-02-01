@@ -2,9 +2,8 @@ import time
 
 from fastapi import Request
 
-from api_gateway.core.logging_config import get_railway_logger
-
-logger = get_railway_logger(__name__)
+import logging
+logger = logging.getLogger(__name__)
 
 async def log_requests_middleware(request: Request, call_next):
     """Middleware to log all incoming requests with timing and status information."""
