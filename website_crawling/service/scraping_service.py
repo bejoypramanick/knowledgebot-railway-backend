@@ -5,11 +5,11 @@ Provides business logic for website scraping operations
 import time
 from typing import Any, Dict, List, Optional
 
-from website_crawling.core.logging_config import get_railway_logger
+from website_crawling.core.otel_logger import get_otel_logger
 
 from ..dao.scraping_dao import ScrapingDAO
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("scraping_service", "website-crawling")
 
 class ScrapingService:
     """Service layer for website scraping operations"""

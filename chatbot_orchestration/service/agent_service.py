@@ -7,12 +7,12 @@ from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 
 from chatbot_orchestration.dao.chat_dao import ChatDAO
-import logging
+from chatbot_orchestration.core.otel_logger import get_otel_logger
 
 from ..core.ai import MODEL_NAME, get_genai_client
 from ..core.dependencies import ChatSessionDeps
 
-logger = logging.getLogger("agent_service")
+logger = get_otel_logger("agent_service", "chatbot-orchestration")
 
 class PydanticAIGatewayService:
     """ Service class for Pydantic AI integration with Gemini FileSearch """

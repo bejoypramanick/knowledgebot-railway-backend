@@ -2,9 +2,9 @@ import asyncio
 import os
 import tempfile
 
-from knowledgebase_ingestion.core.logging_config import get_railway_logger
+from website_crawling.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("ingestion_service", "website-crawling")
 
 async def process_with_gemini(tmp_path: str, file_display_name: str, original_filename: str, mime_type: str, user_email: str = None):
     """Process file with Gemini - placeholder implementation"""

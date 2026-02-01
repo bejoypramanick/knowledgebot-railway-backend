@@ -3,6 +3,6 @@ Website Crawler Service
 Handles website crawling operations
 """
 
-from website_crawling.core.logging_config import get_railway_logger
+from website_crawling.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("crawler_service", "website-crawling")

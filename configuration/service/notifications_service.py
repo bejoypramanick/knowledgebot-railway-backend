@@ -4,11 +4,11 @@ Provides business logic for notifications management operations
 """
 from typing import Any, Dict, List
 
-from configuration.core.logging_config import get_railway_logger
+from configuration.core.otel_logger import get_otel_logger
 
 from ..dao.notifications_dao import NotificationsDAO
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("notifications_service", "configuration")
 
 class NotificationsService:
     """Service layer for notifications management"""

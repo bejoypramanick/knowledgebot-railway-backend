@@ -3,9 +3,9 @@ File Service Layer for Chatbot Orchestration
 Provides business logic for file operations
 """
 
-from chatbot_orchestration.core.logging_config import get_railway_logger
+from chatbot_orchestration.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("file_service", "chatbot-orchestration")
 
 class FileService:
     """Service layer for file operations"""

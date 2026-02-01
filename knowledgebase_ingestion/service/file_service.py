@@ -5,9 +5,9 @@ Provides business logic for file operations
 from typing import Any, Dict, Optional
 
 from knowledgebase_ingestion.core import db
-from knowledgebase_ingestion.core.logging_config import get_railway_logger
+from knowledgebase_ingestion.core.otel_logger import get_otel_logger
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("file_service", "knowledgebase-ingestion")
 
 class FileService:
     """Service layer for file operations"""

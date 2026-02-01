@@ -4,11 +4,11 @@ Provides business logic for persona management operations
 """
 from typing import Any, Dict, List, Optional
 
-from configuration.core.logging_config import get_railway_logger
+from configuration.core.otel_logger import get_otel_logger
 
 from ..dao.personas_dao import PersonasDAO
 
-logger = get_railway_logger(__name__)
+logger = get_otel_logger("personas_service", "configuration")
 
 class PersonasService:
     """Service layer for personas management"""
