@@ -1,15 +1,14 @@
 """Shared database utilities for PostgreSQL connections."""
 import asyncio
 import os
+import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import asyncpg
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from configuration.core.logging_config import get_railway_logger
-
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     """Robust database connection pool manager with health checks and auto-recovery."""
