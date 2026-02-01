@@ -8,6 +8,7 @@ from typing import Dict, List, Any, Optional
 import logging
 import json
 
+from ..service.configuration_service import ConfigurationService
 from ..service.personas_service import PersonasService
 from ..service.auth_service import AuthService
 from ..service.chat_log_service import ChatLogService
