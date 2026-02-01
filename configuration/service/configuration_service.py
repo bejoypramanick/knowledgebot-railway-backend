@@ -324,13 +324,13 @@ class ConfigurationService:
                 "error_alerts_enabled": False,
                 "feedback_requests_enabled": True
             }
-            for row in notification_rows:
-                if row['setting_name'] == 'user_interactions_enabled':
-                    notifications['user_interactions_enabled'] = row['is_enabled']
-                elif row['setting_name'] == 'error_alerts_enabled':
-                    notifications['error_alerts_enabled'] = row['is_enabled']
-                elif row['setting_name'] == 'feedback_requests_enabled':
-                    notifications['feedback_requests_enabled'] = row['is_enabled']
+            #for row in notification_rows:
+                #if row['setting_name'] == 'user_interactions_enabled':
+                    #notifications['user_interactions_enabled'] = row['is_enabled']
+                #elif row['setting_name'] == 'error_alerts_enabled':
+                    #notifications['error_alerts_enabled'] = row['is_enabled']
+                #elif row['setting_name'] == 'feedback_requests_enabled':
+                    #notifications['feedback_requests_enabled'] = row['is_enabled']
 
             # Build security settings dict
             security = {

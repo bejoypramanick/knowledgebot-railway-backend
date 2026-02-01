@@ -94,20 +94,6 @@ feedback_service = FeedbackService()
 token_usage_service = TokenUsageService()
 
 # =================================
-# DEBUG ENDPOINTS
-# =================================
-
-@router.get("/debug/test")
-async def debug_test():
-    """Test endpoint to verify logging is working"""
-    logger.info("🔍 Debug test endpoint called - logging is working!")
-    return {
-        "success": True,
-        "message": "Debug test successful",
-        "timestamp": "2026-01-31T14:40:00Z"
-    }
-
-# =================================
 # CHATBOT CONFIGURATION ENDPOINTS
 # =================================
 
