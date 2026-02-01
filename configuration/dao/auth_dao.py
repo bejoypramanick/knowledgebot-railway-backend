@@ -2,12 +2,12 @@
 Authentication Data Access Object for Configuration Service
 Handles database operations for user authentication and role management
 """
-import logging
 from typing import Any, Dict, List, Optional
 
 from configuration.core.db import get_db_connection
+from configuration.core.otel_logger import get_otel_logger
 
-logger = logging.getLogger("auth_dao")
+logger = get_otel_logger("auth_dao", "configuration")
 
 class AuthDAO:
     def __init__(self):
