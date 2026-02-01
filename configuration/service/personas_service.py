@@ -28,11 +28,11 @@ class PersonasService:
     async def get_all_personas(self) -> Dict[str, Any]:
         """Get all available personas with business logic"""
         try:
-            active_personas = await self.personas_dao.get_all_personas()
+            all_personas = await self.personas_dao.get_all_personas()
             
             return {
-                "personas": active_personas,
-                "total_count": len(active_personas)
+                "personas": all_personas,
+                "total_count": len(all_personas)
             }
         except Exception as e:
             logger.error(f"Error fetching personas: {e}")

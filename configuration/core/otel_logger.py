@@ -103,7 +103,7 @@ class OpenTelemetryLogger:
         if error:
             self.error(f"DB Query Error: {query[:100]}... | Error: {error}")
         else:
-            self.info(f"DB Query: {query[:100]}... | Rows: {len(result) if result and hasattr(result, '__len__') else 'N/A'}")
+            self.info(f"DB Query: {query}... | Rows: {len(result) if result and hasattr(result, '__len__') else 'N/A'}")
 
 def get_otel_logger(name: str, service_name: str) -> OpenTelemetryLogger:
     """Get OpenTelemetry-enhanced logger for configuration service"""
