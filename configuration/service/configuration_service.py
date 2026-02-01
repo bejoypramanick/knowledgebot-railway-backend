@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from configuration.core.otel_logger import get_otel_logger
 from configuration.dao.chatbot_dao import ChatbotDAO
 from configuration.dao.auth_dao import AuthDAO
+from .personas_service import PersonasService
 
 logger = get_otel_logger("configuration_service", "configuration")
 
@@ -314,6 +315,7 @@ class ConfigurationService:
            # notification_rows = await self.get_notification_settings()
             security_rows = await self.get_security_settings()
             llm_rows = await self.get_llm_providers()
+            
             personas_service = PersonasService()
             persona = await personas_service.get_active_persona()
   
@@ -370,7 +372,6 @@ class ConfigurationService:
 
             # Get all available personas (with fallback)
             try:
-                from .personas_service import PersonasService
                 personas_service = PersonasService()
                 personas_response = await personas_service.get_personas()
                 all_personas = personas_response.get('data', {}).get('all_personas', [])
