@@ -7,7 +7,7 @@ import os
 import tempfile
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import UploadFile
 from google.genai import types
