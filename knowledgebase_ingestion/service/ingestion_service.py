@@ -14,7 +14,7 @@ from google.genai import types
 
 from knowledgebase_ingestion.core.otel_logger import get_otel_logger
 from knowledgebase_ingestion.core.ai import get_genai_client
-from knowledgebase_ingestion.schemas.models import BatchUploadItem
+from knowledgebase_ingestion.schemas.models import BatchUploadItem, BatchDeleteItem
 
 logger = get_otel_logger("ingestion_service", "knowledgebase-ingestion")
 
