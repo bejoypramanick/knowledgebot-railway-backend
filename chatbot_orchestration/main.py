@@ -25,7 +25,6 @@ async def lifespan(app: FastAPI):
     Handles startup initialization and shutdown cleanup.
     """
     # Startup
-    instrument_fastapi(app, "chatbot-orchestration")
     logger.info("🚀 Chatbot Orchestration Service starting up...")
     
     # Initialize Pydantic AI Service (and DBs lazily)
@@ -49,8 +48,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Chatbot Orchestration Service",
     version="1.0.0",
+    description="Handles chatbot logic, AI interactions, and response generation",
+    docs_url="/docs",
+    redoc_url="/redoc",
     lifespan=lifespan
 )
+
+# Instrument FastAPI for OpenTelemetry immediately after app creation
+instrument_fastapi(app, "chatbot-orchestration")
 
 # CORS Middleware
 # Allow all origins in production for simplicity, or restrict as needed

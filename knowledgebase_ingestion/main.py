@@ -31,7 +31,6 @@ setup_global_exception_logging("knowledgebase_ingestion")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
-    instrument_fastapi(app, "knowledgebase-ingestion")
     try:
         # Initialize database using centralized initializer
         if settings.railway_postgres_url:
@@ -61,6 +60,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Instrument FastAPI for OpenTelemetry immediately after app creation
+instrument_fastapi(app, "knowledgebase-ingestion")
 
 register_fastapi_exception_handlers(app, "knowledgebase_ingestion")
 

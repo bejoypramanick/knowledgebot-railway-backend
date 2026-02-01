@@ -74,7 +74,6 @@ logger.info(f"🔍 PORT being used: {PORT}")
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events with Railway fixes."""
     try:
-        instrument_fastapi(app, "configuration")
         logger.info("🚀 LIFESPAN: Starting application startup sequence")
         service_status.set_status("starting")
         logger.info("🚀 LIFESPAN: Service status set to 'starting'")
@@ -143,6 +142,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Instrument FastAPI for OpenTelemetry immediately after app creation
+instrument_fastapi(app, "configuration")
 
 # CORS middleware
 app.add_middleware(
