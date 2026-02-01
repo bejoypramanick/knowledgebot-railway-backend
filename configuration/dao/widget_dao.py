@@ -15,92 +15,95 @@ class WidgetDAO:
 
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
         """Get main widget configuration."""
+        query = """
+            SELECT
+                display_name, initial_message, auto_show_duration,
+                keep_showing_suggested, theme, primary_color,
+                use_primary_for_header, chat_bubble_color, align_bubble,
+                display_chatbot, profile_picture_url, chat_icon_url,
+                profile_picture_filename, chat_icon_filename,
+                profile_zoom, chat_icon_zoom, profile_position, chat_icon_position
+            FROM widget_configuration
+            WHERE id = 1
+        """
         try:
             async with get_db_connection() as conn:
-                return await conn.fetchrow(
-                    """
-                    SELECT
-                        display_name, initial_message, auto_show_duration,
-                        keep_showing_suggested, theme, primary_color,
-                        use_primary_for_header, chat_bubble_color, align_bubble,
-                        display_chatbot, profile_picture_url, chat_icon_url,
-                        profile_picture_filename, chat_icon_filename,
-                        profile_zoom, chat_icon_zoom, profile_position, chat_icon_position
-                    FROM widget_configuration
-                    WHERE id = 1
-                    """
-                )
+                result = await conn.fetchrow(query)
+                logger.log_db_query(query, None, result)
+                return result
         except Exception as e:
-            logger.error(f"Error fetching widget config: {e}")
+            logger.log_db_query(query, None, error=e)
             return None
 
     async def get_suggested_messages(self) -> List[str]:
         """Get suggested messages for the widget."""
+        query = """
+            SELECT message_text
+            FROM widget_suggested_messages
+            WHERE is_active = true
+            ORDER BY display_order
+        """
         try:
             async with get_db_connection() as conn:
-                rows = await conn.fetch(
-                    """
-                    SELECT message_text
-                    FROM widget_suggested_messages
-                    WHERE is_active = true
-                    ORDER BY display_order
-                    """
-                )
+                rows = await conn.fetch(query)
+                logger.log_db_query(query, None, rows)
                 return [row["message_text"] for row in rows]
         except Exception as e:
-            logger.error(f"Error fetching suggested messages: {e}")
+            logger.log_db_query(query, None, error=e)
             return []
 
     async def update_widget_config(self, config_data: Dict[str, Any]):
         """Update widget configuration."""
+        query = """
+            UPDATE widget_configuration
+            SET 
+                display_name = $1,
+                initial_message = $2,
+                auto_show_duration = $3,
+                keep_showing_suggested = $4,
+                theme = $5,
+                primary_color = $6,
+                use_primary_for_header = $7,
+                chat_bubble_color = $8,
+                align_bubble = $9,
+                display_chatbot = $10,
+                profile_picture_url = $11,
+                chat_icon_url = $12,
+                profile_picture_filename = $13,
+                chat_icon_filename = $14,
+                profile_zoom = $15,
+                chat_icon_zoom = $16,
+                profile_position = $17,
+                chat_icon_position = $18,
+                updated_at = NOW()
+            WHERE id = 1
+        """
+        params = [
+            config_data["display_name"],
+            config_data["initial_message"],
+            config_data["auto_show_duration"],
+            config_data["keep_showing_suggested"],
+            config_data["theme"],
+            config_data["primary_color"],
+            config_data["use_primary_for_header"],
+            config_data["chat_bubble_color"],
+            config_data["align_bubble"],
+            config_data["display_chatbot"],
+            config_data.get("profile_picture_url"),
+            config_data.get("chat_icon_url"),
+            config_data.get("profile_picture_filename"),
+            config_data.get("chat_icon_filename"),
+            config_data.get("profile_zoom", 1.0),
+            config_data.get("chat_icon_zoom", 1.0),
+            json.dumps(config_data.get("profile_position", {"x": 0, "y": 0})),
+            json.dumps(config_data.get("chat_icon_position", {"x": 0, "y": 0}))
+        ]
         try:
             async with get_db_connection() as conn:
-                await conn.execute(
-                    """
-                    UPDATE widget_configuration
-                    SET 
-                        display_name = $1,
-                        initial_message = $2,
-                        auto_show_duration = $3,
-                        keep_showing_suggested = $4,
-                        theme = $5,
-                        primary_color = $6,
-                        use_primary_for_header = $7,
-                        chat_bubble_color = $8,
-                        align_bubble = $9,
-                        display_chatbot = $10,
-                        profile_picture_url = $11,
-                        chat_icon_url = $12,
-                        profile_picture_filename = $13,
-                        chat_icon_filename = $14,
-                        profile_zoom = $15,
-                        chat_icon_zoom = $16,
-                        profile_position = $17,
-                        chat_icon_position = $18,
-                        updated_at = NOW()
-                    WHERE id = 1
-                    """,
-                    config_data["display_name"],
-                    config_data["initial_message"],
-                    config_data["auto_show_duration"],
-                    config_data["keep_showing_suggested"],
-                    config_data["theme"],
-                    config_data["primary_color"],
-                    config_data["use_primary_for_header"],
-                    config_data["chat_bubble_color"],
-                    config_data["align_bubble"],
-                    config_data["display_chatbot"],
-                    config_data.get("profile_picture_url"),
-                    config_data.get("chat_icon_url"),
-                    config_data.get("profile_picture_filename"),
-                    config_data.get("chat_icon_filename"),
-                    config_data.get("profile_zoom", 1.0),
-                    config_data.get("chat_icon_zoom", 1.0),
-                    json.dumps(config_data.get("profile_position", {"x": 0, "y": 0})),
-                    json.dumps(config_data.get("chat_icon_position", {"x": 0, "y": 0}))
-                )
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, config_data, result)
         except Exception as e:
-            logger.error(f"Error updating widget config: {e}")
+            logger.log_db_query(query, config_data, error=e)
             raise
 
     async def update_suggested_messages(self, messages: List[str]):
@@ -109,17 +112,18 @@ class WidgetDAO:
             async with get_db_connection() as conn:
                 async with conn.transaction():
                     # Clear existing messages
-                    await conn.execute("DELETE FROM widget_suggested_messages")
+                    delete_query = "DELETE FROM widget_suggested_messages"
+                    delete_result = await conn.execute(delete_query)
+                    logger.log_db_query(delete_query, None, delete_result)
                     
                     # Insert new messages
+                    insert_query = """
+                        INSERT INTO widget_suggested_messages (message_text, display_order, is_active)
+                        VALUES ($1, $2, true)
+                    """
                     for i, message in enumerate(messages):
-                        await conn.execute(
-                            """
-                            INSERT INTO widget_suggested_messages (message_text, display_order, is_active)
-                            VALUES ($1, $2, true)
-                            """,
-                            message, i
-                        )
+                        result = await conn.execute(insert_query, message, i)
+                        logger.log_db_query(insert_query, {"message": message, "display_order": i}, result)
         except Exception as e:
-            logger.error(f"Error updating suggested messages: {e}")
+            logger.log_db_query("update_suggested_messages", {"messages": messages}, error=e)
             raise

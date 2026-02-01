@@ -37,13 +37,19 @@ class PersonasService:
         try:
             personas = await self.personas_dao.get_all_personas()
             
-            # Filter to only active personas for general use
-            active_personas = [p for p in personas if p.get('is_active', False)]
-            
             return {
                 "personas": active_personas,
                 "total_count": len(active_personas)
             }
+        except Exception as e:
+            logger.error(f"Error fetching personas: {e}")
+            raise
+    
+    async def get_active_persona(self) -> Dict[str, Any]:
+        """Get all available personas with business logic"""
+        try:
+            persona = await self.personas_dao.get_active_persona()
+            return persona
         except Exception as e:
             logger.error(f"Error fetching personas: {e}")
             raise

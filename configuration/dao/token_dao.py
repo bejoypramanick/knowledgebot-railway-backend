@@ -25,9 +25,10 @@ class TokenDAO:
                     updated_at = NOW()
                 """
                 params = [provider, total_tokens, default_limit]
-                await execute_with_logging(conn, query, *params, operation="UPDATE_LLM_USAGE")
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, params, result)
         except Exception as e:
-            logger.error(f"Error updating LLM usage: {e}")
+            logger.log_db_query(query, params, error=e)
             raise
 
     async def log_token_usage(self, session_id: str, message_id: str, provider: str, model: str, 
@@ -44,19 +45,18 @@ class TokenDAO:
                 """
                 params = [session_id, message_id, provider, model, prompt_tokens, 
                           completion_tokens, total_tokens, api_call_type, request_metadata]
-                await execute_with_logging(conn, query, *params, operation="LOG_TOKEN_USAGE")
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, params, result)
         except Exception as e:
-            logger.error(f"Error logging token usage: {e}")
+            logger.log_db_query(query, params, error=e)
             raise
 
     async def get_gemini_usage(self) -> dict:
         """Get Gemini API token usage by calculating totals from token_usage_log table."""
-        logger.info(" get_gemini_usage called")
         try:
             async with get_db_connection() as conn:
                 # Get total Gemini usage from token_usage_log
-                result = await conn.fetchrow(
-                    """
+                query = """
                     SELECT 
                         SUM(prompt_tokens) as total_prompt_tokens,
                         SUM(completion_tokens) as total_completion_tokens,
@@ -64,8 +64,9 @@ class TokenDAO:
                         COUNT(*) as total_requests
                     FROM token_usage_log 
                     WHERE provider = 'gemini'
-                    """
-                )
+                """
+                result = await conn.fetchrow(query)
+                logger.log_db_query(query, {"provider": "gemini"}, result)
                 
                 if not result:
                     return {
@@ -84,7 +85,7 @@ class TokenDAO:
                     "total_requests": result["total_requests"] or 0
                 }
         except Exception as e:
-            logger.error(f"Error fetching Gemini usage: {e}")
+            logger.log_db_query("get_gemini_usage", {"provider": "gemini"}, error=e)
             raise
 
     async def get_detailed_token_usage(self, limit: int = 100, provider: Optional[str] = None, 
@@ -117,7 +118,8 @@ class TokenDAO:
                 params.append(limit)
                 
                 records = await conn.fetch(query, *params)
+                logger.log_db_query(query, {"provider": provider, "api_call_type": api_call_type, "limit": limit}, records)
                 return [dict(record) for record in records]
         except Exception as e:
-            logger.error(f"Error fetching detailed token usage: {e}")
+            logger.log_db_query("get_detailed_token_usage", {"provider": provider, "api_call_type": api_call_type, "limit": limit}, error=e)
             raise

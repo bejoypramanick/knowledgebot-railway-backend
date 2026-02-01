@@ -23,11 +23,11 @@ class FeedbackDAO:
         
         try:
             async with get_db_connection() as conn:
-                await conn.execute(query, message_id, session_id, feedback, user_email)
-                logger.info(f"🔍 [DB QUERY] create_feedback: {query.strip()} | PARAMS: {params}")
+                result = await conn.execute(query, message_id, session_id, feedback, user_email)
+                logger.log_db_query(query, params, result)
                 logger.info(f"Feedback submitted for message {message_id}")
         except Exception as e:
-            logger.error(f"❌ [DB ERROR] create_feedback: {e}")
+            logger.log_db_query(query, params, error=e)
             raise
 
     async def get_all_feedback(self) -> List[Dict[str, Any]]:
@@ -41,8 +41,8 @@ class FeedbackDAO:
         try:
             async with get_db_connection() as conn:
                 records = await conn.fetch(query)
-                logger.info(f"🔍 [DB QUERY] get_all_feedback: {query.strip()} | FOUND: {len(records)} records")
+                logger.log_db_query(query, None, records)
                 return records
         except Exception as e:
-            logger.error(f"❌ [DB ERROR] get_all_feedback: {e}")
+            logger.log_db_query(query, None, error=e)
             raise

@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager
 from shared.telemetry import setup_telemetry, instrument_fastapi
 
 # Initialize Telemetry
+# Use default behavior (span exporter disabled by default via env var)
 setup_telemetry("configuration")
 logger = logging.getLogger("configuration")
 

@@ -314,7 +314,10 @@ class ConfigurationService:
            # notification_rows = await self.get_notification_settings()
             security_rows = await self.get_security_settings()
             llm_rows = await self.get_llm_providers()
-            persona = await self.get_active_persona()
+            personas_service = PersonasService()
+            persona = await personas_service.get_active_persona()
+  
+                
             human_agents_list = await self.get_human_agents()
             admin_emails_list = await self.get_admins()
 

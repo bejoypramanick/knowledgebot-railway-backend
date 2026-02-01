@@ -14,53 +14,62 @@ class ScrapingDAO:
 
     async def get_existing_website(self, url: str) -> Optional[Dict[str, Any]]:
         """Get existing website record"""
+        query = """
+            SELECT id, url, domain, title, description, status, 
+                   pages_scraped, content_length, created_at, updated_at
+            FROM scraped_websites
+            WHERE url = $1
+            ORDER BY created_at DESC
+            LIMIT 1
+        """
         try:
             async with get_db_connection() as conn:
-                return await conn.fetchrow("""
-                    SELECT id, url, domain, title, description, status, 
-                           pages_scraped, content_length, created_at, updated_at
-                    FROM scraped_websites
-                    WHERE url = $1
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """, url)
+                result = await conn.fetchrow(query, url)
+                logger.log_db_query(query, {"url": url}, result)
+                return result
         except Exception as e:
-            logger.error(f"Error fetching existing website: {e}")
-            raise
+            logger.log_db_query(query, {"url": url}, error=e)
+            return None
 
     async def delete_website_record(self, url: str) -> bool:
         """Delete website record"""
+        query = """
+            DELETE FROM scraped_websites 
+            WHERE url = $1
+        """
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute("""
-                    DELETE FROM scraped_websites 
-                    WHERE url = $1
-                """, url)
+                result = await conn.execute(query, url)
+                logger.log_db_query(query, {"url": url}, result)
                 logger.info(f"Website record deleted: {url}")
                 return True
         except Exception as e:
-            logger.error(f"Error deleting website record: {e}")
+            logger.log_db_query(query, {"url": url}, error=e)
             raise
 
     async def record_scraped_metadata(self, metadata: Dict[str, Any]) -> str:
         """Record scraped metadata"""
+        query = """
+            INSERT INTO scraped_websites 
+            (url, domain, title, description, status, 
+             pages_scraped, content_length, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+            RETURNING id
+        """
+        params = [
+            metadata.get('url'),
+            metadata.get('domain'),
+            metadata.get('title'),
+            metadata.get('description'),
+            metadata.get('status', 'completed'),
+            metadata.get('pages_scraped', 1),
+            metadata.get('content_length', 0)
+        ]
         try:
             async with get_db_connection() as conn:
-                return await conn.fetchval("""
-                    INSERT INTO scraped_websites 
-                    (url, domain, title, description, status, 
-                     pages_scraped, content_length, created_at, updated_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-                    RETURNING id
-                """, 
-                    metadata.get('url'),
-                    metadata.get('domain'),
-                    metadata.get('title'),
-                    metadata.get('description'),
-                    metadata.get('status', 'completed'),
-                    metadata.get('pages_scraped', 1),
-                    metadata.get('content_length', 0)
-                )
+                result = await conn.fetchval(query, *params)
+                logger.log_db_query(query, params, result)
+                return result
         except Exception as e:
-            logger.error(f"Error recording scraped metadata: {e}")
+            logger.log_db_query(query, params, error=e)
             raise

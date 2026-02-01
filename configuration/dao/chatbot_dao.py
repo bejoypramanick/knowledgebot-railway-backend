@@ -149,24 +149,7 @@ class ChatbotDAO:
             logger.log_db_query(query, None, error=e)
             return []
 
-    async def get_active_persona(self) -> Optional[Dict[str, Any]]:
-        """Get active chatbot persona from database."""
-        query = """
-            SELECT id, persona_name, persona_description, system_prompt, 
-                   is_active, created_at, updated_at
-            FROM persona_configurations
-            WHERE is_active = true
-            ORDER BY created_at DESC
-            LIMIT 1
-        """
-        try:
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query)
-                logger.log_db_query(query, None, result)
-                return result
-        except Exception as e:
-            logger.log_db_query(query, None, error=e)
-            return None
+    
 
     async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'text'):
         """Upsert security setting."""
@@ -209,27 +192,37 @@ class ChatbotDAO:
             raise
 
     async def upsert_notification_setting_with_desc(self, name: str, enabled: bool, description: str):
-        async with get_db_connection() as conn:
-            query = """
-                INSERT INTO notification_settings (setting_name, is_enabled, description)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (setting_name) DO UPDATE SET
-                is_enabled = EXCLUDED.is_enabled, description = EXCLUDED.description, updated_at = NOW()
-            """
-            params = [name, enabled, description]
-            await conn.execute(query, *params)
+        query = """
+            INSERT INTO notification_settings (setting_name, is_enabled, description)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (setting_name) DO UPDATE SET
+            is_enabled = EXCLUDED.is_enabled, description = EXCLUDED.description, updated_at = NOW()
+        """
+        params = [name, enabled, description]
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, params, result)
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            raise
 
     async def upsert_security_setting_with_desc(self, name: str, value: str, setting_type: str, description: str):
-        async with get_db_connection() as conn:
-            query = """
-                INSERT INTO security_settings (setting_name, setting_value, setting_type, description)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (setting_name) DO UPDATE SET
-                setting_value = EXCLUDED.setting_value, setting_type = EXCLUDED.setting_type, 
-                description = EXCLUDED.description, updated_at = NOW()
-            """
-            params = [name, value, setting_type, description]
-            await conn.execute(query, *params)
+        query = """
+            INSERT INTO security_settings (setting_name, setting_value, setting_type, description)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (setting_name) DO UPDATE SET
+            setting_value = EXCLUDED.setting_value, setting_type = EXCLUDED.setting_type, 
+            description = EXCLUDED.description, updated_at = NOW()
+        """
+        params = [name, value, setting_type, description]
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, params, result)
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            raise
 
     async def create_human_agent(self, email: str) -> int:
         """Create a new human agent and return the ID. Returns existing ID if email already exists."""
@@ -413,46 +406,58 @@ class ChatbotDAO:
     # Session Assignment Methods
     async def get_existing_assignment(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get existing agent assignment for a session."""
-        async with get_db_connection() as conn:
-            return await conn.fetchrow(
-                """
-                SELECT ha.* FROM human_agents ha
-                JOIN agent_session_assignments asa ON ha.id = asa.agent_id
-                WHERE asa.session_id = $1 AND asa.status = 'active'
-                """,
-                session_id
-            )
+        query = """
+            SELECT ha.* FROM human_agents ha
+            JOIN agent_session_assignments asa ON ha.id = asa.agent_id
+            WHERE asa.session_id = $1 AND asa.status = 'active'
+        """
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetchrow(query, session_id)
+                logger.log_db_query(query, {"session_id": session_id}, result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, {"session_id": session_id}, error=e)
+            return None
 
     async def get_available_agents(self) -> List[Dict[str, Any]]:
         """Get all available human agents."""
-        async with get_db_connection() as conn:
-            return await conn.fetch(
-                """
-                SELECT * FROM human_agents 
-                WHERE is_active = true 
-                ORDER BY email
-                """
-            )
+        query = """
+            SELECT * FROM human_agents 
+            WHERE is_active = true 
+            ORDER BY email
+        """
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetch(query)
+                logger.log_db_query(query, None, result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, None, error=e)
+            return []
 
     async def create_agent_assignment(self, session_id: str, agent_id: int, assigned_by: str):
         """Create a new agent assignment."""
-        async with get_db_connection() as conn:
-            await conn.execute(
-                """
-                INSERT INTO agent_session_assignments 
-                (session_id, agent_id, status, assigned_at, assigned_by)
-                VALUES ($1, $2, 'active', NOW(), $3)
-                ON CONFLICT (session_id) DO UPDATE SET
-                agent_id = EXCLUDED.agent_id, status = EXCLUDED.status, 
-                assigned_at = EXCLUDED.assigned_at, assigned_by = EXCLUDED.assigned_by
-                """,
-                session_id, agent_id, assigned_by
-            )
+        query = """
+            INSERT INTO agent_session_assignments 
+            (session_id, agent_id, status, assigned_at, assigned_by)
+            VALUES ($1, $2, 'active', NOW(), $3)
+            ON CONFLICT (session_id) DO UPDATE SET
+            agent_id = EXCLUDED.agent_id, status = EXCLUDED.status, 
+            assigned_at = EXCLUDED.assigned_at, assigned_by = EXCLUDED.assigned_by
+        """
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, session_id, agent_id, assigned_by)
+                logger.log_db_query(query, {"session_id": session_id, "agent_id": agent_id, "assigned_by": assigned_by}, result)
+        except Exception as e:
+            logger.log_db_query(query, {"session_id": session_id, "agent_id": agent_id, "assigned_by": assigned_by}, error=e)
+            raise
 
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
         """Get all LLM providers."""
         query = """
-            SELECT id, provider_name, token_limit, tokens_used, is_active, created_at, updated_at
+            SELECT id, provider_name, token_limit, token_used, is_active, created_at, updated_at
             FROM llm_providers
             ORDER BY provider_name
         """

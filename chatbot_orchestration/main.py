@@ -10,6 +10,7 @@ import logging
 from shared.telemetry import setup_telemetry, instrument_fastapi
 
 # Initialize Telemetry
+# Use default behavior (span exporter disabled by default via env var)
 setup_telemetry("chatbot-orchestration")
 logger = logging.getLogger("chatbot_orchestration")
 

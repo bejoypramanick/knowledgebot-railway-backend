@@ -18,7 +18,7 @@ import logging
 from shared.telemetry import setup_telemetry, instrument_fastapi
 
 # Initialize Telemetry (Logging + Tracing)
-# This configures root logger, so standard logging works immediately
+# Use default behavior (span exporter disabled by default via env var)
 setup_telemetry("api-gateway")
 logger = logging.getLogger("api_gateway")
 

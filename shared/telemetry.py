@@ -8,14 +8,24 @@ from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
-def setup_telemetry(service_name: str, log_level=logging.INFO):
+def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_exporter=None):
     """
     Configures OpenTelemetry for the service (Tracing + Logging).
     
-    1. Sets up the TracerProvider with a Console Exporter.
+    1. Sets up the TracerProvider with optional Console Exporter.
     2. Configures standard Python logging to include Trace ID and Span ID.
     3. Uses the format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] - Message
+    
+    Args:
+        service_name: Name of the service
+        log_level: Logging level
+        enable_span_exporter: Whether to enable the ConsoleSpanExporter (detailed span output).
+                          If None, defaults to OTEL_SPAN_EXPORTER_ENABLED env var or False.
     """
+    
+    # Determine if span exporter should be enabled
+    if enable_span_exporter is None:
+        enable_span_exporter = os.getenv("OTEL_SPAN_EXPORTER_ENABLED", "false").lower() == "true"
     
     # --- 1. IAM: Identity ---
     resource = Resource.create(attributes={
@@ -25,9 +35,10 @@ def setup_telemetry(service_name: str, log_level=logging.INFO):
     # --- 2. Tracing: The Glue ---
     provider = TracerProvider(resource=resource)
     
-    # "Configure the Console Exporter": Print spans to STDOUT
-    processor = BatchSpanProcessor(ConsoleSpanExporter())
-    provider.add_span_processor(processor)
+    # "Configure the Console Exporter": Print spans to STDOUT (optional)
+    if enable_span_exporter:
+        processor = BatchSpanProcessor(ConsoleSpanExporter())
+        provider.add_span_processor(processor)
     
     # Set the global TracerProvider
     trace.set_tracer_provider(provider)
@@ -61,7 +72,7 @@ def setup_telemetry(service_name: str, log_level=logging.INFO):
     # This automatically injects the 'traceparent' header into outgoing httpx calls
     HTTPXClientInstrumentor().instrument()
     
-    logging.info(f"🔭 OpenTelemetry initialized for {service_name}")
+    logging.info(f"🔭 OpenTelemetry initialized for {service_name} (span_exporter={'enabled' if enable_span_exporter else 'disabled'})")
     
     return trace.get_tracer(service_name)
 

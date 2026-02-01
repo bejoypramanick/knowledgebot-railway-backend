@@ -25,17 +25,17 @@ class NotificationsDAO:
         try:
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query)
-                logger.info(f"🔍 [DB QUERY] get_settings: {query.strip()}")
+                logger.log_db_query(query, None, result)
                 return dict(result) if result else {}
         except Exception as e:
-            logger.error(f"❌ [DB ERROR] get_settings: {e}")
+            logger.log_db_query(query, None, error=e)
             return {}
 
     async def update_settings(self, settings: Dict[str, Any], user_email: str) -> Dict[str, Any]:
         """Update notification settings."""
         try:
             async with get_db_connection() as conn:
-                await conn.execute("""
+                query = """
                     INSERT INTO notification_settings 
                     (id, email_notifications, push_notifications, in_app_notifications, 
                      notification_frequency, quiet_hours_enabled, quiet_hours_start, quiet_hours_end, 
@@ -51,7 +51,8 @@ class NotificationsDAO:
                         quiet_hours_end = EXCLUDED.quiet_hours_end,
                         updated_by = EXCLUDED.updated_by,
                         updated_at = EXCLUDED.updated_at
-                """, 
+                """
+                params = [
                     settings.get('email_notifications', False),
                     settings.get('push_notifications', False),
                     settings.get('in_app_notifications', False),
@@ -60,21 +61,27 @@ class NotificationsDAO:
                     settings.get('quiet_hours_start', '22:00'),
                     settings.get('quiet_hours_end', '08:00'),
                     user_email
-                )
+                ]
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, params, result)
                 return {"success": True}
         except Exception as e:
-            logger.error(f"Error updating notification settings: {e}")
+            logger.log_db_query("update_settings", {"settings": settings, "user_email": user_email}, error=e)
             raise
 
     async def create_notification(self, title: str, message: str, notification_type: str = 'info', user_email: str = None) -> str:
         """Create a new notification."""
         try:
             async with get_db_connection() as conn:
-                return await conn.fetchval("""
+                query = """
                     INSERT INTO notifications (title, message, notification_type, user_email, created_at)
                     VALUES ($1, $2, $3, $4, NOW())
                     RETURNING id
-                """, title, message, notification_type, user_email)
+                """
+                params = [title, message, notification_type, user_email]
+                result = await conn.fetchval(query, *params)
+                logger.log_db_query(query, params, result)
+                return result
         except Exception as e:
-            logger.error(f"Error creating notification: {e}")
+            logger.log_db_query(query, params, error=e)
             raise
