@@ -6,19 +6,25 @@ import sys
 import os
 
 # VERY EARLY LOGGING - Before any other imports
-print("🚀 CONFIGURATION SERVICE: STARTING EXECUTION - VERSION 2.2")
+print("🚀 CONFIGURATION SERVICE: STARTING EXECUTION - VERSION 3.0")
 print(f"🚀 Python version: {sys.version}")
 print(f"🚀 Working directory: {os.getcwd()}")
 print(f"🚀 Script location: {__file__}")
-print("🚀 FORCING RAILWAY REDEPLOY - ENHANCED DEBUGGING ACTIVE")
 
 # Configure Shared Telemetry
 import logging
+from contextlib import asynccontextmanager
 from shared.telemetry import setup_telemetry, instrument_fastapi
 
 # Initialize Telemetry
 setup_telemetry("configuration")
 logger = logging.getLogger("configuration")
+
+print("✅ RAILWAY TELEMETRY CONFIGURED SUCCESSFULLY")
+
+# NOW import FastAPI and other dependencies
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 # Import routers and services
 try:
@@ -31,14 +37,20 @@ except Exception as e:
     print(f"❌ TRACEBACK: {traceback.format_exc()}")
     sys.exit(1)
 
-# Logging is already configured via setup_telemetry
-print("✅ RAILWAY TELEMETRY CONFIGURED SUCCESSFULLY")
+# Import core utilities
+from configuration.core.db import database_initializer, close_databases, railway_db
+from configuration.core.utils import (
+    validate_environment,
+    wait_for_railway_network,
+    ServiceStatus
+)
+
+# Initialize service status
+service_status = ServiceStatus()
 
 # Log startup diagnostics
 logger.info("="*60)
 logger.info("CONFIGURATION SERVICE STARTING UP")
-logger.info("="*60)
-logger.info("🚀 CONFIGURATION SERVICE STARTING")
 logger.info("="*60)
 logger.info(f"Python version: {sys.version}")
 logger.info(f"Working directory: {os.getcwd()}")
@@ -101,7 +113,7 @@ async def lifespan(app: FastAPI):
                 logger.error(f"❌ LIFESPAN: Database error traceback: {traceback.format_exc()}")
                 # Don't fail startup, but log the error
         else:
-            logger.error("❌ LIFESPAN: DATABASE_URL, RAILWAY_POSTGRES_URL, or POSTGRES_URL not set - configuration endpoints will not work")
+            logger.error("❌ LIFESPAN: DATABASE_URL not set - configuration endpoints will not work")
             app.state.database_url = None
             service_status.set_status("error")
             raise ValueError("Database URL not configured")
@@ -129,25 +141,6 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan
 )
-
-# Simple root endpoint for testing
-@app.get("/")
-async def root():
-    """Root endpoint for testing service availability"""
-    return {
-        "service": "configuration",
-        "status": "running",
-        "timestamp": "2025-01-31T13:09:00Z"
-    }
-
-@app.get("/health")
-async def health_check():
-    """Health check endpoint that doesn't depend on database"""
-    return {
-        "status": "healthy",
-        "service": "configuration",
-        "database": "not_checked"
-    }
 
 # CORS middleware
 app.add_middleware(
@@ -198,7 +191,6 @@ async def health_check():
         "database": db_status,
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
     })
-    # I'll rely on service_status.get_status() being correct generally.
 
     return {
         "status": "healthy" if db_status in ["connected", "not_checked"] else "unhealthy",
@@ -208,8 +200,9 @@ async def health_check():
     }
 
 # Include Routers
-app.include_router(config_router, prefix="/api/v1/configuration")  # Service name as root
+app.include_router(config_router, prefix="/api/v1/configuration")
 
+# Root endpoint
 @app.get("/")
 async def root():
     """Root endpoint"""
