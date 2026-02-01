@@ -5,9 +5,9 @@ All configuration endpoints in one file for easier debugging
 
 from fastapi import APIRouter, HTTPException, Request, Depends
 from typing import Dict, List, Any, Optional
-import logging
 import json
 
+from configuration.core.otel_logger import get_otel_logger
 from ..service.configuration_service import ConfigurationService
 from ..service.personas_service import PersonasService
 from ..service.auth_service import AuthService
@@ -27,7 +27,7 @@ from ..schemas.models import (
 
 # Version: 2.2 - Enhanced debugging with version check
 # This version includes detailed logging for get_user_profile debugging
-logger = logging.getLogger(__name__)
+logger = get_otel_logger("configuration_router", "configuration")
 router = APIRouter()
 
 @router.get("/version")
@@ -115,7 +115,7 @@ async def debug_test():
 async def get_chatbot_config(cache: bool = True):
     """Get complete chatbot configuration with caching support"""
     try:
-        logger.info(f"🔍 GET /chatbot called with cache={cache}")
+        logger.info(f"🔍 GET /chatAgentConfig called with cache={cache}")
         config = await config_service.get_chatAgent_config()
         logger.info(f"✅ Chatbot config retrieved successfully (cache={cache})")
         return {"success": True, "data": config}
@@ -123,11 +123,11 @@ async def get_chatbot_config(cache: bool = True):
         logger.error(f"Error getting chatbot config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/chatbot")
+@router.post("/chatAgentConfig")
 async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
     """Save chatbot configuration"""
     try:
-        logger.info(f"🔍 POST /chatbot received: {config}")
+        logger.info(f"🔍 POST /chatAgentConfig received: {config}")
         logger.info(f"🔍 Request headers: {dict(request.headers)}")
         
         await config_service.save_chatbot_config(config.dict())
