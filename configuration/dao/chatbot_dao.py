@@ -24,10 +24,10 @@ class ChatbotDAO:
         try:
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query)
-                logger.info(f"🔍 [DB QUERY] get_metadata: {query.strip()}")
+                logger.log_db_query(query, None, result)
                 return result
         except Exception as e:
-            logger.error(f"❌ [DB ERROR] get_metadata: {e}")
+            logger.log_db_query(query, None, error=e)
             return None
 
     async def update_metadata(self, **kwargs):
