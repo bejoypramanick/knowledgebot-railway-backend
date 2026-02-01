@@ -1,14 +1,13 @@
 import os
+import logging
 from typing import Annotated
 
 import httpx
 
-from chatbot_orchestration.core.logging_config import get_railway_logger
-
 from ..core.dependencies import ChatSessionDeps
 from ..service.file_service import FileService
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # Tool for requesting human agent connection
 async def request_human_agent_connection(

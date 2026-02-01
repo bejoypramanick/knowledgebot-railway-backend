@@ -1,12 +1,11 @@
 import hashlib
 import os
 import tempfile
+import logging
 
 from fastapi import UploadFile
 
-from knowledgebase_ingestion.core.logging_config import get_railway_logger
-
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 def calculate_sha256(file_path: str) -> str:
     """Calculate SHA256 hash of a file."""

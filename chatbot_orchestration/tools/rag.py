@@ -1,14 +1,13 @@
 import os
+import logging
 from typing import Annotated, List
 
 from google.genai import types
 
-from chatbot_orchestration.core.logging_config import get_railway_logger
-
 from ..core.ai import get_genai_client
 from ..schemas.models import SearchResult
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 async def search_knowledge_base(query: Annotated[str, "The search query to find relevant information in uploaded documents"]) -> List[SearchResult]:
     """
