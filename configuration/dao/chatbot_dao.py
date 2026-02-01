@@ -64,7 +64,7 @@ class ChatbotDAO:
                            chat_bubble_color, profile_picture_url, profile_zoom,
                            keep_showing_suggested, use_primary_for_header,
                            created_at, updated_at
-                    FROM widget_config
+                    FROM widget_configuration
                     WHERE id = 1
                 """)
         except Exception as e:
@@ -153,13 +153,6 @@ class ChatbotDAO:
         except Exception as e:
             logger.error(f"Error fetching active persona: {e}")
             return None
-                INSERT INTO notification_settings (setting_name, is_enabled)
-                VALUES ($1, $2)
-                ON CONFLICT (setting_name) DO UPDATE SET
-                is_enabled = EXCLUDED.is_enabled, updated_at = NOW()
-            """
-            params = [name, enabled]
-            await conn.execute(query, *params)
 
     async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'text'):
         async with get_db_connection() as conn:
