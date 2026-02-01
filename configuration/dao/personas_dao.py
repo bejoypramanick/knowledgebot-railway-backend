@@ -132,3 +132,31 @@ class PersonasDAO:
         except Exception as e:
             logger.log_db_query(query, {"persona_name": persona_name}, error=e)
             raise
+
+
+    async def update_persona(self, persona_name: str, system_prompt: str, is_active: bool = True):
+        """Update existing persona configuration only (no insert)."""
+        try:
+            async with get_db_connection() as conn:
+                async with conn.transaction():
+                    if is_active:
+                        deactivate_query = "UPDATE persona_configurations SET is_active = false"
+                        deactivate_result = await conn.execute(deactivate_query)
+                        logger.log_db_query(deactivate_query, None, deactivate_result)
+                    
+                    update_query = """
+                        UPDATE persona_configurations 
+                        SET system_prompt = $1, is_active = $2, updated_at = NOW()
+                        WHERE persona_name = $3
+                    """
+                    params = [system_prompt, is_active, persona_name]
+                    result = await conn.execute(update_query, *params)
+                    
+                    # Check if the persona was actually updated
+                    if result == "UPDATE 0":
+                        raise ValueError(f"Persona '{persona_name}' not found. Cannot update non-existent persona.")
+                    
+                    logger.log_db_query(update_query, params, result)
+        except Exception as e:
+            logger.log_db_query("UPDATE persona_configurations", {"persona_name": persona_name, "system_prompt": system_prompt, "is_active": is_active}, error=e)
+            raise

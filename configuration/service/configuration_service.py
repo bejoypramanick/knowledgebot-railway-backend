@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from configuration.core.otel_logger import get_otel_logger
 from configuration.dao.chatbot_dao import ChatbotDAO
 from configuration.dao.auth_dao import AuthDAO
-from .personas_service import PersonasService
+from configuration.dao.personas_dao import PersonasDAO
 
 logger = get_otel_logger("configuration_service", "configuration")
 
@@ -17,6 +17,7 @@ class ConfigurationService:
     def __init__(self):
         self._chatbot_dao = ChatbotDAO()
         self._auth_dao = AuthDAO()
+        self._persona_dao = PersonasDAO()
     
     async def get_metadata(self) -> Optional[Dict[str, Any]]:
         """Get chatbot metadata"""
@@ -315,11 +316,7 @@ class ConfigurationService:
            # notification_rows = await self.get_notification_settings()
             security_rows = await self.get_security_settings()
             llm_rows = await self.get_llm_providers()
-            
-            personas_service = PersonasService()
-            persona = await personas_service.get_active_persona()
-  
-                
+            persona = await self._persona_dao.get_active_persona()
             human_agents_list = await self.get_human_agents()
             admin_emails_list = await self.get_admins()
 
@@ -372,8 +369,7 @@ class ConfigurationService:
 
             # Get all available personas (with fallback)
             try:
-                personas_service = PersonasService()
-                personas_response = await personas_service.get_all_personas()
+                personas_response = await self._persona_dao.get_all_personas()
                 all_personas = personas_response.get('personas', [])
                 
                 # Select the first persona (most recent) as default if no active persona is set
@@ -511,7 +507,7 @@ class ConfigurationService:
             default_system_prompt = f"You are {persona_name}, a helpful AI assistant. Your role is to assist users with their questions and provide accurate, helpful responses."
             
             # Use the DAO method to activate the persona
-            await self._chatbot_dao.upsert_persona(
+            await self._persona_dao.update_persona(
                 persona_name=persona_name,
                 system_prompt=default_system_prompt,
                 is_active=True
@@ -530,11 +526,8 @@ class ConfigurationService:
             logger.info(f"🔍 Saving chatbot config: {config_data}")
             
             # Update metadata if provided
-            if 'display_name' in config_data or 'description' in config_data or 'response_policy' in config_data:
+            if 'description' in config_data or 'response_policy' in config_data:
                 metadata_updates = {}
-                if 'display_name' in config_data:
-                    metadata_updates['display_name'] = config_data['display_name']
-                    logger.info(f"🔍 Updating display_name: {config_data['display_name']}")
                 if 'description' in config_data:
                     metadata_updates['description'] = config_data['description']
                     logger.info(f"🔍 Updating description: {config_data['description']}")

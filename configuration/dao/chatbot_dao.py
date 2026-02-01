@@ -168,29 +168,6 @@ class ChatbotDAO:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def upsert_persona(self, persona_name: str, system_prompt: str, is_active: bool = True):
-        """Upsert persona configuration."""
-        try:
-            async with get_db_connection() as conn:
-                async with conn.transaction():
-                    if is_active:
-                        deactivate_query = "UPDATE persona_configurations SET is_active = false"
-                        deactivate_result = await conn.execute(deactivate_query)
-                        logger.log_db_query(deactivate_query, None, deactivate_result)
-                    
-                    upsert_query = """
-                        INSERT INTO persona_configurations (persona_name, system_prompt, is_active)
-                        VALUES ($1, $2, $3)
-                        ON CONFLICT (persona_name) DO UPDATE SET
-                        system_prompt = EXCLUDED.system_prompt, is_active = EXCLUDED.is_active, updated_at = NOW()
-                    """
-                    params = [persona_name, system_prompt, is_active]
-                    result = await conn.execute(upsert_query, *params)
-                    logger.log_db_query(upsert_query, params, result)
-        except Exception as e:
-            logger.log_db_query("UPSERT persona_configurations", {"persona_name": persona_name, "system_prompt": system_prompt, "is_active": is_active}, error=e)
-            raise
-
     async def upsert_notification_setting_with_desc(self, name: str, enabled: bool, description: str):
         query = """
             INSERT INTO notification_settings (setting_name, is_enabled, description)
