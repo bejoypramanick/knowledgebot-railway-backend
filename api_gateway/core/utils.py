@@ -17,7 +17,6 @@ from fastapi.responses import JSONResponse
 from starlette.status import HTTP_503_SERVICE_UNAVAILABLE
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from api_gateway.core.logging_config import get_railway_logger
 from shared.correlation_id import get_correlation_id, add_correlation_id_headers
 
 logger = logging.getLogger(__name__)
