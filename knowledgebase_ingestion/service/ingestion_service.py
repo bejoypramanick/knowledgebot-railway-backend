@@ -2,11 +2,20 @@
 Ingestion Service Layer for Knowledgebase Ingestion
 Provides business logic for file ingestion operations
 """
-from typing import Dict
+import asyncio
+import os
+import tempfile
+import time
+from datetime import datetime
+from typing import Dict, List, Optional
 
-import logging
+from fastapi import UploadFile
+from google.genai import types
 
-logger = logging.getLogger("ingestion_service")
+from knowledgebase_ingestion.core.otel_logger import get_otel_logger
+from knowledgebase_ingestion.core.ai import get_genai_client
+
+logger = get_otel_logger("ingestion_service", "knowledgebase-ingestion")
 
 async def process_with_gemini(tmp_path: str, file_display_name: str, original_filename: str, mime_type: str, user_email: str = None):
     """Process file with Gemini - placeholder implementation"""
