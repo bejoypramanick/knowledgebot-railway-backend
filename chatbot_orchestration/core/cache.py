@@ -4,13 +4,13 @@ import time
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from chatbot_orchestration.core.logging_config import get_railway_logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Import os to access environment variables potentially?
 # The original code used MODEL_NAME global variable. 
 # I will pass it as an argument or import settings.
-
-logger = get_railway_logger(__name__)
 
 CACHE_TTL_SECONDS = 3600  # 1 hour TTL
 context_cache = {}

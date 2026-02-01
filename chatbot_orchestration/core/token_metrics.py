@@ -8,9 +8,9 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from chatbot_orchestration.core.logging_config import get_railway_logger
+import logging
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 @dataclass
 class TokenMetrics:

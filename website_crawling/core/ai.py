@@ -1,10 +1,9 @@
 import os
+import logging
 
 from google import genai
 
-from website_crawling.core.logging_config import get_railway_logger
-
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 

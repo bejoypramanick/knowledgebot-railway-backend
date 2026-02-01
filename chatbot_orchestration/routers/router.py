@@ -12,10 +12,10 @@ import time
 from ..service.chat_service import ChatService
 from ..service.agent_service import PydanticAIGatewayService
 from ..schemas.models import ChatRequest
-from ..core.logging_config import get_railway_logger
+
+logger = logging.getLogger(__name__)
 from ..core.utils import log_endpoint_request
 
-logger = get_railway_logger(__name__)
 router = APIRouter()
 
 # Initialize services

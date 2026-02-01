@@ -16,9 +16,10 @@ from fastapi.responses import JSONResponse
 from starlette.status import HTTP_503_SERVICE_UNAVAILABLE
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+import logging
 from configuration.core.logging_config import get_railway_logger
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 # Enhanced retry configuration for Railway network issues

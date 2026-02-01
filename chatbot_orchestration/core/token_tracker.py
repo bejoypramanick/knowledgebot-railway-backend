@@ -5,11 +5,11 @@ Tracks and accumulates token usage from Gemini API responses.
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+import logging
 from chatbot_orchestration.service.token_service import TokenService
-from chatbot_orchestration.core.logging_config import get_railway_logger
 from chatbot_orchestration.core.token_metrics import track_token_metrics
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 @dataclass
 class TokenUsageData:

@@ -1,11 +1,11 @@
 import os
+import logging
 
 from google import genai
 
 from knowledgebase_ingestion.core.config import settings
-from knowledgebase_ingestion.core.logging_config import get_railway_logger
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # Global clients - initialized lazily
 genai_client = None

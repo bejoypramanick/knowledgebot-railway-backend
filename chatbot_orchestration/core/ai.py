@@ -1,12 +1,12 @@
 import os
+import logging
 
 from google import genai
 from pydantic_ai.models.google import GoogleModel
 
 from chatbot_orchestration.core.config import settings
-from chatbot_orchestration.core.logging_config import get_railway_logger
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 # Global clients - initialized lazily
 genai_client = None

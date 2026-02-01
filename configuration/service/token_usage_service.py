@@ -3,11 +3,11 @@ Token Usage Service Layer
 Provides business logic for token usage management operations
 """
 from typing import Optional
+import logging
 
 from configuration.dao.token_dao import TokenDAO
-from configuration.core.logging_config import get_railway_logger
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 class TokenUsageService:
     """Service layer for token usage management"""
