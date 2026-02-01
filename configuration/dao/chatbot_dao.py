@@ -2,12 +2,12 @@
 Chatbot Data Access Object for Configuration Service
 Handles database operations for chatbot configuration management
 """
-import logging
 from typing import Dict, List, Any, Optional
 
 from configuration.core.db import get_db_connection
+from configuration.core.otel_logger import get_otel_logger
 
-logger = logging.getLogger("chatbot_dao")
+logger = get_otel_logger("chatbot_dao", "configuration")
 
 class ChatbotDAO:
     def __init__(self):
@@ -16,8 +16,8 @@ class ChatbotDAO:
     async def get_metadata(self) -> Optional[Dict[str, Any]]:
         """Get chatbot metadata."""
         query = """
-            SELECT id, display_name, description, version, created_at, updated_at
-            FROM chatbot_metadata
+            SELECT default_user_role, hil_enabled, response_policy
+            FROM configuration_metadata
             WHERE id = 1
         """
         
