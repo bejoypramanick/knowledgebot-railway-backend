@@ -3,14 +3,13 @@ Centralized Database Initialization Service
 Handles all database initialization logic for the singleton pattern.
 """
 import os
+import logging
 from pathlib import Path
 from typing import Optional
 
-from knowledgebase_ingestion.core.logging_config import get_railway_logger
-
 from .db import init_railway_db
 
-logger = get_railway_logger(__name__)
+logger = logging.getLogger(__name__)
 
 class DatabaseInitializer:
     """Centralized database initialization service using singleton pattern."""
