@@ -4,9 +4,9 @@ Handles database operations for file management
 """
 from typing import Any, Dict, List, Optional
 
-import logging
+from knowledgebase_ingestion.core.otel_logger import get_otel_logger
 
-logger = logging.getLogger("file_dao")
+logger = get_otel_logger("file_dao", "knowledgebase-ingestion")
 
 class FileDAO:
     def __init__(self):

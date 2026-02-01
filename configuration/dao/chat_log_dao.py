@@ -4,12 +4,12 @@ Handles database operations for chat logging
 """
 from typing import Dict, List, Any, Optional
 import json
-import logging
 from datetime import datetime
 
 from configuration.core.db import get_db_connection
+from configuration.core.otel_logger import get_otel_logger
 
-logger = logging.getLogger("chat_log_dao")
+logger = get_otel_logger("chat_log_dao", "configuration")
 
 class ChatLogDAO:
     def __init__(self):

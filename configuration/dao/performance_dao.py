@@ -4,8 +4,9 @@ Handles database operations for performance metrics
 """
 from typing import Dict, List, Any, Optional
 
-import logging
-logger = logging.getLogger("performance_dao")
+from configuration.core.otel_logger import get_otel_logger
+
+logger = get_otel_logger("performance_dao", "configuration")
 
 class PerformanceDAO:
     def __init__(self):

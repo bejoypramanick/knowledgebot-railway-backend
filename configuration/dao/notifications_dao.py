@@ -2,12 +2,12 @@
 Notifications Data Access Object for Configuration Service
 Handles database operations for user notifications
 """
-import logging
 from typing import Dict, List, Any, Optional
 
 from configuration.core.db import get_db_connection
+from configuration.core.otel_logger import get_otel_logger
 
-logger = logging.getLogger("notifications_dao")
+logger = get_otel_logger("notifications_dao", "configuration")
 
 class NotificationsDAO:
     def __init__(self):

@@ -4,11 +4,10 @@ Handles database operations for token management
 """
 from typing import Dict, List, Any, Optional
 
-import logging
 from configuration.core.db import get_db_connection
-from configuration.core.db_logger import execute_with_logging
+from configuration.core.otel_logger import get_otel_logger
 
-logger = logging.getLogger("token_dao")
+logger = get_otel_logger("token_dao", "configuration")
 
 class TokenDAO:
     def __init__(self):
