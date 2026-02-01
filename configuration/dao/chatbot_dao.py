@@ -16,11 +16,10 @@ class ChatbotDAO:
     async def get_metadata(self) -> Optional[Dict[str, Any]]:
         """Get chatbot metadata."""
         query = """
-            SELECT default_user_role, hil_enabled, response_policy
+            SELECT hil_enabled, response_policy
             FROM configuration_metadata
             WHERE id = 1
         """
-        
         try:
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query)
@@ -43,15 +42,15 @@ class ChatbotDAO:
                 
                 if set_clauses:
                     query = f"""
-                        UPDATE chatbot_metadata 
+                        UPDATE configuration_metadata
                         SET {', '.join(set_clauses)}, updated_at = NOW()
                         WHERE id = 1
                     """
                     result = await conn.execute(query, *params)
-                    logger.info(f"🔍 [DB QUERY] update_metadata: {query.strip()} | PARAMS: {kwargs}")
+                    logger.log_db_query(query, params, result)
                     logger.info(f"Updated chatbot metadata: {kwargs}")
         except Exception as e:
-            logger.error(f"Error updating chatbot metadata: {e}")
+            logger.log_db_query("UPDATE configuration_metadata", kwargs, error=e)
             raise
 
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
@@ -127,31 +126,37 @@ class ChatbotDAO:
 
     async def get_security_settings(self) -> List[Dict[str, Any]]:
         """Get security settings."""
+        query = """
+            SELECT setting_name, setting_value, setting_type, description
+            FROM security_settings
+            ORDER BY setting_name
+        """
         try:
             async with get_db_connection() as conn:
-                return await conn.fetch("""
-                    SELECT setting_name, setting_value, setting_type, description
-                    FROM security_settings
-                    ORDER BY setting_name
-                """)
+                result = await conn.fetch(query)
+                logger.log_db_query(query, None, result)
+                return [dict(row) for row in result]
         except Exception as e:
-            logger.error(f"Error fetching security settings: {e}")
+            logger.log_db_query(query, None, error=e)
             return []
 
     async def get_active_persona(self) -> Optional[Dict[str, Any]]:
         """Get active chatbot persona from database."""
+        query = """
+            SELECT id, persona_name, persona_description, system_prompt, 
+                   is_active, created_at, updated_at
+            FROM persona_configurations
+            WHERE is_active = true
+            ORDER BY created_at DESC
+            LIMIT 1
+        """
         try:
             async with get_db_connection() as conn:
-                return await conn.fetchrow("""
-                    SELECT id, persona_name, persona_description, system_prompt, 
-                           is_active, created_at, updated_at
-                    FROM chatbot_personas
-                    WHERE is_active = true
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """)
+                result = await conn.fetchrow(query)
+                logger.log_db_query(query, None, result)
+                return result
         except Exception as e:
-            logger.error(f"Error fetching active persona: {e}")
+            logger.log_db_query(query, None, error=e)
             return None
 
     async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'text'):
@@ -414,3 +419,20 @@ class ChatbotDAO:
                 """,
                 session_id, agent_id, assigned_by
             )
+
+    async def get_llm_providers(self) -> List[Dict[str, Any]]:
+        """Get all LLM providers."""
+        query = """
+            SELECT id, provider_name, token_limit, tokens_used, is_active, created_at, updated_at
+            FROM llm_providers
+            ORDER BY provider_name
+        """
+        
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetch(query)
+                logger.log_db_query(query, None, result)
+                return [dict(row) for row in result]
+        except Exception as e:
+            logger.log_db_query(query, None, error=e)
+            return []

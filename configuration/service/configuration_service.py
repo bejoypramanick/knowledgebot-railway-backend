@@ -306,12 +306,12 @@ class ConfigurationService:
             logger.error(f"Error updating LLM used tokens: {e}")
             raise
 
-    async def get_chatbot_config(self):
+    async def get_chatAgent_config(self):
         """Get complete chatbot configuration with all data transformations"""
         try:
             # Get all raw data
             metadata = await self.get_metadata()
-            notification_rows = await self.get_notification_settings()
+           # notification_rows = await self.get_notification_settings()
             security_rows = await self.get_security_settings()
             llm_rows = await self.get_llm_providers()
             persona = await self.get_active_persona()
@@ -341,10 +341,10 @@ class ConfigurationService:
             for row in security_rows:
                 if row['setting_name'] == 'response_timeout':
                     security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
-                elif row['setting_name'] == 'remove_pii':
-                    security['remove_pii'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
-                elif row['setting_name'] == 'restrict_config':
-                    security['restrict_config'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
+                #elif row['setting_name'] == 'remove_pii':
+                    #security['remove_pii'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
+                #elif row['setting_name'] == 'restrict_config':
+                    #security['restrict_config'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
 
             # Build LLM tokens dict
             llm_tokens = {
@@ -391,7 +391,7 @@ class ConfigurationService:
 
             # Build final configuration
             data = {
-                "admin_user": "GLOBISTAAN",
+                
                 "admin_emails": admin_emails_list,
                 "human_agents": human_agents_list,
                 "hil_enabled": metadata['hil_enabled'] if metadata else True,

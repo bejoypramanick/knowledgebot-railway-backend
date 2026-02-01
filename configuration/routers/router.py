@@ -111,12 +111,12 @@ async def debug_test():
 # CHATBOT CONFIGURATION ENDPOINTS
 # =================================
 
-@router.get("/chatbot")
+@router.get("/chatAgentConfig")
 async def get_chatbot_config(cache: bool = True):
     """Get complete chatbot configuration with caching support"""
     try:
         logger.info(f"🔍 GET /chatbot called with cache={cache}")
-        config = await config_service.get_chatbot_config()
+        config = await config_service.get_chatAgent_config()
         logger.info(f"✅ Chatbot config retrieved successfully (cache={cache})")
         return {"success": True, "data": config}
     except Exception as e:
