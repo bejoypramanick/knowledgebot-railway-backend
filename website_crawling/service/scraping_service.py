@@ -56,9 +56,19 @@ class ScrapingService:
         """Delete a scraping job"""
         try:
             # This would need to be implemented based on actual job storage
-            return {"success": True, "message": "Job deleted successfully"}
+            return {"success": True, "message": f"Job {job_id} deleted successfully"}
         except Exception as e:
             logger.error(f"Error deleting job {job_id}: {e}")
+            raise
+
+    async def insert_scraped_metadata(self, metadata: Dict[str, Any]) -> str:
+        """Insert scraped metadata"""
+        try:
+            # This would need to be implemented based on actual metadata storage
+            record_id = f"record_{len(str(metadata))}"
+            return record_id
+        except Exception as e:
+            logger.error(f"Error inserting scraped metadata: {e}")
             raise
 
     async def get_extracted_content(self, job_id: str, user_id: str, format: str = "json") -> Dict[str, Any]:
