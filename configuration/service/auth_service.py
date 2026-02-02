@@ -164,3 +164,58 @@ class AuthService:
         except Exception as e:
             logger.error(f"Error fetching admin users: {e}")
             raise
+
+    async def remove_human_agent(self, email: str, current_user_email: str) -> dict:
+        """Remove a human agent"""
+        try:
+            await self.auth_dao.remove_human_agent(email)
+            return {"success": True, "message": "Human agent removed successfully"}
+        except Exception as e:
+            logger.error(f"Error removing human agent: {e}")
+            raise
+
+    async def get_or_create_unique_id(self, email: str, role: str = "customer") -> Dict[str, Any]:
+        """Get or create a unique ID for a user by email and role"""
+        try:
+            import uuid
+            from configuration.core.db import get_db_connection
+
+            async with get_db_connection() as conn:
+                # Query user_unique_ids table
+                result = await conn.fetchrow(
+                    """
+                    SELECT unique_id, email, role, created_at
+                    FROM user_unique_ids
+                    WHERE email = $1 AND role = $2
+                    """,
+                    email, role
+                )
+
+                if result:
+                    return {
+                        "unique_id": result["unique_id"],
+                        "email": result["email"],
+                        "role": result["role"]
+                    }
+                else:
+                    # If no existing unique ID, generate one and store it
+                    new_unique_id = str(uuid.uuid4())[:8]  # Short unique ID
+
+                    await conn.execute(
+                        """
+                        INSERT INTO user_unique_ids (email, unique_id, role)
+                        VALUES ($1, $2, $3)
+                        ON CONFLICT (email, role) DO NOTHING
+                        """,
+                        email, new_unique_id, role
+                    )
+
+                    return {
+                        "unique_id": new_unique_id,
+                        "email": email,
+                        "role": role,
+                        "created": True
+                    }
+        except Exception as e:
+            logger.error(f"Error getting/creating unique ID: {e}")
+            raise

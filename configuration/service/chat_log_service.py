@@ -407,3 +407,21 @@ class ChatLogService:
             }
             await self.connection_manager.broadcast_to_session(session_ended_message, session_id)
         return True
+
+    async def record_session_feedback(self, session_id: str, feedback_type: str, user_type: str = "customer"):
+        """Record feedback for a chat session"""
+        try:
+            from configuration.core.db import get_db_connection
+
+            async with get_db_connection() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO chat_feedback (message_id, session_id, feedback_type, user_type)
+                    VALUES ($1, $2, $3, $4)
+                    """,
+                    "session_feedback", session_id, feedback_type, user_type
+                )
+            logger.info(f"Feedback '{feedback_type}' recorded for session {session_id}")
+        except Exception as e:
+            logger.error(f"Error recording session feedback: {e}")
+            raise

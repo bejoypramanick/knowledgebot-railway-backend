@@ -9,7 +9,6 @@ import json
 
 from configuration.core.otel_logger import get_otel_logger
 from ..service.configuration_service import ConfigurationService
-from ..service.personas_service import PersonasService
 from ..service.auth_service import AuthService
 from ..service.chat_log_service import ChatLogService
 from ..service.notifications_service import NotificationsService
@@ -17,9 +16,8 @@ from ..service.performance_service import PerformanceService
 from ..service.feedback_service import FeedbackService
 from ..service.token_usage_service import TokenUsageService
 from ..schemas.models import (
-    ChatbotConfigRequest, 
+    ChatbotConfigRequest,
     AdminManagementRequest,
-    PersonaRequest,
     NotificationRequest,
     FeedbackRequest,
     WidgetConfigRequest
@@ -85,7 +83,6 @@ async def get_current_user(request: Request):
 
 # Initialize services
 config_service = ConfigurationService()
-personas_service = PersonasService()
 auth_service = AuthService()
 chat_log_service = ChatLogService()
 notifications_service = NotificationsService(notifications_dao=None)
@@ -258,26 +255,8 @@ async def upload_widget_image(
         base64_content = base64.b64encode(content).decode('utf-8')
         data_url = f"data:{file.content_type};base64,{base64_content}"
 
-        # Store in widget_configuration table based on type
-        from configuration.core.db import get_db_connection
-
-        column_mapping = {
-            "profile": ("profile_picture_url", "profile_picture_filename"),
-            "chatIcon": ("chat_icon_url", "chat_icon_filename"),
-            "headerIcon": ("profile_picture_url", "profile_picture_filename")  # Use profile for header
-        }
-
-        url_column, filename_column = column_mapping[type]
-
-        async with get_db_connection() as conn:
-            await conn.execute(
-                f"""
-                UPDATE widget_configuration
-                SET {url_column} = $1, {filename_column} = $2, updated_at = NOW()
-                WHERE id = 1
-                """,
-                data_url, file.filename
-            )
+        # Store in widget_configuration table via service
+        await config_service.update_widget_image(type, data_url, file.filename)
 
         return {
             "success": True,
@@ -290,40 +269,6 @@ async def upload_widget_image(
         raise
     except Exception as e:
         logger.error(f"Error uploading widget image: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =================================
-# PERSONAS ENDPOINTS
-# =================================
-
-@router.get("/personas")
-async def get_personas():
-    """Get all available personas"""
-    try:
-        personas = await personas_service.get_all_personas()
-        return {"success": True, "data": personas}
-    except Exception as e:
-        logger.error(f"Error getting personas: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/personas/{persona_name}/activate")
-async def activate_persona(persona_name: str, request: Request):
-    """Activate a specific persona"""
-    try:
-        result = await personas_service.activate_persona(persona_name, "admin@example.com")
-        return {"success": True, "message": f"Persona {persona_name} activated successfully"}
-    except Exception as e:
-        logger.error(f"Error activating persona: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/personas")
-async def create_persona(persona: PersonaRequest, request: Request):
-    """Create a new persona"""
-    try:
-        result = await personas_service.create_persona(persona.dict(), "admin@example.com")
-        return {"success": True, "message": "Persona created successfully"}
-    except Exception as e:
-        logger.error(f"Error creating persona: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
@@ -672,16 +617,8 @@ async def update_session_feedback(session_id: str, request: Request):
             user_type=user_type
         )
 
-        # Also record in chat_feedback table
-        from configuration.core.db import get_db_connection
-        async with get_db_connection() as conn:
-            await conn.execute(
-                """
-                INSERT INTO chat_feedback (message_id, session_id, feedback_type, user_type)
-                VALUES ($1, $2, $3, $4)
-                """,
-                "session_feedback", session_id, feedback, user_type
-            )
+        # Also record in chat_feedback table via service
+        await chat_log_service.record_session_feedback(session_id, feedback, user_type)
 
         return {
             "success": True,
@@ -728,47 +665,8 @@ async def generate_unique_id():
 async def get_user_unique_id(email: str, role: str = "customer"):
     """Get unique ID for a user by email and role"""
     try:
-        from configuration.core.db import get_db_connection
-
-        async with get_db_connection() as conn:
-            # Query user_unique_ids table
-            result = await conn.fetchrow(
-                """
-                SELECT unique_id, email, role, created_at
-                FROM user_unique_ids
-                WHERE email = $1 AND role = $2
-                """,
-                email, role
-            )
-
-            if result:
-                return {
-                    "success": True,
-                    "unique_id": result["unique_id"],
-                    "email": result["email"],
-                    "role": result["role"]
-                }
-            else:
-                # If no existing unique ID, generate one and store it
-                import uuid
-                new_unique_id = str(uuid.uuid4())[:8]  # Short unique ID
-
-                await conn.execute(
-                    """
-                    INSERT INTO user_unique_ids (email, unique_id, role)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (email, role) DO NOTHING
-                    """,
-                    email, new_unique_id, role
-                )
-
-                return {
-                    "success": True,
-                    "unique_id": new_unique_id,
-                    "email": email,
-                    "role": role,
-                    "created": True
-                }
+        result = await auth_service.get_or_create_unique_id(email, role)
+        return {"success": True, **result}
     except Exception as e:
         logger.error(f"Error getting user unique ID: {e}")
         raise HTTPException(status_code=500, detail=str(e))
