@@ -117,34 +117,7 @@ class NotificationRequest(BaseModel):
     feedback_requests_enabled: bool = True
 
 class FeedbackRequest(BaseModel):
-    rating: int = Field(..., ge=1, le=5)
-    comment: Optional[str] = Field(None, max_length=1000)
-    session_id: Optional[str] = Field(None, max_length=100)
-    suggested_messages: Optional[List[str]] = Field(None, max_items=5)
-    keep_showing_suggested: Optional[bool] = None
-    theme: Optional[str] = Field(None, pattern=r'^(light|dark)$')
-    primary_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
-    use_primary_for_header: Optional[bool] = None
-    chat_bubble_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
-    align_bubble: Optional[str] = Field(None, pattern=r'^(left|right)$')
-    display_chatbot: Optional[bool] = None
-    profile_picture_url: Optional[str] = None
-    chat_icon_url: Optional[str] = None
-    profile_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
-    chat_icon_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
-    profile_position: Optional[PositionData] = None
-    chat_icon_position: Optional[PositionData] = None
-    profile_picture_filename: Optional[str] = Field(None, max_length=255)
-    chat_icon_filename: Optional[str] = Field(None, max_length=255)
-
-    @validator('suggested_messages')
-    def validate_suggested_messages(cls, v):
-        if v:
-            for i, message in enumerate(v):
-                if message:
-                    message = message.strip()
-                    if len(message) > 100:
-                        raise ValueError(f'Suggested message {i+1} must be less than 100 characters')
-                    if not message:
-                        raise ValueError(f'Suggested message {i+1} cannot be empty')
-        return v
+    """Request model for message feedback"""
+    message_id: str = Field(..., min_length=1, max_length=255)
+    session_id: str = Field(..., min_length=1, max_length=255)
+    feedback: str = Field(..., pattern=r'^(positive|negative)$')

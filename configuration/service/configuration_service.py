@@ -369,8 +369,7 @@ class ConfigurationService:
 
             # Get all available personas (with fallback)
             try:
-                personas_response = await self._persona_dao.get_all_personas()
-                all_personas = personas_response.get('personas', [])
+                all_personas = await self._persona_dao.get_all_personas()
                 
                 # Select the first persona (most recent) as default if no active persona is set
                 if not persona and all_personas:

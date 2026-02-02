@@ -272,6 +272,49 @@ async def upload_widget_image(
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
+# PERSONAS ENDPOINT
+# =================================
+
+@router.get("/personas")
+async def get_personas():
+    """Get all available personas with active status details"""
+    try:
+        config = await config_service.get_chatAgent_config()
+        all_personas = config.get("available_personas", [])
+
+        # Format personas with proper timestamps
+        formatted_personas = []
+        for p in all_personas:
+            formatted_personas.append({
+                "id": str(p.get("id", "")),
+                "persona_name": p.get("persona_name", ""),
+                "system_prompt": p.get("system_prompt", ""),
+                "is_active": p.get("is_active", False),
+                "created_at": p.get("created_at").isoformat() if hasattr(p.get("created_at"), "isoformat") else str(p.get("created_at", "")),
+                "updated_at": p.get("updated_at").isoformat() if hasattr(p.get("updated_at"), "isoformat") else str(p.get("updated_at", ""))
+            })
+
+        # Filter active personas
+        active_personas = [p for p in formatted_personas if p.get("is_active")]
+
+        # Get current active persona (first active one)
+        current_active = active_personas[0] if active_personas else None
+
+        return {
+            "success": True,
+            "data": {
+                "all_personas": formatted_personas,
+                "active_personas": active_personas,
+                "current_active_persona": current_active,
+                "total_count": len(formatted_personas),
+                "active_count": len(active_personas)
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting personas: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =================================
 # ADMIN MANAGEMENT ENDPOINTS
 # =================================
 
@@ -289,7 +332,7 @@ async def get_admin_users():
 async def add_admin_user(request_data: AdminManagementRequest, request: Request):
     """Add a new admin user"""
     try:
-        result = await auth_service.add_admin(request_data.email, "admin@example.com")
+        result = await auth_service.add_admin(request_data.email)
         return {"success": True, "message": "Admin user added successfully"}
     except Exception as e:
         logger.error(f"Error adding admin user: {e}")
@@ -324,7 +367,7 @@ async def get_human_agents_admin():
 async def add_human_agent(request_data: AdminManagementRequest, request: Request):
     """Add a new human agent"""
     try:
-        result = await auth_service.add_human_agent(request_data.email, "admin@example.com")
+        result = await auth_service.add_human_agent(request_data.email)
         return {"success": True, "message": "Human agent added successfully"}
     except Exception as e:
         logger.error(f"Error adding human agent: {e}")
@@ -396,6 +439,66 @@ async def send_notification(notification: Dict[str, Any], request: Request):
         return {"success": True, "message": "Notification sent successfully"}
     except Exception as e:
         logger.error(f"Error sending notification: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/notifications")
+async def get_notifications(
+    request: Request,
+    limit: int = 50,
+    offset: int = 0,
+    unread_only: bool = False
+):
+    """Get user notifications with pagination"""
+    try:
+        user_email = request.headers.get("X-User-Email", "user@example.com")
+        notifications = await notifications_service.get_notifications(user_email, limit, offset, unread_only)
+        # Calculate unread count
+        unread_count = len([n for n in notifications if not n.get("read", False)])
+        return {
+            "notifications": notifications,
+            "total_count": len(notifications),
+            "unread_count": unread_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting notifications: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/notifications")
+async def create_notification(request: Request):
+    """Create a new notification"""
+    try:
+        body = await request.json()
+        user_email = request.headers.get("X-User-Email", "user@example.com")
+        result = await notifications_service.create_notification(body, user_email)
+        return {
+            "success": True,
+            "notification_id": str(result.get("notification_id", ""))
+        }
+    except Exception as e:
+        logger.error(f"Error creating notification: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/notifications/mark-read")
+async def mark_notifications_read(request: Request):
+    """Mark specific notifications as read"""
+    try:
+        body = await request.json()
+        notification_ids = body.get("notification_ids", [])
+        updated_count = await notifications_service.mark_as_read(notification_ids)
+        return {"success": True, "updated_count": updated_count}
+    except Exception as e:
+        logger.error(f"Error marking notifications as read: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/notifications/mark-all-read")
+async def mark_all_notifications_read(request: Request):
+    """Mark all notifications as read for the user"""
+    try:
+        user_email = request.headers.get("X-User-Email", "user@example.com")
+        updated_count = await notifications_service.mark_all_as_read(user_email)
+        return {"success": True, "updated_count": updated_count}
+    except Exception as e:
+        logger.error(f"Error marking all notifications as read: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
@@ -651,14 +754,22 @@ async def request_human_agent(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/users/unique-id")
-async def generate_unique_id():
-    """Generate unique user ID"""
+async def create_or_get_unique_id(request: Request):
+    """Create or get unique user ID by email and role"""
     try:
-        import uuid
-        unique_id = str(uuid.uuid4())
-        return {"success": True, "unique_id": unique_id}
+        body = await request.json()
+        email = body.get("email")
+        role = body.get("role", "customer")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+
+        result = await auth_service.get_or_create_unique_id(email, role)
+        return {"success": True, **result}
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error generating unique ID: {e}")
+        logger.error(f"Error creating/getting unique ID: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/users/unique-id")
@@ -701,9 +812,15 @@ async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_ca
 
 @router.post("/feedback")
 async def submit_feedback(feedback: FeedbackRequest, request: Request):
-    """Submit feedback"""
+    """Submit feedback for a chat message"""
     try:
-        result = await feedback_service.submit_feedback(feedback.dict(), "admin@example.com")
+        user_email = request.headers.get("X-User-Email", "anonymous@example.com")
+        result = await feedback_service.submit_feedback(
+            message_id=feedback.message_id,
+            session_id=feedback.session_id,
+            feedback=feedback.feedback,
+            user_email=user_email
+        )
         return {"success": True, "message": "Feedback submitted successfully"}
     except Exception as e:
         logger.error(f"Error submitting feedback: {e}")

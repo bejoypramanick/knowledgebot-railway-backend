@@ -199,16 +199,18 @@ class ChatLogService:
                 if is_expired and session_row['is_active']:
                     await self.dao.archive_session(session_id, 'closed') # Effectively close in DB
 
-            feedback_result = await self.dao.conn.fetchrow(
-                """
-                SELECT
-                    COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
-                    COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
-                FROM chat_feedback
-                WHERE session_id = $1
-                """,
-                session_id
-            )
+            from configuration.core.db import get_db_connection
+            async with get_db_connection() as conn:
+                feedback_result = await conn.fetchrow(
+                    """
+                    SELECT
+                        COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
+                        COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
+                    FROM chat_feedback
+                    WHERE session_id = $1
+                    """,
+                    session_id
+                )
             session_feedback = None
             if feedback_result:
                 if feedback_result['positive_count'] > 0 and feedback_result['negative_count'] == 0:
@@ -369,7 +371,9 @@ class ChatLogService:
 
     async def request_human_agent(self, session_id: str):
         """Request human agent connection."""
-        config = await self.dao.conn.fetchrow("SELECT hil_enabled FROM configuration_metadata WHERE id = 1")
+        from configuration.core.db import get_db_connection
+        async with get_db_connection() as conn:
+            config = await conn.fetchrow("SELECT hil_enabled FROM configuration_metadata WHERE id = 1")
         hil_enabled = config['hil_enabled'] if config and config['hil_enabled'] is not None else True
         
         if not hil_enabled:
