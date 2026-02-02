@@ -369,11 +369,11 @@ class ConfigurationService:
                 "selected_persona": persona.get('persona_name', 'KnowledgeBot') if persona else "KnowledgeBot"
             }
 
-            # Get all available personas (with fallback)
+            # Get all available personas
             try:
                 all_personas = await self._persona_dao.get_all_personas()
                 
-                # Select the first persona (most recent) as default if no active persona is set
+                # Use first persona as default if no active persona is set
                 if not persona and all_personas:
                     first_persona = all_personas[0]
                     persona_config = {
@@ -382,7 +382,7 @@ class ConfigurationService:
                     }
                     
             except Exception as e:
-                logger.warning(f"Could not fetch personas from database, using fallback: {e}")
+                logger.warning(f"Could not fetch personas, using default: {e}")
                 all_personas = [{
                     'id': 'default',
                     'persona_name': 'KnowledgeBot',
