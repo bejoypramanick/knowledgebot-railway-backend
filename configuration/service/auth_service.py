@@ -31,43 +31,8 @@ class AuthService:
             return await self.auth_dao.check_human_agent_exists(email)
         except Exception as e:
             logger.error(f"Error checking human agent: {e}")
-            return False
-
-    async def add_admins(self, emails: List[str], current_user_email: str) -> dict:
-        """Add multiple admin users with business logic"""
-        # Check if current user is an admin
-        admin_result = await self.check_admin_exists(current_user_email)
-        
-        if not admin_result:
-            raise HTTPException(status_code=403, detail="Only admins can add new admins")
-        
-        # Create admins directly without email confirmation
-        admins_created = []
-        
-        for email in emails:
-            # Check if admin already exists
-            existing = await self.check_admin_exists(email)
-
-            if existing:
-                logger.info(f"Admin {email} already exists, skipping")
-                continue
-            
-            # Create new admin
-            admin_id = await self.add_admin(email)
-            
-            # Admin created successfully
-            admins_created.append({
-                "email": email,
-                "status": "active"
-            })
-            logger.info(f"Admin {email} created successfully")
-        
-        return {
-            "success": True,
-            "message": "Admins created successfully",
-            "admins": admins_created
-        }
-
+            raise
+    
     async def get_user_role(self, email: str) -> dict:
         """Get user role (admin, human_agent, or user) for a given email"""
         try:
@@ -114,14 +79,6 @@ class AuthService:
             "message": "Admin removed successfully"
         }
 
-    async def execute_role_query(self, query: str, email: str) -> List[Dict[str, Any]]:
-        """Execute role query."""
-        try:
-            return await self.auth_dao.execute_role_query(query, email)
-        except Exception as e:
-            logger.error(f"Error executing role query: {e}")
-            raise
-    
     async def add_admin(self, email: str) -> bool:
         """Add admin user"""
         try:
@@ -156,14 +113,6 @@ class AuthService:
             return await self.auth_dao.get_human_agents()
         except Exception as e:
             logger.error(f"Error fetching human agents: {e}")
-            raise
-
-    async def get_admin_users(self) -> List[Dict[str, Any]]:
-        """Get all admin users"""
-        try:
-            return await self.auth_dao.get_admins()
-        except Exception as e:
-            logger.error(f"Error fetching admin users: {e}")
             raise
 
     async def remove_human_agent(self, email: str, current_user_email: str) -> dict:
