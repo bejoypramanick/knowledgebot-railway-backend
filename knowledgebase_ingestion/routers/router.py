@@ -31,6 +31,11 @@ def extract_user_from_request(request: Request) -> tuple[str, str]:
 # FILE UPLOAD ENDPOINTS
 # =================================
 
+@router.post("/upload")
+async def upload_file_alias(file: UploadFile = File(...), request: Request = None):
+    """Upload a file to the knowledgebase (alias endpoint for /files/upload)"""
+    return await upload_file(file, request)
+
 @router.post("/files/upload")
 async def upload_file(file: UploadFile = File(...), request: Request = None):
     """Upload a file to the knowledgebase"""

@@ -135,6 +135,9 @@ async def generic_proxy_handler(request: Request, path: str):
         elif backend_path.startswith("webcrawl/"):
             service_url = get_settings().website_crawling_url
             logger.info(f"✅ Routing to webcrawl service: {service_url}")
+        elif backend_path.startswith("widget/"):
+            service_url = get_settings().configuration_service_url
+            logger.info(f"✅ Routing widget endpoint to configuration service: {service_url}")
         else:
             logger.error(f"❌ Unknown path: {backend_path}")
             return JSONResponse(

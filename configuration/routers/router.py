@@ -176,6 +176,122 @@ async def update_widget_config(config: WidgetConfigRequest, request: Request):
         logger.error(f"Error updating widget config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/widget/embed-script")
+async def generate_widget_embed_script(request: Request):
+    """Generate widget embed script based on configuration"""
+    try:
+        body = await request.json()
+        embed_type = body.get("embedType", "bubble")
+        theme = body.get("theme", "light")
+        primary_color = body.get("primaryColor", "#3b82f6")
+        position = body.get("position", "bottom-right")
+        widget_url = body.get("widgetUrl", "https://your-widget-url.com")
+
+        if embed_type == "iframe":
+            script = f'''<!-- Knowledgebot Widget - Iframe Embed -->
+<iframe
+    src="{widget_url}"
+    style="position: fixed; {position.replace('-', ': 20px; ')}; width: 400px; height: 600px; border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 9999;"
+    title="Chat Widget"
+></iframe>'''
+        else:
+            # Bubble embed (default)
+            script = f'''<!-- Knowledgebot Widget - Bubble Embed -->
+<script>
+(function() {{
+    var w = window;
+    var d = document;
+    var s = d.createElement('script');
+    s.src = '{widget_url}/widget.js';
+    s.async = true;
+    s.onload = function() {{
+        w.KnowledgeBot.init({{
+            theme: '{theme}',
+            primaryColor: '{primary_color}',
+            position: '{position}'
+        }});
+    }};
+    d.head.appendChild(s);
+}})();
+</script>'''
+
+        return {
+            "success": True,
+            "script": script,
+            "embedType": embed_type
+        }
+    except Exception as e:
+        logger.error(f"Error generating embed script: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+from fastapi import UploadFile, File, Form
+import base64
+import os
+
+@router.post("/widget/upload-image")
+async def upload_widget_image(
+    file: UploadFile = File(...),
+    type: str = Form(...)  # profile, chatIcon, headerIcon
+):
+    """Upload an image for the widget (profile picture, chat icon, or header icon)"""
+    try:
+        # Validate file type
+        allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"]
+        if file.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Allowed types: {', '.join(allowed_types)}"
+            )
+
+        # Validate image type parameter
+        valid_types = ["profile", "chatIcon", "headerIcon"]
+        if type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid type. Allowed types: {', '.join(valid_types)}"
+            )
+
+        # Read file content
+        content = await file.read()
+
+        # Convert to base64 data URL for storage
+        base64_content = base64.b64encode(content).decode('utf-8')
+        data_url = f"data:{file.content_type};base64,{base64_content}"
+
+        # Store in widget_configuration table based on type
+        from configuration.core.db import get_db_connection
+
+        column_mapping = {
+            "profile": ("profile_picture_url", "profile_picture_filename"),
+            "chatIcon": ("chat_icon_url", "chat_icon_filename"),
+            "headerIcon": ("profile_picture_url", "profile_picture_filename")  # Use profile for header
+        }
+
+        url_column, filename_column = column_mapping[type]
+
+        async with get_db_connection() as conn:
+            await conn.execute(
+                f"""
+                UPDATE widget_configuration
+                SET {url_column} = $1, {filename_column} = $2, updated_at = NOW()
+                WHERE id = 1
+                """,
+                data_url, file.filename
+            )
+
+        return {
+            "success": True,
+            "url": data_url,
+            "filename": file.filename,
+            "type": type,
+            "message": f"Image uploaded successfully for {type}"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading widget image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # =================================
 # PERSONAS ENDPOINTS
 # =================================
@@ -253,6 +369,11 @@ async def get_human_agents():
     except Exception as e:
         logger.error(f"Error getting human agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/admin/human-agents")
+async def get_human_agents_admin():
+    """Get all human agents (admin alias endpoint)"""
+    return await get_human_agents()
 
 @router.post("/human-agents")
 async def add_human_agent(request_data: AdminManagementRequest, request: Request):
@@ -347,13 +468,249 @@ async def get_online_agents():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/admin/chat-sessions")
-async def get_admin_chat_sessions(role: str = "admin", status: str = "active", page: int = 1, limit: int = 50):
-    """Get chat sessions for admin"""
+async def get_admin_chat_sessions(
+    request: Request,
+    agent_id: str = None,
+    role: str = "admin",
+    status: str = "active",
+    page: int = 1,
+    limit: int = 50
+):
+    """Get chat sessions for admin with real database integration"""
     try:
-        # For now, return empty result - this should be implemented with proper session tracking
-        return {"success": True, "sessions": [], "total_count": 0, "page": page}
+        # Get user email from request headers
+        user_email = request.headers.get("X-User-Email", "admin@example.com")
+
+        # Use chat_log_service to get sessions from real database
+        sessions, total_count = await chat_log_service.get_chat_sessions(
+            role=role,
+            user_email=user_email,
+            archive_status=status,
+            page=page,
+            limit=limit,
+            agent_id=agent_id
+        )
+
+        # Convert sessions to dict format for JSON response
+        sessions_data = []
+        for session in sessions:
+            if hasattr(session, 'dict'):
+                sessions_data.append(session.dict())
+            elif hasattr(session, '__dict__'):
+                sessions_data.append(session.__dict__)
+            else:
+                sessions_data.append(session)
+
+        total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
+
+        return {
+            "success": True,
+            "sessions": sessions_data,
+            "total_count": total_count,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages
+        }
     except Exception as e:
         logger.error(f"Error getting admin chat sessions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/admin/chat-sessions/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    """Get all messages for a specific chat session"""
+    try:
+        messages = await chat_log_service.get_session_messages(session_id)
+
+        # Format messages for response
+        formatted_messages = []
+        for msg in messages:
+            formatted_messages.append({
+                "id": str(msg.get("id", "")),
+                "text": msg.get("content", ""),
+                "sender": msg.get("role", "user"),
+                "timestamp": msg.get("created_at").isoformat() if msg.get("created_at") else None,
+                "session_id": session_id
+            })
+
+        return {
+            "success": True,
+            "messages": formatted_messages,
+            "session_id": session_id
+        }
+    except Exception as e:
+        logger.error(f"Error getting session messages: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/admin/chat-sessions/{session_id}/messages")
+async def send_agent_message(session_id: str, request: Request):
+    """Send a message from an agent to a customer in a chat session"""
+    try:
+        body = await request.json()
+        text = body.get("text", "")
+        agent_id = body.get("agent_id", request.headers.get("X-User-Email", "agent@example.com"))
+
+        if not text:
+            raise HTTPException(status_code=400, detail="Message text is required")
+
+        message_id = await chat_log_service.send_agent_message(session_id, agent_id, text)
+
+        return {
+            "success": True,
+            "message_id": str(message_id),
+            "session_id": session_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending agent message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/admin/chat-sessions/{session_id}/archive")
+async def archive_session(session_id: str, request: Request):
+    """Archive a chat session"""
+    try:
+        body = await request.json()
+        archive_status = body.get("status", "archived")
+        user_email = request.headers.get("X-User-Email", "admin@example.com")
+
+        await chat_log_service.archive_chat_session(session_id, archive_status, user_email)
+
+        return {
+            "success": True,
+            "message": f"Session {archive_status} successfully",
+            "session_id": session_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error archiving session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/admin/chat-sessions/{session_id}/end-agent")
+async def end_agent_session(session_id: str, request: Request):
+    """End a chat session from the agent side"""
+    try:
+        user_email = request.headers.get("X-User-Email", "agent@example.com")
+
+        await chat_log_service.update_chat_session(
+            session_id=session_id,
+            user_email=user_email,
+            status="closed"
+        )
+
+        return {
+            "success": True,
+            "message": "Session ended by agent",
+            "session_id": session_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error ending agent session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/admin/chat-sessions/{session_id}/end-customer")
+async def end_customer_session(session_id: str, request: Request):
+    """End a chat session from the customer side"""
+    try:
+        user_email = request.headers.get("X-User-Email", "customer@example.com")
+
+        await chat_log_service.end_customer_session(session_id, user_email)
+
+        return {
+            "success": True,
+            "message": "Session ended by customer",
+            "session_id": session_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error ending customer session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/admin/chat-sessions/{session_id}/transfer")
+async def transfer_session(session_id: str, request: Request):
+    """Transfer a chat session to another agent"""
+    try:
+        body = await request.json()
+        target_agent_email = body.get("target_agent_email")
+        user_email = request.headers.get("X-User-Email", "agent@example.com")
+
+        if not target_agent_email:
+            raise HTTPException(status_code=400, detail="Target agent email is required")
+
+        await chat_log_service.transfer_chat_session(session_id, user_email, target_agent_email)
+
+        return {
+            "success": True,
+            "message": f"Session transferred to {target_agent_email}",
+            "session_id": session_id,
+            "transferred_to": target_agent_email
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error transferring session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/admin/chat-sessions/{session_id}/feedback")
+async def update_session_feedback(session_id: str, request: Request):
+    """Update feedback for a chat session"""
+    try:
+        body = await request.json()
+        feedback = body.get("feedback")  # positive or negative
+        user_type = body.get("user_type", "customer")  # customer or agent
+        user_email = request.headers.get("X-User-Email", "user@example.com")
+
+        if feedback not in ["positive", "negative"]:
+            raise HTTPException(status_code=400, detail="Feedback must be 'positive' or 'negative'")
+
+        await chat_log_service.update_chat_session(
+            session_id=session_id,
+            user_email=user_email,
+            feedback=feedback,
+            user_type=user_type
+        )
+
+        # Also record in chat_feedback table
+        from configuration.core.db import get_db_connection
+        async with get_db_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO chat_feedback (message_id, session_id, feedback_type, user_type)
+                VALUES ($1, $2, $3, $4)
+                """,
+                "session_feedback", session_id, feedback, user_type
+            )
+
+        return {
+            "success": True,
+            "message": "Feedback recorded",
+            "session_id": session_id,
+            "feedback": feedback
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating session feedback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/admin/chat-sessions/{session_id}/request-agent")
+async def request_human_agent(session_id: str):
+    """Request a human agent for a chat session"""
+    try:
+        assigned_agent = await chat_log_service.request_human_agent(session_id)
+
+        return {
+            "success": True,
+            "message": "Human agent assigned",
+            "agent_assigned": assigned_agent,
+            "session_id": session_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error requesting human agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/users/unique-id")
@@ -365,6 +722,55 @@ async def generate_unique_id():
         return {"success": True, "unique_id": unique_id}
     except Exception as e:
         logger.error(f"Error generating unique ID: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/users/unique-id")
+async def get_user_unique_id(email: str, role: str = "customer"):
+    """Get unique ID for a user by email and role"""
+    try:
+        from configuration.core.db import get_db_connection
+
+        async with get_db_connection() as conn:
+            # Query user_unique_ids table
+            result = await conn.fetchrow(
+                """
+                SELECT unique_id, email, role, created_at
+                FROM user_unique_ids
+                WHERE email = $1 AND role = $2
+                """,
+                email, role
+            )
+
+            if result:
+                return {
+                    "success": True,
+                    "unique_id": result["unique_id"],
+                    "email": result["email"],
+                    "role": result["role"]
+                }
+            else:
+                # If no existing unique ID, generate one and store it
+                import uuid
+                new_unique_id = str(uuid.uuid4())[:8]  # Short unique ID
+
+                await conn.execute(
+                    """
+                    INSERT INTO user_unique_ids (email, unique_id, role)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (email, role) DO NOTHING
+                    """,
+                    email, new_unique_id, role
+                )
+
+                return {
+                    "success": True,
+                    "unique_id": new_unique_id,
+                    "email": email,
+                    "role": role,
+                    "created": True
+                }
+    except Exception as e:
+        logger.error(f"Error getting user unique ID: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
