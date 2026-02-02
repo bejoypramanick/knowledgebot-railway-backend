@@ -306,3 +306,56 @@ class ChatLogDAO:
     async def delete_chat_log(self, session_id: str) -> Dict[str, Any]:
         """Delete a chat log"""
         return {"success": True}
+
+    async def record_session_feedback(self, session_id: str, feedback_type: str, user_type: str = "customer") -> bool:
+        """Record feedback for a chat session."""
+        query = """
+            INSERT INTO chat_feedback (message_id, session_id, feedback_type, user_type)
+            VALUES ($1, $2, $3, $4)
+        """
+        params = {"session_id": session_id, "feedback_type": feedback_type, "user_type": user_type}
+
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, "session_feedback", session_id, feedback_type, user_type)
+                logger.log_db_query(query, params, result)
+                return True
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            raise
+
+    async def get_session_feedback_counts(self, session_id: str) -> Dict[str, int]:
+        """Get feedback counts for a session."""
+        query = """
+            SELECT
+                COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
+                COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
+            FROM chat_feedback
+            WHERE session_id = $1
+        """
+        params = {"session_id": session_id}
+
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetchrow(query, session_id)
+                logger.log_db_query(query, params, result)
+                return {
+                    "positive_count": result["positive_count"] if result else 0,
+                    "negative_count": result["negative_count"] if result else 0
+                }
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return {"positive_count": 0, "negative_count": 0}
+
+    async def get_hil_enabled(self) -> bool:
+        """Get HIL enabled status from configuration."""
+        query = "SELECT hil_enabled FROM configuration_metadata WHERE id = 1"
+
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetchrow(query)
+                logger.log_db_query(query, None, result)
+                return result['hil_enabled'] if result and result['hil_enabled'] is not None else True
+        except Exception as e:
+            logger.log_db_query(query, None, error=e)
+            return True  # Default to enabled if query fails

@@ -186,3 +186,47 @@ class AuthDAO:
         except Exception as e:
             logger.log_db_query(query, {"email": email}, error=e)
             raise
+
+    async def get_or_create_unique_id(self, email: str, role: str = "customer") -> Dict[str, Any]:
+        """Get or create a unique ID for a user by email and role."""
+        import uuid
+
+        select_query = """
+            SELECT unique_id, email, role, created_at
+            FROM user_unique_ids
+            WHERE email = $1 AND role = $2
+        """
+        params = {"email": email, "role": role}
+
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetchrow(select_query, email, role)
+                logger.log_db_query(select_query, params, result)
+
+                if result:
+                    return {
+                        "unique_id": result["unique_id"],
+                        "email": result["email"],
+                        "role": result["role"]
+                    }
+                else:
+                    # If no existing unique ID, generate one and store it
+                    new_unique_id = str(uuid.uuid4())[:8]  # Short unique ID
+
+                    insert_query = """
+                        INSERT INTO user_unique_ids (email, unique_id, role)
+                        VALUES ($1, $2, $3)
+                        ON CONFLICT (email, role) DO NOTHING
+                    """
+                    insert_result = await conn.execute(insert_query, email, new_unique_id, role)
+                    logger.log_db_query(insert_query, {"email": email, "unique_id": new_unique_id, "role": role}, insert_result)
+
+                    return {
+                        "unique_id": new_unique_id,
+                        "email": email,
+                        "role": role,
+                        "created": True
+                    }
+        except Exception as e:
+            logger.log_db_query("get_or_create_unique_id", params, error=e)
+            raise

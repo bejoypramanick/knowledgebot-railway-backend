@@ -8,16 +8,18 @@ from configuration.core.otel_logger import get_otel_logger
 from configuration.dao.chatbot_dao import ChatbotDAO
 from configuration.dao.auth_dao import AuthDAO
 from configuration.dao.personas_dao import PersonasDAO
+from configuration.dao.widget_dao import WidgetDAO
 
 logger = get_otel_logger("configuration_service", "configuration")
 
 class ConfigurationService:
     """Service layer for configuration operations"""
-    
+
     def __init__(self):
         self._chatbot_dao = ChatbotDAO()
         self._auth_dao = AuthDAO()
         self._persona_dao = PersonasDAO()
+        self._widget_dao = WidgetDAO()
     
     async def get_metadata(self) -> Optional[Dict[str, Any]]:
         """Get chatbot metadata"""
@@ -613,28 +615,9 @@ class ConfigurationService:
     async def update_widget_image(self, image_type: str, data_url: str, filename: str) -> bool:
         """Update widget image (profile, chatIcon, or headerIcon)"""
         try:
-            from configuration.core.db import get_db_connection
-
-            column_mapping = {
-                "profile": ("profile_picture_url", "profile_picture_filename"),
-                "chatIcon": ("chat_icon_url", "chat_icon_filename"),
-                "headerIcon": ("profile_picture_url", "profile_picture_filename")
-            }
-
-            url_column, filename_column = column_mapping[image_type]
-
-            async with get_db_connection() as conn:
-                await conn.execute(
-                    f"""
-                    UPDATE widget_configuration
-                    SET {url_column} = $1, {filename_column} = $2, updated_at = NOW()
-                    WHERE id = 1
-                    """,
-                    data_url, filename
-                )
-
+            result = await self._widget_dao.update_widget_image(image_type, data_url, filename)
             logger.info(f"✅ Widget image '{image_type}' updated successfully")
-            return True
+            return result
         except Exception as e:
             logger.error(f"Error updating widget image: {e}")
             raise

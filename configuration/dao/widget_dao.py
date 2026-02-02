@@ -3,6 +3,7 @@ Widget Data Access Object for Configuration Service
 Handles database operations for widget configuration
 """
 from typing import Dict, List, Any, Optional
+import json
 
 from configuration.core.db import get_db_connection
 from configuration.core.otel_logger import get_otel_logger
@@ -126,4 +127,56 @@ class WidgetDAO:
                         logger.log_db_query(insert_query, {"message": message, "display_order": i}, result)
         except Exception as e:
             logger.log_db_query("update_suggested_messages", {"messages": messages}, error=e)
+            raise
+
+    async def update_widget_image(self, image_type: str, data_url: str, filename: str) -> bool:
+        """Update widget image (profile, chatIcon, or headerIcon)."""
+        column_mapping = {
+            "profile": ("profile_picture_url", "profile_picture_filename"),
+            "chatIcon": ("chat_icon_url", "chat_icon_filename"),
+            "headerIcon": ("profile_picture_url", "profile_picture_filename")
+        }
+
+        url_column, filename_column = column_mapping[image_type]
+
+        query = f"""
+            UPDATE widget_configuration
+            SET {url_column} = $1, {filename_column} = $2, updated_at = NOW()
+            WHERE id = 1
+        """
+        params = {"image_type": image_type, "url_column": url_column, "filename_column": filename_column, "data_url_length": len(data_url), "filename": filename}
+
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, data_url, filename)
+                logger.log_db_query(query, params, result)
+                return True
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            raise
+
+    async def clear_suggested_messages(self):
+        """Clear all suggested messages."""
+        query = "DELETE FROM widget_suggested_messages"
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(query)
+                logger.log_db_query(query, None, result)
+        except Exception as e:
+            logger.log_db_query(query, None, error=e)
+            raise
+
+    async def add_suggested_message(self, message: str, index: int):
+        """Add a suggested message."""
+        query = """
+            INSERT INTO widget_suggested_messages (message_text, display_order, is_active)
+            VALUES ($1, $2, true)
+        """
+        params = {"message": message, "index": index}
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, message, index)
+                logger.log_db_query(query, params, result)
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
             raise

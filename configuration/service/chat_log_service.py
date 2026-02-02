@@ -199,24 +199,12 @@ class ChatLogService:
                 if is_expired and session_row['is_active']:
                     await self.dao.archive_session(session_id, 'closed') # Effectively close in DB
 
-            from configuration.core.db import get_db_connection
-            async with get_db_connection() as conn:
-                feedback_result = await conn.fetchrow(
-                    """
-                    SELECT
-                        COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
-                        COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
-                    FROM chat_feedback
-                    WHERE session_id = $1
-                    """,
-                    session_id
-                )
+            feedback_counts = await self.dao.get_session_feedback_counts(session_id)
             session_feedback = None
-            if feedback_result:
-                if feedback_result['positive_count'] > 0 and feedback_result['negative_count'] == 0:
-                    session_feedback = 'positive'
-                elif feedback_result['negative_count'] > 0:
-                    session_feedback = 'negative'
+            if feedback_counts['positive_count'] > 0 and feedback_counts['negative_count'] == 0:
+                session_feedback = 'positive'
+            elif feedback_counts['negative_count'] > 0:
+                session_feedback = 'negative'
 
             from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(
@@ -371,10 +359,7 @@ class ChatLogService:
 
     async def request_human_agent(self, session_id: str):
         """Request human agent connection."""
-        from configuration.core.db import get_db_connection
-        async with get_db_connection() as conn:
-            config = await conn.fetchrow("SELECT hil_enabled FROM configuration_metadata WHERE id = 1")
-        hil_enabled = config['hil_enabled'] if config and config['hil_enabled'] is not None else True
+        hil_enabled = await self.dao.get_hil_enabled()
         
         if not hil_enabled:
             raise HTTPException(status_code=503, detail="Human agent support is currently disabled")
@@ -415,16 +400,7 @@ class ChatLogService:
     async def record_session_feedback(self, session_id: str, feedback_type: str, user_type: str = "customer"):
         """Record feedback for a chat session"""
         try:
-            from configuration.core.db import get_db_connection
-
-            async with get_db_connection() as conn:
-                await conn.execute(
-                    """
-                    INSERT INTO chat_feedback (message_id, session_id, feedback_type, user_type)
-                    VALUES ($1, $2, $3, $4)
-                    """,
-                    "session_feedback", session_id, feedback_type, user_type
-                )
+            await self.dao.record_session_feedback(session_id, feedback_type, user_type)
             logger.info(f"Feedback '{feedback_type}' recorded for session {session_id}")
         except Exception as e:
             logger.error(f"Error recording session feedback: {e}")
