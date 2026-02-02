@@ -137,7 +137,7 @@ class ConfigurationService:
         try:
             # Get all raw data
             metadata = await self.get_metadata()
-           # notification_rows = await self.get_notification_settings()
+            notification_rows = await self._chatbot_dao.get_notification_settings()
             security_rows = await self._chatbot_dao.get_security_settings()
             llm_rows = await self._chatbot_dao.get_llm_providers()
             persona = await self._persona_dao.get_active_persona()
@@ -150,13 +150,13 @@ class ConfigurationService:
                 "error_alerts_enabled": False,
                 "feedback_requests_enabled": True
             }
-            #for row in notification_rows:
-                #if row['setting_name'] == 'user_interactions_enabled':
-                    #notifications['user_interactions_enabled'] = row['is_enabled']
-                #elif row['setting_name'] == 'error_alerts_enabled':
-                    #notifications['error_alerts_enabled'] = row['is_enabled']
-                #elif row['setting_name'] == 'feedback_requests_enabled':
-                    #notifications['feedback_requests_enabled'] = row['is_enabled']
+            for row in notification_rows:
+                if row['setting_name'] == 'user_interactions_enabled':
+                    notifications['user_interactions_enabled'] = row['is_enabled']
+                elif row['setting_name'] == 'error_alerts_enabled':
+                    notifications['error_alerts_enabled'] = row['is_enabled']
+                elif row['setting_name'] == 'feedback_requests_enabled':
+                    notifications['feedback_requests_enabled'] = row['is_enabled']
 
             # Build security settings dict
             security = {
