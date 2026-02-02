@@ -1,5 +1,5 @@
 """
-Chatbot Data Access Object for Configuration Service
+ChatAdmin Data Access Object for Configuration Service
 Handles database operations for chatbot configuration management
 """
 from typing import Dict, List, Any, Optional
@@ -9,7 +9,7 @@ from configuration.core.otel_logger import get_otel_logger
 
 logger = get_otel_logger("chatbot_dao", "configuration")
 
-class ChatbotDAO:
+class ChatAdminDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
