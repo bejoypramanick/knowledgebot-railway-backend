@@ -138,11 +138,11 @@ class ConfigurationService:
             # Get all raw data
             metadata = await self.get_metadata()
            # notification_rows = await self.get_notification_settings()
-            security_rows = await self.get_security_settings()
-            llm_rows = await self.get_llm_providers()
+            security_rows = await self._chatbot_dao.get_security_settings()
+            llm_rows = await self._chatbot_dao.get_llm_providers()
             persona = await self._persona_dao.get_active_persona()
-            human_agents_list = await self.get_human_agents()
-            admin_emails_list = await self.get_admins()
+            human_agents_list = await self._chatbot_dao.get_human_agents()
+            admin_emails_list = await self._chatbot_dao.get_admins()
 
             # Build notification settings dict
             notifications = {
