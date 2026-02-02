@@ -408,6 +408,11 @@ class ConfigurationService:
                 "llm_tokens": llm_tokens
             }
 
+            # Enhanced logging for response_policy debugging
+            logger.info(f"🔍 GET CONFIG - Raw metadata: {metadata}")
+            logger.info(f"🔍 GET CONFIG - Response policy being returned: {data['response_policy']}")
+            logger.info(f"🔍 GET CONFIG - Full config data keys: {list(data.keys())}")
+
             return data
         except Exception as e:
             logger.error(f"Error getting chatbot configuration: {e}")
@@ -539,6 +544,20 @@ class ConfigurationService:
                 logger.info(f"🔍 Calling update_metadata with: {metadata_updates}")
                 await self.update_metadata(**metadata_updates)
                 logger.info(f"✅ update_metadata completed successfully")
+                
+                # Verify the update by reading back the metadata
+                updated_metadata = await self.get_metadata()
+                logger.info(f"🔍 VERIFICATION - Updated metadata: {updated_metadata}")
+                if updated_metadata and 'response_policy' in updated_metadata:
+                    actual_value = updated_metadata['response_policy']
+                    expected_value = config_data['response_policy']
+                    logger.info(f"🔍 RESPONSE_POLICY CHECK - Expected: {expected_value}, Actual: {actual_value}")
+                    if actual_value == expected_value:
+                        logger.info(f"✅ RESPONSE_POLICY PERSISTENCE VERIFIED: {actual_value}")
+                    else:
+                        logger.error(f"❌ RESPONSE_POLICY PERSISTENCE FAILED - Expected: {expected_value}, Got: {actual_value}")
+                else:
+                    logger.error(f"❌ RESPONSE_POLICY NOT FOUND IN UPDATED METADATA")
             else:
                 logger.info(f"🔍 No metadata updates needed - checking keys: display_name={config_data.get('display_name')}, description={config_data.get('description')}, response_policy={config_data.get('response_policy')}")
             
