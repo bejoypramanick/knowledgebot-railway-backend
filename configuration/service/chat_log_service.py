@@ -90,22 +90,6 @@ class ChatLogService:
             logger.error(f"Error in load balancing: {e}", exc_info=True)
             return None
 
-    async def get_online_agents(self, user_email: str):
-        """Get all online human agents and admins with their active session counts."""
-        try:
-            agent_emails = await self.auth_dao.get_available_agents()
-            online_users = []
-            for email in agent_emails:
-                if await self.get_agent_online_status(email):
-                    chat_count = await self.get_agent_chat_count(email)
-                    online_users.append({
-                        "email": email, "role": "agent", "is_online": True, "active_sessions": chat_count
-                    })
-            return {"success": True, "agents": online_users}
-        except Exception as e:
-            logger.error(f"Error getting online agents: {e}")
-            raise
-
     async def record_heartbeat(self, user_email: str):
         """Record heartbeat for an agent or admin."""
         roles = await self.dao.check_user_role(user_email)
@@ -368,34 +352,6 @@ class ChatLogService:
         if not assigned_agent:
             raise HTTPException(status_code=503, detail="No available agents to assign chat")
         return assigned_agent
-
-    async def public_end_customer_session(self, session_id: str):
-        """Public endpoint to end customer session."""
-        session_data = await self.dao.get_session_by_id_with_messages(session_id)
-        if not session_data:
-            raise HTTPException(status_code=404, detail="Chat session not found")
-        
-        session_db_id = session_data['id']
-        metadata = session_data['metadata'] or {}
-        if isinstance(metadata, str):
-            metadata = json.loads(metadata)
-        
-        if 'assigned_agent' in metadata:
-            del metadata['assigned_agent']
-        
-        await self.dao.update_chat_session_metadata(session_db_id, metadata)
-        await self.dao.archive_session(session_id, 'closed')
-        
-        if self.connection_manager:
-            session_ended_message = {
-                'type': 'session_ended',
-                'session_id': session_id,
-                'ended_by': 'customer',
-                'text': 'The session has ended by the customer.',
-                'timestamp': time.time()
-            }
-            await self.connection_manager.broadcast_to_session(session_ended_message, session_id)
-        return True
 
     async def record_session_feedback(self, session_id: str, feedback_type: str, user_type: str = "customer"):
         """Record feedback for a chat session"""
