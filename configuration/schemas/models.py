@@ -73,6 +73,7 @@ class ChatbotConfigRequest(BaseModel):
     data_management: Optional[DataManagementUpdate] = None
     persona: Optional[PersonaUpdate] = None
     notifications: Optional[NotificationsUpdate] = None
+    response_policy: Optional[int] = Field(None, ge=15, le=300, description="Response policy timeout in seconds (15-300)")
 
     @validator('admin_emails')
     def validate_admin_emails(cls, v):
@@ -84,6 +85,12 @@ class ChatbotConfigRequest(BaseModel):
     def validate_human_agents(cls, v):
         if v is not None and len(v) > 20:
             raise ValueError('Maximum 20 human agents allowed')
+        return v
+
+    @validator('response_policy')
+    def validate_response_policy(cls, v):
+        if v is not None and (v < 15 or v > 300):
+            raise ValueError('Response policy must be between 15 and 300 seconds')
         return v
 
 class PositionData(BaseModel):
