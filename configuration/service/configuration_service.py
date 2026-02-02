@@ -392,8 +392,26 @@ class ConfigurationService:
                 await self.sync_human_agent_emails(config_data['human_agents'])
             
             # Update persona if provided
-            if 'persona' in config_data and 'selected_persona' in config_data['persona']:
-                await self.activate_persona(config_data['persona']['selected_persona'])
+            if 'persona' in config_data:
+                persona_data = config_data['persona']
+                if 'selected_persona' in persona_data:
+                    persona_name = persona_data['selected_persona']
+                    system_prompt = persona_data.get('system_prompt', f"You are {persona_name}, a helpful AI assistant. Your role is to assist users with their questions and provide accurate, helpful responses.")
+                    
+                    # If it's a custom persona, create/update it with the custom system prompt
+                    if persona_name == 'Custom':
+                        # For custom personas, we need to handle them specially
+                        # Create or update the custom persona with the provided system prompt
+                        await self._persona_dao.update_persona(
+                            persona_name='Custom',
+                            system_prompt=system_prompt,
+                            is_active=True
+                        )
+                    else:
+                        # For predefined personas, just activate them
+                        await self.activate_persona(persona_name)
+                    
+                    logger.info(f"✅ Successfully updated persona: {persona_name}")
             
             # Update notifications if provided
             if 'notifications' in config_data:
