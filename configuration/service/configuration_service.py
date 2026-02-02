@@ -5,7 +5,7 @@ Provides business logic layer between routers and DAO
 from typing import Any, Dict, List, Optional
 
 from configuration.core.otel_logger import get_otel_logger
-from configuration.dao.chat_admin_dao import AdminAgentDAO
+from configuration.dao.chat_agent_dao import AdminAgentDAO
 from configuration.dao.auth_dao import AuthDAO
 from configuration.dao.personas_dao import PersonasDAO
 from configuration.dao.widget_dao import WidgetDAO
