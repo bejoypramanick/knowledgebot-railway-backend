@@ -138,10 +138,6 @@ async def generic_proxy_handler(request: Request, path: str):
         elif backend_path.startswith("widget/"):
             service_url = get_settings().configuration_service_url
             logger.info(f"✅ Routing widget endpoint to configuration service: {service_url}")
-            # For widget endpoints, need to add 'configuration' to the path
-            if not backend_path.startswith("widget/configuration"):
-                backend_path = f"configuration/{backend_path}"
-            logger.info(f"🔍 Updated backend path for widget: {backend_path}")
         else:
             logger.error(f"❌ Unknown path: {backend_path}")
             return JSONResponse(
