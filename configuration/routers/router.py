@@ -199,7 +199,16 @@ async def generate_widget_embed_script(request: Request):
         fallback_config = {
             "theme": body.get("theme"),
             "primaryColor": body.get("primaryColor"),
-            "position": body.get("position")
+            "position": body.get("position"),
+            "alignBubble": body.get("alignBubble"),
+            "chatBubbleColor": body.get("chatBubbleColor"),
+            "displayChatbot": body.get("displayChatbot"),
+            "displayName": body.get("displayName"),
+            "initialMessage": body.get("initialMessage"),
+            "suggestedMessages": body.get("suggestedMessages"),
+            "profilePictureUrl": body.get("profilePictureUrl"),
+            "chatIconUrl": body.get("chatIconUrl"),
+            "baseUrl": body.get("baseUrl")
         }
         
         # Delegate to service layer for business logic

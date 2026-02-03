@@ -139,9 +139,9 @@ class WidgetConfigService:
             # Use actual config values or fallback to provided config
             theme = config.get("theme", fallback_config.get("theme", "light") if fallback_config else "light")
             primary_color = config.get("primary_color", fallback_config.get("primaryColor", "#3b82f6") if fallback_config else "#3b82f6")
-            position = config.get("align_bubble", fallback_config.get("position", "right") if fallback_config else "right")
-            chat_bubble_color = config.get("chat_bubble_color", "#000000")
-            display_chatbot = config.get("display_chatbot", True)
+            position = config.get("align_bubble", fallback_config.get("position", fallback_config.get("alignBubble", "right"))) if fallback_config else config.get("align_bubble", "right")
+            chat_bubble_color = config.get("chat_bubble_color", fallback_config.get("chatBubbleColor", "#000000")) if fallback_config else config.get("chat_bubble_color", "#000000")
+            display_chatbot = config.get("display_chatbot", fallback_config.get("displayChatbot", True)) if fallback_config else config.get("display_chatbot", True)
             
             # Convert position format for CSS
             position_css = "bottom-right" if position == "right" else "bottom-left"
