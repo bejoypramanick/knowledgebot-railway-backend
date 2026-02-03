@@ -27,25 +27,6 @@ from ..schemas.models import (
 logger = get_otel_logger("configuration_router", "configuration")
 router = APIRouter()
 
-@router.get("/version")
-async def get_version():
-    """Simple version check endpoint"""
-    return {
-        "service": "configuration",
-        "version": "2.2",
-        "status": "enhanced_debugging_deployed",
-        "timestamp": "2026-01-31T13:28:00Z"
-    }
-
-@router.get("/test")
-async def test_endpoint():
-    """Simple test endpoint without authentication"""
-    logger.info("🔍 TEST ENDPOINT CALLED - SERVICE IS WORKING!")
-    return {
-        "message": "Configuration service is working!",
-        "version": "2.2",
-        "timestamp": "2026-01-31T13:35:00Z"
-    }
 
 # Simple function to get current user from request state or headers (set by API Gateway middleware)
 async def get_current_user(request: Request):
@@ -270,117 +251,6 @@ async def upload_widget_image(
         logger.error(f"Error uploading widget image: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# =================================
-# PERSONAS ENDPOINT
-# =================================
-
-@router.get("/personas")
-async def get_personas():
-    """Get all available personas with active status details"""
-    try:
-        config = await chat_agent_config_service.get_chatAgent_config()
-        all_personas = config.get("available_personas", [])
-
-        # Format personas with proper timestamps
-        formatted_personas = []
-        for p in all_personas:
-            formatted_personas.append({
-                "id": str(p.get("id", "")),
-                "persona_name": p.get("persona_name", ""),
-                "system_prompt": p.get("system_prompt", ""),
-                "is_active": p.get("is_active", False),
-                "created_at": p.get("created_at").isoformat() if hasattr(p.get("created_at"), "isoformat") else str(p.get("created_at", "")),
-                "updated_at": p.get("updated_at").isoformat() if hasattr(p.get("updated_at"), "isoformat") else str(p.get("updated_at", ""))
-            })
-
-        # Filter active personas
-        active_personas = [p for p in formatted_personas if p.get("is_active")]
-
-        # Get current active persona (first active one)
-        current_active = active_personas[0] if active_personas else None
-
-        return {
-            "success": True,
-            "data": {
-                "all_personas": formatted_personas,
-                "active_personas": active_personas,
-                "current_active_persona": current_active,
-                "total_count": len(formatted_personas),
-                "active_count": len(active_personas)
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error getting personas: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =================================
-# ADMIN MANAGEMENT ENDPOINTS
-# =================================
-
-@router.get("/admins")
-async def get_admin_users():
-    """Get all admin users"""
-    try:
-        admins = await auth_service.get_admin_users()
-        return {"success": True, "data": admins}
-    except Exception as e:
-        logger.error(f"Error getting admin users: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/admins")
-async def add_admin_user(request_data: AdminManagementRequest, request: Request):
-    """Add a new admin user"""
-    try:
-        result = await auth_service.add_admin(request_data.email)
-        return {"success": True, "message": "Admin user added successfully"}
-    except Exception as e:
-        logger.error(f"Error adding admin user: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.delete("/admins/{email}")
-async def remove_admin_user(email: str, request: Request):
-    """Remove an admin user"""
-    try:
-        result = await auth_service.remove_admin(email, "admin@example.com")
-        return {"success": True, "message": "Admin user removed successfully"}
-    except Exception as e:
-        logger.error(f"Error removing admin user: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/human-agents")
-async def get_human_agents():
-    """Get all human agents"""
-    try:
-        agents = await auth_service.get_human_agents()
-        return {"success": True, "data": agents}
-    except Exception as e:
-        logger.error(f"Error getting human agents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/admin/human-agents")
-async def get_human_agents_admin():
-    """Get all human agents (admin alias endpoint)"""
-    return await get_human_agents()
-
-@router.post("/human-agents")
-async def add_human_agent(request_data: AdminManagementRequest, request: Request):
-    """Add a new human agent"""
-    try:
-        result = await auth_service.add_human_agent(request_data.email)
-        return {"success": True, "message": "Human agent added successfully"}
-    except Exception as e:
-        logger.error(f"Error adding human agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.delete("/human-agents/{email}")
-async def remove_human_agent(email: str, request: Request):
-    """Remove a human agent"""
-    try:
-        result = await auth_service.remove_human_agent(email, "admin@example.com")
-        return {"success": True, "message": "Human agent removed successfully"}
-    except Exception as e:
-        logger.error(f"Error removing human agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
 # CHAT LOG ENDPOINTS
@@ -407,8 +277,6 @@ async def delete_chat_log(session_id: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
-<<<<<<< HEAD
-=======
 # NOTIFICATIONS ENDPOINTS
 # =================================
 
@@ -483,7 +351,6 @@ async def mark_all_notifications_read(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
->>>>>>> 336ea8d (refactor: remove only notification_settings table related code)
 # ADMIN ENDPOINTS
 # =================================
 

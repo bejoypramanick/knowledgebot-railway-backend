@@ -48,7 +48,7 @@ class ChatAgentConfigService:
                 }
                 
                           
-            logger.info(f"✅ LLM tokens constructed from llm_providers table: {llm_tokens}")
+            logger.info(f"✅ get_chatAgent_config : LLM tokens constructed from llm_providers table: {llm_tokens}")
 
             # Initialize persona config with active persona
             persona_config = {
