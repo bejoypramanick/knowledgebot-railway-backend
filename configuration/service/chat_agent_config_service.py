@@ -98,8 +98,15 @@ class ChatAgentConfigService:
             # Save metadata if provided
             if 'metadata' in config_data:
                 metadata = config_data['metadata']
+                logger.info(f"🔍 Found metadata in config_data: {metadata}")
                 if isinstance(metadata, dict):
+                    logger.info(f"🔍 Calling update_metadata with: {metadata}")
                     await self._chatAgent_dao.update_metadata(**metadata)
+                    logger.info("✅ Metadata updated successfully")
+                else:
+                    logger.warning(f"⚠️ Metadata is not a dict: {type(metadata)}")
+            else:
+                logger.warning("⚠️ No metadata found in config_data")
             
             # Save security settings
             if 'security' in config_data:

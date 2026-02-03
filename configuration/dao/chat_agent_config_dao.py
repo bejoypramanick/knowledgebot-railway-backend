@@ -32,6 +32,7 @@ class ChatAgentConfigDAO:
     async def update_metadata(self, **kwargs):
         """Update chatbot metadata."""
         try:
+            logger.info(f"🔍 DAO update_metadata called with kwargs: {kwargs}")
             async with get_db_connection() as conn:
                 set_clauses = []
                 params = []
@@ -39,6 +40,7 @@ class ChatAgentConfigDAO:
                 for key, value in kwargs.items():
                     set_clauses.append(f"{key} = ${len(params) + 1}")
                     params.append(value)
+                    logger.info(f"🔍 Adding clause: {key} = ${len(params)} with value: {value}")
                 
                 if set_clauses:
                     query = f"""
@@ -46,11 +48,16 @@ class ChatAgentConfigDAO:
                         SET {', '.join(set_clauses)}, updated_at = NOW()
                         WHERE id = 1
                     """
+                    logger.info(f"🔍 Executing query: {query}")
+                    logger.info(f"🔍 With params: {params}")
                     result = await conn.execute(query, *params)
                     logger.log_db_query(query, params, result)
-                    logger.info(f"Updated chatbot metadata: {kwargs}")
+                    logger.info(f"✅ Updated chatbot metadata: {kwargs}")
+                else:
+                    logger.warning("⚠️ No set clauses generated for metadata update")
         except Exception as e:
             logger.log_db_query(query, None, error=e)
+            logger.error(f"❌ Error in update_metadata: {e}")
             raise
 
 
