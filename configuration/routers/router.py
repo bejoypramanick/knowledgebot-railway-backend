@@ -8,7 +8,8 @@ from typing import Dict, List, Any, Optional
 import json
 
 from configuration.core.otel_logger import get_otel_logger
-from ..service.configuration_service import ConfigurationService
+from ..service.chat_agent_config_service import ChatAgentConfigService
+from ..service.widget_config_service import WidgetConfigService
 from ..service.auth_service import AuthService
 from ..service.chat_log_service import ChatLogService
 from ..service.notifications_service import NotificationsService
@@ -82,7 +83,8 @@ async def get_current_user(request: Request):
     raise HTTPException(status_code=401, detail="User not found in request state or headers")
 
 # Initialize services
-config_service = ConfigurationService()
+chat_agent_config_service = ChatAgentConfigService()
+widget_config_service = WidgetConfigService()
 auth_service = AuthService()
 chat_log_service = ChatLogService()
 notifications_service = NotificationsService(notifications_dao=None)
@@ -99,7 +101,7 @@ async def get_chatbot_config(cache: bool = True):
     """Get complete chatbot configuration with caching support"""
     try:
         logger.info(f"🔍 GET /chatAgentConfig called with cache={cache}")
-        config = await config_service.get_chatAgent_config()
+        config = await chat_agent_config_service.get_chatAgent_config()
         logger.info(f"✅ Chatbot config retrieved successfully (cache={cache})")
         return {"success": True, "data": config}
     except Exception as e:
@@ -113,7 +115,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
         logger.info(f"🔍 POST /chatAgentConfig received: {config}")
         logger.info(f"🔍 Request headers: {dict(request.headers)}")
         
-        await config_service.save_chatbot_config(config.dict())
+        await chat_agent_config_service.save_chatbot_config(config.dict())
         
         logger.info("✅ Chatbot config saved successfully")
         return {"success": True, "message": "Chatbot configuration saved successfully"}
@@ -131,7 +133,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
 async def get_widget_config():
     """Get widget configuration"""
     try:
-        config = await config_service.get_widget_config()
+        config = await widget_config_service.get_widget_config()
         
         # If no config exists, return default configuration
         if not config:
@@ -167,7 +169,7 @@ async def get_widget_config():
 async def update_widget_config(config: WidgetConfigRequest, request: Request):
     """Update widget configuration"""
     try:
-        await config_service.update_widget_config(config.dict())
+        await widget_config_service.update_widget_config(config.dict())
         return {"success": True, "message": "Widget configuration updated successfully"}
     except Exception as e:
         logger.error(f"Error updating widget config: {e}")
@@ -256,7 +258,7 @@ async def upload_widget_image(
         data_url = f"data:{file.content_type};base64,{base64_content}"
 
         # Store in widget_configuration table via service
-        await config_service.update_widget_image(type, data_url, file.filename)
+        await widget_config_service.update_widget_image(type, data_url, file.filename)
 
         return {
             "success": True,
@@ -279,7 +281,7 @@ async def upload_widget_image(
 async def get_personas():
     """Get all available personas with active status details"""
     try:
-        config = await config_service.get_chatAgent_config()
+        config = await chat_agent_config_service.get_chatAgent_config()
         all_personas = config.get("available_personas", [])
 
         # Format personas with proper timestamps
@@ -981,7 +983,8 @@ async def health_check():
             "service": "configuration",
             "timestamp": "2024-01-01T00:00:00Z",
             "components": {
-                "config_service": "healthy",
+                "chat_agent_config_service": "healthy",
+                "widget_config_service": "healthy",
                 "personas_service": "healthy",
                 "auth_service": "healthy",
                 "chat_log_service": "healthy",
