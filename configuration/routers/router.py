@@ -107,8 +107,8 @@ async def save_chatAgent_config(config: ChatbotConfigRequest, request: Request):
 # WIDGET CONFIGURATION ENDPOINTS
 # =================================
 
-@router.get("/widget")
-async def get_widget_config():
+@router.get("/widgetConfig")
+async def get_widget_config(request: Request):
     """Get widget configuration"""
     try:
         config = await widget_config_service.get_widget_config()
@@ -143,7 +143,7 @@ async def get_widget_config():
         logger.error(f"Error getting widget config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/widget")
+@router.post("/widgetConfig")
 async def update_widget_config(config: WidgetConfigRequest, request: Request):
     """Update widget configuration"""
     try:
