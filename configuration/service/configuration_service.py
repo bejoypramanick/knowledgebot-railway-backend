@@ -5,7 +5,7 @@ Provides business logic layer between routers and DAO
 from typing import Any, Dict, List, Optional
 
 from configuration.core.otel_logger import get_otel_logger
-from configuration.dao.chat_agent_dao import ChatAgentDAO
+from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
 from configuration.dao.auth_dao import AuthDAO
 from configuration.dao.personas_dao import PersonasDAO
 from configuration.dao.widget_dao import WidgetDAO
@@ -17,7 +17,7 @@ class ConfigurationService:
     """Service layer for configuration operations"""
 
     def __init__(self):
-        self._chatAgent_dao = ChatAgentDAO()
+        self._chatAgent_dao = ChatAgentConfigDAO()
         self._auth_dao = AuthDAO()
         self._persona_dao = PersonasDAO()
         self._widget_dao = WidgetDAO()
