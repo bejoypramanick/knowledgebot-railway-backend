@@ -12,14 +12,12 @@ from ..service.chat_agent_config_service import ChatAgentConfigService
 from ..service.widget_config_service import WidgetConfigService
 from ..service.auth_service import AuthService
 from ..service.chat_log_service import ChatLogService
-from ..service.notifications_service import NotificationsService
 from ..service.performance_service import PerformanceService
 from ..service.feedback_service import FeedbackService
 
 from ..schemas.models import (
     ChatbotConfigRequest,
     AdminManagementRequest,
-    NotificationRequest,
     FeedbackRequest,
     WidgetConfigRequest
 )
@@ -87,10 +85,9 @@ chat_agent_config_service = ChatAgentConfigService()
 widget_config_service = WidgetConfigService()
 auth_service = AuthService()
 chat_log_service = ChatLogService()
-notifications_service = NotificationsService(notifications_dao=None)
 performance_service = PerformanceService()
 feedback_service = FeedbackService()
-
+token_dao = TokenDAO()
 
 # =================================
 # CHATBOT CONFIGURATION ENDPOINTS
@@ -407,100 +404,6 @@ async def delete_chat_log(session_id: str, request: Request):
         return {"success": True, "message": "Chat log deleted successfully"}
     except Exception as e:
         logger.error(f"Error deleting chat log: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =================================
-# NOTIFICATIONS ENDPOINTS
-# =================================
-
-@router.get("/notifications/settings")
-async def get_notification_settings():
-    """Get notification settings"""
-    try:
-        settings = await notifications_service.get_settings()
-        return {"success": True, "data": settings}
-    except Exception as e:
-        logger.error(f"Error getting notification settings: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/notifications/settings")
-async def update_notification_settings(settings: NotificationRequest, request: Request):
-    """Update notification settings"""
-    try:
-        result = await notifications_service.update_settings(settings.dict(), "admin@example.com")
-        return {"success": True, "message": "Notification settings updated successfully"}
-    except Exception as e:
-        logger.error(f"Error updating notification settings: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/notifications/send")
-async def send_notification(notification: Dict[str, Any], request: Request):
-    """Send a notification"""
-    try:
-        result = await notifications_service.send_notification(notification, "admin@example.com")
-        return {"success": True, "message": "Notification sent successfully"}
-    except Exception as e:
-        logger.error(f"Error sending notification: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/notifications")
-async def get_notifications(
-    request: Request,
-    limit: int = 50,
-    offset: int = 0,
-    unread_only: bool = False
-):
-    """Get user notifications with pagination"""
-    try:
-        user_email = request.headers.get("X-User-Email", "user@example.com")
-        notifications = await notifications_service.get_notifications(user_email, limit, offset, unread_only)
-        # Calculate unread count
-        unread_count = len([n for n in notifications if not n.get("read", False)])
-        return {
-            "notifications": notifications,
-            "total_count": len(notifications),
-            "unread_count": unread_count
-        }
-    except Exception as e:
-        logger.error(f"Error getting notifications: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/notifications")
-async def create_notification(request: Request):
-    """Create a new notification"""
-    try:
-        body = await request.json()
-        user_email = request.headers.get("X-User-Email", "user@example.com")
-        result = await notifications_service.create_notification(body, user_email)
-        return {
-            "success": True,
-            "notification_id": str(result.get("notification_id", ""))
-        }
-    except Exception as e:
-        logger.error(f"Error creating notification: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.put("/notifications/mark-read")
-async def mark_notifications_read(request: Request):
-    """Mark specific notifications as read"""
-    try:
-        body = await request.json()
-        notification_ids = body.get("notification_ids", [])
-        updated_count = await notifications_service.mark_as_read(notification_ids)
-        return {"success": True, "updated_count": updated_count}
-    except Exception as e:
-        logger.error(f"Error marking notifications as read: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.put("/notifications/mark-all-read")
-async def mark_all_notifications_read(request: Request):
-    """Mark all notifications as read for the user"""
-    try:
-        user_email = request.headers.get("X-User-Email", "user@example.com")
-        updated_count = await notifications_service.mark_all_as_read(user_email)
-        return {"success": True, "updated_count": updated_count}
-    except Exception as e:
-        logger.error(f"Error marking all notifications as read: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
@@ -980,7 +883,6 @@ async def health_check():
                 "personas_service": "healthy",
                 "auth_service": "healthy",
                 "chat_log_service": "healthy",
-                "notifications_service": "healthy",
                 "performance_service": "healthy",
                 "feedback_service": "healthy"
             }

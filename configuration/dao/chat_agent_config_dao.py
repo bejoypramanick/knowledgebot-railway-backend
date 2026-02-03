@@ -89,22 +89,6 @@ class ChatAgentConfigDAO:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def upsert_notification_setting_with_desc(self, name: str, enabled: bool, description: str):
-        query = """
-            INSERT INTO notification_settings (setting_name, is_enabled, description)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (setting_name) DO UPDATE SET
-            is_enabled = EXCLUDED.is_enabled, description = EXCLUDED.description, updated_at = NOW()
-        """
-        params = [name, enabled, description]
-        try:
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, *params)
-                logger.log_db_query(query, params, result)
-        except Exception as e:
-            logger.log_db_query(query, params, error=e)
-            raise
-
     async def upsert_security_setting_with_desc(self, name: str, value: str, setting_type: str, description: str):
         query = """
             INSERT INTO security_settings (setting_name, setting_value, setting_type, description)

@@ -52,8 +52,8 @@ class ChatAgentConfigService:
             if 'gemini' not in llm_tokens:
                 llm_tokens['gemini'] = {
                     "used": 0,
-                    "available": 20000,
-                    "limit": 20000
+                    "available": 0,
+                    "limit": 0
                 }
             
             logger.info(f"✅ LLM tokens constructed from llm_providers table: {llm_tokens}")
