@@ -211,14 +211,18 @@ class PydanticAIGatewayService:
             # Import AI service
             from ..core.ai import get_genai_client, get_gemini_model
             
+            logger.info(f"Processing message: {message[:50]}... for session: {session_id}")
+            
             # Get Gemini model
             model = get_gemini_model()
             if not model:
+                logger.error("Gemini model is not available")
                 yield "AI service is currently unavailable. Please try again later."
                 return
             
             # Get chat history for context
             chat_history = await self.get_chat_history(session_id)
+            logger.info(f"Retrieved chat history: {len(chat_history.get('messages', []))} messages")
             
             # Format chat history for Gemini
             history_text = ""
@@ -229,6 +233,8 @@ class PydanticAIGatewayService:
                     elif msg.get("sender") in ["agent", "bot"]:
                         history_text += f"Assistant: {msg.get('message', '')}\n"
             
+            logger.info(f"History text length: {len(history_text)} characters")
+            
             # Create prompt with context
             prompt = f"""You are a helpful AI assistant. Please respond to the user's message naturally and helpfully.
 
@@ -238,11 +244,16 @@ Chat History:
 User: {message}
 Assistant:"""
             
+            logger.info(f"Sending prompt to Gemini (length: {len(prompt)} characters)")
+            
             # Generate response using Gemini
             client = get_genai_client()
             if not client:
+                logger.error("Gemini client is not available")
                 yield "AI service is currently unavailable. Please try again later."
                 return
+            
+            logger.info("Generating content with Gemini...")
             
             # Generate content
             response = await client.generate_content(
@@ -250,14 +261,19 @@ Assistant:"""
                 contents=prompt
             )
             
+            logger.info(f"Gemini response received: {response.text[:100] if response.text else 'No response'}...")
+            
             # Stream the response
             if response and response.text:
                 yield response.text
             else:
+                logger.warning("Gemini returned empty response")
                 yield "I apologize, but I couldn't generate a response. Please try again."
                 
         except Exception as e:
             logger.error(f"Error processing message stream: {e}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Exception details: {str(e)}")
             yield "I encountered an error while processing your message. Please try again."
 
     async def get_available_agents(self) -> list:
