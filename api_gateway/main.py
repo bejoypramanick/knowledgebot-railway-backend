@@ -79,7 +79,10 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
             "/favicon.ico",  # Favicon
             "/auth/login",  # Login endpoint
             "/auth/verify",  # Token verification endpoint
-            "/gateway-check"  # Gateway diagnostic endpoint
+            "/gateway-check",  # Gateway diagnostic endpoint
+            "/api/v1/gateway/chatbot/chat/stream",  # Public chat streaming endpoint
+            "/api/v1/gateway/widget",  # Public widget endpoint
+            "/widget"  # Alternative widget endpoint
         ]
     
     async def dispatch(self, request, call_next):
