@@ -53,7 +53,7 @@ class RailwayStorageService:
         """Check if Railway storage is available"""
         return self._s3_client is not None
     
-    async def upload_image(self, image_data: bytes, filename: str, content_type: str = 'image/jpeg') -> Tuple[str, str]:
+    async def upload_image(self, image_data: bytes, filename: str, content_type: str = 'image/jpeg', image_type: str = 'profile') -> Tuple[str, str]:
         """
         Upload image to Railway storage
         
@@ -61,6 +61,7 @@ class RailwayStorageService:
             image_data: Raw image data
             filename: Original filename
             content_type: MIME type of the image
+            image_type: Type of image ('profile', 'chatIcon', 'headerIcon') for consistent naming
             
         Returns:
             Tuple of (storage_url, storage_filename)
@@ -73,9 +74,43 @@ class RailwayStorageService:
             return data_url, filename
         
         try:
-            # Generate unique filename
-            file_extension = filename.split('.')[-1] if '.' in filename else 'jpg'
-            unique_filename = f"{uuid.uuid4()}.{file_extension}"
+            # Use consistent filenames for Agent Icon and Bubble Icon to enable replacement
+            if image_type == 'profile':
+                # Agent Icon - always use the same filename
+                unique_filename = "agent-icon.png"
+                # Adjust content type based on actual file extension
+                if filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg'):
+                    content_type = 'image/jpeg'
+                    unique_filename = "agent-icon.jpg"
+                elif filename.lower().endswith('.gif'):
+                    content_type = 'image/gif'
+                    unique_filename = "agent-icon.gif"
+                elif filename.lower().endswith('.webp'):
+                    content_type = 'image/webp'
+                    unique_filename = "agent-icon.webp"
+                elif filename.lower().endswith('.svg'):
+                    content_type = 'image/svg+xml'
+                    unique_filename = "agent-icon.svg"
+            elif image_type == 'chatIcon':
+                # Bubble Icon - always use the same filename
+                unique_filename = "bubble-icon.png"
+                # Adjust content type based on actual file extension
+                if filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg'):
+                    content_type = 'image/jpeg'
+                    unique_filename = "bubble-icon.jpg"
+                elif filename.lower().endswith('.gif'):
+                    content_type = 'image/gif'
+                    unique_filename = "bubble-icon.gif"
+                elif filename.lower().endswith('.webp'):
+                    content_type = 'image/webp'
+                    unique_filename = "bubble-icon.webp"
+                elif filename.lower().endswith('.svg'):
+                    content_type = 'image/svg+xml'
+                    unique_filename = "bubble-icon.svg"
+            else:
+                # For other types, generate unique filename
+                file_extension = filename.split('.')[-1] if '.' in filename else 'jpg'
+                unique_filename = f"{uuid.uuid4()}.{file_extension}"
             
             # Upload to Railway storage
             self._s3_client.put_object(

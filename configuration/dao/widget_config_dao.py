@@ -156,12 +156,25 @@ class WidgetConfigDAO:
             elif filename.lower().endswith('.svg'):
                 content_type = 'image/svg+xml'
             
-            # Upload to Railway storage
+            # Upload to Railway storage with consistent naming
             storage_url, storage_filename = await railway_storage.upload_image(
-                image_data, filename, content_type
+                image_data, filename, content_type, image_type
             )
             
             # Update database with storage URL
+            # Use consistent filenames for Agent Icon and Bubble Icon
+            if image_type == 'profile':
+                # Agent Icon - use consistent filename based on file type
+                file_extension = filename.split('.')[-1] if '.' in filename else 'png'
+                storage_filename = f"agent-icon.{file_extension}"
+            elif image_type == 'chatIcon':
+                # Bubble Icon - use consistent filename based on file type
+                file_extension = filename.split('.')[-1] if '.' in filename else 'png'
+                storage_filename = f"bubble-icon.{file_extension}"
+            else:
+                # Use the filename from storage service for other types
+                storage_filename = storage_filename  # Keep as is from upload result
+            
             column_mapping = {
                 "profile": ("profile_picture_url", "profile_picture_filename"),
                 "chatIcon": ("chat_icon_url", "chat_icon_filename"),
