@@ -42,12 +42,13 @@ class ChatAgentConfigService:
                 used_tokens = row['token_used'] or 0
                 # Calculate available tokens (show negative when overused)
                 available_tokens = token_limit - used_tokens
-                
                 llm_tokens[provider] = {
                     "used": used_tokens,
                     "available": available_tokens,
                     "limit": token_limit
-                }          
+                }
+                
+                          
             logger.info(f"✅ LLM tokens constructed from llm_providers table: {llm_tokens}")
 
             # Initialize persona config with active persona
@@ -110,18 +111,6 @@ class ChatAgentConfigService:
                             'response_timeout', 
                             str(security['response_timeout']), 
                             'integer'
-                        )
-                    if 'remove_pii' in security:
-                        await self._chatAgent_dao.upsert_security_setting(
-                            'remove_pii', 
-                            str(security['remove_pii']).lower(), 
-                            'boolean'
-                        )
-                    if 'restrict_config' in security:
-                        await self._chatAgent_dao.upsert_security_setting(
-                            'restrict_config', 
-                            str(security['restrict_config']).lower(), 
-                            'boolean'
                         )
             
             # Save admin emails if provided
