@@ -34,27 +34,53 @@ class ChatAgentConfigDAO:
         try:
             logger.info(f"🔍 DAO update_metadata called with kwargs: {kwargs}")
             async with get_db_connection() as conn:
-                set_clauses = []
-                params = []
+                # First check if the row exists
+                check_query = "SELECT id FROM configuration_metadata WHERE id = 1"
+                existing_row = await conn.fetchrow(check_query)
+                logger.info(f"🔍 Existing row check: {existing_row}")
                 
-                for key, value in kwargs.items():
-                    set_clauses.append(f"{key} = ${len(params) + 1}")
-                    params.append(value)
-                    logger.info(f"🔍 Adding clause: {key} = ${len(params)} with value: {value}")
-                
-                if set_clauses:
-                    query = f"""
-                        UPDATE configuration_metadata
-                        SET {', '.join(set_clauses)}, updated_at = NOW()
-                        WHERE id = 1
+                if not existing_row:
+                    logger.warning("⚠️ No row found with id = 1, attempting to insert")
+                    # Insert the row if it doesn't exist
+                    insert_query = """
+                        INSERT INTO configuration_metadata (id, hil_enabled, response_policy, created_at, updated_at)
+                        VALUES (1, $1, $2, NOW(), NOW())
                     """
-                    logger.info(f"🔍 Executing query: {query}")
-                    logger.info(f"🔍 With params: {params}")
-                    result = await conn.execute(query, *params)
-                    logger.log_db_query(query, params, result)
-                    logger.info(f"✅ Updated chatbot metadata: {kwargs}")
+                    insert_params = [kwargs.get('hil_enabled', False), kwargs.get('response_policy', 300)]
+                    logger.info(f"🔍 Inserting row with params: {insert_params}")
+                    await conn.execute(insert_query, *insert_params)
+                    logger.info("✅ Inserted new metadata row")
                 else:
-                    logger.warning("⚠️ No set clauses generated for metadata update")
+                    logger.info(f"🔍 Row exists, proceeding with update")
+                    # Update existing row
+                    set_clauses = []
+                    params = []
+                    
+                    for key, value in kwargs.items():
+                        set_clauses.append(f"{key} = ${len(params) + 1}")
+                        params.append(value)
+                        logger.info(f"🔍 Adding clause: {key} = ${len(params)} with value: {value}")
+                    
+                    if set_clauses:
+                        query = f"""
+                            UPDATE configuration_metadata
+                            SET {', '.join(set_clauses)}, updated_at = NOW()
+                            WHERE id = 1
+                        """
+                        logger.info(f"🔍 Executing query: {query}")
+                        logger.info(f"🔍 With params: {params}")
+                        result = await conn.execute(query, *params)
+                        logger.log_db_query(query, params, result)
+                        logger.info(f"✅ Updated chatbot metadata: {kwargs}")
+                        logger.info(f"🔍 Update result: {result}")
+                        
+                        # Verify the update by checking affected rows
+                        if hasattr(result, 'rows_affected'):
+                            logger.info(f"🔍 Rows affected: {result.rows_affected}")
+                        else:
+                            logger.info("🔍 Row count not available in result")
+                    else:
+                        logger.warning("⚠️ No set clauses generated for metadata update")
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             logger.error(f"❌ Error in update_metadata: {e}")
