@@ -11,11 +11,12 @@ class RailwayStorageService:
     """Service for handling Railway storage (S3-compatible) operations"""
     
     def __init__(self):
-        self.bucket_name = os.getenv('RAILWAY_BUCKET_NAME', 'widget-images')
+        # Railway automatically provides these environment variables when storage is attached
+        self.bucket_name = os.getenv('RAILWAY_BUCKET_NAME') or os.getenv('RAILWAY_VOLUME_NAME', 'widget-images')
         self.region = os.getenv('RAILWAY_REGION', 'us-east-1')
-        self.endpoint_url = os.getenv('RAILWAY_STORAGE_URL')
-        self.access_key = os.getenv('RAILWAY_STORAGE_ACCESS_KEY')
-        self.secret_key = os.getenv('RAILWAY_STORAGE_SECRET_KEY')
+        self.endpoint_url = os.getenv('RAILWAY_STORAGE_URL') or os.getenv('AWS_S3_ENDPOINT_URL')
+        self.access_key = os.getenv('RAILWAY_STORAGE_ACCESS_KEY') or os.getenv('AWS_ACCESS_KEY_ID')
+        self.secret_key = os.getenv('RAILWAY_STORAGE_SECRET_KEY') or os.getenv('AWS_SECRET_ACCESS_KEY')
         
         # Initialize S3 client
         self._s3_client = None
@@ -24,6 +25,14 @@ class RailwayStorageService:
     def _init_s3_client(self):
         """Initialize S3 client with Railway storage credentials"""
         try:
+            # Log detected environment variables (without exposing sensitive data)
+            logger.info(f"🔍 Railway storage configuration detected:")
+            logger.info(f"  - Bucket name: {self.bucket_name}")
+            logger.info(f"  - Region: {self.region}")
+            logger.info(f"  - Endpoint URL: {'✓ Configured' if self.endpoint_url else '✗ Missing'}")
+            logger.info(f"  - Access key: {'✓ Configured' if self.access_key else '✗ Missing'}")
+            logger.info(f"  - Secret key: {'✓ Configured' if self.secret_key else '✗ Missing'}")
+            
             if self.endpoint_url and self.access_key and self.secret_key:
                 self._s3_client = boto3.client(
                     's3',
