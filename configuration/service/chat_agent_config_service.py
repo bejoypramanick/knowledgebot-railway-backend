@@ -6,8 +6,6 @@ from typing import Any, Dict, List, Optional
 
 from configuration.core.otel_logger import get_otel_logger
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
-from configuration.dao.auth_dao import AuthDAO
-from configuration.dao.token_dao import TokenDAO
 
 logger = get_otel_logger("chat_agent_config_service", "configuration")
 
@@ -16,8 +14,6 @@ class ChatAgentConfigService:
 
     def __init__(self):
         self._chatAgent_dao = ChatAgentConfigDAO()
-        self._auth_dao = AuthDAO()
-        self._token_dao = TokenDAO()
     
     async def get_chatAgent_config(self):
         """Get complete chatbot configuration with all data transformations"""
@@ -38,28 +34,29 @@ class ChatAgentConfigService:
                 if row['setting_name'] == 'response_timeout':
                     security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
                
-            # Build LLM tokens dict using actual token usage from token_usage_log
-            llm_tokens = {
-                "gemini": {"used": 0, "available": 20000, "limit": 20000}
-            }
-            
-            # Get actual token usage from token_usage_log table
-            try:
-                gemini_usage = await self._token_dao.get_gemini_usage()
-                used_tokens = gemini_usage.get("total_tokens", 0)
-                limit_tokens = 20000  # Default limit
-                available_tokens = max(0, limit_tokens - used_tokens)
+            # Build LLM tokens dict using llm_providers table data
+            llm_tokens = {}
+            for row in llm_rows:
+                provider = row['provider_name']
+                token_limit = row['token_limit'] or 0
+                token_used = row['token_used'] or 0
+                available_tokens = max(0, token_limit - token_used)
                 
-                llm_tokens['gemini'] = {
-                    "used": used_tokens,
+                llm_tokens[provider] = {
+                    "used": token_used,
                     "available": available_tokens,
-                    "limit": limit_tokens
+                    "limit": token_limit
                 }
-                logger.info(f"✅ Actual token usage calculated: used={used_tokens}, available={available_tokens}")
-            except Exception as e:
-                logger.error(f"❌ Error calculating actual token usage: {e}")
-                # Fallback to static values if calculation fails
-                logger.info("⚠️ Using fallback static token values")
+            
+            # Ensure gemini provider exists with defaults if not in database
+            if 'gemini' not in llm_tokens:
+                llm_tokens['gemini'] = {
+                    "used": 0,
+                    "available": 20000,
+                    "limit": 20000
+                }
+            
+            logger.info(f"✅ LLM tokens constructed from llm_providers table: {llm_tokens}")
 
             # Initialize persona config with active persona
             persona_config = {
