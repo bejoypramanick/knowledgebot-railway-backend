@@ -295,7 +295,7 @@ class ChatAgentConfigDAO:
                     SELECT id, persona_name, system_prompt, 
                            is_active, created_at, updated_at
                     FROM public.persona_configurations
-                    ORDER BY created_at DESC
+                    ORDER BY id ASC
                 """
                 rows = await conn.fetch(query)
                 logger.log_db_query(query, None, rows)
