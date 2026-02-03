@@ -75,19 +75,19 @@ token_dao = TokenDAO()
 # =================================
 
 @router.get("/chatAgentConfig")
-async def get_chatbot_config(cache: bool = True):
+async def get_chatAgent_config():
     """Get complete chatbot configuration with caching support"""
     try:
-        logger.info(f"🔍 GET /chatAgentConfig called with cache={cache}")
+        logger.info(f"🔍 GET /chatAgentConfig called")
         config = await chat_agent_config_service.get_chatAgent_config()
-        logger.info(f"✅ Chatbot config retrieved successfully (cache={cache})")
+        logger.info(f"✅ Chatbot config retrieved successfully")
         return {"success": True, "data": config}
     except Exception as e:
         logger.error(f"Error getting chatbot config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/chatAgentConfig")
-async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
+async def save_chatAgent_config(config: ChatbotConfigRequest, request: Request):
     """Save chatbot configuration"""
     try:
         logger.info(f"🔍 POST /chatAgentConfig received: {config}")
