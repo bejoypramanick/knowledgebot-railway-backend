@@ -2,7 +2,7 @@
 WidgetConfig Data Access Object for Configuration Service
 Handles database operations for widget configuration
 """
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import json
 import base64
 
