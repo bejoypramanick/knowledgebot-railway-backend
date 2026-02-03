@@ -190,69 +190,22 @@ async def update_widget_config(request: Request):
 async def generate_widget_embed_script(request: Request):
     """Generate widget embed script based on latest widget configuration"""
     try:
+        # Extract request data
         body = await request.json()
         embed_type = body.get("embedType", "bubble")
         widget_url = body.get("widgetUrl", "https://your-widget-url.com")
-
-        # Get the latest widget configuration from database
-        config = await widget_config_service.get_widget_config()
         
-        # Use actual config values or fallback to request body
-        theme = config.get("theme", body.get("theme", "light"))
-        primary_color = config.get("primary_color", body.get("primaryColor", "#3b82f6"))
-        position = config.get("align_bubble", body.get("position", "right"))
-        chat_bubble_color = config.get("chat_bubble_color", "#000000")
-        display_chatbot = config.get("display_chatbot", True)
-        
-        # Convert position format for CSS
-        position_css = "bottom-right" if position == "right" else "bottom-left"
-
-        if embed_type == "iframe":
-            script = f'''<!-- Knowledgebot Widget - Iframe Embed -->
-<iframe
-    src="{widget_url}"
-    style="position: fixed; {position_css.replace('-', ': 20px; ')}; width: 400px; height: 600px; border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 9999;"
-    title="Chat Widget"
-></iframe>'''
-        else:
-            # Bubble embed (default) - use actual config values
-            script = f'''<!-- Knowledgebot Widget - Bubble Embed -->
-<script>
-(function() {{
-    var w = window;
-    var d = document;
-    var s = d.createElement('script');
-    s.src = '{widget_url}/widget.js';
-    s.async = true;
-    s.onload = function() {{
-        w.KnowledgeBot.init({{
-            theme: '{theme}',
-            primaryColor: '{primary_color}',
-            position: '{position_css}',
-            chatBubbleColor: '{chat_bubble_color}',
-            displayChatbot: {str(display_chatbot).lower()},
-            profilePictureUrl: '{config.get("profile_picture_url", "")}',
-            chatIconUrl: '{config.get("chat_icon_url", "")}',
-            displayName: '{config.get("display_name", "AI Assistant")}',
-            initialMessage: '{config.get("initial_message", "Hello! How can I help you?")}'
-        }});
-    }};
-    d.head.appendChild(s);
-}})();
-</script>'''
-
-        return {
-            "success": True,
-            "script": script,
-            "embedType": embed_type,
-            "config": {
-                "theme": theme,
-                "primaryColor": primary_color,
-                "position": position_css,
-                "chatBubbleColor": chat_bubble_color,
-                "displayChatbot": display_chatbot
-            }
+        # Extract fallback config values from request body
+        fallback_config = {
+            "theme": body.get("theme"),
+            "primaryColor": body.get("primaryColor"),
+            "position": body.get("position")
         }
+        
+        # Delegate to service layer for business logic
+        result = await widget_config_service.generate_embed_script(embed_type, widget_url, fallback_config)
+        
+        return result
     except Exception as e:
         logger.error(f"Error generating embed script: {e}")
         raise HTTPException(status_code=500, detail=str(e))
