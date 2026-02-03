@@ -7,7 +7,6 @@ from typing import Any, Dict, List, Optional
 from configuration.core.otel_logger import get_otel_logger
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
 from configuration.dao.auth_dao import AuthDAO
-from configuration.dao.personas_dao import PersonasDAO
 from configuration.dao.widget_dao import WidgetDAO
 from configuration.dao.token_dao import TokenDAO
 
@@ -19,7 +18,6 @@ class ConfigurationService:
     def __init__(self):
         self._chatAgent_dao = ChatAgentConfigDAO()
         self._auth_dao = AuthDAO()
-        self._persona_dao = PersonasDAO()
         self._widget_dao = WidgetDAO()
         self._token_dao = TokenDAO()
     
@@ -142,7 +140,7 @@ class ConfigurationService:
             notification_rows = await self._chatAgent_dao.get_notification_settings()
             security_rows = await self._chatAgent_dao.get_security_settings()
             llm_rows = await self._chatAgent_dao.get_llm_providers()
-            persona = await self._persona_dao.get_active_persona()
+            persona = await self._chatAgent_dao.get_active_persona()
             human_agents_list = await self._chatAgent_dao.get_human_agents()
             admin_emails_list = await self._chatAgent_dao.get_admins()
 
@@ -205,7 +203,7 @@ class ConfigurationService:
 
             # Get all available personas
             try:
-                all_personas = await self._persona_dao.get_all_personas()
+                all_personas = await self._chatAgent_dao.get_all_personas()
                 
                 # Use first persona as default if no active persona is set
                 if not persona and all_personas:
@@ -347,7 +345,7 @@ class ConfigurationService:
             default_system_prompt = f"You are {persona_name}, a helpful AI assistant. Your role is to assist users with their questions and provide accurate, helpful responses."
             
             # Use the DAO method to activate the persona
-            await self._persona_dao.update_persona(
+            await self._chatAgent_dao.update_persona(
                 persona_name=persona_name,
                 system_prompt=default_system_prompt,
                 is_active=True
@@ -414,7 +412,7 @@ class ConfigurationService:
                     if persona_name == 'Custom':
                         # For custom personas, we need to handle them specially
                         # Create or update the custom persona with the provided system prompt
-                        await self._persona_dao.update_persona(
+                        await self._chatAgent_dao.update_persona(
                             persona_name='Custom',
                             system_prompt=system_prompt,
                             is_active=True
