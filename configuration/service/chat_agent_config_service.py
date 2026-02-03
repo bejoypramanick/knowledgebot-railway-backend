@@ -38,8 +38,8 @@ class ChatAgentConfigService:
             llm_tokens = {}
             for row in llm_rows:
                 provider = row['provider_name']
-                token_limit = row['token_limit'] or 0
-                used_tokens = row['token_used'] or 0
+                token_limit = row['token_limit']
+                used_tokens = row['token_used']
                 # Calculate available tokens (show negative when overused)
                 llm_tokens[provider] = {
                     "used": used_tokens,
