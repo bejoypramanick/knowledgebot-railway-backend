@@ -153,6 +153,17 @@ async def update_widget_config(config: WidgetConfigRequest, request: Request):
         logger.error(f"Error updating widget config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/widget/fix-image-urls")
+async def fix_existing_image_urls():
+    """Fix existing image URLs to use presigned URLs for Railway storage"""
+    try:
+        from configuration.core.railway_storage import update_existing_image_urls_to_presigned
+        await update_existing_image_urls_to_presigned()
+        return {"success": True, "message": "Image URLs updated to presigned URLs"}
+    except Exception as e:
+        logger.error(f"Error fixing image URLs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/widget/embed-script")
 async def generate_widget_embed_script(request: Request):
     """Generate widget embed script based on configuration"""

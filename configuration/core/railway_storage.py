@@ -83,11 +83,33 @@ class RailwayStorageService:
                 Key=unique_filename,
                 Body=image_data,
                 ContentType=content_type,
-                ACL='public-read'  # Make publicly accessible
+                # Note: Railway storage might not support ACLs, so we'll handle access differently
             )
             
-            # Generate public URL
-            storage_url = f"{self.endpoint_url}/{self.bucket_name}/{unique_filename}"
+            # Generate public URL - Railway storage uses different URL format
+            if 'digitaloceanspaces.com' in self.endpoint_url:
+                # DigitalOcean Spaces format
+                storage_url = f"https://{self.bucket_name}.{self.endpoint_url.replace('https://', '')}/{unique_filename}"
+            elif 'r2.cloudflarestorage.com' in self.endpoint_url:
+                # Cloudflare R2 format
+                storage_url = f"https://pub-{self.bucket_name}.{self.endpoint_url.replace('https://', '')}/{unique_filename}"
+            else:
+                # Generic S3 format - try to make it public by adding query parameters if needed
+                storage_url = f"{self.endpoint_url}/{self.bucket_name}/{unique_filename}"
+                
+                # For Railway storage, we might need to use a different approach
+                # Let's try to generate a presigned URL that lasts for a long time
+                try:
+                    presigned_url = self._s3_client.generate_presigned_url(
+                        'get_object',
+                        Params={'Bucket': self.bucket_name, 'Key': unique_filename},
+                        ExpiresIn=31536000  # 1 year
+                    )
+                    storage_url = presigned_url
+                    logger.info("✅ Using presigned URL for Railway storage")
+                except Exception as presign_error:
+                    logger.warning(f"⚠️ Could not generate presigned URL: {presign_error}")
+                    # Fall back to direct URL
             
             logger.info(f"✅ Image uploaded successfully: {unique_filename}")
             return storage_url, unique_filename
@@ -146,7 +168,83 @@ class RailwayStorageService:
             logger.warning("⚠️ Railway storage not available, cannot generate public URL")
             return ""
         
-        return f"{self.endpoint_url}/{self.bucket_name}/{storage_filename}"
+        # Try to generate a presigned URL first (most reliable for Railway)
+        try:
+            presigned_url = self._s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self.bucket_name, 'Key': storage_filename},
+                ExpiresIn=31536000  # 1 year
+            )
+            logger.info("✅ Generated presigned URL for image access")
+            return presigned_url
+        except Exception as presign_error:
+            logger.warning(f"⚠️ Could not generate presigned URL: {presign_error}")
+            
+            # Fall back to direct URL format
+            if 'digitaloceanspaces.com' in self.endpoint_url:
+                # DigitalOcean Spaces format
+                return f"https://{self.bucket_name}.{self.endpoint_url.replace('https://', '')}/{storage_filename}"
+            elif 'r2.cloudflarestorage.com' in self.endpoint_url:
+                # Cloudflare R2 format
+                return f"https://pub-{self.bucket_name}.{self.endpoint_url.replace('https://', '')}/{storage_filename}"
+            else:
+                # Generic S3 format
+                return f"{self.endpoint_url}/{self.bucket_name}/{storage_filename}"
 
 # Global storage service instance
 railway_storage = RailwayStorageService()
+
+async def update_existing_image_urls_to_presigned():
+    """
+    Update existing image URLs in the database to use presigned URLs
+    This should be called once to fix existing images that have access issues
+    """
+    try:
+        from configuration.dao.widget_config_dao import WidgetConfigDAO
+        from configuration.core.db import get_db_connection
+        
+        dao = WidgetConfigDAO()
+        
+        # Get current config
+        async with get_db_connection() as conn:
+            query = """
+                SELECT profile_picture_url, chat_icon_url, profile_picture_filename, chat_icon_filename
+                FROM widget_configuration
+                WHERE id = 1
+            """
+            result = await conn.fetchrow(query)
+            
+            if result:
+                updates = []
+                
+                # Check and update profile picture URL if needed
+                if result['profile_picture_url'] and result['profile_picture_filename']:
+                    old_url = result['profile_picture_url']
+                    if not old_url.startswith('data:') and 'Access Denied' in str(old_url):
+                        new_url = railway_storage.get_public_url(result['profile_picture_filename'])
+                        if new_url != old_url:
+                            updates.append(f"profile_picture_url = '{new_url}'")
+                            logger.info(f"✅ Updated profile picture URL to presigned URL")
+                
+                # Check and update chat icon URL if needed
+                if result['chat_icon_url'] and result['chat_icon_filename']:
+                    old_url = result['chat_icon_url']
+                    if not old_url.startswith('data:') and 'Access Denied' in str(old_url):
+                        new_url = railway_storage.get_public_url(result['chat_icon_filename'])
+                        if new_url != old_url:
+                            updates.append(f"chat_icon_url = '{new_url}'")
+                            logger.info(f"✅ Updated chat icon URL to presigned URL")
+                
+                # Apply updates if any
+                if updates:
+                    update_query = f"""
+                        UPDATE widget_configuration
+                        SET {', '.join(updates)}, updated_at = NOW()
+                        WHERE id = 1
+                    """
+                    await conn.execute(update_query)
+                    logger.info("✅ Updated existing image URLs to presigned URLs")
+                    
+    except Exception as e:
+        logger.error(f"❌ Failed to update existing image URLs: {e}")
+        raise
