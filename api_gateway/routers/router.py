@@ -16,6 +16,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # =================================
+# DOMAIN VALIDATION HELPER FUNCTIONS
+# =================================
+
+async def is_authorized_domain(referer: str = None, origin: str = None) -> bool:
+    """Check if the request is from an authorized domain"""
+    try:
+        # For now, allow all domains (authorized domains logic not implemented yet)
+        # TODO: Implement proper domain validation when authorized domains feature is ready
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error in domain validation: {e}")
+        return True  # Fail open for now
+
+# =================================
 # FIREBASE AUTHENTICATION ENDPOINTS
 # =================================
 
