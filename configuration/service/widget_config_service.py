@@ -25,14 +25,6 @@ class WidgetConfigService:
             if not widget_config:
                 widget_config = {}
             
-            # Debug: Log what we got from DAO
-            logger.info(f"🔍 DAO returned widget_config: {widget_config}")
-            logger.info(f"🔍 DAO config type: {type(widget_config)}")
-            if widget_config:
-                logger.info(f"🔍 DAO config keys: {list(widget_config.keys())}")
-                logger.info(f"🔍 DAO display_name: {widget_config.get('display_name')}")
-                logger.info(f"🔍 DAO initial_message: {widget_config.get('initial_message')}")
-            
             # Get suggested messages
             suggested_messages = await self._widget_config_dao.get_suggested_messages()
             
@@ -56,7 +48,6 @@ class WidgetConfigService:
                 "chat_icon_zoom": widget_config.get("chat_icon_zoom", 100)
             }
             
-            logger.info(f"🔍 Final transformed_config: {transformed_config}")
             logger.info("✅ Widget config retrieved successfully")
             return transformed_config
             
