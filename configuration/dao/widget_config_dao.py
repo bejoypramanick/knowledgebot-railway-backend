@@ -33,7 +33,8 @@ class WidgetConfigDAO:
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query)
                 logger.log_db_query(query, None, result)
-                return result
+                # Convert database row to dictionary
+                return dict(result) if result else None
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return None
