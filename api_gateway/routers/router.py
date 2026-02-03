@@ -94,12 +94,88 @@ async def public_chat_stream(request: Request):
         import httpx
         from ..core.config import get_settings
         
+        # Get session ID from request to check if this is the first message in the session
+        body = await request.json()
+        session_id = body.get("session_id")
+        
+        # Only check chat enabled status on first message of each session
+        if session_id and not hasattr(request.state, 'chat_status_checked'):
+            config_service_url = "http://configuration.railway.internal:8080"  # Internal service URL
+            
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    response = await client.get(
+                        f"{config_service_url}/api/v1/configuration/widget-config",
+                        timeout=5.0
+                    )
+                    
+                    if response.status_code == 200:
+                        config = response.json()
+                        chat_enabled = config.get("display_chatbot", True)
+                        
+                        # Store the result in request state for subsequent requests
+                        request.state.chat_status_checked = True
+                        request.state.chat_enabled = chat_enabled
+                        
+                        if not chat_enabled:
+                            logger.info("Chat is disabled - blocking request")
+                            raise HTTPException(status_code=403, detail="Chat is currently disabled")
+                        else:
+                            logger.info(f"Chat is enabled for session {session_id}")
+                            
+            except Exception as e:
+                logger.error(f"Error checking chat enabled status: {e}")
+                # If we can't check the status, allow the request (fail open)
+                request.state.chat_status_checked = True
+                request.state.chat_enabled = True
+        
+        # If we haven't checked the status yet (no session_id or first request), check now
+        elif not hasattr(request.state, 'chat_status_checked'):
+            config_service_url = "http://configuration.railway.internal:8080"  # Internal service URL
+            
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    response = await client.get(
+                        f"{config_service_url}/api/v1/configuration/widget-config",
+                        timeout=5.0
+                    )
+                    
+                    if response.status_code == 200:
+                        config = response.json()
+                        chat_enabled = config.get("display_chatbot", True)
+                        request.state.chat_status_checked = True
+                        request.state.chat_enabled = chat_enabled
+                        
+                        if not chat_enabled:
+                            logger.info("Chat is disabled - blocking request")
+                            raise HTTPException(status_code=403, detail="Chat is currently disabled")
+                            
+            except Exception as e:
+                logger.error(f"Error checking chat enabled status: {e}")
+                # If we can't check the status, allow the request (fail open)
+                request.state.chat_status_checked = True
+                request.state.chat_enabled = True
+        
+        # Check cached status if available
+        elif hasattr(request.state, 'chat_enabled') and not request.state.chat_enabled:
+            logger.info("Chat is disabled (cached) - blocking request")
+            raise HTTPException(status_code=403, detail="Chat is currently disabled")
+        
+        # Validate referer domain for security
+        referer = request.headers.get("referer")
+        origin = request.headers.get("origin")
+        
+        # Check if the request is from an authorized domain
+        if not await is_authorized_domain(referer, origin):
+            logger.warning(f"Unauthorized widget access attempt - Referer: {referer}, Origin: {origin}")
+            raise HTTPException(status_code=403, detail="Widget embedding not authorized for this domain")
+        
         settings = get_settings()
         chatbot_service_url = settings.chatbot_orchestration_url
         
         # Log the request
         correlation_id = request.headers.get("X-Correlation-ID", "no-correlation-id")
-        logger.info(f"🔍 [{correlation_id}] Public chat stream request received")
+        logger.info(f"🔍 [{correlation_id}] Public chat stream request received from authorized domain")
         
         # Prepare headers - remove auth-related headers for public endpoint
         headers = dict(request.headers)
@@ -131,6 +207,8 @@ async def public_chat_stream(request: Request):
                 headers=dict(response.headers)
             )
             
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in public chat stream: {e}")
         raise HTTPException(status_code=500, detail=str(e))
