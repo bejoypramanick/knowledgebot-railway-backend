@@ -76,37 +76,33 @@ class RailwayStorageService:
         try:
             # Use consistent filenames for Agent Icon and Bubble Icon to enable replacement
             if image_type == 'profile':
-                # Agent Icon - always use the same filename
-                unique_filename = "agent-icon.png"
+                # Agent Icon - use the original filename
+                unique_filename = f"agent-{filename}"
                 # Adjust content type based on actual file extension
                 if filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg'):
                     content_type = 'image/jpeg'
-                    unique_filename = "agent-icon.jpg"
                 elif filename.lower().endswith('.gif'):
                     content_type = 'image/gif'
-                    unique_filename = "agent-icon.gif"
                 elif filename.lower().endswith('.webp'):
                     content_type = 'image/webp'
-                    unique_filename = "agent-icon.webp"
                 elif filename.lower().endswith('.svg'):
                     content_type = 'image/svg+xml'
-                    unique_filename = "agent-icon.svg"
+                elif filename.lower().endswith('.png'):
+                    content_type = 'image/png'
             elif image_type == 'chatIcon':
-                # Bubble Icon - always use the same filename
-                unique_filename = "bubble-icon.png"
+                # Bubble Icon - use the original filename
+                unique_filename = f"bubble-{filename}"
                 # Adjust content type based on actual file extension
                 if filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg'):
                     content_type = 'image/jpeg'
-                    unique_filename = "bubble-icon.jpg"
                 elif filename.lower().endswith('.gif'):
                     content_type = 'image/gif'
-                    unique_filename = "bubble-icon.gif"
                 elif filename.lower().endswith('.webp'):
                     content_type = 'image/webp'
-                    unique_filename = "bubble-icon.webp"
                 elif filename.lower().endswith('.svg'):
                     content_type = 'image/svg+xml'
-                    unique_filename = "bubble-icon.svg"
+                elif filename.lower().endswith('.png'):
+                    content_type = 'image/png'
             else:
                 # For other types, generate unique filename
                 file_extension = filename.split('.')[-1] if '.' in filename else 'jpg'

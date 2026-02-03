@@ -162,18 +162,7 @@ class WidgetConfigDAO:
             )
             
             # Update database with storage URL
-            # Use consistent filenames for Agent Icon and Bubble Icon
-            if image_type == 'profile':
-                # Agent Icon - use consistent filename based on file type
-                file_extension = filename.split('.')[-1] if '.' in filename else 'png'
-                storage_filename = f"agent-icon.{file_extension}"
-            elif image_type == 'chatIcon':
-                # Bubble Icon - use consistent filename based on file type
-                file_extension = filename.split('.')[-1] if '.' in filename else 'png'
-                storage_filename = f"bubble-icon.{file_extension}"
-            else:
-                # Use the filename from storage service for other types
-                storage_filename = storage_filename  # Keep as is from upload result
+            # The storage_filename is already properly handled by the storage service
             
             column_mapping = {
                 "profile": ("profile_picture_url", "profile_picture_filename"),
