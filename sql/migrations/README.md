@@ -12,13 +12,12 @@ The main `database_schema.sql` already includes these tables:
 - ✅ `chat_messages`
 - ✅ `session_assignments` (uses assignee_email, not agent_id)
 - ✅ `file_uploads`
-- ✅ `configuration_metadata`
-- ✅ `widget_configuration`
-- ✅ `widget_suggested_messages`
-- ✅ `notification_settings`
-- ✅ `security_settings`
-- ✅ `llm_providers`
-- ✅ `persona_configurations`
+-- ✅ `configuration_metadata`
+-- ✅ `widget_configuration`
+-- ✅ `widget_suggested_messages`
+-- ✅ `security_settings`
+-- ✅ `llm_providers`
+-- ✅ `persona_configurations`
 - ✅ `notifications`
 - ✅ `chat_feedback`
 - ✅ `token_usage_log`

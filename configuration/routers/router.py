@@ -407,6 +407,83 @@ async def delete_chat_log(session_id: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
+<<<<<<< HEAD
+=======
+# NOTIFICATIONS ENDPOINTS
+# =================================
+
+@router.post("/notifications/send")
+async def send_notification(notification: Dict[str, Any], request: Request):
+    """Send a notification"""
+    try:
+        result = await notifications_service.send_notification(notification, "admin@example.com")
+        return {"success": True, "message": "Notification sent successfully"}
+    except Exception as e:
+        logger.error(f"Error sending notification: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/notifications")
+async def get_notifications(
+    request: Request,
+    limit: int = 50,
+    offset: int = 0,
+    unread_only: bool = False
+):
+    """Get user notifications with pagination"""
+    try:
+        user_email = request.headers.get("X-User-Email", "user@example.com")
+        notifications = await notifications_service.get_notifications(user_email, limit, offset, unread_only)
+        # Calculate unread count
+        unread_count = len([n for n in notifications if not n.get("read", False)])
+        return {
+            "notifications": notifications,
+            "total_count": len(notifications),
+            "unread_count": unread_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting notifications: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/notifications")
+async def create_notification(request: Request):
+    """Create a new notification"""
+    try:
+        body = await request.json()
+        user_email = request.headers.get("X-User-Email", "user@example.com")
+        result = await notifications_service.create_notification(body, user_email)
+        return {
+            "success": True,
+            "notification_id": str(result.get("notification_id", ""))
+        }
+    except Exception as e:
+        logger.error(f"Error creating notification: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/notifications/mark-read")
+async def mark_notifications_read(request: Request):
+    """Mark specific notifications as read"""
+    try:
+        body = await request.json()
+        notification_ids = body.get("notification_ids", [])
+        updated_count = await notifications_service.mark_as_read(notification_ids)
+        return {"success": True, "updated_count": updated_count}
+    except Exception as e:
+        logger.error(f"Error marking notifications as read: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.put("/notifications/mark-all-read")
+async def mark_all_notifications_read(request: Request):
+    """Mark all notifications as read for the user"""
+    try:
+        user_email = request.headers.get("X-User-Email", "user@example.com")
+        updated_count = await notifications_service.mark_all_as_read(user_email)
+        return {"success": True, "updated_count": updated_count}
+    except Exception as e:
+        logger.error(f"Error marking all notifications as read: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =================================
+>>>>>>> 336ea8d (refactor: remove only notification_settings table related code)
 # ADMIN ENDPOINTS
 # =================================
 

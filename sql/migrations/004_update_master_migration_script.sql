@@ -225,7 +225,7 @@ WHERE table_schema = 'public'
     AND table_name IN (
         'admins', 'human_agents', 'users', 'chat_sessions', 'chat_messages',
         'session_assignments', 'file_uploads', 'configuration_metadata',
-        'widget_configuration', 'widget_suggested_messages', 'notification_settings',
+        'widget_configuration', 'widget_suggested_messages',
         'security_settings', 'llm_providers', 'persona_configurations',
         'notifications', 'chat_feedback', 'token_usage_log', 'metrics',
         'email_oauth_credentials', 'user_unique_ids', 'scraped_websites',

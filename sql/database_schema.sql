@@ -252,20 +252,6 @@ CREATE INDEX idx_widget_suggested_messages_config ON public.widget_suggested_mes
 CREATE INDEX idx_widget_suggested_messages_order ON public.widget_suggested_messages USING btree (display_order);
 COMMENT ON TABLE public.widget_suggested_messages IS 'Suggested messages for widget (normalized from array)';
 
--- Notification settings table
-CREATE TABLE public.notification_settings (
-    id uuid DEFAULT uuid_generate_v4() NOT NULL,
-    setting_name varchar(100) NOT NULL,
-    is_enabled bool DEFAULT false NULL,
-    description text NULL,
-    created_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
-    updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
-    CONSTRAINT notification_settings_pkey PRIMARY KEY (id),
-    CONSTRAINT notification_settings_setting_name_key UNIQUE (setting_name)
-);
-CREATE INDEX idx_notification_settings_name ON public.notification_settings USING btree (setting_name);
-COMMENT ON TABLE public.notification_settings IS 'Notification configuration settings';
-
 -- Security settings table
 CREATE TABLE public.security_settings (
     id uuid DEFAULT uuid_generate_v4() NOT NULL,
