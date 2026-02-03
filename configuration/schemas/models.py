@@ -109,6 +109,26 @@ class WidgetConfigRequest(BaseModel):
     display_name: Optional[str] = Field(None, min_length=2, max_length=50)
     initial_message: Optional[str] = Field(None, min_length=5, max_length=200)
     auto_show_duration: Optional[int] = Field(None, ge=0, le=30)
+    suggested_messages: Optional[List[str]] = Field(None, max_items=5)
+    keep_showing_suggested: Optional[bool] = None
+    theme: Optional[str] = Field(None, pattern=r'^(light|dark)$')
+    primary_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
+    use_primary_for_header: Optional[bool] = None
+    chat_bubble_color: Optional[str] = Field(None, pattern=r'^#[0-9A-Fa-f]{6}$')
+    align_bubble: Optional[str] = Field(None, pattern=r'^(left|right)$')
+    display_chatbot: Optional[bool] = None
+    profile_picture_url: Optional[str] = Field(None, max_length=1000)
+    chat_icon_url: Optional[str] = Field(None, max_length=1000)
+    header_icon_url: Optional[str] = Field(None, max_length=1000)
+    profile_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
+    chat_icon_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
+    header_icon_zoom: Optional[float] = Field(None, ge=0.1, le=5.0)
+    profile_position: Optional[PositionData] = None
+    chat_icon_position: Optional[PositionData] = None
+    header_icon_position: Optional[PositionData] = None
+    profile_picture_filename: Optional[str] = Field(None, max_length=255)
+    chat_icon_filename: Optional[str] = Field(None, max_length=255)
+    header_icon_filename: Optional[str] = Field(None, max_length=255)
 
 # Additional request models for router endpoints
 class AdminManagementRequest(BaseModel):
