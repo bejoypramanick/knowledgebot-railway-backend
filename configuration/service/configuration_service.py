@@ -5,7 +5,7 @@ Provides business logic layer between routers and DAO
 from typing import Any, Dict, List, Optional
 
 from configuration.core.otel_logger import get_otel_logger
-from configuration.dao.chat_agent_dao import AdminAgentDAO
+from configuration.dao.chat_agent_dao import ChatAgentDAO
 from configuration.dao.auth_dao import AuthDAO
 from configuration.dao.personas_dao import PersonasDAO
 from configuration.dao.widget_dao import WidgetDAO
@@ -17,7 +17,7 @@ class ConfigurationService:
     """Service layer for configuration operations"""
 
     def __init__(self):
-        self._chatbot_dao = AdminAgentDAO()
+        self._chatAgent_dao = ChatAgentDAO()
         self._auth_dao = AuthDAO()
         self._persona_dao = PersonasDAO()
         self._widget_dao = WidgetDAO()
@@ -26,7 +26,7 @@ class ConfigurationService:
     async def get_metadata(self) -> Optional[Dict[str, Any]]:
         """Get chatbot metadata"""
         try:
-            return await self._chatbot_dao.get_metadata()
+            return await self._chatAgent_dao.get_metadata()
         except Exception as e:
             logger.error(f"Error getting metadata: {e}")
             return None
@@ -34,7 +34,7 @@ class ConfigurationService:
     async def update_metadata(self, **kwargs):
         """Update chatbot metadata"""
         try:
-            await self._chatbot_dao.update_metadata(**kwargs)
+            await self._chatAgent_dao.update_metadata(**kwargs)
         except Exception as e:
             logger.error(f"Error updating metadata: {e}")
             raise
@@ -105,7 +105,7 @@ class ConfigurationService:
     async def sync_admin_emails(self, admin_emails: List[str]) -> Dict[str, List[str]]:
         """Sync admin emails by comparing database with UI request"""
         try:
-            return await self._chatbot_dao.sync_admin_emails(admin_emails)
+            return await self._chatAgent_dao.sync_admin_emails(admin_emails)
         except Exception as e:
             logger.error(f"Error syncing admin emails: {e}")
             raise
@@ -113,7 +113,7 @@ class ConfigurationService:
     async def sync_human_agent_emails(self, human_agent_emails: List[str]) -> Dict[str, List[str]]:
         """Sync human agent emails by comparing database with UI request"""
         try:
-            return await self._chatbot_dao.sync_human_agent_emails(human_agent_emails)
+            return await self._chatAgent_dao.sync_human_agent_emails(human_agent_emails)
         except Exception as e:
             logger.error(f"Error syncing human agent emails: {e}")
             raise
@@ -121,7 +121,7 @@ class ConfigurationService:
     async def update_llm_tokens(self, provider: str, token_limit: int):
         """Update LLM token limit"""
         try:
-            await self._chatbot_dao.update_llm_tokens(provider, token_limit)
+            await self._chatAgent_dao.update_llm_tokens(provider, token_limit)
         except Exception as e:
             logger.error(f"Error updating LLM tokens: {e}")
             raise
@@ -129,7 +129,7 @@ class ConfigurationService:
     async def update_llm_used_tokens(self, provider: str, token_used: int):
         """Update LLM used tokens"""
         try:
-            await self._chatbot_dao.update_llm_used_tokens(provider, token_used)
+            await self._chatAgent_dao.update_llm_used_tokens(provider, token_used)
         except Exception as e:
             logger.error(f"Error updating LLM used tokens: {e}")
             raise
@@ -139,12 +139,12 @@ class ConfigurationService:
         try:
             # Get all raw data
             metadata = await self.get_metadata()
-            notification_rows = await self._chatbot_dao.get_notification_settings()
-            security_rows = await self._chatbot_dao.get_security_settings()
-            llm_rows = await self._chatbot_dao.get_llm_providers()
+            notification_rows = await self._chatAgent_dao.get_notification_settings()
+            security_rows = await self._chatAgent_dao.get_security_settings()
+            llm_rows = await self._chatAgent_dao.get_llm_providers()
             persona = await self._persona_dao.get_active_persona()
-            human_agents_list = await self._chatbot_dao.get_human_agents()
-            admin_emails_list = await self._chatbot_dao.get_admins()
+            human_agents_list = await self._chatAgent_dao.get_human_agents()
+            admin_emails_list = await self._chatAgent_dao.get_admins()
 
             # Build notification settings dict
             notifications = {
@@ -430,17 +430,17 @@ class ConfigurationService:
                 notifications = config_data['notifications']
                 if isinstance(notifications, dict):
                     if 'user_interactions_enabled' in notifications:
-                        await self._chatbot_dao.upsert_notification_setting(
+                        await self._chatAgent_dao.upsert_notification_setting(
                             'user_interactions_enabled', 
                             notifications['user_interactions_enabled']
                         )
                     if 'error_alerts_enabled' in notifications:
-                        await self._chatbot_dao.upsert_notification_setting(
+                        await self._chatAgent_dao.upsert_notification_setting(
                             'error_alerts_enabled', 
                             notifications['error_alerts_enabled']
                         )
                     if 'feedback_requests_enabled' in notifications:
-                        await self._chatbot_dao.upsert_notification_setting(
+                        await self._chatAgent_dao.upsert_notification_setting(
                             'feedback_requests_enabled', 
                             notifications['feedback_requests_enabled']
                         )
@@ -450,19 +450,19 @@ class ConfigurationService:
                 security = config_data['security']
                 if isinstance(security, dict):
                     if 'response_timeout' in security:
-                        await self._chatbot_dao.upsert_security_setting(
+                        await self._chatAgent_dao.upsert_security_setting(
                             'response_timeout', 
                             str(security['response_timeout']), 
                             'integer'
                         )
                     if 'remove_pii' in security:
-                        await self._chatbot_dao.upsert_security_setting(
+                        await self._chatAgent_dao.upsert_security_setting(
                             'remove_pii', 
                             str(security['remove_pii']).lower(), 
                             'boolean'
                         )
                     if 'restrict_config' in security:
-                        await self._chatbot_dao.upsert_security_setting(
+                        await self._chatAgent_dao.upsert_security_setting(
                             'restrict_config', 
                             str(security['restrict_config']).lower(), 
                             'boolean'
