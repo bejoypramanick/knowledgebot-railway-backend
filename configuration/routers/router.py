@@ -229,26 +229,31 @@ async def generate_widget_embed_script(request: Request):
 async def widget_websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time widget state synchronization"""
     await websocket.accept()
+    logger.info("🔌 Widget WebSocket connection accepted")
     
     # Generate unique widget ID for this connection
     import uuid
     widget_id = f"widget_{uuid.uuid4().hex[:8]}"
+    logger.info(f"🔌 Generated widget ID: {widget_id}")
     
     try:
         from .service.widget_realtime_service import widget_realtime_service
         
         # Register connection
         await widget_realtime_service.register_connection(widget_id, websocket)
+        logger.info(f"🔌 Widget {widget_id} registered with realtime service")
         
         # Keep connection alive and handle messages
         while True:
             try:
                 # Receive ping/pong messages to keep connection alive
                 message = await websocket.receive_text()
+                logger.info(f"🔌 Received message from {widget_id}: {message}")
                 data = json.loads(message)
                 
                 if data.get("type") == "ping":
                     await websocket.send_text(json.dumps({"type": "pong", "timestamp": datetime.utcnow().isoformat()}))
+                    logger.info(f"🔌 Sent pong to {widget_id}")
                 elif data.get("type") == "get_state":
                     # Send current state on request
                     current_state = await widget_realtime_service.get_widget_state()
@@ -256,22 +261,25 @@ async def widget_websocket_endpoint(websocket: WebSocket):
                         "type": "state_update",
                         "state": current_state
                     }))
+                    logger.info(f"🔌 Sent state to {widget_id}")
                     
             except WebSocketDisconnect:
+                logger.info(f"🔌 Widget {widget_id} disconnected normally")
                 break
             except Exception as e:
-                logger.error(f"Error in WebSocket message handling: {e}")
+                logger.error(f"🔌 Error in WebSocket message handling for {widget_id}: {e}")
                 break
                 
     except WebSocketDisconnect:
-        logger.info(f"Widget {widget_id} disconnected")
+        logger.info(f"🔌 Widget {widget_id} disconnected during setup")
     except Exception as e:
-        logger.error(f"Error in WebSocket connection: {e}")
+        logger.error(f"🔌 Error in WebSocket connection for {widget_id}: {e}")
     finally:
         # Unregister connection
         try:
             from .service.widget_realtime_service import widget_realtime_service
             await widget_realtime_service.unregister_connection(widget_id, websocket)
+            logger.info(f"🔌 Widget {widget_id} unregistered")
         except:
             pass
 
