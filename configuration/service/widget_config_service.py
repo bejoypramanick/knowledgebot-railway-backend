@@ -85,62 +85,36 @@ class WidgetConfigService:
             logger.error(f"Error updating widget image: {e}")
             raise
 
-    async def update_widget_config_with_images(self, request):
+    async def update_widget_config_with_images(self, config_data: Dict[str, Any], profile_file=None, chat_icon_file=None):
         """
         Update widget configuration with optional image uploads in a single transaction.
         
         Args:
-            request: FastAPI Request object containing either JSON or multipart form data
+            config_data: Widget configuration data
+            profile_file: Optional profile image file (UploadFile)
+            chat_icon_file: Optional chat icon image file (UploadFile)
             
         Returns:
             None (raises exception on error)
         """
         try:
-            # Check if this is a multipart form request (with images) or JSON
-            content_type = request.headers.get("content-type", "")
+            # Handle image uploads if present and update config with URLs
+            if profile_file and profile_file.filename:
+                image_data = await profile_file.read()
+                image_url, image_filename = await self.update_widget_image('profile', image_data, profile_file.filename)
+                config_data['profile_picture_url'] = image_url
+                config_data['profile_picture_filename'] = image_filename
+                logger.info(f"✅ Profile image uploaded and URL updated: {profile_file.filename}")
             
-            if content_type.startswith("multipart/form-data"):
-                # Handle multipart form with images
-                from fastapi import UploadFile, File, Form
-                import json
-                
-                # Parse multipart form data
-                form = await request.form()
-                
-                # Extract config data
-                config_json = form.get("config")
-                if not config_json:
-                    raise ValueError("Configuration data is required")
-                
-                config_data = json.loads(config_json)
-                
-                # Handle image uploads if present
-                profile_file = form.get("profile_image")
-                chat_icon_file = form.get("chat_icon_image")
-                
-                # Upload profile image if present and update config with URL
-                if profile_file and profile_file.filename:
-                    image_data = await profile_file.read()
-                    image_url, image_filename = await self._widget_config_dao.update_widget_image('profile', image_data, profile_file.filename)
-                    config_data['profile_picture_url'] = image_url
-                    config_data['profile_picture_filename'] = image_filename
-                    logger.info(f"✅ Profile image uploaded and URL updated: {profile_file.filename}")
-                
-                # Upload chat icon image if present and update config with URL
-                if chat_icon_file and chat_icon_file.filename:
-                    image_data = await chat_icon_file.read()
-                    image_url, image_filename = await self._widget_config_dao.update_widget_image('chatIcon', image_data, chat_icon_file.filename)
-                    config_data['chat_icon_url'] = image_url
-                    config_data['chat_icon_filename'] = image_filename
-                    logger.info(f"✅ Chat icon image uploaded and URL updated: {chat_icon_file.filename}")
-                
-                # Update widget configuration with image URLs
-                await self.update_widget_config(config_data)
-                
-            else:
-                # Handle regular JSON request (no images)
-                config_data = await request.json()
-                await self.update_widget_config(config_data)
+            if chat_icon_file and chat_icon_file.filename:
+                image_data = await chat_icon_file.read()
+                image_url, image_filename = await self.update_widget_image('chatIcon', image_data, chat_icon_file.filename)
+                config_data['chat_icon_url'] = image_url
+                config_data['chat_icon_filename'] = image_filename
+                logger.info(f"✅ Chat icon image uploaded and URL updated: {chat_icon_file.filename}")
+            
+            # Update widget configuration with image URLs
+            await self.update_widget_config(config_data)
                 
         except Exception as e:
             logger.error(f"Error in update_widget_config_with_images: {e}")

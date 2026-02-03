@@ -147,7 +147,40 @@ async def get_widget_config(request: Request):
 async def update_widget_config(request: Request):
     """Update widget configuration with optional image uploads"""
     try:
-        await widget_config_service.update_widget_config_with_images(request)
+        # Check if this is a multipart form request (with images) or JSON
+        content_type = request.headers.get("content-type", "")
+        
+        if content_type.startswith("multipart/form-data"):
+            # Handle multipart form with images
+            from fastapi import UploadFile, File, Form
+            import json
+            
+            # Parse multipart form data
+            form = await request.form()
+            
+            # Extract config data
+            config_json = form.get("config")
+            if not config_json:
+                raise HTTPException(status_code=400, detail="Configuration data is required")
+            
+            config_data = json.loads(config_json)
+            
+            # Extract image files
+            profile_file = form.get("profile_image")
+            chat_icon_file = form.get("chat_icon_image")
+            
+            # Call service with clean parameters
+            await widget_config_service.update_widget_config_with_images(
+                config_data, 
+                profile_file, 
+                chat_icon_file
+            )
+            
+        else:
+            # Handle regular JSON request (no images)
+            config_data = await request.json()
+            await widget_config_service.update_widget_config(config_data)
+        
         return {"success": True, "message": "Widget configuration updated successfully"}
     except Exception as e:
         logger.error(f"Error updating widget config: {e}")
