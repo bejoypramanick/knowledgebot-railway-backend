@@ -208,12 +208,57 @@ class PydanticAIGatewayService:
     async def process_message_stream(self, message: str, session_id: str):
         """Process a chat message with streaming response"""
         try:
-            # This would need to be implemented based on actual chat logic
-            # For now, yield a simple response
-            yield f"Response to: {message}"
+            # Import AI service
+            from ..core.ai import get_genai_client, get_gemini_model
+            
+            # Get Gemini model
+            model = get_gemini_model()
+            if not model:
+                yield "AI service is currently unavailable. Please try again later."
+                return
+            
+            # Get chat history for context
+            chat_history = await self.get_chat_history(session_id)
+            
+            # Format chat history for Gemini
+            history_text = ""
+            if chat_history and chat_history.get("messages"):
+                for msg in chat_history["messages"][-5:]:  # Last 5 messages for context
+                    if msg.get("sender") == "user":
+                        history_text += f"User: {msg.get('message', '')}\n"
+                    elif msg.get("sender") in ["agent", "bot"]:
+                        history_text += f"Assistant: {msg.get('message', '')}\n"
+            
+            # Create prompt with context
+            prompt = f"""You are a helpful AI assistant. Please respond to the user's message naturally and helpfully.
+
+Chat History:
+{history_text}
+
+User: {message}
+Assistant:"""
+            
+            # Generate response using Gemini
+            client = get_genai_client()
+            if not client:
+                yield "AI service is currently unavailable. Please try again later."
+                return
+            
+            # Generate content
+            response = await client.generate_content(
+                model=model,
+                contents=prompt
+            )
+            
+            # Stream the response
+            if response and response.text:
+                yield response.text
+            else:
+                yield "I apologize, but I couldn't generate a response. Please try again."
+                
         except Exception as e:
             logger.error(f"Error processing message stream: {e}")
-            raise
+            yield "I encountered an error while processing your message. Please try again."
 
     async def get_available_agents(self) -> list:
         """Get list of available agents"""
