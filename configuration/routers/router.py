@@ -71,7 +71,7 @@ feedback_service = FeedbackService()
 
 
 # =================================
-# CHATBOT CONFIGURATION ENDPOINTS
+# CHATADMIN CONFIGURATION ENDPOINTS
 # =================================
 
 @router.get("/chatAgentConfig")

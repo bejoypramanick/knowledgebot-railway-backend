@@ -59,7 +59,17 @@ class WidgetConfigService:
     async def update_widget_config(self, config_data: Dict[str, Any]):
         """Update widget configuration"""
         try:
+            # Extract suggested messages if present
+            suggested_messages = config_data.pop('suggested_messages', None)
+            
+            # Update main widget configuration
             await self._widget_config_dao.update_widget_config(config_data)
+            
+            # Update suggested messages if provided
+            if suggested_messages is not None:
+                logger.info(f"Updating suggested messages: {suggested_messages}")
+                await self._widget_config_dao.update_suggested_messages(suggested_messages)
+            
         except Exception as e:
             logger.error(f"Error updating widget config: {e}")
             raise
