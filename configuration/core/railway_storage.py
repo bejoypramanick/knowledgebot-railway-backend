@@ -133,15 +133,15 @@ class RailwayStorageService:
                 storage_url = f"{self.endpoint_url}/{self.bucket_name}/{unique_filename}"
                 
                 # For Railway storage, we might need to use a different approach
-                # Let's try to generate a presigned URL that lasts for a long time
+                # Let's try to generate a presigned URL that lasts for a week (maximum allowed)
                 try:
                     presigned_url = self._s3_client.generate_presigned_url(
                         'get_object',
                         Params={'Bucket': self.bucket_name, 'Key': unique_filename},
-                        ExpiresIn=31536000  # 1 year
+                        ExpiresIn=604800  # 7 days (maximum allowed by Railway)
                     )
                     storage_url = presigned_url
-                    logger.info("✅ Using presigned URL for Railway storage")
+                    logger.info("✅ Using presigned URL for Railway storage (7 days)")
                 except Exception as presign_error:
                     logger.warning(f"⚠️ Could not generate presigned URL: {presign_error}")
                     # Fall back to direct URL
@@ -208,9 +208,9 @@ class RailwayStorageService:
             presigned_url = self._s3_client.generate_presigned_url(
                 'get_object',
                 Params={'Bucket': self.bucket_name, 'Key': storage_filename},
-                ExpiresIn=31536000  # 1 year
+                ExpiresIn=604800  # 7 days (maximum allowed by Railway)
             )
-            logger.info("✅ Generated presigned URL for image access")
+            logger.info("✅ Generated presigned URL for image access (7 days)")
             return presigned_url
         except Exception as presign_error:
             logger.warning(f"⚠️ Could not generate presigned URL: {presign_error}")
