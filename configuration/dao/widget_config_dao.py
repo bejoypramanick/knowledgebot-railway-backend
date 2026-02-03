@@ -132,7 +132,7 @@ class WidgetConfigDAO:
             logger.log_db_query("update_suggested_messages", {"messages": messages}, error=e)
             raise
 
-    async def update_widget_image(self, image_type: str, image_data: bytes, filename: str) -> bool:
+    async def update_widget_image(self, image_type: str, image_data: bytes, filename: str) -> Tuple[str, str]:
         """
         Update widget image by uploading to Railway storage and updating database with URL.
         
@@ -142,7 +142,7 @@ class WidgetConfigDAO:
             filename: Original filename
             
         Returns:
-            True if update was successful
+            Tuple of (storage_url, storage_filename)
         """
         try:
             # Determine content type from filename or default to JPEG
@@ -202,7 +202,7 @@ class WidgetConfigDAO:
                 }, result)
                 
                 logger.info(f"✅ Widget image '{image_type}' updated successfully with URL: {storage_url}")
-                return True
+                return storage_url, storage_filename
                 
         except Exception as e:
             logger.error(f"❌ Error updating widget image '{image_type}': {e}")

@@ -2,7 +2,7 @@
 Widget Configuration Service for Widget Management
 Provides business logic layer for widget configuration operations
 """
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from configuration.core.otel_logger import get_otel_logger
 from configuration.dao.widget_config_dao import WidgetConfigDAO
@@ -65,9 +65,9 @@ class WidgetConfigService:
             raise
     
 
-    async def update_widget_image(self, image_type: str, image_data: bytes, filename: str) -> bool:
+    async def update_widget_image(self, image_type: str, image_data: bytes, filename: str) -> Tuple[str, str]:
         """
-        Update widget image by uploading to Railway storage
+        Update widget image by uploading to Railway storage and updating database with URL.
         
         Args:
             image_type: Type of image ('profile', 'chatIcon', 'headerIcon')
@@ -75,7 +75,7 @@ class WidgetConfigService:
             filename: Original filename
             
         Returns:
-            True if update was successful
+            Tuple of (storage_url, storage_filename)
         """
         try:
             result = await self._widget_config_dao.update_widget_image(image_type, image_data, filename)
@@ -83,4 +83,65 @@ class WidgetConfigService:
             return result
         except Exception as e:
             logger.error(f"Error updating widget image: {e}")
+            raise
+
+    async def update_widget_config_with_images(self, request):
+        """
+        Update widget configuration with optional image uploads in a single transaction.
+        
+        Args:
+            request: FastAPI Request object containing either JSON or multipart form data
+            
+        Returns:
+            None (raises exception on error)
+        """
+        try:
+            # Check if this is a multipart form request (with images) or JSON
+            content_type = request.headers.get("content-type", "")
+            
+            if content_type.startswith("multipart/form-data"):
+                # Handle multipart form with images
+                from fastapi import UploadFile, File, Form
+                import json
+                
+                # Parse multipart form data
+                form = await request.form()
+                
+                # Extract config data
+                config_json = form.get("config")
+                if not config_json:
+                    raise ValueError("Configuration data is required")
+                
+                config_data = json.loads(config_json)
+                
+                # Handle image uploads if present
+                profile_file = form.get("profile_image")
+                chat_icon_file = form.get("chat_icon_image")
+                
+                # Upload profile image if present and update config with URL
+                if profile_file and profile_file.filename:
+                    image_data = await profile_file.read()
+                    image_url, image_filename = await self._widget_config_dao.update_widget_image('profile', image_data, profile_file.filename)
+                    config_data['profile_picture_url'] = image_url
+                    config_data['profile_picture_filename'] = image_filename
+                    logger.info(f"✅ Profile image uploaded and URL updated: {profile_file.filename}")
+                
+                # Upload chat icon image if present and update config with URL
+                if chat_icon_file and chat_icon_file.filename:
+                    image_data = await chat_icon_file.read()
+                    image_url, image_filename = await self._widget_config_dao.update_widget_image('chatIcon', image_data, chat_icon_file.filename)
+                    config_data['chat_icon_url'] = image_url
+                    config_data['chat_icon_filename'] = image_filename
+                    logger.info(f"✅ Chat icon image uploaded and URL updated: {chat_icon_file.filename}")
+                
+                # Update widget configuration with image URLs
+                await self.update_widget_config(config_data)
+                
+            else:
+                # Handle regular JSON request (no images)
+                config_data = await request.json()
+                await self.update_widget_config(config_data)
+                
+        except Exception as e:
+            logger.error(f"Error in update_widget_config_with_images: {e}")
             raise
