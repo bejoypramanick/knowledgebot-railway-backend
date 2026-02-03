@@ -41,10 +41,9 @@ class ChatAgentConfigService:
                 token_limit = row['token_limit'] or 0
                 used_tokens = row['token_used'] or 0
                 # Calculate available tokens (show negative when overused)
-                available_tokens = token_limit - used_tokens
                 llm_tokens[provider] = {
                     "used": used_tokens,
-                    "available": available_tokens,
+                    "available": (token_limit - used_tokens),
                     "limit": token_limit
                 }
                 
