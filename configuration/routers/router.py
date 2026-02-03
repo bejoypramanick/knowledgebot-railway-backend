@@ -15,7 +15,7 @@ from ..service.chat_log_service import ChatLogService
 from ..service.notifications_service import NotificationsService
 from ..service.performance_service import PerformanceService
 from ..service.feedback_service import FeedbackService
-from ..service.token_usage_service import TokenUsageService
+from ..dao.token_dao import TokenDAO
 from ..schemas.models import (
     ChatbotConfigRequest,
     AdminManagementRequest,
@@ -90,7 +90,7 @@ chat_log_service = ChatLogService()
 notifications_service = NotificationsService(notifications_dao=None)
 performance_service = PerformanceService()
 feedback_service = FeedbackService()
-token_usage_service = TokenUsageService()
+token_dao = TokenDAO()
 
 # =================================
 # CHATBOT CONFIGURATION ENDPOINTS
@@ -798,15 +798,7 @@ async def get_performance_metrics():
         logger.error(f"Error getting metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/admin/token-usage/detailed")
-async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_call_type: str = None):
-    """Get detailed token usage"""
-    try:
-        usage = await token_usage_service.get_detailed_token_usage(limit, provider, api_call_type)
-        return {"success": True, "data": usage}
-    except Exception as e:
-        logger.error(f"Error getting detailed token usage: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 # =================================
 # FEEDBACK ENDPOINTS
@@ -990,8 +982,7 @@ async def health_check():
                 "chat_log_service": "healthy",
                 "notifications_service": "healthy",
                 "performance_service": "healthy",
-                "feedback_service": "healthy",
-                "token_usage_service": "healthy"
+                "feedback_service": "healthy"
             }
         }
         return health_status
