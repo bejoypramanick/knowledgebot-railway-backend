@@ -115,19 +115,29 @@ class WidgetConfigDAO:
         try:
             async with get_db_connection() as conn:
                 async with conn.transaction():
-                    # Clear existing messages
-                    delete_query = "DELETE FROM widget_suggested_messages"
-                    delete_result = await conn.execute(delete_query)
-                    logger.log_db_query(delete_query, None, delete_result)
+                    # Get the widget config ID (should be ID 1 for the main config)
+                    config_id_query = "SELECT id FROM widget_configuration LIMIT 1"
+                    config_id_result = await conn.execute(config_id_query)
+                    config_id_row = await config_id_result.fetchone()
+                    
+                    if not config_id_row:
+                        raise ValueError("No widget configuration found")
+                    
+                    widget_config_id = config_id_row[0]
+                    
+                    # Clear existing messages for this widget config
+                    delete_query = "DELETE FROM widget_suggested_messages WHERE widget_config_id = $1"
+                    delete_result = await conn.execute(delete_query, widget_config_id)
+                    logger.log_db_query(delete_query, {"widget_config_id": widget_config_id}, delete_result)
                     
                     # Insert new messages
                     insert_query = """
-                        INSERT INTO widget_suggested_messages (message_text, display_order, is_active)
-                        VALUES ($1, $2, true)
+                        INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active)
+                        VALUES ($1, $2, $3, true)
                     """
                     for i, message in enumerate(messages):
-                        result = await conn.execute(insert_query, message, i)
-                        logger.log_db_query(insert_query, {"message": message, "display_order": i}, result)
+                        result = await conn.execute(insert_query, widget_config_id, message, i)
+                        logger.log_db_query(insert_query, {"widget_config_id": widget_config_id, "message": message, "display_order": i}, result)
         except Exception as e:
             logger.log_db_query("update_suggested_messages", {"messages": messages}, error=e)
             raise
