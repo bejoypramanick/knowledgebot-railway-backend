@@ -117,8 +117,7 @@ class WidgetConfigDAO:
                 async with conn.transaction():
                     # Get the widget config ID (should be ID 1 for the main config)
                     config_id_query = "SELECT id FROM widget_configuration LIMIT 1"
-                    config_id_result = await conn.execute(config_id_query)
-                    config_id_row = await config_id_result.fetchone()
+                    config_id_row = await conn.fetchrow(config_id_query)
                     
                     if not config_id_row:
                         raise ValueError("No widget configuration found")
