@@ -11,7 +11,7 @@ class RailwayStorageService:
     """Service for handling Railway storage (S3-compatible) operations"""
     
     def __init__(self):
-        self.bucket_name = os.getenv('RAILWAY_VOLUME_NAME', 'widget-images')
+        self.bucket_name = os.getenv('RAILWAY_BUCKET_NAME', 'widget-images')
         self.region = os.getenv('RAILWAY_REGION', 'us-east-1')
         self.endpoint_url = os.getenv('RAILWAY_STORAGE_URL')
         self.access_key = os.getenv('RAILWAY_STORAGE_ACCESS_KEY')
