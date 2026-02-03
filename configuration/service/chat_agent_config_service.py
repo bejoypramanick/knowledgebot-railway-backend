@@ -34,29 +34,20 @@ class ChatAgentConfigService:
                 if row['setting_name'] == 'response_timeout':
                     security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
                
-            # Build LLM tokens dict using llm_providers table data
+            # Build LLM tokens dict using llm_providers table data (show negative values)
             llm_tokens = {}
             for row in llm_rows:
                 provider = row['provider_name']
                 token_limit = row['token_limit'] or 0
                 used_tokens = row['token_used'] or 0
-                # Calculate available tokens (can be negative if overused)
+                # Calculate available tokens (show negative when overused)
                 available_tokens = token_limit - used_tokens
                 
                 llm_tokens[provider] = {
                     "used": used_tokens,
                     "available": available_tokens,
                     "limit": token_limit
-                }
-            
-            # Ensure gemini provider exists with defaults if not in database
-            if 'gemini' not in llm_tokens:
-                llm_tokens['gemini'] = {
-                    "used": 0,
-                    "available": 20000,
-                    "limit": 20000
-                }
-            
+                }          
             logger.info(f"✅ LLM tokens constructed from llm_providers table: {llm_tokens}")
 
             # Initialize persona config with active persona
