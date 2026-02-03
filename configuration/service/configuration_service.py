@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from configuration.core.otel_logger import get_otel_logger
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
 from configuration.dao.auth_dao import AuthDAO
-from configuration.dao.widget_dao import WidgetDAO
+from configuration.dao.widget_config_dao import WidgetConfigDAO
 from configuration.dao.token_dao import TokenDAO
 
 logger = get_otel_logger("configuration_service", "configuration")
@@ -18,7 +18,7 @@ class ConfigurationService:
     def __init__(self):
         self._chatAgent_dao = ChatAgentConfigDAO()
         self._auth_dao = AuthDAO()
-        self._widget_dao = WidgetDAO()
+        self._widget_dao = WidgetConfigDAO()
         self._token_dao = TokenDAO()
     
     async def get_metadata(self) -> Optional[Dict[str, Any]]:
@@ -137,41 +137,20 @@ class ConfigurationService:
         try:
             # Get all raw data
             metadata = await self.get_metadata()
-            notification_rows = await self._chatAgent_dao.get_notification_settings()
             security_rows = await self._chatAgent_dao.get_security_settings()
             llm_rows = await self._chatAgent_dao.get_llm_providers()
             persona = await self._chatAgent_dao.get_active_persona()
             human_agents_list = await self._chatAgent_dao.get_human_agents()
             admin_emails_list = await self._chatAgent_dao.get_admins()
 
-            # Build notification settings dict
-            notifications = {
-                "user_interactions_enabled": False,
-                "error_alerts_enabled": False,
-                "feedback_requests_enabled": True
-            }
-            for row in notification_rows:
-                if row['setting_name'] == 'user_interactions_enabled':
-                    notifications['user_interactions_enabled'] = row['is_enabled']
-                elif row['setting_name'] == 'error_alerts_enabled':
-                    notifications['error_alerts_enabled'] = row['is_enabled']
-                elif row['setting_name'] == 'feedback_requests_enabled':
-                    notifications['feedback_requests_enabled'] = row['is_enabled']
-
             # Build security settings dict
             security = {
-                "response_timeout": 30,
-                "remove_pii": False,
-                "restrict_config": False
+                "response_timeout": 30
             }
             for row in security_rows:
                 if row['setting_name'] == 'response_timeout':
                     security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
-                #elif row['setting_name'] == 'remove_pii':
-                    #security['remove_pii'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
-                #elif row['setting_name'] == 'restrict_config':
-                    #security['restrict_config'] = row['setting_value'].lower() == 'true' if row['setting_type'] == 'boolean' else False
-
+               
             # Build LLM tokens dict using actual token usage from token_usage_log
             llm_tokens = {
                 "gemini": {"used": 0, "available": 20000, "limit": 20000}
