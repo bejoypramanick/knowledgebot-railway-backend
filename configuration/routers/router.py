@@ -210,7 +210,7 @@ async def upload_widget_image(
     file: UploadFile = File(...),
     type: str = Form(...)  # profile, chatIcon, headerIcon
 ):
-    """Upload an image for the widget (profile picture, chat icon, or header icon)"""
+    """Upload an image for the widget (profile picture, chat icon, or header icon) to Railway storage"""
     try:
         # Validate file type
         allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"]
@@ -231,16 +231,28 @@ async def upload_widget_image(
         # Read file content
         content = await file.read()
 
-        # Convert to base64 data URL for storage
-        base64_content = base64.b64encode(content).decode('utf-8')
-        data_url = f"data:{file.content_type};base64,{base64_content}"
+        # Upload to Railway storage via service layer
+        success = await widget_config_service.update_widget_image(type, content, file.filename)
+        
+        if not success:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to upload image to storage"
+            )
 
-        # Store in widget_configuration table via service
-        await widget_config_service.update_widget_image(type, data_url, file.filename)
-
+        # Get the updated widget config to return the new URL
+        config = await widget_config_service.get_widget_config()
+        
+        # Determine which URL to return based on image type
+        url_mapping = {
+            "profile": config.get("profile_picture_url", ""),
+            "chatIcon": config.get("chat_icon_url", ""),
+            "headerIcon": config.get("profile_picture_url", "")
+        }
+        
         return {
             "success": True,
-            "url": data_url,
+            "url": url_mapping.get(type, ""),
             "filename": file.filename,
             "type": type,
             "message": f"Image uploaded successfully for {type}"

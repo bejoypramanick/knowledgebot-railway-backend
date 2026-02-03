@@ -13,7 +13,7 @@ class WidgetConfigService:
     """Service layer for widget configuration operations"""
 
     def __init__(self):
-        self._widget_dao = WidgetConfigDAO()
+        self._widget_config_dao = WidgetConfigDAO()
     
     # Widget Configuration Methods
    
@@ -21,12 +21,12 @@ class WidgetConfigService:
         """Get complete widget configuration with all data transformations"""
         try:
             # Get main widget configuration
-            widget_config = await self._widget_dao.get_widget_config()
+            widget_config = await self._widget_config_dao.get_widget_config()
             if not widget_config:
                 widget_config = {}
             
             # Get suggested messages
-            suggested_messages = await self._widget_dao.get_suggested_messages()
+            suggested_messages = await self._widget_config_dao.get_suggested_messages()
             
             # Transform configuration for frontend
             transformed_config = {
@@ -59,16 +59,26 @@ class WidgetConfigService:
     async def update_widget_config(self, config_data: Dict[str, Any]):
         """Update widget configuration"""
         try:
-            await self._widget_dao.update_widget_config(config_data)
+            await self._widget_config_dao.update_widget_config(config_data)
         except Exception as e:
             logger.error(f"Error updating widget config: {e}")
             raise
     
 
-    async def update_widget_image(self, image_type: str, data_url: str, filename: str) -> bool:
-        """Update widget image (profile, chatIcon, or headerIcon)"""
+    async def update_widget_image(self, image_type: str, image_data: bytes, filename: str) -> bool:
+        """
+        Update widget image by uploading to Railway storage
+        
+        Args:
+            image_type: Type of image ('profile', 'chatIcon', 'headerIcon')
+            image_data: Raw image data bytes
+            filename: Original filename
+            
+        Returns:
+            True if update was successful
+        """
         try:
-            result = await self._widget_dao.update_widget_image(image_type, data_url, filename)
+            result = await self._widget_config_dao.update_widget_image(image_type, image_data, filename)
             logger.info(f"✅ Widget image '{image_type}' updated successfully")
             return result
         except Exception as e:

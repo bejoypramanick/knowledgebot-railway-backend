@@ -4,9 +4,11 @@ Handles database operations for widget configuration
 """
 from typing import Dict, List, Any, Optional
 import json
+import base64
 
 from configuration.core.db import get_db_connection
 from configuration.core.otel_logger import get_otel_logger
+from configuration.core.railway_storage import railway_storage
 
 logger = get_otel_logger("widget_dao", "configuration")
 
@@ -129,30 +131,67 @@ class WidgetConfigDAO:
             logger.log_db_query("update_suggested_messages", {"messages": messages}, error=e)
             raise
 
-    async def update_widget_image(self, image_type: str, data_url: str, filename: str) -> bool:
-        """Update widget image (profile, chatIcon, or headerIcon)."""
-        column_mapping = {
-            "profile": ("profile_picture_url", "profile_picture_filename"),
-            "chatIcon": ("chat_icon_url", "chat_icon_filename"),
-            "headerIcon": ("profile_picture_url", "profile_picture_filename")
-        }
-
-        url_column, filename_column = column_mapping[image_type]
-
-        query = f"""
-            UPDATE widget_configuration
-            SET {url_column} = $1, {filename_column} = $2, updated_at = NOW()
-            WHERE id = 1
+    async def update_widget_image(self, image_type: str, image_data: bytes, filename: str) -> bool:
         """
-        params = {"image_type": image_type, "url_column": url_column, "filename_column": filename_column, "data_url_length": len(data_url), "filename": filename}
-
+        Update widget image by uploading to Railway storage and updating database with URL.
+        
+        Args:
+            image_type: Type of image ('profile', 'chatIcon', 'headerIcon')
+            image_data: Raw image data bytes
+            filename: Original filename
+            
+        Returns:
+            True if update was successful
+        """
         try:
+            # Determine content type from filename or default to JPEG
+            content_type = 'image/jpeg'
+            if filename.lower().endswith('.png'):
+                content_type = 'image/png'
+            elif filename.lower().endswith('.gif'):
+                content_type = 'image/gif'
+            elif filename.lower().endswith('.webp'):
+                content_type = 'image/webp'
+            elif filename.lower().endswith('.svg'):
+                content_type = 'image/svg+xml'
+            
+            # Upload to Railway storage
+            storage_url, storage_filename = await railway_storage.upload_image(
+                image_data, filename, content_type
+            )
+            
+            # Update database with storage URL
+            column_mapping = {
+                "profile": ("profile_picture_url", "profile_picture_filename"),
+                "chatIcon": ("chat_icon_url", "chat_icon_filename"),
+                "headerIcon": ("profile_picture_url", "profile_picture_filename")
+            }
+            
+            if image_type not in column_mapping:
+                logger.error(f"❌ Invalid image type: {image_type}")
+                return False
+            
+            url_column, filename_column = column_mapping[image_type]
+            
+            query = f"""
+                UPDATE widget_configuration
+                SET {url_column} = $1, {filename_column} = $2, updated_at = NOW()
+                WHERE id = 1
+            """
+            
             async with get_db_connection() as conn:
-                result = await conn.execute(query, data_url, filename)
-                logger.log_db_query(query, params, result)
+                result = await conn.execute(query, storage_url, storage_filename)
+                logger.log_db_query(query, {
+                    "image_type": image_type,
+                    "storage_url": storage_url,
+                    "storage_filename": storage_filename
+                }, result)
+                
+                logger.info(f"✅ Widget image '{image_type}' updated successfully with URL: {storage_url}")
                 return True
+                
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.error(f"❌ Error updating widget image '{image_type}': {e}")
             raise
 
     async def clear_suggested_messages(self):
