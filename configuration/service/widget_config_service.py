@@ -21,7 +21,7 @@ class WidgetConfigService:
         """Get complete widget configuration with all data transformations"""
         try:
             # Get main widget configuration
-            widget_config = await self.get_widget_config()
+            widget_config = await self._widget_dao.get_widget_config()
             if not widget_config:
                 widget_config = {}
             
