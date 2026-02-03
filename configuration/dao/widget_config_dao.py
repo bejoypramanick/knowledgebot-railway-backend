@@ -85,14 +85,14 @@ class WidgetConfigDAO:
         params = [
             config_data["display_name"],
             config_data["initial_message"],
-            config_data["auto_show_duration"],
-            config_data["keep_showing_suggested"],
-            config_data["theme"],
-            config_data["primary_color"],
-            config_data["use_primary_for_header"],
-            config_data["chat_bubble_color"],
-            config_data["align_bubble"],
-            config_data["display_chatbot"],
+            config_data.get("auto_show_duration", 4),  # Default to 4 if None
+            config_data.get("keep_showing_suggested", True),  # Default to True if None
+            config_data.get("theme", "light"),  # Default to light if None
+            config_data.get("primary_color", "#3b82f6"),  # Default if None
+            config_data.get("use_primary_for_header", True),  # Default if None
+            config_data.get("chat_bubble_color", "#3b82f6"),  # Default if None
+            config_data.get("align_bubble", "right"),  # Default if None
+            config_data.get("display_chatbot", True),  # Default if None
             config_data.get("profile_picture_url"),
             config_data.get("chat_icon_url"),
             config_data.get("profile_picture_filename"),
