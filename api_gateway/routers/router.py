@@ -136,6 +136,78 @@ async def public_chat_stream(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
+# PUBLIC WIDGET ENDPOINT (No Authentication Required)
+# =================================
+
+@router.get("/widget")
+async def public_widget(request: Request):
+    """Public widget endpoint - serves HTML page with chat widget for iframe embedding"""
+    try:
+        # Get query parameters
+        widget_mode = request.query_params.get("widgetMode", "true")
+        theme = request.query_params.get("theme", "light")
+        primary_color = request.query_params.get("primaryColor", "#3b82f6")
+        display_name = request.query_params.get("displayName", "AI Assistant")
+        
+        # Generate HTML page with embedded chat widget
+        html_content = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Widget</title>
+    <style>
+        body {{
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+        }}
+        .widget-container {{
+            height: 100vh;
+            width: 100vw;
+        }}
+    </style>
+</head>
+<body>
+    <div id="widget-root" class="widget-container"></div>
+    <script>
+        // Widget configuration
+        window.WIDGET_CONFIG = {{
+            widgetMode: {widget_mode},
+            theme: "{theme}",
+            primaryColor: "{primary_color}",
+            displayName: "{display_name}"
+        }};
+        
+        // Load the chat widget
+        (function() {{
+            const script = document.createElement('script');
+            script.src = '{request.base_url}/widget-script.js';
+            script.async = true;
+            script.onload = function() {{
+                // Initialize widget if script provides initialization
+                if (window.KnowledgeBot) {{
+                    window.KnowledgeBot.init(window.WIDGET_CONFIG);
+                }}
+            }};
+            document.head.appendChild(script);
+        }})();
+    </script>
+</body>
+</html>
+        """
+        
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html_content)
+        
+    except Exception as e:
+        logger.error(f"Error in public widget: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =================================
 # GENERIC SERVICE PROXY HANDLER (catches ALL requests)
 # =================================
 
