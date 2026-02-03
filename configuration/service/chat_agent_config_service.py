@@ -107,7 +107,7 @@ class ChatAgentConfigService:
                     logger.warning(f"⚠️ Metadata is not a dict: {type(metadata)}")
             else:
                 logger.warning("⚠️ No metadata found in config_data")
-            
+
             # Save security settings
             if 'security' in config_data:
                 security = config_data['security']
