@@ -193,7 +193,7 @@ async def generate_widget_embed_script(request: Request):
         # Extract request data
         body = await request.json()
         embed_type = body.get("embedType", "bubble")
-        widget_url = body.get("widgetUrl", "https://your-widget-url.com")
+        widget_url = body.get("baseUrl", body.get("widgetUrl", "https://your-widget-url.com"))
         
         # Extract fallback config values from request body
         fallback_config = {
