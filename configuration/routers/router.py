@@ -3,9 +3,10 @@ Consolidated Configuration Router
 All configuration endpoints in one file for easier debugging
 """
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect
 from typing import Dict, List, Any, Optional
 import json
+from datetime import datetime
 
 from configuration.core.otel_logger import get_otel_logger
 from ..service.chat_agent_config_service import ChatAgentConfigService
@@ -217,6 +218,93 @@ async def generate_widget_embed_script(request: Request):
         return result
     except Exception as e:
         logger.error(f"Error generating embed script: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =================================
+# REAL-TIME WIDGET WEBSOCKET ENDPOINTS
+# =================================
+
+@router.websocket("/widget/ws")
+async def widget_websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for real-time widget state synchronization"""
+    await websocket.accept()
+    
+    # Generate unique widget ID for this connection
+    import uuid
+    widget_id = f"widget_{uuid.uuid4().hex[:8]}"
+    
+    try:
+        from .service.widget_realtime_service import widget_realtime_service
+        
+        # Register connection
+        await widget_realtime_service.register_connection(widget_id, websocket)
+        
+        # Keep connection alive and handle messages
+        while True:
+            try:
+                # Receive ping/pong messages to keep connection alive
+                message = await websocket.receive_text()
+                data = json.loads(message)
+                
+                if data.get("type") == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong", "timestamp": datetime.utcnow().isoformat()}))
+                elif data.get("type") == "get_state":
+                    # Send current state on request
+                    current_state = await widget_realtime_service.get_widget_state()
+                    await websocket.send_text(json.dumps({
+                        "type": "state_update",
+                        "state": current_state
+                    }))
+                    
+            except WebSocketDisconnect:
+                break
+            except Exception as e:
+                logger.error(f"Error in WebSocket message handling: {e}")
+                break
+                
+    except WebSocketDisconnect:
+        logger.info(f"Widget {widget_id} disconnected")
+    except Exception as e:
+        logger.error(f"Error in WebSocket connection: {e}")
+    finally:
+        # Unregister connection
+        try:
+            from .service.widget_realtime_service import widget_realtime_service
+            await widget_realtime_service.unregister_connection(widget_id, websocket)
+        except:
+            pass
+
+
+@router.post("/widget/broadcast-state")
+async def trigger_state_broadcast(request: Request):
+    """Trigger broadcast of current widget state to all connected widgets"""
+    try:
+        from .service.widget_realtime_service import widget_realtime_service
+        
+        # Get the field that changed (if specified)
+        body = await request.json()
+        changed_field = body.get("changed_field")
+        
+        # Broadcast to all connected widgets
+        await widget_realtime_service.broadcast_state_change(changed_field)
+        
+        return {"success": True, "message": "State broadcast triggered"}
+        
+    except Exception as e:
+        logger.error(f"Error triggering state broadcast: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/widget/stats")
+async def get_widget_stats():
+    """Get statistics about widget connections"""
+    try:
+        from .service.widget_realtime_service import widget_realtime_service
+        stats = widget_realtime_service.get_connection_stats()
+        return {"success": True, "stats": stats}
+    except Exception as e:
+        logger.error(f"Error getting widget stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

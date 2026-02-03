@@ -59,6 +59,11 @@ class WidgetConfigService:
     async def update_widget_config(self, config_data: Dict[str, Any]):
         """Update widget configuration"""
         try:
+            # Check if display_chatbot is being changed
+            old_config = await self.get_widget_config()
+            old_display_chatbot = old_config.get("display_chatbot", True)
+            new_display_chatbot = config_data.get("display_chatbot", True)
+            
             # Extract suggested messages if present
             suggested_messages = config_data.pop('suggested_messages', None)
             
@@ -69,6 +74,15 @@ class WidgetConfigService:
             if suggested_messages is not None:
                 logger.info(f"Updating suggested messages: {suggested_messages}")
                 await self._widget_config_dao.update_suggested_messages(suggested_messages)
+            
+            # Broadcast state change if display_chatbot changed
+            if old_display_chatbot != new_display_chatbot:
+                logger.info(f"Display chatbot changed from {old_display_chatbot} to {new_display_chatbot}")
+                try:
+                    from .widget_realtime_service import widget_realtime_service
+                    await widget_realtime_service.broadcast_state_change("display_chatbot")
+                except Exception as e:
+                    logger.error(f"Error broadcasting state change: {e}")
             
         except Exception as e:
             logger.error(f"Error updating widget config: {e}")
