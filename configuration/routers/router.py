@@ -234,68 +234,6 @@ async def generate_widget_embed_script(request: Request):
         logger.error(f"Error generating embed script: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-from fastapi import UploadFile, File, Form
-import base64
-import os
-
-@router.post("/widget/upload-image")
-async def upload_widget_image(
-    file: UploadFile = File(...),
-    type: str = Form(...)  # profile, chatIcon, headerIcon
-):
-    """Upload an image for the widget (profile picture, chat icon, or header icon) to Railway storage"""
-    try:
-        # Validate file type
-        allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"]
-        if file.content_type not in allowed_types:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid file type. Allowed types: {', '.join(allowed_types)}"
-            )
-
-        # Validate image type parameter
-        valid_types = ["profile", "chatIcon", "headerIcon"]
-        if type not in valid_types:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid type. Allowed types: {', '.join(valid_types)}"
-            )
-
-        # Read file content
-        content = await file.read()
-
-        # Upload to Railway storage via service layer
-        success = await widget_config_service.update_widget_image(type, content, file.filename)
-        
-        if not success:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to upload image to storage"
-            )
-
-        # Get the updated widget config to return the new URL
-        config = await widget_config_service.get_widget_config()
-        
-        # Determine which URL to return based on image type
-        url_mapping = {
-            "profile": config.get("profile_picture_url", ""),
-            "chatIcon": config.get("chat_icon_url", ""),
-            "headerIcon": config.get("profile_picture_url", "")
-        }
-        
-        return {
-            "success": True,
-            "url": url_mapping.get(type, ""),
-            "filename": file.filename,
-            "type": type,
-            "message": f"Image uploaded successfully for {type}"
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error uploading widget image: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 # =================================
 # CHAT LOG ENDPOINTS
