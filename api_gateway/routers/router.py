@@ -84,6 +84,58 @@ async def login_user(request: Request):
         raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
 
 # =================================
+# PUBLIC CHAT ENDPOINTS (No Authentication Required)
+# =================================
+
+@router.post("/chatbot/chat/stream")
+async def public_chat_stream(request: Request):
+    """Public chat streaming endpoint - no authentication required for website visitors"""
+    try:
+        import httpx
+        from ..core.config import get_settings
+        
+        settings = get_settings()
+        chatbot_service_url = settings.chatbot_orchestration_url
+        
+        # Log the request
+        correlation_id = request.headers.get("X-Correlation-ID", "no-correlation-id")
+        logger.info(f"🔍 [{correlation_id}] Public chat stream request received")
+        
+        # Prepare headers - remove auth-related headers for public endpoint
+        headers = dict(request.headers)
+        headers.pop("host", None)
+        headers.pop("authorization", None)
+        
+        # Make request to chatbot service
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.request(
+                method=request.method,
+                url=f"{chatbot_service_url}/api/v1/chatbot/chat/stream",
+                headers=headers,
+                content=await request.body(),
+                params=request.query_params
+            )
+            
+            logger.info(f"✅ [{correlation_id}] Chat stream response: {response.status_code}")
+            
+            # Return streaming response
+            from fastapi.responses import StreamingResponse
+            
+            async def stream_response():
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+            
+            return StreamingResponse(
+                stream_response(),
+                status_code=response.status_code,
+                headers=dict(response.headers)
+            )
+            
+    except Exception as e:
+        logger.error(f"Error in public chat stream: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =================================
 # GENERIC SERVICE PROXY HANDLER (catches ALL requests)
 # =================================
 
