@@ -22,8 +22,6 @@ class NotificationsUpdate(BaseModel):
 
 class SecurityUpdate(BaseModel):
     response_timeout: int = Field(..., ge=15, le=300, description="Response timeout in seconds (15-300)")
-    remove_pii: bool
-    restrict_config: bool
 
     @validator('response_timeout')
     def validate_timeout(cls, v):
@@ -33,6 +31,16 @@ class SecurityUpdate(BaseModel):
 
 class DataManagementUpdate(BaseModel):
     backup_logs: bool
+
+class MetadataUpdate(BaseModel):
+    hil_enabled: bool
+    response_policy: int = Field(..., ge=15, le=300, description="Response policy timeout in seconds (15-300)")
+
+    @validator('response_policy')
+    def validate_response_policy(cls, v):
+        if v < 15 or v > 300:
+            raise ValueError('Response policy must be between 15 and 300 seconds')
+        return v
 
 class PersonaUpdate(BaseModel):
     system_prompt: str = Field(..., min_length=10, max_length=5000)
@@ -68,12 +76,11 @@ class AdminAccount(BaseModel):
 class ChatbotConfigRequest(BaseModel):
     admin_emails: Optional[List[Union[ValidatedEmail, AdminAccount]]] = Field(None, max_items=10)
     human_agents: Optional[List[ValidatedEmail]] = Field(None, max_items=20)
-    hil_enabled: Optional[bool] = None
+    metadata: Optional[MetadataUpdate] = None
     security: Optional[SecurityUpdate] = None
     data_management: Optional[DataManagementUpdate] = None
     persona: Optional[PersonaUpdate] = None
     notifications: Optional[NotificationsUpdate] = None
-    response_policy: Optional[int] = Field(None, ge=15, le=300, description="Response policy timeout in seconds (15-300)")
 
     @validator('admin_emails')
     def validate_admin_emails(cls, v):
@@ -85,12 +92,6 @@ class ChatbotConfigRequest(BaseModel):
     def validate_human_agents(cls, v):
         if v is not None and len(v) > 20:
             raise ValueError('Maximum 20 human agents allowed')
-        return v
-
-    @validator('response_policy')
-    def validate_response_policy(cls, v):
-        if v is not None and (v < 15 or v > 300):
-            raise ValueError('Response policy must be between 15 and 300 seconds')
         return v
 
 class PositionData(BaseModel):
