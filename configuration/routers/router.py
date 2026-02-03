@@ -68,7 +68,7 @@ auth_service = AuthService()
 chat_log_service = ChatLogService()
 performance_service = PerformanceService()
 feedback_service = FeedbackService()
-token_dao = TokenDAO()
+
 
 # =================================
 # CHATBOT CONFIGURATION ENDPOINTS
