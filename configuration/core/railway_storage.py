@@ -74,10 +74,10 @@ class RailwayStorageService:
             return data_url, filename
         
         try:
-            # Use consistent filenames for Agent Icon and Bubble Icon to enable replacement
+            # Use consistent folder structure for Agent Icon and Bubble Icon to ensure unique paths
             if image_type == 'profile':
-                # Agent Icon - use the original filename
-                unique_filename = f"agent-{filename}"
+                # Agent Icon - use dedicated folder with original filename
+                unique_filename = f"agent-icon/{filename}"
                 # Adjust content type based on actual file extension
                 if filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg'):
                     content_type = 'image/jpeg'
@@ -90,8 +90,8 @@ class RailwayStorageService:
                 elif filename.lower().endswith('.png'):
                     content_type = 'image/png'
             elif image_type == 'chatIcon':
-                # Bubble Icon - use the original filename
-                unique_filename = f"bubble-{filename}"
+                # Bubble Icon - use dedicated folder with original filename
+                unique_filename = f"bubble-icon/{filename}"
                 # Adjust content type based on actual file extension
                 if filename.lower().endswith('.jpg') or filename.lower().endswith('.jpeg'):
                     content_type = 'image/jpeg'
