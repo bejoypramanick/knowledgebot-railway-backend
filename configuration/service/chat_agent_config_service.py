@@ -19,87 +19,11 @@ class ChatAgentConfigService:
         self._auth_dao = AuthDAO()
         self._token_dao = TokenDAO()
     
-    async def get_metadata(self) -> Optional[Dict[str, Any]]:
-        """Get chatbot metadata"""
-        try:
-            return await self._chatAgent_dao.get_metadata()
-        except Exception as e:
-            logger.error(f"Error getting metadata: {e}")
-            return None
-    
-    async def update_metadata(self, **kwargs):
-        """Update chatbot metadata"""
-        try:
-            await self._chatAgent_dao.update_metadata(**kwargs)
-        except Exception as e:
-            logger.error(f"Error updating metadata: {e}")
-            raise
-    
-    # Human Agent Management Methods
-    async def create_human_agent(self, email: str) -> str:
-        """Create a new human agent"""
-        try:
-            return await self._auth_dao.create_human_agent(email)
-        except Exception as e:
-            logger.error(f"Error creating human agent: {e}")
-            raise
-    
-    async def get_all_human_agents(self) -> List[str]:
-        """Get all human agents"""
-        try:
-            # Use auth_dao to get human agents since user_dao doesn't exist locally
-            return await self._auth_dao.get_human_agents()
-        except Exception as e:
-            logger.error(f"Error getting human agents: {e}")
-            return []
-    
-    async def delete_human_agent(self, email: str):
-        """Delete a human agent"""
-        try:
-            await self._auth_dao.remove_human_agent(email)
-        except Exception as e:
-            logger.error(f"Error deleting human agent: {e}")
-            raise
-
-    # Chatbot Configuration Methods
-
-    async def sync_admin_emails(self, admin_emails: List[str]) -> Dict[str, List[str]]:
-        """Sync admin emails by comparing database with UI request"""
-        try:
-            return await self._chatAgent_dao.sync_admin_emails(admin_emails)
-        except Exception as e:
-            logger.error(f"Error syncing admin emails: {e}")
-            raise
-
-    async def sync_human_agent_emails(self, human_agent_emails: List[str]) -> Dict[str, List[str]]:
-        """Sync human agent emails by comparing database with UI request"""
-        try:
-            return await self._chatAgent_dao.sync_human_agent_emails(human_agent_emails)
-        except Exception as e:
-            logger.error(f"Error syncing human agent emails: {e}")
-            raise
-
-    async def update_llm_tokens(self, provider: str, token_limit: int):
-        """Update LLM token limit"""
-        try:
-            await self._chatAgent_dao.update_llm_tokens(provider, token_limit)
-        except Exception as e:
-            logger.error(f"Error updating LLM tokens: {e}")
-            raise
-
-    async def update_llm_used_tokens(self, provider: str, token_used: int):
-        """Update LLM used tokens"""
-        try:
-            await self._chatAgent_dao.update_llm_used_tokens(provider, token_used)
-        except Exception as e:
-            logger.error(f"Error updating LLM used tokens: {e}")
-            raise
-
     async def get_chatAgent_config(self):
         """Get complete chatbot configuration with all data transformations"""
         try:
-            # Get all raw data
-            metadata = await self.get_metadata()
+            # Get all raw data via direct DAO calls
+            metadata = await self._chatAgent_dao.get_metadata()
             security_rows = await self._chatAgent_dao.get_security_settings()
             llm_rows = await self._chatAgent_dao.get_llm_providers()
             persona = await self._chatAgent_dao.get_active_persona()
@@ -177,57 +101,16 @@ class ChatAgentConfigService:
             logger.error(f"Error getting chatbot configuration: {e}")
             raise
 
-    async def request_human_agent(self, session_id: str):
-        """Request a human agent for a chat session"""
-        try:
-            from ..service.chat_log_service import ChatLogService
-            chat_log_service = ChatLogService()
-            
-            # Get all human agents
-            human_agents = await self.get_all_human_agents()
-            
-            if not human_agents:
-                raise ValueError("No human agents available")
-            
-            # For now, assign to the first available human agent
-            # In a real implementation, you might want to implement load balancing
-            assigned_agent = human_agents[0]
-            
-            # Update the chat session with the assigned human agent
-            await chat_log_service.assign_human_agent(session_id, assigned_agent)
-            
-            logger.info(f"✅ Human agent {assigned_agent} assigned to session {session_id}")
-            return assigned_agent
-            
-        except Exception as e:
-            logger.error(f"Error requesting human agent: {e}")
-            raise
-
-    async def activate_persona(self, persona_name: str) -> bool:
-        """Activate a specific persona by deactivating all others and activating the selected one."""
-        try:
-            # Use a default system prompt for the persona
-            # In a real implementation, you might want to fetch this from a personas table
-            default_system_prompt = f"You are {persona_name}, a helpful AI assistant. Your role is to assist users with their questions and provide accurate, helpful responses."
-            
-            # Use the DAO method to activate the persona
-            await self._chatAgent_dao.update_persona(
-                persona_name=persona_name,
-                system_prompt=default_system_prompt,
-                is_active=True
-            )
-            
-            logger.info(f"✅ Successfully activated persona: {persona_name}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Error activating persona '{persona_name}': {e}")
-            raise
-
-    async def save_chatbot_config(self, config_data: Dict[str, Any]):
+    async def save_chatAgent_config(self, config_data: Dict[str, Any]):
         """Save complete chatbot configuration"""
         try:
             logger.info(f"🔍 Saving chatbot config: {config_data}")
+            
+            # Save metadata if provided
+            if 'metadata' in config_data:
+                metadata = config_data['metadata']
+                if isinstance(metadata, dict):
+                    await self._chatAgent_dao.update_metadata(**metadata)
             
             # Save security settings
             if 'security' in config_data:
@@ -252,36 +135,56 @@ class ChatAgentConfigService:
                             'boolean'
                         )
             
+            # Save admin emails if provided
+            if 'admin_emails' in config_data:
+                admin_emails = config_data['admin_emails']
+                if isinstance(admin_emails, list):
+                    await self._chatAgent_dao.sync_admin_emails(admin_emails)
+            
+            # Save human agents if provided
+            if 'human_agents' in config_data:
+                human_agents = config_data['human_agents']
+                if isinstance(human_agents, list):
+                    await self._chatAgent_dao.sync_human_agent_emails(human_agents)
+            
             # Update LLM tokens if provided
             if 'llm_tokens' in config_data:
                 llm_tokens = config_data['llm_tokens']
-                for provider, tokens in llm_tokens.items():
-                    if 'limit' in tokens:
-                        await self.update_llm_tokens(provider, tokens['limit'])
-                    if 'used' in tokens:
-                        await self.update_llm_used_tokens(provider, tokens['used'])
+                if isinstance(llm_tokens, dict):
+                    for provider, tokens in llm_tokens.items():
+                        if isinstance(tokens, dict):
+                            if 'limit' in tokens:
+                                await self._chatAgent_dao.update_llm_tokens(provider, tokens['limit'])
+                            if 'used' in tokens:
+                                await self._chatAgent_dao.update_llm_used_tokens(provider, tokens['used'])
             
             # Save persona configuration
             if 'persona' in config_data:
                 persona_data = config_data['persona']
-                if 'selected_persona' in persona_data:
-                    persona_name = persona_data['selected_persona']
-                    system_prompt = persona_data.get('system_prompt', f"You are {persona_name}, a helpful AI assistant. Your role is to assist users with their questions and provide accurate, helpful responses.")
-                    
-                    # If it's a custom persona, create/update it with the custom system prompt
-                    if persona_name == 'Custom':
-                        # For custom personas, we need to handle them specially
-                        # Create or update the custom persona with the provided system prompt
-                        await self._chatAgent_dao.update_persona(
-                            persona_name='Custom',
-                            system_prompt=system_prompt,
-                            is_active=True
-                        )
-                    else:
-                        # For predefined personas, just activate them
-                        await self.activate_persona(persona_name)
-                    
-                    logger.info(f"✅ Successfully updated persona: {persona_name}")
+                if isinstance(persona_data, dict):
+                    if 'selected_persona' in persona_data:
+                        persona_name = persona_data['selected_persona']
+                        system_prompt = persona_data.get('system_prompt', f"You are {persona_name}, a helpful AI assistant. Your role is to assist users with their questions and provide accurate, helpful responses.")
+                        
+                        # If it's a custom persona, create/update it with the custom system prompt
+                        if persona_name == 'Custom':
+                            # For custom personas, we need to handle them specially
+                            # Create or update the custom persona with the provided system prompt
+                            await self._chatAgent_dao.update_persona(
+                                persona_name='Custom',
+                                system_prompt=system_prompt,
+                                is_active=True
+                            )
+                        else:
+                            # For predefined personas, just activate them with default system prompt
+                            default_system_prompt = f"You are {persona_name}, a helpful AI assistant. Your role is to assist users with their questions and provide accurate, helpful responses."
+                            await self._chatAgent_dao.update_persona(
+                                persona_name=persona_name,
+                                system_prompt=default_system_prompt,
+                                is_active=True
+                            )
+                        
+                        logger.info(f"✅ Successfully updated persona: {persona_name}")
             
             logger.info("✅ Chatbot config saved successfully")
 

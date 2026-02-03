@@ -15,7 +15,7 @@ from ..service.chat_log_service import ChatLogService
 from ..service.notifications_service import NotificationsService
 from ..service.performance_service import PerformanceService
 from ..service.feedback_service import FeedbackService
-from ..dao.token_dao import TokenDAO
+
 from ..schemas.models import (
     ChatbotConfigRequest,
     AdminManagementRequest,
@@ -90,7 +90,7 @@ chat_log_service = ChatLogService()
 notifications_service = NotificationsService(notifications_dao=None)
 performance_service = PerformanceService()
 feedback_service = FeedbackService()
-token_dao = TokenDAO()
+
 
 # =================================
 # CHATBOT CONFIGURATION ENDPOINTS
@@ -115,7 +115,7 @@ async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
         logger.info(f"🔍 POST /chatAgentConfig received: {config}")
         logger.info(f"🔍 Request headers: {dict(request.headers)}")
         
-        await chat_agent_config_service.save_chatbot_config(config.dict())
+        await chat_agent_config_service.save_chatAgent_config(config.dict())
         
         logger.info("✅ Chatbot config saved successfully")
         return {"success": True, "message": "Chatbot configuration saved successfully"}
