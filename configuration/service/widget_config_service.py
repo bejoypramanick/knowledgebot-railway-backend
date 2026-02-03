@@ -16,23 +16,8 @@ class WidgetConfigService:
         self._widget_dao = WidgetConfigDAO()
     
     # Widget Configuration Methods
-    async def get_widget_config(self) -> Optional[Dict[str, Any]]:
-        """Get widget configuration"""
-        try:
-            return await self._widget_dao.get_widget_config()
-        except Exception as e:
-            logger.error(f"Error getting widget config: {e}")
-            return None
-    
-    async def update_widget_config(self, config_data: Dict[str, Any]):
-        """Update widget configuration"""
-        try:
-            await self._widget_dao.update_widget_config(config_data)
-        except Exception as e:
-            logger.error(f"Error updating widget config: {e}")
-            raise
-    
-    async def get_widget_config_with_transform(self):
+   
+    async def get_widget_config(self):
         """Get complete widget configuration with all data transformations"""
         try:
             # Get main widget configuration
@@ -69,6 +54,16 @@ class WidgetConfigService:
         except Exception as e:
             logger.error(f"Error getting widget configuration: {e}")
             raise
+
+
+    async def update_widget_config(self, config_data: Dict[str, Any]):
+        """Update widget configuration"""
+        try:
+            await self._widget_dao.update_widget_config(config_data)
+        except Exception as e:
+            logger.error(f"Error updating widget config: {e}")
+            raise
+    
 
     async def update_widget_image(self, image_type: str, data_url: str, filename: str) -> bool:
         """Update widget image (profile, chatIcon, or headerIcon)"""
