@@ -144,10 +144,51 @@ async def get_widget_config(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/widgetConfig")
-async def update_widget_config(config: WidgetConfigRequest, request: Request):
-    """Update widget configuration"""
+async def update_widget_config(request: Request):
+    """Update widget configuration with optional image uploads"""
     try:
-        await widget_config_service.update_widget_config(config.dict())
+        # Check if this is a multipart form request (with images) or JSON
+        content_type = request.headers.get("content-type", "")
+        
+        if content_type.startswith("multipart/form-data"):
+            # Handle multipart form with images
+            from fastapi import UploadFile, File, Form
+            import json
+            
+            # Parse multipart form data
+            form = await request.form()
+            
+            # Extract config data
+            config_json = form.get("config")
+            if not config_json:
+                raise HTTPException(status_code=400, detail="Configuration data is required")
+            
+            config_data = json.loads(config_json)
+            
+            # Handle image uploads if present
+            profile_file = form.get("profile_image")
+            chat_icon_file = form.get("chat_icon_image")
+            
+            if profile_file and profile_file.filename:
+                # Upload profile image
+                image_data = await profile_file.read()
+                await widget_config_service.update_widget_image('profile', image_data, profile_file.filename)
+                logger.info(f"✅ Profile image uploaded: {profile_file.filename}")
+            
+            if chat_icon_file and chat_icon_file.filename:
+                # Upload chat icon image
+                image_data = await chat_icon_file.read()
+                await widget_config_service.update_widget_image('chatIcon', image_data, chat_icon_file.filename)
+                logger.info(f"✅ Chat icon image uploaded: {chat_icon_file.filename}")
+            
+            # Update widget configuration
+            await widget_config_service.update_widget_config(config_data)
+            
+        else:
+            # Handle regular JSON request (no images)
+            config_data = await request.json()
+            await widget_config_service.update_widget_config(config_data)
+        
         return {"success": True, "message": "Widget configuration updated successfully"}
     except Exception as e:
         logger.error(f"Error updating widget config: {e}")
