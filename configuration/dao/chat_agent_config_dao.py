@@ -89,59 +89,6 @@ class ChatAgentConfigDAO:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def upsert_security_setting_with_desc(self, name: str, value: str, setting_type: str, description: str):
-        query = """
-            INSERT INTO security_settings (setting_name, setting_value, setting_type, description)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (setting_name) DO UPDATE SET
-            setting_value = EXCLUDED.setting_value, setting_type = EXCLUDED.setting_type, 
-            description = EXCLUDED.description, updated_at = NOW()
-        """
-        params = [name, value, setting_type, description]
-        try:
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, *params)
-                logger.log_db_query(query, params, result)
-        except Exception as e:
-            logger.log_db_query(query, params, error=e)
-            raise
-
-    async def create_human_agent(self, email: str) -> int:
-        """Create a new human agent and return the ID. Returns existing ID if email already exists."""
-        try:
-            async with get_db_connection() as conn:
-                # Try to insert first
-                try:
-                    insert_query = """
-                        INSERT INTO human_agents (email)
-                        VALUES ($1)
-                        RETURNING id
-                    """
-                    result = await conn.fetchval(insert_query, email)
-                    logger.log_db_query(insert_query, {"email": email}, result)
-                    return result
-                except asyncpg.exceptions.UniqueViolationError:
-                    # If email already exists, return the existing ID
-                    select_query = """
-                        SELECT id FROM human_agents WHERE email = $1
-                    """
-                    result = await conn.fetchval(select_query, email)
-                    logger.log_db_query(select_query, {"email": email}, result)
-                    return result
-        except Exception as e:
-            logger.log_db_query("CREATE/SELECT human_agents", {"email": email}, error=e)
-            raise
-
-    async def delete_human_agent(self, email: str):
-        """Delete a human agent by email."""
-        query = "DELETE FROM human_agents WHERE email = $1"
-        try:
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, email)
-                logger.log_db_query(query, {"email": email}, result)
-        except Exception as e:
-            logger.log_db_query(query, {"email": email}, error=e)
-            raise
 
     async def get_human_agents(self) -> List[str]:
         """Get all human agent emails."""
@@ -285,56 +232,6 @@ class ChatAgentConfigDAO:
             logger.error(f"Error syncing human agent emails: {e}")
             raise
 
-    # Session Assignment Methods
-    async def get_existing_assignment(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Get existing agent assignment for a session."""
-        query = """
-            SELECT ha.* FROM human_agents ha
-            JOIN agent_session_assignments asa ON ha.id = asa.agent_id
-            WHERE asa.session_id = $1 AND asa.status = 'active'
-        """
-        try:
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, session_id)
-                logger.log_db_query(query, {"session_id": session_id}, result)
-                return result
-        except Exception as e:
-            logger.log_db_query(query, {"session_id": session_id}, error=e)
-            return None
-
-    async def get_available_agents(self) -> List[Dict[str, Any]]:
-        """Get all available human agents."""
-        query = """
-            SELECT * FROM human_agents 
-            WHERE is_active = true 
-            ORDER BY email
-        """
-        try:
-            async with get_db_connection() as conn:
-                result = await conn.fetch(query)
-                logger.log_db_query(query, None, result)
-                return result
-        except Exception as e:
-            logger.log_db_query(query, None, error=e)
-            return []
-
-    async def create_agent_assignment(self, session_id: str, agent_id: int, assigned_by: str):
-        """Create a new agent assignment."""
-        query = """
-            INSERT INTO agent_session_assignments 
-            (session_id, agent_id, status, assigned_at, assigned_by)
-            VALUES ($1, $2, 'active', NOW(), $3)
-            ON CONFLICT (session_id) DO UPDATE SET
-            agent_id = EXCLUDED.agent_id, status = EXCLUDED.status, 
-            assigned_at = EXCLUDED.assigned_at, assigned_by = EXCLUDED.assigned_by
-        """
-        try:
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, session_id, agent_id, assigned_by)
-                logger.log_db_query(query, {"session_id": session_id, "agent_id": agent_id, "assigned_by": assigned_by}, result)
-        except Exception as e:
-            logger.log_db_query(query, {"session_id": session_id, "agent_id": agent_id, "assigned_by": assigned_by}, error=e)
-            raise
 
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
         """Get all LLM providers."""
@@ -394,38 +291,6 @@ class ChatAgentConfigDAO:
             logger.log_db_query(query, None, error=e)
             return None
     
-    async def activate_persona(self, persona_name: str, user_email: str) -> Dict[str, Any]:
-        """Activate a persona (set is_active to true)"""
-        query = """
-            UPDATE public.persona_configurations 
-            SET is_active = true, updated_at = NOW()
-            WHERE persona_name = $1
-            RETURNING id, persona_name, system_prompt, 
-                     is_active, created_at, updated_at
-        """
-        try:
-            async with get_db_connection() as conn:
-                # First check if persona exists
-                check_query = """
-                    SELECT id, persona_name, system_prompt, 
-                           is_active, created_at, updated_at
-                    FROM public.persona_configurations
-                    WHERE persona_name = $1
-                """
-                row = await conn.fetchrow(check_query, persona_name)
-                logger.log_db_query(check_query, {"persona_name": persona_name}, row)
-                
-                if not row:
-                    raise ValueError(f"Persona '{persona_name}' not found")
-                
-                # Update the persona to be active
-                updated_row = await conn.fetchrow(query, persona_name)
-                logger.log_db_query(query, {"persona_name": persona_name}, updated_row)
-            
-            return dict(updated_row)
-        except Exception as e:
-            logger.log_db_query(query, {"persona_name": persona_name}, error=e)
-            raise
 
     async def update_persona(self, persona_name: str, system_prompt: str, is_active: bool = True):
         """Update existing persona configuration only (no insert)."""
