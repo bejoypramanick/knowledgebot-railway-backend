@@ -271,7 +271,7 @@ class FileService:
                        file_size, sha256_hash, gemini_state, created_at, version
                        FROM file_uploads 
                        WHERE id = $1""",
-                    file_id
+                    int(file_id)  # Convert string to integer for database query
                 )
                 
                 if not file_record:
@@ -310,7 +310,7 @@ class FileService:
                     return False
                 
                 # Delete from database
-                await conn.execute("DELETE FROM file_uploads WHERE id = $1", file_id)
+                await conn.execute("DELETE FROM file_uploads WHERE id = $1", int(file_id))
                 
                 logger.info(f"File deleted from database: {file_id}")
                 return True
