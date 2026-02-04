@@ -80,6 +80,28 @@ async def upload_file(
         logger.error(f"Error uploading file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.delete("/files/{file_id}")
+async def delete_file_by_id(file_id: str, request: Request = None):
+    """Delete a specific file by ID"""
+    try:
+        # Extract authenticated user information
+        user_email, user_id = extract_user_from_request(request)
+        
+        result = await file_service.delete_file(file_id, user_id)
+        
+        return {
+            "success": True,
+            "message": "File deleted successfully",
+            "result": result,
+            "user": {
+                "email": user_email,
+                "id": user_id
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error deleting file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/files/{file_id}")
 async def get_file_by_id(file_id: str, request: Request = None):
     """Get a specific file by ID"""
