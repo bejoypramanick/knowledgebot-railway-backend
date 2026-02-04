@@ -66,41 +66,52 @@ async def upload_content_to_gemini(
 
         logger.info(f"🤖 [GEMINI] Uploading scraped content - Display: {display_name}")
 
-        # Upload to Gemini
-        uploaded_file = genai_client.files.upload(
+        # Get FileSearch store name from environment (same as file uploads)
+        import os
+        file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
+        logger.info(f"📂 [GEMINI] Uploading to FileSearch store: {file_search_store_name}")
+
+        # Upload directly to FileSearch store (same as file uploads)
+        operation = genai_client.file_search_stores.upload_to_file_search_store(
             file=tmp_path,
-            config=types.UploadFileConfig(
-                display_name=display_name,
-                mime_type="text/plain"
-            )
+            file_search_store_name=file_search_store_name,
+            config={
+                'display_name': display_name,
+                'custom_metadata': [
+                    {'key': 'source', 'value': 'website_scraping'},
+                    {'key': 'url', 'value': url},
+                    {'key': 'title', 'value': title},
+                    {'key': 'user_email', 'value': user_email or 'admin'},
+                    {'key': 'scraped_at', 'value': datetime.utcnow().isoformat()}
+                ]
+            }
         )
 
-        # Poll for processing completion
-        final_state = uploaded_file.state.name if hasattr(uploaded_file.state, 'name') else str(uploaded_file.state)
+        # Poll for operation completion
+        final_state = "PENDING"
         gemini_processed_at = None
 
         for i in range(15):  # Poll for up to 30 seconds
-            current_file = genai_client.files.get(name=uploaded_file.name)
-            final_state = current_file.state.name if hasattr(current_file.state, 'name') else str(current_file.state)
-            logger.info(f"🔄 [GEMINI] Polling state (Attempt {i+1}/15): {final_state}")
+            current_operation = genai_client.operations.get(operation)
+            final_state = current_operation.response.state.name if hasattr(current_operation.response.state, 'name') else str(current_operation.response.state)
+            logger.info(f"🔄 [GEMINI] FileSearch operation state (Attempt {i+1}/15): {final_state}")
 
             if final_state == "ACTIVE":
                 gemini_processed_at = datetime.utcnow()
-                logger.info("⚡ [GEMINI] Processing complete - File is now ACTIVE")
+                logger.info("⚡ [GEMINI] FileSearch upload complete - Content is now ACTIVE")
                 break
             elif final_state == "FAILED":
-                logger.error(f"❌ [GEMINI] Processing FAILED for {uploaded_file.name}")
+                logger.error(f"❌ [GEMINI] FileSearch upload FAILED for {url}")
                 break
 
             await asyncio.sleep(2)
 
         return {
             "success": final_state == "ACTIVE",
-            "file_name": uploaded_file.name,
-            "file_uri": getattr(uploaded_file, 'uri', None),
+            "file_name": operation.response.name if hasattr(operation.response, 'name') else None,
             "state": final_state,
             "processed_at": gemini_processed_at.isoformat() if gemini_processed_at else None,
-            "display_name": display_name
+            "file_search_store": file_search_store_name
         }
 
     except Exception as e:
