@@ -15,6 +15,35 @@ class ChatDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
+    async def create_session(self, session_id: str, user_role_id: int = None) -> Dict[str, Any]:
+        """Create a new chat session record"""
+        query = """
+            INSERT INTO chat_sessions (session_id, user_role_id, started_at, last_activity_at, is_active, message_count)
+            VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
+            RETURNING id, session_id, user_role_id, started_at, last_activity_at, is_active, message_count
+        """
+        
+        try:
+            async with get_db_connection() as conn:
+                record = await conn.fetchrow(query, session_id, user_role_id)
+                logger.log_db_query(query, {"session_id": session_id, "user_role_id": user_role_id}, record)
+                
+                if record:
+                    return {
+                        "id": record["id"],
+                        "session_id": record["session_id"],
+                        "user_role_id": record["user_role_id"],
+                        "started_at": record["started_at"].isoformat() if record["started_at"] else None,
+                        "last_activity_at": record["last_activity_at"].isoformat() if record["last_activity_at"] else None,
+                        "is_active": record["is_active"],
+                        "message_count": record["message_count"]
+                    }
+                else:
+                    return None
+        except Exception as e:
+            logger.log_db_query(query, {"session_id": session_id, "user_role_id": user_role_id}, error=e)
+            return None
+
     async def get_session_metadata(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get session metadata from database"""
         query = """
@@ -82,8 +111,20 @@ class ChatDAO:
                 logger.log_db_query(session_query, {"session_id": session_id}, session_record)
                 
                 if not session_record:
-                    logger.info(f"Session not found: {session_id}")
-                    return []
+                    logger.info(f"Session not found: {session_id}, creating new session")
+                    # Create the session if it doesn't exist
+                    session_record = await conn.fetchrow(
+                        """INSERT INTO chat_sessions (session_id, user_role_id, started_at, last_activity_at, is_active, message_count)
+                           VALUES ($1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
+                           RETURNING id, session_id, user_role_id, cached_content_id, created_at, last_activity_at, message_count""",
+                        session_id
+                    )
+                    
+                    if not session_record:
+                        logger.error(f"Failed to create session: {session_id}")
+                        return []
+                    
+                    logger.info(f"✅ Created new session: {session_id} -> ID: {session_record['id']}")
                 
                 # Use the integer session ID for chat messages query
                 integer_session_id = session_record["id"]
