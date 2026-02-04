@@ -309,7 +309,14 @@ class PydanticAIGatewayService:
                 # Get chat agent config from configuration service
                 config_url = os.getenv("CONFIGURATION_SERVICE_URL", "https://api-gateway-common.up.railway.app/api/v1/gateway/configuration/chatAgentConfig")
                 
-                async with httpx.AsyncClient(timeout=10.0) as http_client:
+                # Add authentication headers if available
+                headers = {}
+                # Try to get API key from environment for internal service communication
+                api_key = os.getenv("INTERNAL_API_KEY")
+                if api_key:
+                    headers["Authorization"] = f"Bearer {api_key}"
+                
+                async with httpx.AsyncClient(timeout=10.0, headers=headers) as http_client:
                     response = await http_client.get(config_url)
                     if response.status_code == 200:
                         config_data = response.json()
@@ -330,6 +337,9 @@ class PydanticAIGatewayService:
                         logger.info(f"🎭 Using active persona: {persona_name}")
                     else:
                         logger.warning(f"⚠️ Failed to fetch persona config: {response.status_code}")
+                        # Log response body for debugging
+                        if response.status_code == 401:
+                            logger.warning("🔐 Authentication failed - check INTERNAL_API_KEY environment variable")
             except Exception as e:
                 logger.error(f"❌ Error fetching persona config: {e}")
                 logger.info("🎭 Using default KnowledgeBot persona")

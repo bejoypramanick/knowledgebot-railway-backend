@@ -68,17 +68,35 @@ class ChatDAO:
 
     async def get_chat_history(self, session_id: str) -> List[Dict[str, Any]]:
         """Get chat history for a session"""
-        query = """
-            SELECT id, role, content, created_at, used_rag, sources, confidence_score
-            FROM chat_messages
+        # First get the session record to find the integer ID
+        session_query = """
+            SELECT id, session_id, user_role_id, cached_content_id, created_at, last_activity_at, message_count
+            FROM chat_sessions
             WHERE session_id = $1
-            ORDER BY created_at ASC
         """
         
         try:
             async with get_db_connection() as conn:
-                records = await conn.fetch(query, session_id)
-                logger.log_db_query(query, {"session_id": session_id}, records)
+                # Get session record first
+                session_record = await conn.fetchrow(session_query, session_id)
+                logger.log_db_query(session_query, {"session_id": session_id}, session_record)
+                
+                if not session_record:
+                    logger.info(f"Session not found: {session_id}")
+                    return []
+                
+                # Use the integer session ID for chat messages query
+                integer_session_id = session_record["id"]
+                
+                query = """
+                    SELECT id, role, content, created_at, used_rag, sources, confidence_score
+                    FROM chat_messages
+                    WHERE session_id = $1
+                    ORDER BY created_at ASC
+                """
+                
+                records = await conn.fetch(query, integer_session_id)
+                logger.log_db_query(query, {"session_id": integer_session_id}, records)
                 
                 # Convert to expected format for the service
                 messages = []
@@ -87,15 +105,16 @@ class ChatDAO:
                         "id": str(record["id"]),
                         "sender": "user" if record["role"] == "user" else "agent",
                         "message": record["content"],
+                        "role": record["role"],
                         "created_at": record["created_at"].isoformat() if record["created_at"] else None,
-                        "used_rag": record.get("used_rag", False),
-                        "sources": record.get("sources", []),
-                        "confidence_score": float(record.get("confidence_score", 0.0))
+                        "used_rag": record["used_rag"],
+                        "sources": record["sources"] or [],
+                        "confidence_score": float(record["confidence_score"]) if record["confidence_score"] else None
                     })
                 
                 return {"messages": messages}
         except Exception as e:
-            logger.log_db_query(query, {"session_id": session_id}, error=e)
+            logger.log_db_query(session_query, {"session_id": session_id}, error=e)
             return {"messages": []}
 
     async def delete_session(self, session_id: str) -> bool:
