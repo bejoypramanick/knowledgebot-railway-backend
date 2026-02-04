@@ -36,17 +36,11 @@ class AuthService:
     async def get_user_role(self, email: str) -> dict:
         """Get user role (admin, human_agent, or user) for a given email"""
         try:
-            roles = []
+            # Get all roles for the user in a single database call
+            user_roles_data = await self.auth_dao.get_user_roles(email)
             
-            # Check if user is an admin using the new user_role_mapping table
-            admin_result = await self.auth_dao.check_user_has_role(email, "admin")
-            if admin_result:
-                roles.append("admin")
-            
-            # Check if user is a human agent using the new user_role_mapping table
-            agent_result = await self.auth_dao.check_user_has_role(email, "human_agent")
-            if agent_result:
-                roles.append("human_agent")
+            # Extract role names from the results
+            roles = [role_data['role_name'] for role_data in user_roles_data]
             
             # Return all roles or default to user
             if not roles:
