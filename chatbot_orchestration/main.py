@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
     """
     Lifecycle manager for the Chatbot Orchestration Service.
     Handles startup initialization and shutdown cleanup.
+    """
     try:
         # Log environment variables for debugging
         logger.info("🔧 Environment Variables Check:")
