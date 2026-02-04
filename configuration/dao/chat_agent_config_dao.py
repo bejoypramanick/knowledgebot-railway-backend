@@ -2,6 +2,7 @@
 ChatAgentConfig Data Access Object for Configuration Service
 Handles database operations for admin and agent configuration management
 """
+import json
 from typing import Dict, List, Any, Optional
 
 from configuration.core.db import get_db_connection
@@ -75,8 +76,8 @@ class ChatAgentConfigDAO:
                         kwargs.get('chat_icon_filename'),
                         kwargs.get('profile_zoom', 1.00),
                         kwargs.get('chat_icon_zoom', 1.00),
-                        kwargs.get('profile_position', {"x": 0, "y": 0}),
-                        kwargs.get('chat_icon_position', {"x": 20, "y": 20}),
+                        json.dumps(kwargs.get('profile_position', {"x": 0, "y": 0})),
+                        json.dumps(kwargs.get('chat_icon_position', {"x": 20, "y": 20})),
                         kwargs.get('hil_enabled', True),
                         kwargs.get('response_policy', 30),
                         kwargs.get('hil_disabled_message', 'Human assistance is currently offline. Please leave a message or try again later.')
@@ -102,7 +103,11 @@ class ChatAgentConfigDAO:
                     for key, value in kwargs.items():
                         if key in valid_fields:
                             set_clauses.append(f"{key} = ${len(params) + 1}")
-                            params.append(value)
+                            # Convert JSONB fields to JSON strings
+                            if key in ['profile_position', 'chat_icon_position']:
+                                params.append(json.dumps(value))
+                            else:
+                                params.append(value)
                             logger.info(f"🔍 Adding clause: {key} = ${len(params)} with value: {value}")
                     
                     if set_clauses:
