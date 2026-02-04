@@ -67,7 +67,9 @@ class AuthDAO:
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
-            WHERE u.email = $1
+            WHERE u.email = $1 
+            AND u.is_active = true 
+            AND urm.is_active = true
             ORDER BY r.role_name
         """
         
@@ -170,12 +172,14 @@ class AuthDAO:
     async def get_admins(self) -> List[Dict[str, Any]]:
         """Get all users with admin role."""
         query = """
-            SELECT urm.user_role_id, u.email, u.display_name, u.created_at as user_created_at,
+            SELECT urm.user_role_id, u.email, u.created_at as user_created_at,
                    urm.created_at as role_assigned_at
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
-            WHERE r.role_name = 'admin'
+            WHERE r.role_name = 'admin' 
+            AND u.is_active = true 
+            AND urm.is_active = true
             ORDER BY u.email
         """
         
@@ -191,12 +195,14 @@ class AuthDAO:
     async def get_human_agents(self) -> List[Dict[str, Any]]:
         """Get all users with human_agent role."""
         query = """
-            SELECT urm.user_role_id, u.email, u.display_name, u.created_at as user_created_at,
+            SELECT urm.user_role_id, u.email, u.created_at as user_created_at,
                    urm.created_at as role_assigned_at
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'human_agent'
+            AND u.is_active = true 
+            AND urm.is_active = true
             ORDER BY u.email
         """
         

@@ -172,6 +172,8 @@ class ChatAgentConfigDAO:
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'human_agent'
+            AND u.is_active = true 
+            AND urm.is_active = true
         """
         try:
             async with get_db_connection() as conn:
@@ -190,6 +192,8 @@ class ChatAgentConfigDAO:
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'admin'
+            AND u.is_active = true 
+            AND urm.is_active = true
         """
         try:
             async with get_db_connection() as conn:

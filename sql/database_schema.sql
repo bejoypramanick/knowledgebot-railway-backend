@@ -283,9 +283,10 @@ GRANT ALL ON SEQUENCE public.widget_suggested_messages_id_seq TO pg_database_own
 
 -- DROP TABLE public.users;
 
-CREATE TABLE public.users ( id serial4 NOT NULL, email varchar(255) NOT NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, last_login_at timestamptz NULL, CONSTRAINT users_email_key UNIQUE (email), CONSTRAINT users_pkey PRIMARY KEY (id), CONSTRAINT valid_user_email CHECK (((email)::text ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'::text)));
+CREATE TABLE public.users ( id serial4 NOT NULL, email varchar(255) NOT NULL, is_active bool DEFAULT true NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, last_login_at timestamptz NULL, CONSTRAINT users_email_key UNIQUE (email), CONSTRAINT users_pkey PRIMARY KEY (id), CONSTRAINT valid_user_email CHECK (((email)::text ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'::text)));
 CREATE INDEX idx_users_created_at ON public.users USING btree (created_at DESC);
 CREATE INDEX idx_users_email ON public.users USING btree (email);
+CREATE INDEX idx_users_is_active ON public.users USING btree (is_active);
 COMMENT ON TABLE public.users IS 'User accounts from Firebase Auth';
 
 -- Permissions
@@ -318,9 +319,10 @@ GRANT ALL ON TABLE public.roles TO pg_database_owner;
 
 -- DROP TABLE public.user_role_mapping;
 
-CREATE TABLE public.user_role_mapping ( user_role_id serial4 NOT NULL, user_id int4 NOT NULL, role_id int4 NOT NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT user_role_mapping_pkey PRIMARY KEY (user_role_id), CONSTRAINT user_role_mapping_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE, CONSTRAINT user_role_mapping_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE, CONSTRAINT user_role_mapping_user_role_key UNIQUE (user_id, role_id));
+CREATE TABLE public.user_role_mapping ( user_role_id serial4 NOT NULL, user_id int4 NOT NULL, role_id int4 NOT NULL, is_active bool DEFAULT true NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT user_role_mapping_pkey PRIMARY KEY (user_role_id), CONSTRAINT user_role_mapping_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE, CONSTRAINT user_role_mapping_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE, CONSTRAINT user_role_mapping_user_role_key UNIQUE (user_id, role_id));
 CREATE INDEX idx_user_role_mapping_role_id ON public.user_role_mapping USING btree (role_id);
 CREATE INDEX idx_user_role_mapping_user_id ON public.user_role_mapping USING btree (user_id);
+CREATE INDEX idx_user_role_mapping_is_active ON public.user_role_mapping USING btree (is_active);
 COMMENT ON TABLE public.user_role_mapping IS 'Mapping between users and their roles';
 
 -- Permissions
