@@ -72,23 +72,48 @@ class FileService:
             logger.error(f"Error deleting existing file record: {e}")
 
     async def get_user_role_id(self, user_id: str) -> Optional[int]:
-        """Get user_role_id for a given user_id"""
+        """Get the most appropriate user_role_id for a given user_id"""
         try:
             from knowledgebase_ingestion.core.db import get_db_connection
             
             async with get_db_connection() as conn:
-                # First get the user's role mapping
-                role_mapping = await conn.fetchrow(
-                    "SELECT user_role_id FROM user_role_mapping WHERE user_id = $1 AND is_active = true",
+                # Get all active role mappings for the user with role details
+                role_mappings = await conn.fetch(
+                    """SELECT urm.user_role_id, r.role_name, r.role_description
+                       FROM user_role_mapping urm
+                       JOIN roles r ON urm.role_id = r.id
+                       WHERE urm.user_id = $1 AND urm.is_active = true
+                       ORDER BY r.role_name""",
                     user_id
                 )
                 
-                if role_mapping:
-                    return role_mapping['user_role_id']
+                if not role_mappings:
+                    logger.warning(f"No active role mappings found for user_id: {user_id}")
+                    return None
                 
-                # If no role mapping exists, return None
-                logger.warning(f"No active role mapping found for user_id: {user_id}")
-                return None
+                # Priority order: admin > human_agent > user
+                role_priority = {'admin': 3, 'human_agent': 2, 'user': 1}
+                
+                # Find the highest priority role
+                selected_role = None
+                highest_priority = 0
+                
+                for mapping in role_mappings:
+                    role_name = mapping['role_name']
+                    priority = role_priority.get(role_name, 0)
+                    
+                    if priority > highest_priority:
+                        highest_priority = priority
+                        selected_role = mapping
+                
+                if selected_role:
+                    logger.info(f"Selected role '{selected_role['role_name']}' (user_role_id: {selected_role['user_role_id']}) for user_id: {user_id}")
+                    return selected_role['user_role_id']
+                
+                # If no recognized roles, return the first one
+                first_role = role_mappings[0]
+                logger.info(f"Using first available role '{first_role['role_name']}' (user_role_id: {first_role['user_role_id']}) for user_id: {user_id}")
+                return first_role['user_role_id']
                 
         except Exception as e:
             logger.error(f"Error getting user role ID: {e}")
