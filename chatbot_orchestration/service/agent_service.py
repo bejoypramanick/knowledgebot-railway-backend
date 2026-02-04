@@ -295,8 +295,35 @@ class PydanticAIGatewayService:
             
             logger.info(f"History text length: {len(history_text)} characters")
             
-            # Step 3: Create conversational system prompt with natural interaction
-            system_prompt = f"""You are a helpful AI assistant that engages in natural conversation and answers questions based ONLY on the provided knowledge base context.
+            # Step 3: Fetch active persona and create conversational system prompt
+            persona_prompt = ""
+            persona_name = "KnowledgeBot"
+            try:
+                # Import here to avoid circular imports
+                import os
+                import httpx
+                
+                # Get chat agent config from configuration service
+                config_url = os.getenv("CONFIGURATION_SERVICE_URL", "https://api-gateway-common.up.railway.app/api/v1/gateway/configuration/chatAgentConfig")
+                
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.get(config_url)
+                    if response.status_code == 200:
+                        config_data = response.json()
+                        persona_data = config_data.get("persona", {})
+                        persona_prompt = persona_data.get("system_prompt", "")
+                        persona_name = persona_data.get("selected_persona", "KnowledgeBot")
+                        logger.info(f"🎭 Using active persona: {persona_name}")
+                    else:
+                        logger.warning(f"⚠️ Failed to fetch persona config: {response.status_code}")
+            except Exception as e:
+                logger.error(f"❌ Error fetching persona config: {e}")
+                logger.info("🎭 Using default KnowledgeBot persona")
+            
+            # Create conversational system prompt with persona integration
+            system_prompt = f"""You are {persona_name}, a helpful AI assistant that engages in natural conversation and answers questions based ONLY on the provided knowledge base context.
+
+{persona_prompt}
 
 CONVERSATION GUIDELINES:
 1. Be friendly and conversational - greet naturally when users say hello or introduce themselves
