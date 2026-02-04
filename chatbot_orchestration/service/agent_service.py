@@ -306,8 +306,8 @@ class PydanticAIGatewayService:
                 # Get chat agent config from configuration service
                 config_url = os.getenv("CONFIGURATION_SERVICE_URL", "https://api-gateway-common.up.railway.app/api/v1/gateway/configuration/chatAgentConfig")
                 
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.get(config_url)
+                async with httpx.AsyncClient(timeout=10.0) as http_client:
+                    response = await http_client.get(config_url)
                     if response.status_code == 200:
                         config_data = response.json()
                         persona_data = config_data.get("persona", {})
