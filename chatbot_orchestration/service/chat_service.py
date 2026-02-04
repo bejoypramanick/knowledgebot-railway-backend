@@ -175,11 +175,14 @@ class ChatService:
                 total_tokens = getattr(usage_data, 'totalTokenCount', 0) or getattr(usage_data, 'total_tokens', 0)
                 
                 # Save to database using DAO
+                import os
+                model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash-lite")
+                
                 success = await token_dao.save_token_usage(
                     session_id=session_id,
                     message_id=message_id,
                     provider='gemini',
-                    model='gemini-2.5-flash-lite',
+                    model=model_name,
                     prompt_tokens=int(prompt_tokens),
                     completion_tokens=int(completion_tokens),
                     total_tokens=int(total_tokens),
