@@ -23,7 +23,7 @@ class FileService:
             async with get_db_connection() as conn:
                 # Check by hash first (exact duplicate)
                 existing = await conn.fetchrow(
-                    "SELECT id, original_filename, display_name, sha256_hash, size_bytes, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1",
+                    "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1",
                     sha256_hash
                 )
                 if existing:
@@ -32,7 +32,7 @@ class FileService:
                         "original_filename": existing['original_filename'],
                         "display_name": existing['display_name'],
                         "sha256_hash": existing['sha256_hash'],
-                        "size_bytes": existing['size_bytes'],
+                        "file_size": existing['file_size'],
                         "gemini_file_name": existing['gemini_file_name'],
                         "version": existing.get('version', 1),
                         "match_type": "hash"
@@ -40,7 +40,7 @@ class FileService:
                 
                 # Check by filename (same name, different content)
                 existing_by_name = await conn.fetchrow(
-                    "SELECT id, original_filename, display_name, sha256_hash, size_bytes, gemini_file_name, version FROM file_uploads WHERE original_filename = $1",
+                    "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1",
                     original_filename
                 )
                 if existing_by_name:
@@ -49,7 +49,7 @@ class FileService:
                         "original_filename": existing_by_name['original_filename'],
                         "display_name": existing_by_name['display_name'],
                         "sha256_hash": existing_by_name['sha256_hash'],
-                        "size_bytes": existing_by_name['size_bytes'],
+                        "file_size": existing_by_name['file_size'],
                         "gemini_file_name": existing_by_name['gemini_file_name'],
                         "version": existing_by_name.get('version', 1),
                         "match_type": "filename"
@@ -97,10 +97,10 @@ class FileService:
                     
                     # Log metric
                     await conn.execute(
-                        """INSERT INTO metrics (type, name, value, unit, user_id, file_id, metadata, created_at) 
-                           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())""",
-                        'file_upload', 'file_size_bytes', file_size, 'bytes', user_id, db_record_id,
-                        {'filename': original_filename}
+                        """INSERT INTO metrics (metric_type, metric_name, value, unit, tags, created_at) 
+                           VALUES ($1, $2, $3, $4, $5, NOW())""",
+                        'file_upload', 'file_size_bytes', file_size, 'bytes', 
+                        {'user_id': user_id, 'file_id': db_record_id, 'filename': original_filename}
                     )
             except Exception as db_error:
                 logger.error(f"❌ [DB] Database error during metadata recording: {db_error}")
