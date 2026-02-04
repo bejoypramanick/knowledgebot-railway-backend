@@ -333,8 +333,10 @@ Conversation History:
                 response_text = response.text
                 logger.info(f"✅ Generated response length: {len(response_text)} characters")
                 
-                # Stream the response
-                for chunk in response_text:
+                # Stream the response in chunks of ~10 characters for better UX
+                chunk_size = 10
+                for i in range(0, len(response_text), chunk_size):
+                    chunk = response_text[i:i + chunk_size]
                     yield f"data: {chunk}\n\n"
                 
                 yield "data: [DONE]\n\n"
