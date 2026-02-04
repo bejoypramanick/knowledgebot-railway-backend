@@ -162,6 +162,8 @@ class FileService:
         try:
             from knowledgebase_ingestion.core.db import get_db_connection
             
+            logger.info(f"🔍 Looking for file record with ID: {file_id}")
+            
             async with get_db_connection() as conn:
                 # Look up in file_uploads table
                 record = await conn.fetchrow(
@@ -169,6 +171,7 @@ class FileService:
                     file_id
                 )
                 if record:
+                    logger.info(f"✅ Found file record in file_uploads: {record}")
                     return {
                         'gemini_file_name': record['gemini_file_name'],
                         'original_filename': record['original_filename'],
@@ -181,12 +184,14 @@ class FileService:
                     file_id
                 )
                 if record:
+                    logger.info(f"✅ Found file record in scraped_websites: {record}")
                     return {
                         'gemini_file_name': record['gemini_file_name'],
                         'original_filename': record.get('original_url', 'Unknown'),
                         'table_name': 'scraped_websites'
                     }
                 
+                logger.warning(f"❌ No file record found for ID: {file_id}")
                 return None
         except Exception as e:
             logger.error(f"Error finding file record: {e}")
