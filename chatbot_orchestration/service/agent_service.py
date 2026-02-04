@@ -1,5 +1,5 @@
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 from google.genai import types
@@ -274,8 +274,8 @@ class PydanticAIGatewayService:
             
             logger.info(f"History text length: {len(history_text)} characters")
             
-            # Step 3: Create RAG-enhanced prompt
-            prompt = f"""You are a helpful AI assistant with access to a knowledge base. 
+            # Step 3: Create RAG-enhanced prompt with caching-friendly structure
+            system_prompt = f"""You are a helpful AI assistant with access to a knowledge base. 
 Please answer the user's question based on the provided context and conversation history.
 If the context doesn't contain relevant information, say so politely and provide a general response.
 
@@ -283,20 +283,22 @@ Knowledge Base Context:
 {rag_context}
 
 Conversation History:
-{history_text}
-
-User Question: {message}
-
-Helpful Answer:"""
+{history_text}"""
             
-            logger.info(f"🤖 Sending RAG-enhanced prompt to Gemini (length: {len(prompt)} characters)")
+            # User message separate for better caching
+            user_message = f"User Question: {message}\n\nHelpful Answer:"
             
-            # Step 4: Generate response using Gemini with RAG context
-            logger.info("🧠 Generating content with Gemini using RAG context...")
+            logger.info(f"🤖 Using cached Gemini model with structured prompt (system: {len(system_prompt)}, user: {len(user_message)} chars)")
+            
+            # Step 4: Generate response using Gemini with RAG context and caching
+            logger.info("🧠 Generating content with Gemini using RAG context and caching...")
             
             response = await client.generate_content(
                 model=model,
-                contents=prompt
+                contents=[
+                    {"role": "user", "parts": [{"text": system_prompt}]},
+                    {"role": "user", "parts": [{"text": user_message}]}
+                ]
             )
             
             logger.info(f"✨ Gemini RAG response received: {response.text[:100] if response.text else 'No response'}...")

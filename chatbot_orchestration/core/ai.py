@@ -27,12 +27,18 @@ def get_genai_client():
             genai_client = None
     return genai_client
 
-# Initialize Gemini Model
+# Initialize Gemini Model with caching
 if GEMINI_API_KEY:
     try:
-        # Pydantic AI's GeminiModel
-        gemini_model = GoogleModel(MODEL_NAME)
-        logger.info("✅ Gemini model initialized")
+        # Pydantic AI's GeminiModel with 15-minute caching
+        gemini_model = GoogleModel(
+            MODEL_NAME,
+            settings=GoogleModelSettings(
+                # Enable caching with 15-minute TTL
+                cache_ttl=900  # 15 minutes in seconds
+            )
+        )
+        logger.info("✅ Gemini model initialized with 15-minute caching")
     except Exception as e:
         gemini_model = None
         logger.error(f"❌ Failed to initialize GeminiModel: {e}")
