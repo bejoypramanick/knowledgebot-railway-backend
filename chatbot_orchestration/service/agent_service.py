@@ -206,7 +206,7 @@ class PydanticAIGatewayService:
             raise
 
     async def process_message_stream(self, message: str, session_id: str):
-        """Process a chat message with streaming response"""
+        """Process a chat message with RAG-enhanced streaming response"""
         try:
             # Import AI service
             from ..core.ai import get_genai_client, get_gemini_model
@@ -220,14 +220,53 @@ class PydanticAIGatewayService:
                 yield "AI service is currently unavailable. Please try again later."
                 return
             
-            # Get chat history for context
+            # Get Gemini client for RAG search
+            client = get_genai_client()
+            if not client:
+                logger.error("Gemini client is not available")
+                yield "AI service is currently unavailable. Please try again later."
+                return
+            
+            # Step 1: RAG Search - Retrieve relevant documents from knowledge base
+            logger.info("🔍 Performing RAG search in knowledge base...")
+            rag_context = ""
+            try:
+                # Use Gemini FileSearch to find relevant documents
+                search_response = await client.retrieve_content(
+                    query=message,
+                    # You can specify which FileSearch stores to search
+                    # file_search_stores=["your_file_search_store_name"]
+                )
+                
+                if search_response and hasattr(search_response, 'chunks') and search_response.chunks:
+                    logger.info(f"📚 Found {len(search_response.chunks)} relevant documents")
+                    
+                    # Combine retrieved chunks into context
+                    context_parts = []
+                    for i, chunk in enumerate(search_response.chunks[:5]):  # Limit to top 5 results
+                        if hasattr(chunk, 'text'):
+                            context_parts.append(f"Document {i+1}: {chunk.text}")
+                        elif hasattr(chunk, 'content'):
+                            context_parts.append(f"Document {i+1}: {chunk.content}")
+                    
+                    rag_context = "\n\n".join(context_parts)
+                    logger.info(f"📝 RAG context length: {len(rag_context)} characters")
+                else:
+                    logger.info("📚 No relevant documents found in knowledge base")
+                    rag_context = "No relevant documents found in the knowledge base."
+                    
+            except Exception as e:
+                logger.error(f"❌ RAG search failed: {e}")
+                rag_context = "Unable to search knowledge base due to an error."
+            
+            # Step 2: Get chat history for context
             chat_history = await self.get_chat_history(session_id)
             logger.info(f"Retrieved chat history: {len(chat_history.get('messages', []))} messages")
             
             # Format chat history for Gemini
             history_text = ""
             if chat_history and chat_history.get("messages"):
-                for msg in chat_history["messages"][-5:]:  # Last 5 messages for context
+                for msg in chat_history["messages"][-3:]:  # Last 3 messages for context
                     if msg.get("sender") == "user":
                         history_text += f"User: {msg.get('message', '')}\n"
                     elif msg.get("sender") in ["agent", "bot"]:
@@ -235,35 +274,34 @@ class PydanticAIGatewayService:
             
             logger.info(f"History text length: {len(history_text)} characters")
             
-            # Create prompt with context
-            prompt = f"""You are a helpful AI assistant. Please respond to the user's message naturally and helpfully.
+            # Step 3: Create RAG-enhanced prompt
+            prompt = f"""You are a helpful AI assistant with access to a knowledge base. 
+Please answer the user's question based on the provided context and conversation history.
+If the context doesn't contain relevant information, say so politely and provide a general response.
 
-Chat History:
+Knowledge Base Context:
+{rag_context}
+
+Conversation History:
 {history_text}
 
-User: {message}
-Assistant:"""
+User Question: {message}
+
+Helpful Answer:"""
             
-            logger.info(f"Sending prompt to Gemini (length: {len(prompt)} characters)")
+            logger.info(f"🤖 Sending RAG-enhanced prompt to Gemini (length: {len(prompt)} characters)")
             
-            # Generate response using Gemini
-            client = get_genai_client()
-            if not client:
-                logger.error("Gemini client is not available")
-                yield "AI service is currently unavailable. Please try again later."
-                return
+            # Step 4: Generate response using Gemini with RAG context
+            logger.info("🧠 Generating content with Gemini using RAG context...")
             
-            logger.info("Generating content with Gemini...")
-            
-            # Generate content
             response = await client.generate_content(
                 model=model,
                 contents=prompt
             )
             
-            logger.info(f"Gemini response received: {response.text[:100] if response.text else 'No response'}...")
+            logger.info(f"✨ Gemini RAG response received: {response.text[:100] if response.text else 'No response'}...")
             
-            # Stream the response
+            # Step 5: Stream the response
             if response and response.text:
                 yield response.text
             else:
@@ -271,7 +309,7 @@ Assistant:"""
                 yield "I apologize, but I couldn't generate a response. Please try again."
                 
         except Exception as e:
-            logger.error(f"Error processing message stream: {e}")
+            logger.error(f"Error processing message stream with RAG: {e}")
             logger.error(f"Exception type: {type(e).__name__}")
             logger.error(f"Exception details: {str(e)}")
             yield "I encountered an error while processing your message. Please try again."
