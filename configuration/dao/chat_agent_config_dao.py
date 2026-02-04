@@ -227,11 +227,11 @@ class ChatAgentConfigDAO:
                     try:
                         # Ensure user exists
                         user_query = """
-                            INSERT INTO users (email, display_name, email_verified, created_at, updated_at)
-                            VALUES ($1, $2, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            INSERT INTO users (email, created_at)
+                            VALUES ($1, CURRENT_TIMESTAMP)
                             ON CONFLICT (email) DO NOTHING
                         """
-                        await conn.execute(user_query, email, email.split('@')[0])
+                        await conn.execute(user_query, email)
                         
                         # Add admin role
                         role_query = """
@@ -297,11 +297,11 @@ class ChatAgentConfigDAO:
                     try:
                         # Ensure user exists
                         user_query = """
-                            INSERT INTO users (email, display_name, email_verified, created_at, updated_at)
-                            VALUES ($1, $2, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            INSERT INTO users (email, created_at)
+                            VALUES ($1, CURRENT_TIMESTAMP)
                             ON CONFLICT (email) DO NOTHING
                         """
-                        await conn.execute(user_query, email, email.split('@')[0])
+                        await conn.execute(user_query, email)
                         
                         # Add human agent role
                         role_query = """

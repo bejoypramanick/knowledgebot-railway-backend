@@ -108,13 +108,13 @@ class AuthDAO:
         if not user:
             # Create new user
             create_user_query = """
-                INSERT INTO users (email, display_name, email_verified, created_at, updated_at)
-                VALUES ($1, $2, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                RETURNING id, email, display_name, email_verified, created_at, updated_at
+                INSERT INTO users (email, created_at)
+                VALUES ($1, CURRENT_TIMESTAMP)
+                RETURNING id, email, created_at
             """
             try:
                 async with get_db_connection() as conn:
-                    user = await conn.fetchrow(create_user_query, email, email.split('@')[0])
+                    user = await conn.fetchrow(create_user_query, email)
                     logger.log_db_query(create_user_query, {"email": email}, user)
             except Exception as e:
                 logger.log_db_query(create_user_query, {"email": email}, error=e)
