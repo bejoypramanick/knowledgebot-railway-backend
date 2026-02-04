@@ -110,9 +110,9 @@ class AuthDAO:
         if not user:
             # Create new user
             create_user_query = """
-                INSERT INTO users (email, created_at)
-                VALUES ($1, CURRENT_TIMESTAMP)
-                RETURNING id, email, created_at
+                INSERT INTO users (email, created_at, updated_at)
+                VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING id, email, created_at, updated_at
             """
             try:
                 async with get_db_connection() as conn:

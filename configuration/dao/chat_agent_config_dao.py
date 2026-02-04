@@ -231,8 +231,8 @@ class ChatAgentConfigDAO:
                     try:
                         # Ensure user exists
                         user_query = """
-                            INSERT INTO users (email, created_at)
-                            VALUES ($1, CURRENT_TIMESTAMP)
+                            INSERT INTO users (email, created_at, updated_at)
+                            VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                             ON CONFLICT (email) DO NOTHING
                         """
                         await conn.execute(user_query, email)
@@ -301,8 +301,8 @@ class ChatAgentConfigDAO:
                     try:
                         # Ensure user exists
                         user_query = """
-                            INSERT INTO users (email, created_at)
-                            VALUES ($1, CURRENT_TIMESTAMP)
+                            INSERT INTO users (email, created_at, updated_at)
+                            VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                             ON CONFLICT (email) DO NOTHING
                         """
                         await conn.execute(user_query, email)
