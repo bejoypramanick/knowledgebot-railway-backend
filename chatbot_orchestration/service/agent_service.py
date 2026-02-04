@@ -295,9 +295,12 @@ class PydanticAIGatewayService:
             
             logger.info(f"History text length: {len(history_text)} characters")
             
-            # Step 3: Fetch active persona and create conversational system prompt
+            # Step 3: Fetch active persona and response policy, create conversational system prompt
             persona_prompt = ""
             persona_name = "KnowledgeBot"
+            response_policy = ""
+            response_timeout = 30  # Default timeout
+            
             try:
                 # Import here to avoid circular imports
                 import os
@@ -313,6 +316,17 @@ class PydanticAIGatewayService:
                         persona_data = config_data.get("persona", {})
                         persona_prompt = persona_data.get("system_prompt", "")
                         persona_name = persona_data.get("selected_persona", "KnowledgeBot")
+                        
+                        # Get response policy
+                        response_policy = config_data.get("response_policy", "")
+                        if response_policy:
+                            logger.info(f"📋 Using response policy: {response_policy}")
+                        
+                        # Get response timeout from security settings
+                        security_data = config_data.get("security", {})
+                        response_timeout = security_data.get("response_timeout", 30)
+                        logger.info(f"⏱️ Response timeout: {response_timeout} seconds")
+                        
                         logger.info(f"🎭 Using active persona: {persona_name}")
                     else:
                         logger.warning(f"⚠️ Failed to fetch persona config: {response.status_code}")
@@ -320,10 +334,13 @@ class PydanticAIGatewayService:
                 logger.error(f"❌ Error fetching persona config: {e}")
                 logger.info("🎭 Using default KnowledgeBot persona")
             
-            # Create conversational system prompt with persona integration
+            # Create conversational system prompt with persona and response policy integration
             system_prompt = f"""You are {persona_name}, a helpful AI assistant that engages in natural conversation and answers questions based ONLY on the provided knowledge base context.
 
 {persona_prompt}
+
+RESPONSE POLICY:
+{response_policy if response_policy else "Be helpful, accurate, and concise in your responses."}
 
 CONVERSATION GUIDELINES:
 1. Be friendly and conversational - greet naturally when users say hello or introduce themselves
