@@ -2,7 +2,7 @@ import os
 import logging
 
 from google import genai
-from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 
 from chatbot_orchestration.core.config import settings
 
@@ -37,6 +37,7 @@ def get_genai_client():
 # Initialize Gemini Model with caching
 if GEMINI_API_KEY:
     try:
+        logger.info(f"🔧 Attempting to initialize Gemini model: {MODEL_NAME}")
         # Pydantic AI's GeminiModel with 15-minute caching
         gemini_model = GoogleModel(
             MODEL_NAME,
@@ -45,10 +46,11 @@ if GEMINI_API_KEY:
                 cache_ttl=900  # 15 minutes in seconds
             )
         )
-        logger.info("✅ Gemini model initialized with 15-minute caching")
+        logger.info(f"✅ Gemini model '{MODEL_NAME}' initialized with 15-minute caching")
     except Exception as e:
         gemini_model = None
-        logger.error(f"❌ Failed to initialize GeminiModel: {e}")
+        logger.error(f"❌ Failed to initialize GeminiModel '{MODEL_NAME}': {e}")
+        logger.error(f"❌ Exception type: {type(e).__name__}")
         logger.error("Gemini model will be unavailable; chat endpoints may return 503 or degraded responses")
 else:
     logger.warning("❌ Gemini model not initialized - GEMINI_API_KEY is missing")
