@@ -38,14 +38,14 @@ class AuthService:
         try:
             roles = []
             
-            # Check if user is an admin
-            admin_result = await self.check_admin_exists(email)
+            # Check if user is an admin using the new user_role_mapping table
+            admin_result = await self.auth_dao.check_user_has_role(email, "admin")
             if admin_result:
                 roles.append("admin")
             
-            # Check if user is a human agent
-            is_agent = await self.check_human_agent_exists(email)
-            if is_agent:
+            # Check if user is a human agent using the new user_role_mapping table
+            agent_result = await self.auth_dao.check_user_has_role(email, "human_agent")
+            if agent_result:
                 roles.append("human_agent")
             
             # Return all roles or default to user
