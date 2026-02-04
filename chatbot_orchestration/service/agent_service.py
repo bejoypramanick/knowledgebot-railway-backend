@@ -205,6 +205,16 @@ class PydanticAIGatewayService:
             logger.error(f"Error processing message: {e}")
             raise
 
+    async def get_chat_history(self, session_id: str) -> Dict[str, Any]:
+        """Get chat history for a session"""
+        try:
+            # Use ChatDAO to get chat history
+            history = await self.chat_dao.get_chat_history(session_id)
+            return history or {"messages": []}
+        except Exception as e:
+            logger.error(f"❌ Error getting chat history: {e}")
+            return {"messages": []}
+
     async def process_message_stream(self, message: str, session_id: str):
         """Process a chat message with RAG-enhanced streaming response"""
         try:
@@ -236,28 +246,16 @@ class PydanticAIGatewayService:
                 file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
                 logger.info(f"📂 Using FileSearch store: {file_search_store_name}")
                 
-                # Use Gemini FileSearch to find relevant documents in the same store
-                search_response = await client.retrieve_content(
-                    query=message,
-                    file_search_stores=[file_search_store_name]
-                )
+                # For now, skip RAG search as the retrieve_content method is not available
+                # TODO: Implement proper Gemini FileSearch API integration
+                logger.info("⚠️ RAG search temporarily disabled - API method not available")
+                rag_context = "No knowledge base search performed."
                 
-                if search_response and hasattr(search_response, 'chunks') and search_response.chunks:
-                    logger.info(f"📚 Found {len(search_response.chunks)} relevant documents")
-                    
-                    # Combine retrieved chunks into context
-                    context_parts = []
-                    for i, chunk in enumerate(search_response.chunks[:5]):  # Limit to top 5 results
-                        if hasattr(chunk, 'text'):
-                            context_parts.append(f"Document {i+1}: {chunk.text}")
-                        elif hasattr(chunk, 'content'):
-                            context_parts.append(f"Document {i+1}: {chunk.content}")
-                    
-                    rag_context = "\n\n".join(context_parts)
-                    logger.info(f"📝 RAG context length: {len(rag_context)} characters")
-                else:
-                    logger.info("📚 No relevant documents found in knowledge base")
-                    rag_context = "No relevant documents found in the knowledge base."
+                # Previous code that failed:
+                # search_response = await client.retrieve_content(
+                #     query=message,
+                #     file_search_stores=[file_search_store_name]
+                # )
                     
             except Exception as e:
                 logger.error(f"❌ RAG search failed: {e}")
