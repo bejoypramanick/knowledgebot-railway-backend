@@ -276,10 +276,15 @@ class PydanticAIGatewayService:
             
             logger.info(f"History text length: {len(history_text)} characters")
             
-            # Step 3: Create RAG-enhanced prompt with caching-friendly structure
-            system_prompt = f"""You are a helpful AI assistant with access to a knowledge base. 
-Please answer the user's question based on the provided context and conversation history.
-If the context doesn't contain relevant information, say so politely and provide a general response.
+            # Step 3: Create RAG-enhanced prompt with strict RAG-only instructions
+            system_prompt = f"""You are a helpful AI assistant that ONLY answers questions based on the provided knowledge base context.
+
+IMPORTANT INSTRUCTIONS:
+1. You MUST answer ONLY using information from the provided Knowledge Base Context
+2. If the answer is not found in the context, you MUST respond: "I'm sorry, but this information is not available in my training data."
+3. Do NOT use any external knowledge or make up information
+4. Do NOT provide general responses or suggestions outside the context
+5. Be helpful and concise with information found in the context
 
 Knowledge Base Context:
 {rag_context}
@@ -288,7 +293,7 @@ Conversation History:
 {history_text}"""
             
             # User message separate for better caching
-            user_message = f"User Question: {message}\n\nHelpful Answer:"
+            user_message = f"User Question: {message}\n\nAnswer based only on the provided knowledge base context:"
             
             logger.info(f"🤖 Using cached Gemini model with structured prompt (system: {len(system_prompt)}, user: {len(user_message)} chars)")
             
