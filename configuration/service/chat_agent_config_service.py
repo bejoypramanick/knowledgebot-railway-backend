@@ -34,6 +34,15 @@ class ChatAgentConfigService:
                 if row['setting_name'] == 'response_timeout':
                     security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
                
+            # Build metadata from widget config (HIL settings)
+            metadata = {}
+            if widget_config:
+                metadata = {
+                    "hil_enabled": widget_config.get('hil_enabled', False),
+                    "response_policy": widget_config.get('response_policy', 30),
+                    "hil_disabled_message": widget_config.get('hil_disabled_message', '')
+                }
+               
             # Build LLM tokens dict using llm_providers table data (show negative values)
             llm_tokens = {}
             for row in llm_rows:
