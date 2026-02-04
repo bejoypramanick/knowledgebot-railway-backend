@@ -53,9 +53,9 @@ class ChatAgentConfigDAO:
                             theme, primary_color, use_primary_for_header, chat_bubble_color, align_bubble,
                             display_chatbot, profile_picture_url, chat_icon_url, profile_picture_filename,
                             chat_icon_filename, profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
-                            hil_enabled, response_policy, hil_disabled_message, created_at, updated_at
+                            hil_enabled, response_policy, created_at, updated_at, hil_disabled_message
                         ) VALUES (
-                            1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW()
+                            1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW(), $21
                         )
                     """
                     insert_params = [
