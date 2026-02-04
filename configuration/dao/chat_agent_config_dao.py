@@ -237,13 +237,15 @@ class ChatAgentConfigDAO:
                         """
                         await conn.execute(user_query, email)
                         
-                        # Add admin role
+                        # Add admin role (or reactivate if inactive)
                         role_query = """
-                            INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
+                            INSERT INTO user_role_mapping (user_id, role_id, is_active, created_at, updated_at)
                             VALUES ((SELECT id FROM users WHERE email = $1), 
                                    (SELECT id FROM roles WHERE role_name = 'admin'), 
-                                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (user_id, role_id) DO NOTHING
+                                   true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (user_id, role_id) DO UPDATE SET
+                                is_active = true,
+                                updated_at = CURRENT_TIMESTAMP
                         """
                         await conn.execute(role_query, email)
                         added_emails.append(email)
@@ -251,18 +253,18 @@ class ChatAgentConfigDAO:
                     except Exception as e:
                         logger.error(f"Error adding admin {email}: {e}")
                 
-                # Remove admins (remove role mapping)
+                # Remove admins (mark role as inactive for audit purposes)
                 removed_emails = []
                 for email in to_remove:
                     try:
                         await conn.execute(
-                            "DELETE FROM user_role_mapping WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')",
+                            "UPDATE user_role_mapping SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')",
                             email
                         )
                         removed_emails.append(email)
-                        logger.info(f"Removed admin role: {email}")
+                        logger.info(f"Marked admin role as inactive: {email}")
                     except Exception as e:
-                        logger.error(f"Error removing admin {email}: {e}")
+                        logger.error(f"Error deactivating admin {email}: {e}")
                 
                 return {
                     'added': list(added_emails),
@@ -307,13 +309,15 @@ class ChatAgentConfigDAO:
                         """
                         await conn.execute(user_query, email)
                         
-                        # Add human agent role
+                        # Add human agent role (or reactivate if inactive)
                         role_query = """
-                            INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
+                            INSERT INTO user_role_mapping (user_id, role_id, is_active, created_at, updated_at)
                             VALUES ((SELECT id FROM users WHERE email = $1), 
                                    (SELECT id FROM roles WHERE role_name = 'human_agent'), 
-                                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (user_id, role_id) DO NOTHING
+                                   true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (user_id, role_id) DO UPDATE SET
+                                is_active = true,
+                                updated_at = CURRENT_TIMESTAMP
                         """
                         await conn.execute(role_query, email)
                         added_emails.append(email)
@@ -321,18 +325,18 @@ class ChatAgentConfigDAO:
                     except Exception as e:
                         logger.error(f"Error adding human agent {email}: {e}")
                 
-                # Remove human agents (remove role mapping)
+                # Remove human agents (mark role as inactive for audit purposes)
                 removed_emails = []
                 for email in to_remove:
                     try:
                         await conn.execute(
-                            "DELETE FROM user_role_mapping WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')",
+                            "UPDATE user_role_mapping SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')",
                             email
                         )
                         removed_emails.append(email)
-                        logger.info(f"Removed human agent role: {email}")
+                        logger.info(f"Marked human agent role as inactive: {email}")
                     except Exception as e:
-                        logger.error(f"Error removing human agent {email}: {e}")
+                        logger.error(f"Error deactivating human agent {email}: {e}")
                 
                 return {
                     'added': list(added_emails),
