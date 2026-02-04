@@ -113,7 +113,7 @@ class FileService:
                              final_state: str, gemini_processed_at: Any, mime_type: str, version: int = 1):
         """Persist file metadata and metrics to the PostgreSQL database."""
         try:
-            logger.info(f"🗄️ [DB] Saving metadata for {original_filename} (version {version})")
+            logger.info(f"🗄️ [DB] Saving metadata for {original_filename} (version {version}) - Size: {file_size} bytes")
             
             # Use the new DatabaseManager pattern
             from knowledgebase_ingestion.core.db import get_db_connection
@@ -136,6 +136,8 @@ class FileService:
                         uploaded_file.name, getattr(uploaded_file, 'uri', None), mime_type,
                         file_size, sha256_hash, final_state, version
                     )
+                    
+                    logger.info(f"✅ [DB] Record created with ID: {db_record_id}, Size: {file_size} bytes")
                     
                     # Log metric
                     await conn.execute(
@@ -242,7 +244,8 @@ class FileService:
                         "gemini_state": file['gemini_state'],
                         "processed_at": None,  # Not available in current schema
                         "created_at": file['created_at'].isoformat() if file['created_at'] else None,
-                        "version": file.get('version', 1)
+                        "version": file.get('version', 1),
+                        "source": "upload"  # Add source field for frontend
                     })
                 
                 logger.info(f"Retrieved {len(result)} files from database")
@@ -281,7 +284,8 @@ class FileService:
                     "gemini_state": file_record['gemini_state'],
                     "processed_at": None,  # Not available in current schema
                     "created_at": file_record['created_at'].isoformat() if file_record['created_at'] else None,
-                    "version": file_record.get('version', 1)
+                    "version": file_record.get('version', 1),
+                    "source": "upload"  # Add source field for frontend
                 }
                 
         except Exception as e:
