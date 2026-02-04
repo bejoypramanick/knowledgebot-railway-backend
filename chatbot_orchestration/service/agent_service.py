@@ -231,11 +231,15 @@ class PydanticAIGatewayService:
             logger.info("🔍 Performing RAG search in knowledge base...")
             rag_context = ""
             try:
-                # Use Gemini FileSearch to find relevant documents
+                # Get FileSearch store name from environment (same as used for uploads)
+                import os
+                file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
+                logger.info(f"📂 Using FileSearch store: {file_search_store_name}")
+                
+                # Use Gemini FileSearch to find relevant documents in the same store
                 search_response = await client.retrieve_content(
                     query=message,
-                    # You can specify which FileSearch stores to search
-                    # file_search_stores=["your_file_search_store_name"]
+                    file_search_stores=[file_search_store_name]
                 )
                 
                 if search_response and hasattr(search_response, 'chunks') and search_response.chunks:
