@@ -76,11 +76,13 @@ class ChatLogDAO:
             logger.log_db_query("check_user_role", {"email": email}, error=e)
             return {"is_agent": False, "is_admin": False}
 
-    async def get_agent_chat_count(self, email: str) -> int:
-        """Get active chat count for agent."""
+    async def get_user_role_id(self, email: str) -> Optional[int]:
+        """Get user_role_id for a given email."""
         query = """
-            SELECT COUNT(*) FROM session_assignments 
-            WHERE assignee_email = $1 AND status = 'active'
+            SELECT urm.user_role_id
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            WHERE u.email = $1
         """
         try:
             async with get_db_connection() as conn:
@@ -89,6 +91,25 @@ class ChatLogDAO:
                 return result
         except Exception as e:
             logger.log_db_query(query, {"email": email}, error=e)
+            return None
+
+    async def get_agent_chat_count(self, email: str) -> int:
+        """Get active chat count for agent."""
+        user_role_id = await self.get_user_role_id(email)
+        if not user_role_id:
+            return 0
+            
+        query = """
+            SELECT COUNT(*) FROM session_assignments 
+            WHERE user_role_id = $1 AND status = 'active'
+        """
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetchval(query, user_role_id)
+                logger.log_db_query(query, {"user_role_id": user_role_id}, result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, {"user_role_id": user_role_id}, error=e)
             return 0
 
     async def get_session_db_id(self, session_id: str) -> Optional[int]:
@@ -140,72 +161,92 @@ class ChatLogDAO:
 
     async def update_session_assignment(self, session_db_id: int, email: str, type: str, status: str):
         """Update session assignment."""
+        user_role_id = await self.get_user_role_id(email)
+        if not user_role_id:
+            raise ValueError(f"User role not found for email: {email}")
+            
         query = """
             UPDATE session_assignments 
-            SET assignee_email = $2, assignee_type = $3, status = $4, assigned_at = NOW(), updated_at = NOW()
+            SET user_role_id = $2, status = $3, assigned_at = NOW(), updated_at = NOW()
             WHERE session_id = $1
         """
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute(query, session_db_id, email, type, status)
-                logger.log_db_query(query, {"session_db_id": session_db_id, "email": email, "type": type, "status": status}, result)
+                result = await conn.execute(query, session_db_id, user_role_id, status)
+                logger.log_db_query(query, {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}, result)
         except Exception as e:
-            logger.log_db_query(query, {"session_db_id": session_db_id, "email": email, "type": type, "status": status}, error=e)
+            logger.log_db_query(query, {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}, error=e)
             raise
 
     async def create_session_assignment(self, session_db_id: int, email: str, type: str, status: str):
         """Create session assignment."""
+        user_role_id = await self.get_user_role_id(email)
+        if not user_role_id:
+            raise ValueError(f"User role not found for email: {email}")
+            
         query = """
-            INSERT INTO session_assignments (session_id, assignee_email, assignee_type, status, assigned_at, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, NOW(), NOW(), NOW())
+            INSERT INTO session_assignments (session_id, user_role_id, status, assigned_at, created_at, updated_at)
+            VALUES ($1, $2, $3, NOW(), NOW(), NOW())
         """
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute(query, session_db_id, email, type, status)
-                logger.log_db_query(query, {"session_db_id": session_db_id, "email": email, "type": type, "status": status}, result)
+                result = await conn.execute(query, session_db_id, user_role_id, status)
+                logger.log_db_query(query, {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}, result)
         except Exception as e:
-            logger.log_db_query(query, {"session_db_id": session_db_id, "email": email, "type": type, "status": status}, error=e)
+            logger.log_db_query(query, {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}, error=e)
             raise
 
     async def get_sessions_for_agent(self, email: str, archive_status: str, limit: int, offset: int) -> List[Dict[str, Any]]:
+        user_role_id = await self.get_user_role_id(email)
+        if not user_role_id:
+            return []
+            
         query = """
-            SELECT cs.*, sa.assignee_email as agent_email 
+            SELECT cs.*, u.email as agent_email 
             FROM chat_sessions cs
             LEFT JOIN session_assignments sa ON cs.id = sa.session_id
-            WHERE sa.assignee_email = $1 AND cs.archive_status = $2
+            LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+            LEFT JOIN users u ON urm.user_id = u.id
+            WHERE sa.user_role_id = $1 AND cs.archive_status = $2
             ORDER BY cs.last_activity_at DESC
             LIMIT $3 OFFSET $4
         """
         try:
             async with get_db_connection() as conn:
-                result = await conn.fetch(query, email, archive_status, limit, offset)
-                logger.log_db_query(query, {"email": email, "archive_status": archive_status, "limit": limit, "offset": offset}, result)
+                result = await conn.fetch(query, user_role_id, archive_status, limit, offset)
+                logger.log_db_query(query, {"user_role_id": user_role_id, "archive_status": archive_status, "limit": limit, "offset": offset}, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"email": email, "archive_status": archive_status, "limit": limit, "offset": offset}, error=e)
+            logger.log_db_query(query, {"user_role_id": user_role_id, "archive_status": archive_status, "limit": limit, "offset": offset}, error=e)
             return []
 
     async def count_sessions_for_agent(self, email: str, archive_status: str) -> int:
+        user_role_id = await self.get_user_role_id(email)
+        if not user_role_id:
+            return 0
+            
         query = """
             SELECT COUNT(*) 
             FROM chat_sessions cs
             LEFT JOIN session_assignments sa ON cs.id = sa.session_id
-            WHERE sa.assignee_email = $1 AND cs.archive_status = $2
+            WHERE sa.user_role_id = $1 AND cs.archive_status = $2
         """
         try:
             async with get_db_connection() as conn:
-                result = await conn.fetchval(query, email, archive_status)
-                logger.log_db_query(query, {"email": email, "archive_status": archive_status}, result)
+                result = await conn.fetchval(query, user_role_id, archive_status)
+                logger.log_db_query(query, {"user_role_id": user_role_id, "archive_status": archive_status}, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"email": email, "archive_status": archive_status}, error=e)
+            logger.log_db_query(query, {"user_role_id": user_role_id, "archive_status": archive_status}, error=e)
             return 0
 
     async def get_all_sessions(self, archive_status: str, limit: int, offset: int) -> List[Dict[str, Any]]:
         query = """
-            SELECT cs.*, sa.assignee_email as agent_email 
+            SELECT cs.*, u.email as agent_email 
             FROM chat_sessions cs
             LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+            LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+            LEFT JOIN users u ON urm.user_id = u.id
             WHERE cs.archive_status = $1
             ORDER BY cs.last_activity_at DESC
             LIMIT $2 OFFSET $3

@@ -97,7 +97,6 @@ class PerformanceDAO:
             AND NOT EXISTS (
                 SELECT 1 FROM session_assignments sa
                 WHERE sa.session_id = cm.session_id
-                AND sa.assignee_type IN ('agent', 'admin')
                 AND sa.status != 'ended'
             )
         """
@@ -119,7 +118,6 @@ class PerformanceDAO:
             AND EXISTS (
                 SELECT 1 FROM session_assignments sa
                 WHERE sa.session_id = cm.session_id
-                AND sa.assignee_type IN ('agent', 'admin')
                 AND sa.status != 'ended'
             )
         """
@@ -142,8 +140,7 @@ class PerformanceDAO:
                 COUNT(*) FILTER (WHERE sa.session_id IS NOT NULL) as human_handoff
             FROM chat_messages cm
             LEFT JOIN session_assignments sa ON cm.session_id = sa.session_id
-                AND sa.assignee_type IN ('agent', 'admin')
-            AND sa.status != 'ended'
+                AND sa.status != 'ended'
         WHERE cm.role = 'user'
         AND cm.created_at >= NOW() - INTERVAL '6 months'
         GROUP BY TO_CHAR(cm.created_at, 'Mon'), DATE_TRUNC('month', cm.created_at)

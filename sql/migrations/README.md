@@ -10,7 +10,7 @@ The main `database_schema.sql` already includes these tables:
 - ✅ `users`
 - ✅ `chat_sessions`
 - ✅ `chat_messages`
-- ✅ `session_assignments` (uses assignee_email, not agent_id)
+- ✅ `session_assignments` (uses user_role_id FK to user_role_mapping)
 - ✅ `file_uploads`
 -- ✅ `configuration_metadata`
 -- ✅ `widget_configuration`

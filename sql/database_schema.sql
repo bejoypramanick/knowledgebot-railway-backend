@@ -615,13 +615,12 @@ GRANT ALL ON TABLE public.scraped_websites TO pg_database_owner;
 
 -- DROP TABLE public.session_assignments;
 
-CREATE TABLE public.session_assignments ( id serial4 NOT NULL, session_id int4 NOT NULL, assignee_email varchar(255) NOT NULL, assignee_type varchar(20) NOT NULL, status varchar(50) DEFAULT 'active'::character varying NULL, assigned_at timestamp DEFAULT now() NULL, ended_at timestamp NULL, updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT session_assignments_pkey PRIMARY KEY (id), CONSTRAINT valid_assignee_type CHECK (((assignee_type)::text = ANY (ARRAY[('agent'::character varying)::text, ('admin'::character varying)::text]))), CONSTRAINT valid_assignment_status CHECK (((status)::text = ANY (ARRAY[('waiting'::character varying)::text, ('active'::character varying)::text, ('transferred'::character varying)::text, ('ended'::character varying)::text]))), CONSTRAINT session_assignments_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.chat_sessions(id) ON DELETE CASCADE);
+CREATE TABLE public.session_assignments ( id serial4 NOT NULL, session_id int4 NOT NULL, user_role_id int4 NOT NULL, status varchar(50) DEFAULT 'active'::character varying NULL, assigned_at timestamp DEFAULT now() NULL, ended_at timestamp NULL, updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT session_assignments_pkey PRIMARY KEY (id), CONSTRAINT valid_assignment_status CHECK (((status)::text = ANY (ARRAY[('waiting'::character varying)::text, ('active'::character varying)::text, ('transferred'::character varying)::text, ('ended'::character varying)::text]))), CONSTRAINT session_assignments_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.chat_sessions(id) ON DELETE CASCADE, CONSTRAINT session_assignments_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE CASCADE);
 CREATE INDEX idx_session_assignments_assigned_at ON public.session_assignments USING btree (assigned_at DESC);
-CREATE INDEX idx_session_assignments_assignee ON public.session_assignments USING btree (assignee_email);
+CREATE INDEX idx_session_assignments_user_role_id ON public.session_assignments USING btree (user_role_id);
 CREATE INDEX idx_session_assignments_session ON public.session_assignments USING btree (session_id);
 CREATE INDEX idx_session_assignments_status ON public.session_assignments USING btree (status);
-CREATE INDEX idx_session_assignments_type ON public.session_assignments USING btree (assignee_type);
-COMMENT ON TABLE public.session_assignments IS 'Tracks which agent/admin is assigned to each session';
+COMMENT ON TABLE public.session_assignments IS 'Tracks which user role is assigned to each session';
 
 -- Permissions
 
