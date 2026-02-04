@@ -90,7 +90,7 @@ class FileService:
                            gemini_file_name, gemini_file_uri, mime_type, file_size, sha256_hash, 
                            gemini_state, version, created_at) 
                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()) RETURNING id""",
-                        1, original_filename, file_display_name, file_ext.lstrip('.'),  # user_role_id hardcoded to 1 for now
+                        None, original_filename, file_display_name, file_ext.lstrip('.'),  # user_role_id = NULL for now
                         uploaded_file.name, getattr(uploaded_file, 'uri', None), mime_type,
                         file_size, sha256_hash, final_state, version
                     )
