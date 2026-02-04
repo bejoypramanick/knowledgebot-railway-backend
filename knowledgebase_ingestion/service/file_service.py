@@ -18,44 +18,44 @@ class FileService:
     async def check_duplicate_file(self, sha256_hash: str, original_filename: str) -> Optional[Dict[str, Any]]:
         """Check if a file with the same hash or name already exists."""
         try:
-            if not db.railway_db:
-                return None
+            from knowledgebase_ingestion.core.db import get_db_connection
+            
+            async with get_db_connection() as conn:
+                # Check by hash first (exact duplicate)
+                existing = await conn.fetchrow(
+                    "SELECT id, original_filename, display_name, sha256_hash, size_bytes, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1",
+                    sha256_hash
+                )
+                if existing:
+                    return {
+                        "id": str(existing['id']),
+                        "original_filename": existing['original_filename'],
+                        "display_name": existing['display_name'],
+                        "sha256_hash": existing['sha256_hash'],
+                        "size_bytes": existing['size_bytes'],
+                        "gemini_file_name": existing['gemini_file_name'],
+                        "version": existing.get('version', 1),
+                        "match_type": "hash"
+                    }
                 
-            # Check by hash first (exact duplicate)
-            existing = await db.railway_db.fetchrow(
-                "SELECT id, original_filename, display_name, sha256_hash, size_bytes, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1",
-                sha256_hash
-            )
-            if existing:
-                return {
-                    "id": str(existing['id']),
-                    "original_filename": existing['original_filename'],
-                    "display_name": existing['display_name'],
-                    "sha256_hash": existing['sha256_hash'],
-                    "size_bytes": existing['size_bytes'],
-                    "gemini_file_name": existing['gemini_file_name'],
-                    "version": existing.get('version', 1),
-                    "match_type": "hash"
-                }
-            
-            # Check by filename (same name, different content)
-            existing_by_name = await db.railway_db.fetchrow(
-                "SELECT id, original_filename, display_name, sha256_hash, size_bytes, gemini_file_name, version FROM file_uploads WHERE original_filename = $1",
-                original_filename
-            )
-            if existing_by_name:
-                return {
-                    "id": str(existing_by_name['id']),
-                    "original_filename": existing_by_name['original_filename'],
-                    "display_name": existing_by_name['display_name'],
-                    "sha256_hash": existing_by_name['sha256_hash'],
-                    "size_bytes": existing_by_name['size_bytes'],
-                    "gemini_file_name": existing_by_name['gemini_file_name'],
-                    "version": existing_by_name.get('version', 1),
-                    "match_type": "filename"
-                }
-            
-            return None
+                # Check by filename (same name, different content)
+                existing_by_name = await conn.fetchrow(
+                    "SELECT id, original_filename, display_name, sha256_hash, size_bytes, gemini_file_name, version FROM file_uploads WHERE original_filename = $1",
+                    original_filename
+                )
+                if existing_by_name:
+                    return {
+                        "id": str(existing_by_name['id']),
+                        "original_filename": existing_by_name['original_filename'],
+                        "display_name": existing_by_name['display_name'],
+                        "sha256_hash": existing_by_name['sha256_hash'],
+                        "size_bytes": existing_by_name['size_bytes'],
+                        "gemini_file_name": existing_by_name['gemini_file_name'],
+                        "version": existing_by_name.get('version', 1),
+                        "match_type": "filename"
+                    }
+                
+                return None
         except Exception as e:
             logger.warning(f"Error checking for duplicate file: {e}")
             return None
@@ -63,8 +63,10 @@ class FileService:
     async def delete_existing_file_record(self, db_id: str):
         """Delete an existing file record from database."""
         try:
-            if db.railway_db:
-                await db.railway_db.execute("DELETE FROM file_uploads WHERE id = $1", db_id)
+            from knowledgebase_ingestion.core.db import get_db_connection
+            
+            async with get_db_connection() as conn:
+                await conn.execute("DELETE FROM file_uploads WHERE id = $1", db_id)
                 logger.info(f"Deleted old file record from database: {db_id}")
         except Exception as e:
             logger.error(f"Error deleting existing file record: {e}")
@@ -77,31 +79,36 @@ class FileService:
         try:
             logger.info(f"🗄️ [DB] Saving metadata for {original_filename} (version {version})")
             
-            if not db.railway_db:
-                logger.warning("Database not available - skipping metadata recording")
+            # Use the new DatabaseManager pattern
+            from knowledgebase_ingestion.core.db import get_db_connection
+            
+            db_record_id = None
+            try:
+                async with get_db_connection() as conn:
+                    db_record_id = await conn.fetchval(
+                        """INSERT INTO file_uploads (user_id, original_filename, display_name, file_extension, 
+                           gemini_file_name, gemini_file_uri, mime_type, size_bytes, sha256_hash, 
+                           gemini_state, processed_at, version, created_at) 
+                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()) RETURNING id""",
+                        user_id, original_filename, file_display_name, file_ext.lstrip('.'),
+                        uploaded_file.name, getattr(uploaded_file, 'uri', None), mime_type,
+                        file_size, sha256_hash, final_state, gemini_processed_at, version
+                    )
+                    
+                    # Log metric
+                    await conn.execute(
+                        """INSERT INTO metrics (type, name, value, unit, user_id, file_id, metadata, created_at) 
+                           VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())""",
+                        'file_upload', 'file_size_bytes', file_size, 'bytes', user_id, db_record_id,
+                        {'filename': original_filename}
+                    )
+            except Exception as db_error:
+                logger.error(f"❌ [DB] Database error during metadata recording: {db_error}")
                 return None
             
-            db_record_id = await db.railway_db.fetchval(
-                """INSERT INTO file_uploads (user_id, original_filename, display_name, file_extension, 
-                   gemini_file_name, gemini_file_uri, mime_type, size_bytes, sha256_hash, 
-                   gemini_state, processed_at, version, created_at) 
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()) RETURNING id""",
-                user_id, original_filename, file_display_name, file_ext.lstrip('.'),
-                uploaded_file.name, getattr(uploaded_file, 'uri', None), mime_type,
-                file_size, sha256_hash, final_state, gemini_processed_at, version
-            )
-            
             logger.info(f"✅ [DB] Record created with ID: {db_record_id} (version {version})")
-            
-            # Log metric
-            await db.railway_db.execute(
-                """INSERT INTO metrics (type, name, value, unit, user_id, file_id, metadata, created_at) 
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())""",
-                'file_upload', 'file_size_bytes', file_size, 'bytes', user_id, db_record_id,
-                {'filename': original_filename}
-            )
-            
             return db_record_id
+            
         except Exception as e:
             logger.error(f"❌ [DB] Error recording metadata: {e}")
             raise
@@ -109,34 +116,34 @@ class FileService:
     async def find_file_record(self, file_id: str):
         """Find file record by ID across multiple tables"""
         try:
-            if not db.railway_db:
-                return None
+            from knowledgebase_ingestion.core.db import get_db_connection
+            
+            async with get_db_connection() as conn:
+                # Look up in file_uploads table
+                record = await conn.fetchrow(
+                    "SELECT gemini_file_name, original_filename FROM file_uploads WHERE id = $1",
+                    file_id
+                )
+                if record:
+                    return {
+                        'gemini_file_name': record['gemini_file_name'],
+                        'original_filename': record['original_filename'],
+                        'table_name': 'file_uploads'
+                    }
                 
-            # Look up in file_uploads table
-            record = await db.railway_db.fetchrow(
-                "SELECT gemini_file_name, original_filename FROM file_uploads WHERE id = $1",
-                file_id
-            )
-            if record:
-                return {
-                    'gemini_file_name': record['gemini_file_name'],
-                    'original_filename': record['original_filename'],
-                    'table_name': 'file_uploads'
-                }
-            
-            # Look up in scraped_websites table
-            record = await db.railway_db.fetchrow(
-                "SELECT gemini_file_name, original_url FROM scraped_websites WHERE id = $1",
-                file_id
-            )
-            if record:
-                return {
-                    'gemini_file_name': record['gemini_file_name'],
-                    'original_filename': record.get('original_url', 'Unknown'),
-                    'table_name': 'scraped_websites'
-                }
-            
-            return None
+                # Look up in scraped_websites table
+                record = await conn.fetchrow(
+                    "SELECT gemini_file_name, original_url FROM scraped_websites WHERE id = $1",
+                    file_id
+                )
+                if record:
+                    return {
+                        'gemini_file_name': record['gemini_file_name'],
+                        'original_filename': record.get('original_url', 'Unknown'),
+                        'table_name': 'scraped_websites'
+                    }
+                
+                return None
         except Exception as e:
             logger.error(f"Error finding file record: {e}")
             return None
@@ -144,8 +151,10 @@ class FileService:
     async def delete_file_record(self, file_id: str, table_name: str):
         """Delete file record from specified table"""
         try:
-            if db.railway_db:
-                await db.railway_db.execute(f"DELETE FROM {table_name} WHERE id = $1", file_id)
+            from knowledgebase_ingestion.core.db import get_db_connection
+            
+            async with get_db_connection() as conn:
+                await conn.execute(f"DELETE FROM {table_name} WHERE id = $1", file_id)
         except Exception as e:
             logger.error(f"Error deleting file record: {e}")
             raise
@@ -166,37 +175,36 @@ class FileService:
     async def get_all_files(self) -> list:
         """Get all uploaded files from the database."""
         try:
-            if not db.railway_db:
-                logger.warning("Database not available - returning empty list")
-                return []
+            from knowledgebase_ingestion.core.db import get_db_connection
             
-            files = await db.railway_db.fetch(
-                """SELECT id, original_filename, display_name, file_extension, mime_type, 
-                   size_bytes, sha256_hash, gemini_state, processed_at, created_at, version
-                   FROM file_uploads 
-                   ORDER BY created_at DESC"""
-            )
-            
-            # Convert to list of dicts
-            result = []
-            for file in files:
-                result.append({
-                    "id": str(file['id']),
-                    "original_filename": file['original_filename'],
-                    "display_name": file['display_name'],
-                    "file_extension": file['file_extension'],
-                    "mime_type": file['mime_type'],
-                    "size_bytes": file['size_bytes'],
-                    "sha256_hash": file['sha256_hash'],
-                    "gemini_state": file['gemini_state'],
-                    "processed_at": file['processed_at'].isoformat() if file['processed_at'] else None,
-                    "created_at": file['created_at'].isoformat() if file['created_at'] else None,
-                    "version": file.get('version', 1)
-                })
-            
-            logger.info(f"Retrieved {len(result)} files from database")
-            return result
-            
+            async with get_db_connection() as conn:
+                files = await conn.fetch(
+                    """SELECT id, original_filename, display_name, file_extension, mime_type, 
+                       size_bytes, sha256_hash, gemini_state, processed_at, created_at, version
+                       FROM file_uploads 
+                       ORDER BY created_at DESC"""
+                )
+                
+                # Convert to list of dicts
+                result = []
+                for file in files:
+                    result.append({
+                        "id": str(file['id']),
+                        "original_filename": file['original_filename'],
+                        "display_name": file['display_name'],
+                        "file_extension": file['file_extension'],
+                        "mime_type": file['mime_type'],
+                        "size_bytes": file['size_bytes'],
+                        "sha256_hash": file['sha256_hash'],
+                        "gemini_state": file['gemini_state'],
+                        "processed_at": file['processed_at'].isoformat() if file['processed_at'] else None,
+                        "created_at": file['created_at'].isoformat() if file['created_at'] else None,
+                        "version": file.get('version', 1)
+                    })
+                
+                logger.info(f"Retrieved {len(result)} files from database")
+                return result
+                
         except Exception as e:
             logger.error(f"Error getting all files: {e}")
             return []
@@ -204,35 +212,34 @@ class FileService:
     async def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get file record by ID"""
         try:
-            if not db.railway_db:
-                logger.warning("Database not available - returning None")
-                return None
+            from knowledgebase_ingestion.core.db import get_db_connection
             
-            file_record = await db.railway_db.fetchrow(
-                """SELECT id, original_filename, display_name, file_extension, mime_type, 
-                   size_bytes, sha256_hash, gemini_state, processed_at, created_at, version
-                   FROM file_uploads 
-                   WHERE id = $1""",
-                file_id
-            )
-            
-            if not file_record:
-                return None
+            async with get_db_connection() as conn:
+                file_record = await conn.fetchrow(
+                    """SELECT id, original_filename, display_name, file_extension, mime_type, 
+                       size_bytes, sha256_hash, gemini_state, processed_at, created_at, version
+                       FROM file_uploads 
+                       WHERE id = $1""",
+                    file_id
+                )
                 
-            return {
-                "id": str(file_record['id']),
-                "original_filename": file_record['original_filename'],
-                "display_name": file_record['display_name'],
-                "file_extension": file_record['file_extension'],
-                "mime_type": file_record['mime_type'],
-                "size_bytes": file_record['size_bytes'],
-                "sha256_hash": file_record['sha256_hash'],
-                "gemini_state": file_record['gemini_state'],
-                "processed_at": file_record['processed_at'].isoformat() if file_record['processed_at'] else None,
-                "created_at": file_record['created_at'].isoformat() if file_record['created_at'] else None,
-                "version": file_record.get('version', 1)
-            }
-            
+                if not file_record:
+                    return None
+                    
+                return {
+                    "id": str(file_record['id']),
+                    "original_filename": file_record['original_filename'],
+                    "display_name": file_record['display_name'],
+                    "file_extension": file_record['file_extension'],
+                    "mime_type": file_record['mime_type'],
+                    "size_bytes": file_record['size_bytes'],
+                    "sha256_hash": file_record['sha256_hash'],
+                    "gemini_state": file_record['gemini_state'],
+                    "processed_at": file_record['processed_at'].isoformat() if file_record['processed_at'] else None,
+                    "created_at": file_record['created_at'].isoformat() if file_record['created_at'] else None,
+                    "version": file_record.get('version', 1)
+                }
+                
         except Exception as e:
             logger.error(f"Error getting file by ID: {e}")
             return None
@@ -240,22 +247,21 @@ class FileService:
     async def delete_file(self, file_id: str) -> bool:
         """Delete file by ID"""
         try:
-            if not db.railway_db:
-                logger.warning("Database not available - cannot delete file")
-                return False
+            from knowledgebase_ingestion.core.db import get_db_connection
             
-            # First get the file record
-            file_record = await self.get_file_by_id(file_id)
-            if not file_record:
-                logger.warning(f"File not found: {file_id}")
-                return False
-            
-            # Delete from database
-            await db.railway_db.execute("DELETE FROM file_uploads WHERE id = $1", file_id)
-            
-            logger.info(f"File deleted from database: {file_id}")
-            return True
-            
+            async with get_db_connection() as conn:
+                # First get the file record
+                file_record = await self.get_file_by_id(file_id)
+                if not file_record:
+                    logger.warning(f"File not found: {file_id}")
+                    return False
+                
+                # Delete from database
+                await conn.execute("DELETE FROM file_uploads WHERE id = $1", file_id)
+                
+                logger.info(f"File deleted from database: {file_id}")
+                return True
+                
         except Exception as e:
             logger.error(f"Error deleting file: {e}")
             return False
