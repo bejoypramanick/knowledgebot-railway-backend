@@ -71,52 +71,40 @@ class FileService:
         except Exception as e:
             logger.error(f"Error deleting existing file record: {e}")
 
-    async def get_user_role_id(self, user_id: str) -> Optional[int]:
-        """Get the most appropriate user_role_id for a given user_id"""
+    async def get_admin_user_role_id(self, user_id: str) -> Optional[int]:
+        """Get user_role_id for admin role only - only admins can upload files"""
         try:
             from knowledgebase_ingestion.core.db import get_db_connection
             
             async with get_db_connection() as conn:
-                # Get all active role mappings for the user with role details
-                role_mappings = await conn.fetch(
-                    """SELECT urm.user_role_id, r.role_name, r.role_description
-                       FROM user_role_mapping urm
-                       JOIN roles r ON urm.role_id = r.id
-                       WHERE urm.user_id = $1 AND urm.is_active = true
-                       ORDER BY r.role_name""",
-                    user_id
+                # First get the admin role ID
+                admin_role = await conn.fetchrow(
+                    "SELECT id FROM roles WHERE role_name = 'admin'"
                 )
                 
-                if not role_mappings:
-                    logger.warning(f"No active role mappings found for user_id: {user_id}")
+                if not admin_role:
+                    logger.error("Admin role not found in roles table")
                     return None
                 
-                # Priority order: admin > human_agent > user
-                role_priority = {'admin': 3, 'human_agent': 2, 'user': 1}
+                admin_role_id = admin_role['id']
                 
-                # Find the highest priority role
-                selected_role = None
-                highest_priority = 0
+                # Check if user has admin role mapping
+                admin_mapping = await conn.fetchrow(
+                    """SELECT user_role_id 
+                       FROM user_role_mapping 
+                       WHERE user_id = $1 AND role_id = $2 AND is_active = true""",
+                    user_id, admin_role_id
+                )
                 
-                for mapping in role_mappings:
-                    role_name = mapping['role_name']
-                    priority = role_priority.get(role_name, 0)
-                    
-                    if priority > highest_priority:
-                        highest_priority = priority
-                        selected_role = mapping
-                
-                if selected_role:
-                    logger.info(f"Selected role '{selected_role['role_name']}' (user_role_id: {selected_role['user_role_id']}) for user_id: {user_id}")
-                    return selected_role['user_role_id']
-                
-                # If no recognized roles, return the first one
-                first_role = role_mappings[0]
-                logger.info(f"Using first available role '{first_role['role_name']}' (user_role_id: {first_role['user_role_id']}) for user_id: {user_id}")
-                return first_role['user_role_id']
+                if admin_mapping:
+                    logger.info(f"User {user_id} has admin privileges (user_role_id: {admin_mapping['user_role_id']})")
+                    return admin_mapping['user_role_id']
+                else:
+                    logger.warning(f"User {user_id} does not have admin role - file upload denied")
+                    return None
                 
         except Exception as e:
-            logger.error(f"Error getting user role ID: {e}")
+            logger.error(f"Error checking admin user role ID: {e}")
             return None
 
     async def record_metadata(self, user_id: str, original_filename: str, file_display_name: str, 
@@ -130,8 +118,11 @@ class FileService:
             # Use the new DatabaseManager pattern
             from knowledgebase_ingestion.core.db import get_db_connection
             
-            # Get the actual user_role_id from user_id
-            user_role_id = await self.get_user_role_id(user_id)
+            # Verify user has admin role and get the user_role_id
+            user_role_id = await self.get_admin_user_role_id(user_id)
+            
+            if user_role_id is None:
+                raise PermissionError(f"User {user_id} does not have admin privileges to upload files")
             
             db_record_id = None
             try:
@@ -141,7 +132,7 @@ class FileService:
                            gemini_file_name, gemini_file_uri, mime_type, file_size, sha256_hash, 
                            gemini_state, version, created_at) 
                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()) RETURNING id""",
-                        user_role_id, original_filename, file_display_name, file_ext.lstrip('.'),  # Use actual user_role_id
+                        user_role_id, original_filename, file_display_name, file_ext.lstrip('.'),  # Use admin user_role_id
                         uploaded_file.name, getattr(uploaded_file, 'uri', None), mime_type,
                         file_size, sha256_hash, final_state, version
                     )
