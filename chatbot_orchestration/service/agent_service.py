@@ -391,6 +391,9 @@ Conversation History:
                 response_text = response.text
                 logger.info(f"✅ Generated response length: {len(response_text)} characters")
                 
+                # Track token usage from the RAG response
+                await self._track_token_usage(response, session_id)
+                
                 # Stream the response in chunks of ~10 characters with proper JSON format
                 chunk_size = 10
                 for i in range(0, len(response_text), chunk_size):
