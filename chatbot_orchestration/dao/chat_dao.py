@@ -69,7 +69,7 @@ class ChatDAO:
     async def get_chat_history(self, session_id: str) -> List[Dict[str, Any]]:
         """Get chat history for a session"""
         query = """
-            SELECT message_id, sender_type, sender_email, message_content, metadata, created_at
+            SELECT id, role, content, created_at, used_rag, sources, confidence_score
             FROM chat_messages
             WHERE session_id = $1
             ORDER BY created_at ASC
@@ -79,10 +79,24 @@ class ChatDAO:
             async with get_db_connection() as conn:
                 records = await conn.fetch(query, session_id)
                 logger.log_db_query(query, {"session_id": session_id}, records)
-                return [dict(record) for record in records]
+                
+                # Convert to expected format for the service
+                messages = []
+                for record in records:
+                    messages.append({
+                        "id": str(record["id"]),
+                        "sender": "user" if record["role"] == "user" else "agent",
+                        "message": record["content"],
+                        "created_at": record["created_at"].isoformat() if record["created_at"] else None,
+                        "used_rag": record.get("used_rag", False),
+                        "sources": record.get("sources", []),
+                        "confidence_score": float(record.get("confidence_score", 0.0))
+                    })
+                
+                return {"messages": messages}
         except Exception as e:
             logger.log_db_query(query, {"session_id": session_id}, error=e)
-            return []
+            return {"messages": []}
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete a chat session"""

@@ -300,23 +300,29 @@ Conversation History:
             # Step 4: Generate response using Gemini with RAG context and caching
             logger.info("🧠 Generating content with Gemini using RAG context and caching...")
             
-            response = await client.generate_content(
-                model=model,
-                contents=[
-                    {"role": "user", "parts": [{"text": system_prompt}]},
-                    {"role": "user", "parts": [{"text": user_message}]}
-                ]
+            # Use Pydantic AI's GoogleModel instead of direct Gemini client
+            from pydantic_ai import Agent
+            from pydantic_ai.models.google import GoogleModel
+            
+            # Create a simple agent for this request
+            agent = Agent(
+                model,
+                system_prompt=system_prompt
             )
             
-            logger.info(f"✨ Gemini RAG response received: {response.text[:100] if response.text else 'No response'}...")
+            # Generate response
+            result = await agent.run(user_message)
             
-            # Step 5: Stream the response
-            if response and response.text:
-                yield response.text
-            else:
-                logger.warning("Gemini returned empty response")
-                yield "I apologize, but I couldn't generate a response. Please try again."
-                
+            # Stream the response
+            response_text = result.data
+            logger.info(f"✅ Generated response length: {len(response_text)} characters")
+            
+            # Stream the response
+            for chunk in response_text:
+                yield f"data: {chunk}\n\n"
+            
+            yield "data: [DONE]\n\n"
+            
         except Exception as e:
             logger.error(f"Error processing message stream with RAG: {e}")
             logger.error(f"Exception type: {type(e).__name__}")
