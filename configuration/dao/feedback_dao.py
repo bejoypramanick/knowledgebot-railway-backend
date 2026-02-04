@@ -13,17 +13,17 @@ class FeedbackDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def create_feedback(self, message_id: str, session_id: str, feedback_type: str, user_role_id: Optional[int] = None):
+    async def create_feedback(self, message_id: str, session_id: str, feedback: str, user_email: Optional[str] = None):
         """Submit feedback for a chat message."""
         query = """
-            INSERT INTO chat_feedback (message_id, session_id, feedback_type, user_role_id, created_at)
+            INSERT INTO feedback (message_id, session_id, feedback, user_email, created_at)
             VALUES ($1, $2, $3, $4, NOW())
         """
-        params = {"message_id": message_id, "session_id": session_id, "feedback_type": feedback_type, "user_role_id": user_role_id}
+        params = {"message_id": message_id, "session_id": session_id, "feedback": feedback, "user_email": user_email}
         
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute(query, message_id, session_id, feedback_type, user_role_id)
+                result = await conn.execute(query, message_id, session_id, feedback, user_email)
                 logger.log_db_query(query, params, result)
                 logger.info(f"Feedback submitted for message {message_id}")
         except Exception as e:
@@ -33,14 +33,9 @@ class FeedbackDAO:
     async def get_all_feedback(self) -> List[Dict[str, Any]]:
         """Get all feedback."""
         query = """
-            SELECT cf.id, cf.message_id, cf.session_id, cf.feedback_type, cf.user_role_id, 
-                   cf.created_at, cf.updated_at,
-                   u.email as user_email, r.role_name
-            FROM chat_feedback cf
-            LEFT JOIN user_role_mapping urm ON cf.user_role_id = urm.user_role_id
-            LEFT JOIN users u ON urm.user_id = u.id
-            LEFT JOIN roles r ON urm.role_id = r.id
-            ORDER BY cf.created_at DESC
+            SELECT id, message_id, session_id, feedback, user_email, created_at
+            FROM feedback
+            ORDER BY created_at DESC
         """
         
         try:

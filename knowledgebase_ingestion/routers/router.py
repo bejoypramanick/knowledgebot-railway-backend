@@ -101,11 +101,20 @@ async def get_upload_constraints(request: Request = None):
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
+
+        # Import constants for consistency
+        from ..utils.constants import MAX_FILE_SIZE_BYTES, ALLOWED_FILE_EXTENSIONS
+
         return {
             "success": True,
+            # Top-level fields for frontend compatibility
+            "max_file_size_bytes": MAX_FILE_SIZE_BYTES,
+            "allowed_extensions": ALLOWED_FILE_EXTENSIONS,
+            "max_file_size_display": f"{MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB",
+            # Nested constraints for backwards compatibility
             "constraints": {
-                "max_file_size": 10 * 1024 * 1024,  # 10MB
+                "max_file_size": MAX_FILE_SIZE_BYTES,
+                "allowed_extensions": ALLOWED_FILE_EXTENSIONS,
                 "allowed_types": [
                     "application/pdf",
                     "text/plain",

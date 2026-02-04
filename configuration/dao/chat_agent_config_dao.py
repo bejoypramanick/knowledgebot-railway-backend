@@ -2,7 +2,6 @@
 ChatAgentConfig Data Access Object for Configuration Service
 Handles database operations for admin and agent configuration management
 """
-import json
 from typing import Dict, List, Any, Optional
 
 from configuration.core.db import get_db_connection
@@ -54,9 +53,9 @@ class ChatAgentConfigDAO:
                             theme, primary_color, use_primary_for_header, chat_bubble_color, align_bubble,
                             display_chatbot, profile_picture_url, chat_icon_url, profile_picture_filename,
                             chat_icon_filename, profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
-                            hil_enabled, response_policy, created_at, updated_at, hil_disabled_message
+                            hil_enabled, response_policy, hil_disabled_message, created_at, updated_at
                         ) VALUES (
-                            1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW(), $21
+                            1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW()
                         )
                     """
                     insert_params = [
@@ -76,8 +75,8 @@ class ChatAgentConfigDAO:
                         kwargs.get('chat_icon_filename'),
                         kwargs.get('profile_zoom', 1.00),
                         kwargs.get('chat_icon_zoom', 1.00),
-                        json.dumps(kwargs.get('profile_position', {"x": 0, "y": 0})),
-                        json.dumps(kwargs.get('chat_icon_position', {"x": 20, "y": 20})),
+                        kwargs.get('profile_position', {"x": 0, "y": 0}),
+                        kwargs.get('chat_icon_position', {"x": 20, "y": 20}),
                         kwargs.get('hil_enabled', True),
                         kwargs.get('response_policy', 30),
                         kwargs.get('hil_disabled_message', 'Human assistance is currently offline. Please leave a message or try again later.')
@@ -103,11 +102,7 @@ class ChatAgentConfigDAO:
                     for key, value in kwargs.items():
                         if key in valid_fields:
                             set_clauses.append(f"{key} = ${len(params) + 1}")
-                            # Convert JSONB fields to JSON strings
-                            if key in ['profile_position', 'chat_icon_position']:
-                                params.append(json.dumps(value))
-                            else:
-                                params.append(value)
+                            params.append(value)
                             logger.info(f"🔍 Adding clause: {key} = ${len(params)} with value: {value}")
                     
                     if set_clauses:
@@ -242,15 +237,13 @@ class ChatAgentConfigDAO:
                         """
                         await conn.execute(user_query, email)
                         
-                        # Add admin role (or reactivate if inactive)
+                        # Add admin role
                         role_query = """
-                            INSERT INTO user_role_mapping (user_id, role_id, is_active, created_at, updated_at)
+                            INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
                             VALUES ((SELECT id FROM users WHERE email = $1), 
                                    (SELECT id FROM roles WHERE role_name = 'admin'), 
-                                   true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (user_id, role_id) DO UPDATE SET
-                                is_active = true,
-                                updated_at = CURRENT_TIMESTAMP
+                                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (user_id, role_id) DO NOTHING
                         """
                         await conn.execute(role_query, email)
                         added_emails.append(email)
@@ -258,18 +251,18 @@ class ChatAgentConfigDAO:
                     except Exception as e:
                         logger.error(f"Error adding admin {email}: {e}")
                 
-                # Remove admins (mark role as inactive for audit purposes)
+                # Remove admins (remove role mapping)
                 removed_emails = []
                 for email in to_remove:
                     try:
                         await conn.execute(
-                            "UPDATE user_role_mapping SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')",
+                            "DELETE FROM user_role_mapping WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')",
                             email
                         )
                         removed_emails.append(email)
-                        logger.info(f"Marked admin role as inactive: {email}")
+                        logger.info(f"Removed admin role: {email}")
                     except Exception as e:
-                        logger.error(f"Error deactivating admin {email}: {e}")
+                        logger.error(f"Error removing admin {email}: {e}")
                 
                 return {
                     'added': list(added_emails),
@@ -314,15 +307,13 @@ class ChatAgentConfigDAO:
                         """
                         await conn.execute(user_query, email)
                         
-                        # Add human agent role (or reactivate if inactive)
+                        # Add human agent role
                         role_query = """
-                            INSERT INTO user_role_mapping (user_id, role_id, is_active, created_at, updated_at)
+                            INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
                             VALUES ((SELECT id FROM users WHERE email = $1), 
                                    (SELECT id FROM roles WHERE role_name = 'human_agent'), 
-                                   true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (user_id, role_id) DO UPDATE SET
-                                is_active = true,
-                                updated_at = CURRENT_TIMESTAMP
+                                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (user_id, role_id) DO NOTHING
                         """
                         await conn.execute(role_query, email)
                         added_emails.append(email)
@@ -330,18 +321,18 @@ class ChatAgentConfigDAO:
                     except Exception as e:
                         logger.error(f"Error adding human agent {email}: {e}")
                 
-                # Remove human agents (mark role as inactive for audit purposes)
+                # Remove human agents (remove role mapping)
                 removed_emails = []
                 for email in to_remove:
                     try:
                         await conn.execute(
-                            "UPDATE user_role_mapping SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')",
+                            "DELETE FROM user_role_mapping WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')",
                             email
                         )
                         removed_emails.append(email)
-                        logger.info(f"Marked human agent role as inactive: {email}")
+                        logger.info(f"Removed human agent role: {email}")
                     except Exception as e:
-                        logger.error(f"Error deactivating human agent {email}: {e}")
+                        logger.error(f"Error removing human agent {email}: {e}")
                 
                 return {
                     'added': list(added_emails),

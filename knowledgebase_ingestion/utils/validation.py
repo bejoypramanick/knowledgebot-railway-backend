@@ -26,11 +26,12 @@ def validate_file_size(size_bytes: int) -> Tuple[bool, str]:
     """Validate file size is within limits."""
     if size_bytes <= 0:
         return False, "File is empty"
-    
+
     if size_bytes > MAX_FILE_SIZE_BYTES:
         file_mb = size_bytes / (1024 * 1024)
-        return False, f"File size ({file_mb:.2f} MB) exceeds maximum allowed size of 1 MB"
-    
+        max_mb = MAX_FILE_SIZE_BYTES / (1024 * 1024)
+        return False, f"File size ({file_mb:.2f} MB) exceeds maximum allowed size of {max_mb:.0f} MB"
+
     return True, ""
 
 def validate_mime_type(mime_type: str, filename: str) -> Tuple[bool, str]:
