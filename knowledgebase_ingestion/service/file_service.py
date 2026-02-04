@@ -90,17 +90,35 @@ class FileService:
                 
                 # Check if user has admin role mapping
                 admin_mapping = await conn.fetchrow(
-                    """SELECT user_role_id 
+                    """SELECT user_role_id, user_id as mapped_user_id, is_active
                        FROM user_role_mapping 
                        WHERE user_id = $1 AND role_id = $2 AND is_active = true""",
                     user_id, admin_role_id
                 )
                 
+                logger.info(f"🔍 Admin check for user {user_id}:")
+                logger.info(f"  - Looking for role_id {admin_role_id}")
+                logger.info(f"  - Found mapping: {admin_mapping}")
+                
                 if admin_mapping:
-                    logger.info(f"User {user_id} has admin privileges (user_role_id: {admin_mapping['user_role_id']})")
+                    logger.info(f"✅ User {user_id} has admin privileges (user_role_id: {admin_mapping['user_role_id']})")
                     return admin_mapping['user_role_id']
                 else:
-                    logger.warning(f"User {user_id} does not have admin role - file upload denied")
+                    logger.warning(f"❌ User {user_id} does not have admin role - file upload denied")
+                    logger.warning(f"  - Available mappings for user {user_id}:")
+                    
+                    # Debug: Show all mappings for this user
+                    all_mappings = await conn.fetch(
+                        "SELECT urm.user_id, urm.role_id, r.role_name, urm.is_active "
+                        "FROM user_role_mapping urm "
+                        "JOIN roles r ON urm.role_id = r.id "
+                        "WHERE urm.user_id = $1",
+                        user_id
+                    )
+                    
+                    for mapping in all_mappings:
+                        logger.info(f"    - Mapping: user_id={mapping['user_id']}, role_id={mapping['role_id']}, role={mapping['role_name']}, active={mapping['is_active']}")
+                    
                     return None
                 
         except Exception as e:
