@@ -1,5 +1,5 @@
 """
-Ingestion Service for Website Crawling
+AI Service for Website Crawling
 Handles uploading scraped content to Gemini FileSearch
 """
 import asyncio
@@ -14,9 +14,9 @@ from google.genai import types
 
 from website_crawling.core.otel_logger import get_otel_logger
 from website_crawling.core.ai import get_genai_client
-from website_crawling.service.scraping_service import ScrapingService
+from website_crawling.service.website_service import WebsiteService
 
-logger = get_otel_logger("ingestion_service", "website-crawling")
+logger = get_otel_logger("ai_service", "website-crawling")
 
 
 async def upload_content_to_gemini(
@@ -140,7 +140,7 @@ async def record_scraped_metadata(
         Record ID if successful, None otherwise
     """
     try:
-        scraping_service = ScrapingService()
+        website_service = WebsiteService()
 
         metadata = {
             "user_role_id": user_id,
@@ -155,7 +155,7 @@ async def record_scraped_metadata(
             "gemini_file_uri": gemini_file_uri
         }
 
-        record_id = await scraping_service.insert_scraped_metadata(metadata)
+        record_id = await website_service.insert_scraped_metadata(metadata)
         logger.info(f"✅ Scraped metadata recorded: {record_id}")
         return record_id
 

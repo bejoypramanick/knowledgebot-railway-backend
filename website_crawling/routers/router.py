@@ -7,15 +7,14 @@ from fastapi import APIRouter, HTTPException, Request
 from typing import Dict, List, Any, Optional
 import logging
 
-from ..service.scraping_service import ScrapingService
-from ..service.crawler_service import CrawlerService
+from ..service.website_service import WebsiteService
+from ..service.ai_service import upload_content_to_gemini
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Initialize services
-scraping_service = ScrapingService()
-crawler_service = CrawlerService()
+website_service = WebsiteService()
 
 # =================================
 # WEB SCRAPING ENDPOINTS
@@ -55,7 +54,7 @@ async def scrape_website(request: Request):
 
         logger.info(f"Starting scrape for {url} with options: max_pages={options['max_pages']}, max_depth={options['max_depth']}, replace_existing={options['replace_existing']}")
 
-        result = await scraping_service.scrape_website(url, options)
+        result = await website_service.scrape_website(url, options)
 
         return {
             "success": True,
@@ -73,7 +72,7 @@ async def scrape_website(request: Request):
 async def get_scraping_jobs():
     """Get all scraping jobs"""
     try:
-        jobs = await scraping_service.get_all_jobs()
+        jobs = await website_service.get_all_jobs()
         
         return {
             "success": True,
@@ -87,7 +86,7 @@ async def get_scraping_jobs():
 async def get_scraping_job_details(job_id: str):
     """Get details of a specific scraping job"""
     try:
-        job_details = await scraping_service.get_job_details(job_id)
+        job_details = await website_service.get_job_details(job_id)
         
         if not job_details:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -106,7 +105,7 @@ async def get_scraping_job_details(job_id: str):
 async def delete_scraping_job(job_id: str):
     """Delete a scraping job"""
     try:
-        result = await scraping_service.delete_job(job_id)
+        result = await website_service.delete_job(job_id)
         
         return {
             "success": True,
@@ -147,7 +146,7 @@ async def start_crawl_session(request: Request):
             "user_agent": body.get("user_agent", "KnowledgeBot-Crawler/1.0")
         }
         
-        result = await crawler_service.start_crawl_session(
+        result = await website_service.start_crawl_session(
             urls=urls,
             user_id="default",  # Use default user since no auth
             options=options
@@ -166,7 +165,7 @@ async def start_crawl_session(request: Request):
 async def get_crawl_sessions():
     """Get all crawl sessions"""
     try:
-        sessions = await crawler_service.get_all_sessions()
+        sessions = await website_service.get_all_sessions()
         
         return {
             "success": True,
@@ -180,7 +179,7 @@ async def get_crawl_sessions():
 async def get_crawl_session_details(session_id: str):
     """Get details of a crawl session"""
     try:
-        session_details = await crawler_service.get_session_details(session_id, "default")
+        session_details = await website_service.get_session_details(session_id, "default")
         
         if not session_details:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -199,7 +198,7 @@ async def get_crawl_session_details(session_id: str):
 async def stop_crawl_session(session_id: str):
     """Stop a running crawl session"""
     try:
-        result = await crawler_service.stop_session(session_id, "default")
+        result = await website_service.stop_session(session_id, "default")
         
         return {
             "success": True,
@@ -217,7 +216,7 @@ async def stop_crawl_session(session_id: str):
 async def get_extracted_content(job_id: str, format: str = "json"):
     """Get extracted content from a scraping job"""
     try:
-        content = await scraping_service.get_extracted_content(
+        content = await website_service.get_extracted_content(
             job_id=job_id,
             user_id="default",
             format=format
@@ -238,7 +237,7 @@ async def search_extracted_content(query: str, limit: int = 20):
         if not query:
             raise HTTPException(status_code=400, detail="Query is required")
         
-        results = await scraping_service.search_content(
+        results = await website_service.search_content(
             query=query,
             user_id="default",
             limit=limit
@@ -261,7 +260,7 @@ async def search_extracted_content(query: str, limit: int = 20):
 async def get_scraping_analytics():
     """Get scraping analytics summary"""
     try:
-        analytics = await scraping_service.get_analytics_summary("default")
+        analytics = await website_service.get_analytics_summary("default")
         
         return {
             "success": True,
@@ -275,7 +274,7 @@ async def get_scraping_analytics():
 async def get_domain_analytics():
     """Get domain-specific analytics"""
     try:
-        domain_stats = await scraping_service.get_domain_analytics("default")
+        domain_stats = await website_service.get_domain_analytics("default")
         
         return {
             "success": True,
@@ -298,8 +297,8 @@ async def health_check():
             "service": "website-crawling",
             "timestamp": "2024-01-01T00:00:00Z",
             "components": {
-                "scraping_service": "healthy",
-                "crawler_service": "healthy",
+                "website_service": "healthy",
+                "ai_service": "healthy",
                 "database": "connected",
                 "proxy": "available"
             }
