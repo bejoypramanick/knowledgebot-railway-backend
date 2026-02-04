@@ -260,22 +260,6 @@ ALTER SEQUENCE public.widget_configuration_id_seq OWNER TO postgres;
 GRANT ALL ON SEQUENCE public.widget_configuration_id_seq TO postgres;
 GRANT ALL ON SEQUENCE public.widget_configuration_id_seq TO pg_database_owner;
 
--- DROP SEQUENCE public.widget_scripts_id_seq;
-
-CREATE SEQUENCE public.widget_scripts_id_seq
-	INCREMENT BY 1
-	MINVALUE 1
-	MAXVALUE 9223372036854775807
-	START 1
-	CACHE 1
-	NO CYCLE;
-
--- Permissions
-
-ALTER SEQUENCE public.widget_scripts_id_seq OWNER TO postgres;
-GRANT ALL ON SEQUENCE public.widget_scripts_id_seq TO postgres;
-GRANT ALL ON SEQUENCE public.widget_scripts_id_seq TO pg_database_owner;
-
 -- DROP SEQUENCE public.widget_suggested_messages_id_seq;
 
 CREATE SEQUENCE public.widget_suggested_messages_id_seq
@@ -515,24 +499,6 @@ COMMENT ON TABLE public.widget_configuration IS 'Widget appearance and behavior 
 ALTER TABLE public.widget_configuration OWNER TO postgres;
 GRANT ALL ON TABLE public.widget_configuration TO postgres;
 GRANT ALL ON TABLE public.widget_configuration TO pg_database_owner;
-
-
--- public.widget_scripts definition
-
--- Drop table
-
--- DROP TABLE public.widget_scripts;
-
-CREATE TABLE public.widget_scripts ( id serial4 NOT NULL, config_id varchar(255) NULL, script_content text NOT NULL, "version" int4 DEFAULT 1 NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT widget_scripts_pkey PRIMARY KEY (id));
-CREATE INDEX idx_widget_scripts_config_id ON public.widget_scripts USING btree (config_id);
-CREATE INDEX idx_widget_scripts_version ON public.widget_scripts USING btree (version);
-COMMENT ON TABLE public.widget_scripts IS 'Widget installation scripts and tracking';
-
--- Permissions
-
-ALTER TABLE public.widget_scripts OWNER TO postgres;
-GRANT ALL ON TABLE public.widget_scripts TO postgres;
-GRANT ALL ON TABLE public.widget_scripts TO pg_database_owner;
 
 
 -- public.chat_sessions definition
