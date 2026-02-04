@@ -122,7 +122,7 @@ class WidgetConfigDAO:
                     if not config_id_row:
                         raise ValueError("No widget configuration found")
                     
-                    widget_config_id = config_id_row[0]
+                    widget_config_id = config_id_row["id"]
                     
                     # Clear existing messages for this widget config
                     delete_query = "DELETE FROM widget_suggested_messages WHERE widget_config_id = $1"
@@ -131,8 +131,8 @@ class WidgetConfigDAO:
                     
                     # Insert new messages
                     insert_query = """
-                        INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active)
-                        VALUES ($1, $2, $3, true)
+                        INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
+                        VALUES ($1, $2, $3, true, NOW(), NOW())
                     """
                     for i, message in enumerate(messages):
                         result = await conn.execute(insert_query, widget_config_id, message, i)
@@ -220,8 +220,8 @@ class WidgetConfigDAO:
     async def add_suggested_message(self, message: str, index: int):
         """Add a suggested message."""
         query = """
-            INSERT INTO widget_suggested_messages (message_text, display_order, is_active)
-            VALUES ($1, $2, true)
+            INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
+            VALUES (1, $1, $2, true, NOW(), NOW())
         """
         params = {"message": message, "index": index}
         try:

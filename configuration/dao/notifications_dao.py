@@ -38,8 +38,8 @@ class NotificationsDAO:
         try:
             async with get_db_connection() as conn:
                 query = """
-                    INSERT INTO notifications (title, message, notification_type, user_email, created_at)
-                    VALUES ($1, $2, $3, $4, NOW())
+                    INSERT INTO notifications (title, message, type, user_email, created_at, updated_at)
+                    VALUES ($1, $2, $3, $4, NOW(), NOW())
                     RETURNING id
                 """
                 params = [title, message, notification_type, user_email]
@@ -56,7 +56,7 @@ class NotificationsDAO:
             async with get_db_connection() as conn:
                 if unread_only:
                     query = """
-                        SELECT id, title, message, notification_type, user_email, created_at, read_at,
+                        SELECT id, title, message, type, user_email, created_at, read_at,
                                CASE WHEN read_at IS NULL THEN false ELSE true END as read
                         FROM notifications
                         WHERE user_email = $1 AND read_at IS NULL
@@ -65,7 +65,7 @@ class NotificationsDAO:
                     """
                 else:
                     query = """
-                        SELECT id, title, message, notification_type, user_email, created_at, read_at,
+                        SELECT id, title, message, type, user_email, created_at, read_at,
                                CASE WHEN read_at IS NULL THEN false ELSE true END as read
                         FROM notifications
                         WHERE user_email = $1
@@ -83,7 +83,7 @@ class NotificationsDAO:
                         "id": str(row["id"]),
                         "title": row["title"],
                         "message": row["message"],
-                        "type": row["notification_type"],
+                        "type": row["type"],
                         "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                         "read": row["read"]
                     })
@@ -102,7 +102,7 @@ class NotificationsDAO:
                 int_ids = [int(nid) if isinstance(nid, str) else nid for nid in notification_ids]
                 query = """
                     UPDATE notifications
-                    SET read_at = NOW()
+                    SET read_at = NOW(), updated_at = NOW()
                     WHERE id = ANY($1) AND read_at IS NULL
                 """
                 result = await conn.execute(query, int_ids)
@@ -120,7 +120,7 @@ class NotificationsDAO:
             async with get_db_connection() as conn:
                 query = """
                     UPDATE notifications
-                    SET read_at = NOW()
+                    SET read_at = NOW(), updated_at = NOW()
                     WHERE user_email = $1 AND read_at IS NULL
                 """
                 result = await conn.execute(query, user_email)

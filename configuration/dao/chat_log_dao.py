@@ -124,7 +124,7 @@ class ChatLogDAO:
         """Update session assignment."""
         query = """
             UPDATE session_assignments 
-            SET assignee_email = $2, assignee_type = $3, status = $4, assigned_at = NOW()
+            SET assignee_email = $2, assignee_type = $3, status = $4, assigned_at = NOW(), updated_at = NOW()
             WHERE session_id = $1
         """
         try:
@@ -138,8 +138,8 @@ class ChatLogDAO:
     async def create_session_assignment(self, session_db_id: int, email: str, type: str, status: str):
         """Create session assignment."""
         query = """
-            INSERT INTO session_assignments (session_id, assignee_email, assignee_type, status, assigned_at)
-            VALUES ($1, $2, $3, $4, NOW())
+            INSERT INTO session_assignments (session_id, assignee_email, assignee_type, status, assigned_at, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, NOW(), NOW(), NOW())
         """
         try:
             async with get_db_connection() as conn:
@@ -247,8 +247,8 @@ class ChatLogDAO:
 
     async def create_message(self, session_db_id: int, role: str, content: str) -> int:
         query = """
-            INSERT INTO chat_messages (session_id, role, content, created_at)
-            VALUES ($1, $2, $3, NOW())
+            INSERT INTO chat_messages (session_id, role, content, created_at, updated_at)
+            VALUES ($1, $2, $3, NOW(), NOW())
             RETURNING id
         """
         try:
@@ -310,14 +310,14 @@ class ChatLogDAO:
     async def record_session_feedback(self, session_id: str, feedback_type: str, user_type: str = "customer") -> bool:
         """Record feedback for a chat session."""
         query = """
-            INSERT INTO chat_feedback (message_id, session_id, feedback_type, user_type)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO feedback (message_id, session_id, feedback, user_email, created_at)
+            VALUES ($1, $2, $3, $4, NOW())
         """
         params = {"session_id": session_id, "feedback_type": feedback_type, "user_type": user_type}
 
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute(query, "session_feedback", session_id, feedback_type, user_type)
+                result = await conn.execute(query, "session_feedback", session_id, feedback_type, None)
                 logger.log_db_query(query, params, result)
                 return True
         except Exception as e:
@@ -328,9 +328,9 @@ class ChatLogDAO:
         """Get feedback counts for a session."""
         query = """
             SELECT
-                COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
-                COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
-            FROM chat_feedback
+                COUNT(*) FILTER (WHERE feedback = 'positive') as positive_count,
+                COUNT(*) FILTER (WHERE feedback = 'negative') as negative_count
+            FROM feedback
             WHERE session_id = $1
         """
         params = {"session_id": session_id}

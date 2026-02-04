@@ -298,13 +298,13 @@ class PerformanceDAO:
         """Get uptime metrics over time."""
         query = """
             SELECT 
-                TO_CHAR(recorded_at, 'Mon') as month,
+                TO_CHAR(created_at, 'Mon') as month,
                 AVG(value) as uptime_percentage
             FROM metrics
             WHERE metric_name = 'uptime'
-            AND recorded_at >= NOW() - INTERVAL '6 months'
-            GROUP BY TO_CHAR(recorded_at, 'Mon'), DATE_TRUNC('month', recorded_at)
-            ORDER BY DATE_TRUNC('month', recorded_at)
+            AND created_at >= NOW() - INTERVAL '6 months'
+            GROUP BY TO_CHAR(created_at, 'Mon'), DATE_TRUNC('month', created_at)
+            ORDER BY DATE_TRUNC('month', created_at)
         """
         try:
             async with get_db_connection() as conn:
