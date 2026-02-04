@@ -1,4 +1,5 @@
 import time
+import json
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
@@ -333,17 +334,31 @@ Conversation History:
                 response_text = response.text
                 logger.info(f"✅ Generated response length: {len(response_text)} characters")
                 
-                # Stream the response in chunks of ~10 characters for better UX
+                # Stream the response in chunks of ~10 characters with proper JSON format
                 chunk_size = 10
                 for i in range(0, len(response_text), chunk_size):
                     chunk = response_text[i:i + chunk_size]
-                    yield f"data: {chunk}\n\n"
+                    # Format as JSON for frontend compatibility
+                    chunk_data = {
+                        "type": "chunk",
+                        "content": chunk
+                    }
+                    yield f"data: {json.dumps(chunk_data)}\n\n"
                 
-                yield "data: [DONE]\n\n"
+                # Send completion signal
+                complete_data = {
+                    "type": "complete", 
+                    "content": response_text,
+                    "sources": []
+                }
+                yield f"data: {json.dumps(complete_data)}\n\n"
             else:
                 logger.error("❌ No response received from Gemini")
-                yield "data: I'm sorry, but I couldn't generate a response. Please try again.\n\n"
-                yield "data: [DONE]\n\n"
+                error_data = {
+                    "type": "error",
+                    "content": "I'm sorry, but I couldn't generate a response. Please try again."
+                }
+                yield f"data: {json.dumps(error_data)}\n\n"
             
         except Exception as e:
             logger.error(f"Error processing message stream with RAG: {e}")
