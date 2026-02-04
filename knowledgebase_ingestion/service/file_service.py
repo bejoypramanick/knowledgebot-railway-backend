@@ -236,6 +236,7 @@ class FileService:
                         "display_name": file['display_name'],
                         "file_extension": file['file_extension'],
                         "mime_type": file['mime_type'],
+                        "file_type": (file['file_extension'] or '').upper() or 'Unknown',  # Add file_type for frontend
                         "size_bytes": file['file_size'],  # Map file_size to size_bytes for API consistency
                         "sha256_hash": file['sha256_hash'],
                         "gemini_state": file['gemini_state'],
@@ -274,6 +275,7 @@ class FileService:
                     "display_name": file_record['display_name'],
                     "file_extension": file_record['file_extension'],
                     "mime_type": file_record['mime_type'],
+                    "file_type": (file_record['file_extension'] or '').upper() or 'Unknown',  # Add file_type for frontend
                     "size_bytes": file_record['file_size'],  # Map file_size to size_bytes for API consistency
                     "sha256_hash": file_record['sha256_hash'],
                     "gemini_state": file_record['gemini_state'],
