@@ -161,11 +161,36 @@ class ChatService:
                 usage_data = result.token_usage
             
             if usage_data:
-                # This would need to be adapted based on the actual structure
-                track_gemini_usage_from_response(
+                # Use TokenService for both provider updates and detailed logging
+                from ..dao.token_dao import TokenDAO
+                token_dao = TokenDAO()
+                
+                # Generate a message ID if not available
+                import uuid
+                message_id = str(uuid.uuid4())
+                
+                # Extract token counts from usage data
+                prompt_tokens = getattr(usage_data, 'promptTokenCount', 0) or getattr(usage_data, 'prompt_tokens', 0)
+                completion_tokens = getattr(usage_data, 'candidatesTokenCount', 0) or getattr(usage_data, 'completion_tokens', 0)
+                total_tokens = getattr(usage_data, 'totalTokenCount', 0) or getattr(usage_data, 'total_tokens', 0)
+                
+                # Save to database using DAO
+                success = await token_dao.save_token_usage(
                     session_id=session_id,
-                    response=result
+                    message_id=message_id,
+                    provider='gemini',
+                    model='gemini-2.5-flash-lite',
+                    prompt_tokens=int(prompt_tokens),
+                    completion_tokens=int(completion_tokens),
+                    total_tokens=int(total_tokens),
+                    api_call_type='rag'
                 )
+                
+                if success:
+                    logger.info(f"✅ Tracked token usage: {total_tokens} tokens for session {session_id}")
+                else:
+                    logger.error(f"❌ Failed to track token usage for session {session_id}")
+                    
         except Exception as e:
             logger.error(f"Error tracking token usage: {e}")
     
