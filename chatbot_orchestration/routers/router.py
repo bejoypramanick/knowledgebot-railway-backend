@@ -60,24 +60,33 @@ async def chat_with_agent_stream(request: Request):
     try:
         body = await request.json()
         
-        message = body.get("message")
+        message = body.get("message", "")
         session_id = body.get("session_id")
+        
+        logger.info(f"📨 Received stream request - Message: {message[:50]}..., Session: {session_id}")
         
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
         
-        # Create session if not provided
         if not session_id:
             session_id = f"session_{int(time.time())}"
+            logger.info(f"🆕 Generated new session ID: {session_id}")
         
         # Stream response
         async def generate_response():
-            async for chunk in agent_service.process_message_stream(message, session_id):
-                yield f"data: {chunk}\n\n"
+            try:
+                async for chunk in agent_service.process_message_stream(message, session_id):
+                    yield f"data: {chunk}\n\n"
+            except Exception as e:
+                logger.error(f"Error in stream generation: {e}")
+                logger.error(f"Exception type: {type(e).__name__}")
+                yield f"data: Error: {str(e)}\n\n"
         
         return StreamingResponse(generate_response(), media_type="text/plain")
     except Exception as e:
-        logger.error(f"Error in chat stream: {e}")
+        logger.error(f"Error in chat stream endpoint: {e}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception details: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/chat/history/{session_id}")
