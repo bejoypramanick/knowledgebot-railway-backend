@@ -17,21 +17,6 @@ class AuthService:
     def __init__(self):
         self.auth_dao = AuthDAO()  # Service manages its own DAO
     
-    async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
-        """Check if admin exists for given email."""
-        try:
-            return await self.auth_dao.check_admin_exists(email)
-        except Exception as e:
-            logger.error(f"Error checking admin exists: {e}")
-            raise
-    
-    async def check_human_agent_exists(self, email: str) -> bool:
-        """Check if human agent exists"""
-        try:
-            return await self.auth_dao.check_human_agent_exists(email)
-        except Exception as e:
-            logger.error(f"Error checking human agent: {e}")
-            raise
     
     async def get_user_role(self, email: str) -> dict:
         """Get user role (admin, human_agent, or user) for a given email"""
@@ -54,31 +39,30 @@ class AuthService:
     async def remove_admin(self, email: str, current_user_email: str) -> dict:
         """Remove an admin. Only admins can remove other admins."""
         # Check if current user is an admin
-        admin_result = await self.check_admin_exists(current_user_email)
+        current_user_roles = await self.get_user_role(current_user_email)
         
-        if not admin_result:
+        if 'admin' not in current_user_roles['roles']:
             raise HTTPException(status_code=403, detail="Only admins can remove other admins")
         
-        # Check if admin exists
-        admin = await self.check_admin_exists(email)
+        # Check if user has admin role
+        user_roles = await self.get_user_role(email)
         
-        if not admin:
+        if 'admin' not in user_roles['roles']:
             raise HTTPException(status_code=404, detail="Admin not found")
         
-        # Remove admin
-        await self.auth_dao.remove_admin(email)
+        # Remove admin role
+        success = await self.auth_dao.remove_user_role(email, 'admin')
         
         return {
-            "success": True,
+            "success": success,
             "message": "Admin removed successfully"
         }
 
     async def add_admin(self, email: str) -> bool:
         """Add admin user"""
         try:
-            await self.auth_dao.add_admin(email)
-            logger.info(f"Admin added: {email}")
-            return True
+            result = await self.auth_dao.add_user_role(email, 'admin')
+            return result is not None
         except Exception as e:
             logger.error(f"Error adding admin: {e}")
             raise
@@ -86,9 +70,8 @@ class AuthService:
     async def add_human_agent(self, email: str) -> bool:
         """Add human agent"""
         try:
-            await self.auth_dao.add_human_agent(email)
-            logger.info(f"Human agent added: {email}")
-            return True
+            result = await self.auth_dao.add_user_role(email, 'human_agent')
+            return result is not None
         except Exception as e:
             logger.error(f"Error adding human agent: {e}")
             raise
@@ -111,9 +94,22 @@ class AuthService:
 
     async def remove_human_agent(self, email: str, current_user_email: str) -> dict:
         """Remove a human agent"""
-        try:
-            await self.auth_dao.remove_human_agent(email)
-            return {"success": True, "message": "Human agent removed successfully"}
-        except Exception as e:
-            logger.error(f"Error removing human agent: {e}")
-            raise
+        # Check if current user is an admin
+        current_user_roles = await self.get_user_role(current_user_email)
+        
+        if 'admin' not in current_user_roles['roles']:
+            raise HTTPException(status_code=403, detail="Only admins can remove human agents")
+        
+        # Check if user has human agent role
+        user_roles = await self.get_user_role(email)
+        
+        if 'human_agent' not in user_roles['roles']:
+            raise HTTPException(status_code=404, detail="Human agent not found")
+        
+        # Remove human agent role
+        success = await self.auth_dao.remove_user_role(email, 'human_agent')
+        
+        return {
+            "success": success,
+            "message": "Human agent removed successfully"
+        }
