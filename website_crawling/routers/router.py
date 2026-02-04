@@ -23,30 +23,48 @@ crawler_service = CrawlerService()
 
 @router.post("/")
 async def scrape_website(request: Request):
-    """Scrape a single website"""
+    """Scrape a single website or crawl multiple pages"""
     try:
         body = await request.json()
-        
+
         url = body.get("url")
         if not url:
             raise HTTPException(status_code=400, detail="URL is required")
-        
-        # Scrape options
+
+        # Validate URL format
+        if not url.startswith(("http://", "https://")):
+            raise HTTPException(status_code=400, detail=f"Invalid URL format: {url}")
+
+        # Get crawling parameters from frontend (with sensible defaults)
+        max_pages = body.get("max_pages", 1)
+        max_depth = body.get("max_depth", 2)
+        replace_existing = body.get("replace_existing", False)
+
+        # Scrape options - combine frontend params with defaults
         options = {
+            "url": url,
+            "max_pages": min(max_pages, 100),  # Cap at 100 pages
+            "max_depth": min(max_depth, 5),     # Cap at depth 5
+            "replace_existing": replace_existing,
             "extract_links": body.get("extract_links", True),
-            "extract_images": body.get("extract_images", True),
+            "extract_images": body.get("extract_images", False),
             "respect_robots_txt": body.get("respect_robots_txt", True),
             "user_agent": body.get("user_agent", "KnowledgeBot-Crawler/1.0"),
             "timeout": body.get("timeout", 30)
         }
-        
+
+        logger.info(f"Starting scrape for {url} with options: max_pages={options['max_pages']}, max_depth={options['max_depth']}, replace_existing={options['replace_existing']}")
+
         result = await scraping_service.scrape_website(url, options)
-        
+
         return {
             "success": True,
             "data": result,
-            "message": "Website scraped successfully"
+            "message": "Website scraped successfully",
+            "total_files_uploaded": result.get("pages_scraped", 0) if isinstance(result, dict) else 0
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error scraping website: {e}")
         raise HTTPException(status_code=500, detail=str(e))
