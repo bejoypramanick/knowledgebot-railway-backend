@@ -349,7 +349,7 @@ async def generic_proxy_handler(request: Request, path: str):
         elif backend_path.startswith("knowledgebase/"):
             service_url = get_settings().knowledgebase_ingestion_url
             logger.info(f"✅ Routing to knowledgebase service: {service_url}")
-        elif backend_path.startswith("webcrawl/"):
+        elif backend_path.startswith("webcrawl") or backend_path == "webcrawl":
             service_url = get_settings().website_crawling_url
             logger.info(f"✅ Routing to webcrawl service: {service_url}")
         elif backend_path.startswith("widget/"):
