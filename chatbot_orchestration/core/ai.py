@@ -15,6 +15,11 @@ gemini_model = None
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
 MODEL_NAME = os.getenv("CHATBOT_MODEL", settings.chatbot_model)
 
+# Log configuration for debugging
+logger.info(f"🔧 Gemini Configuration:")
+logger.info(f"   GEMINI_API_KEY: {'✅ Set' if GEMINI_API_KEY else '❌ Missing'}")
+logger.info(f"   CHATBOT_MODEL: {MODEL_NAME}")
+
 def get_genai_client():
     """Lazy initialization of Gemini client."""
     global genai_client
@@ -25,6 +30,8 @@ def get_genai_client():
         except Exception as e:
             logger.error(f"❌ Failed to initialize Gemini client: {e}")
             genai_client = None
+    elif genai_client is None and not GEMINI_API_KEY:
+        logger.error("❌ GEMINI_API_KEY is not set - Gemini client cannot be initialized")
     return genai_client
 
 # Initialize Gemini Model with caching
@@ -44,7 +51,11 @@ if GEMINI_API_KEY:
         logger.error(f"❌ Failed to initialize GeminiModel: {e}")
         logger.error("Gemini model will be unavailable; chat endpoints may return 503 or degraded responses")
 else:
-    logger.warning("Gemini model not initialized - GEMINI_API_KEY is missing")
+    logger.warning("❌ Gemini model not initialized - GEMINI_API_KEY is missing")
+    logger.warning("Chat endpoints will return 'AI service is currently unavailable'")
 
 def get_gemini_model():
+    """Get Gemini model with availability check"""
+    if gemini_model is None:
+        logger.warning("⚠️ Gemini model requested but not available - check GEMINI_API_KEY")
     return gemini_model
