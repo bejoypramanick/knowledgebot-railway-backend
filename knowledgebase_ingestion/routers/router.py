@@ -87,7 +87,7 @@ async def delete_file_by_id(file_id: str, request: Request = None):
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
         
-        result = await file_service.delete_file(file_id, user_id)
+        result = await file_service.delete_file(file_id)
         
         return {
             "success": True,
