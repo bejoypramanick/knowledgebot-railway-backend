@@ -25,8 +25,7 @@ async def lifespan(app: FastAPI):
     Handles startup initialization and shutdown cleanup.
     try:
         # Log environment variables for debugging
-        import os
-        logger.info("� Environment Variables Check:")
+        logger.info("🔧 Environment Variables Check:")
         logger.info(f"   GEMINI_API_KEY: {'✅ Set' if os.getenv('GEMINI_API_KEY') else '❌ Missing'}")
         logger.info(f"   CHATBOT_MODEL: {os.getenv('CHATBOT_MODEL', 'Not set')}")
         logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME: {os.getenv('GEMINI_FILE_SEARCH_STORE_NAME', 'Not set')}")
