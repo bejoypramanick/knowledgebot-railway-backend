@@ -366,17 +366,17 @@ class ChatLogDAO:
         """Delete a chat log"""
         return {"success": True}
 
-    async def record_session_feedback(self, session_id: str, feedback_type: str, user_type: str = "customer") -> bool:
+    async def record_session_feedback(self, session_id: str, feedback_type: str, user_role_id: Optional[int] = None) -> bool:
         """Record feedback for a chat session."""
         query = """
-            INSERT INTO feedback (message_id, session_id, feedback, user_email, created_at)
+            INSERT INTO chat_feedback (message_id, session_id, feedback_type, user_role_id, created_at)
             VALUES ($1, $2, $3, $4, NOW())
         """
-        params = {"session_id": session_id, "feedback_type": feedback_type, "user_type": user_type}
+        params = {"session_id": session_id, "feedback_type": feedback_type, "user_role_id": user_role_id}
 
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute(query, "session_feedback", session_id, feedback_type, None)
+                result = await conn.execute(query, "session_feedback", session_id, feedback_type, user_role_id)
                 logger.log_db_query(query, params, result)
                 return True
         except Exception as e:
@@ -387,9 +387,9 @@ class ChatLogDAO:
         """Get feedback counts for a session."""
         query = """
             SELECT
-                COUNT(*) FILTER (WHERE feedback = 'positive') as positive_count,
-                COUNT(*) FILTER (WHERE feedback = 'negative') as negative_count
-            FROM feedback
+                COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
+                COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
+            FROM chat_feedback
             WHERE session_id = $1
         """
         params = {"session_id": session_id}

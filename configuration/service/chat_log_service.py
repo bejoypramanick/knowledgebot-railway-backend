@@ -353,10 +353,10 @@ class ChatLogService:
             raise HTTPException(status_code=503, detail="No available agents to assign chat")
         return assigned_agent
 
-    async def record_session_feedback(self, session_id: str, feedback_type: str, user_type: str = "customer"):
+    async def record_session_feedback(self, session_id: str, feedback_type: str, user_role_id: Optional[int] = None):
         """Record feedback for a chat session"""
         try:
-            await self.dao.record_session_feedback(session_id, feedback_type, user_type)
+            await self.dao.record_session_feedback(session_id, feedback_type, user_role_id)
             logger.info(f"Feedback '{feedback_type}' recorded for session {session_id}")
         except Exception as e:
             logger.error(f"Error recording session feedback: {e}")

@@ -620,21 +620,32 @@ async def update_session_feedback(session_id: str, request: Request):
     try:
         body = await request.json()
         feedback = body.get("feedback")  # positive or negative
-        user_type = body.get("user_type", "customer")  # customer or agent
         user_email = request.headers.get("X-User-Email", "user@example.com")
 
         if feedback not in ["positive", "negative"]:
             raise HTTPException(status_code=400, detail="Feedback must be 'positive' or 'negative'")
 
+        # Get user_role_id from user email
+        user_roles = await auth_service.get_user_role(user_email)
+        user_role_id = None
+        
+        # Find the user_role_id for the user
+        if user_roles and user_roles.get("roles"):
+            # Get the actual user_role_id from the database
+            user_role_data = await auth_service.auth_dao.get_user_roles(user_email)
+            if user_role_data:
+                # Use the first role's user_role_id (or you could make this more specific)
+                user_role_id = user_role_data[0]["user_role_id"]
+
         await chat_log_service.update_chat_session(
             session_id=session_id,
             user_email=user_email,
             feedback=feedback,
-            user_type=user_type
+            user_type="customer"  # keeping for backward compatibility
         )
 
-        # Also record in chat_feedback table via service
-        await chat_log_service.record_session_feedback(session_id, feedback, user_type)
+        # Record in chat_feedback table with user_role_id
+        await chat_log_service.record_session_feedback(session_id, feedback, user_role_id)
 
         return {
             "success": True,

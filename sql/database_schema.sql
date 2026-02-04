@@ -302,12 +302,12 @@ GRANT ALL ON TABLE public.api_usage TO pg_database_owner;
 
 -- DROP TABLE public.chat_feedback;
 
-CREATE TABLE public.chat_feedback ( id serial4 NOT NULL, message_id varchar(255) NOT NULL, session_id varchar(255) NOT NULL, feedback_type varchar(20) NOT NULL, user_type varchar(20) DEFAULT 'customer'::character varying NULL, created_at timestamp DEFAULT now() NULL, updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT chat_feedback_pkey PRIMARY KEY (id), CONSTRAINT valid_feedback_type CHECK (((feedback_type)::text = ANY (ARRAY[('positive'::character varying)::text, ('negative'::character varying)::text]))), CONSTRAINT valid_user_type CHECK (((user_type)::text = ANY (ARRAY[('customer'::character varying)::text, ('agent'::character varying)::text]))));
+CREATE TABLE public.chat_feedback ( id serial4 NOT NULL, message_id varchar(255) NOT NULL, session_id varchar(255) NOT NULL, feedback_type varchar(20) NOT NULL, user_role_id int4 NULL, created_at timestamp DEFAULT now() NULL, updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT chat_feedback_pkey PRIMARY KEY (id), CONSTRAINT valid_feedback_type CHECK (((feedback_type)::text = ANY (ARRAY[('positive'::character varying)::text, ('negative'::character varying)::text]))), CONSTRAINT chat_feedback_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL);
 CREATE INDEX idx_chat_feedback_created_at ON public.chat_feedback USING btree (created_at DESC);
 CREATE INDEX idx_chat_feedback_session ON public.chat_feedback USING btree (session_id);
 CREATE INDEX idx_chat_feedback_type ON public.chat_feedback USING btree (feedback_type);
-CREATE INDEX idx_chat_feedback_user_type ON public.chat_feedback USING btree (user_type);
-COMMENT ON TABLE public.chat_feedback IS 'User feedback on chat messages';
+CREATE INDEX idx_chat_feedback_user_role_id ON public.chat_feedback USING btree (user_role_id);
+COMMENT ON TABLE public.chat_feedback IS 'User feedback on chat messages with user role reference';
 
 -- Permissions
 
@@ -656,24 +656,6 @@ GRANT ALL ON TABLE public.token_usage_log TO pg_database_owner;
 
 
 -- Missing tables referenced in DAOs
-
--- public.feedback definition (for feedback_dao.py)
--- Drop table
-
--- DROP TABLE public.feedback;
-
-CREATE TABLE public.feedback ( id serial4 NOT NULL, message_id varchar(255) NOT NULL, session_id varchar(255) NOT NULL, feedback varchar(20) NOT NULL, user_email varchar(255) NULL, created_at timestamp DEFAULT now() NULL, CONSTRAINT feedback_pkey PRIMARY KEY (id));
-CREATE INDEX idx_feedback_created_at ON public.feedback USING btree (created_at DESC);
-CREATE INDEX idx_feedback_session ON public.feedback USING btree (session_id);
-CREATE INDEX idx_feedback_message ON public.feedback USING btree (message_id);
-COMMENT ON TABLE public.feedback IS 'User feedback on chat messages (legacy table)';
-
--- Permissions
-
-ALTER TABLE public.feedback OWNER TO postgres;
-GRANT ALL ON TABLE public.feedback TO postgres;
-GRANT ALL ON TABLE public.feedback TO pg_database_owner;
-
 
 -- Add persona_description column to persona_configurations if not present
 ALTER TABLE public.persona_configurations ADD COLUMN IF NOT EXISTS persona_description text NULL;

@@ -16,10 +16,10 @@ class FeedbackService:
     def __init__(self):
         self.feedback_dao = FeedbackDAO()  # Service manages its own DAO
     
-    async def submit_feedback(self, message_id: str, session_id: str, feedback: str, user_email: Optional[str] = None) -> Dict[str, Any]:
+    async def submit_feedback(self, message_id: str, session_id: str, feedback_type: str, user_role_id: Optional[int] = None) -> Dict[str, Any]:
         """Submit feedback for a message"""
         try:
-            await self.feedback_dao.create_feedback(message_id, session_id, feedback, user_email)
+            await self.feedback_dao.create_feedback(message_id, session_id, feedback_type, user_role_id)
             logger.info(f"Feedback submitted for message {message_id}")
             return {"success": True, "message": "Feedback submitted successfully"}
         except Exception as e:
