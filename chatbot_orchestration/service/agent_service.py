@@ -244,7 +244,9 @@ class PydanticAIGatewayService:
                 # Get FileSearch store name from environment (same as used for uploads)
                 import os
                 file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
-                logger.info(f"📂 Using FileSearch store: {file_search_store_name}")
+                # Format the store name correctly for Gemini API: fileSearchStores/{store-name}
+                formatted_store_name = f"fileSearchStores/{file_search_store_name}"
+                logger.info(f"📂 Using FileSearch store: {formatted_store_name}")
                 
                 # Use Gemini File Search tool to search the knowledge base
                 from google.genai import types
@@ -252,7 +254,7 @@ class PydanticAIGatewayService:
                 # Configure the File Search tool
                 file_search_tool = types.Tool(
                     file_search=types.FileSearch(
-                        file_search_store_names=[file_search_store_name]
+                        file_search_store_names=[formatted_store_name]
                     )
                 )
                 
