@@ -338,12 +338,12 @@ Conversation History:
                 chunk_size = 10
                 for i in range(0, len(response_text), chunk_size):
                     chunk = response_text[i:i + chunk_size]
-                    # Format as JSON for frontend compatibility
+                    # Format as JSON for frontend compatibility (FastAPI will add data: prefix)
                     chunk_data = {
                         "type": "chunk",
                         "content": chunk
                     }
-                    yield f"data: {json.dumps(chunk_data)}\n\n"
+                    yield f"{json.dumps(chunk_data)}\n\n"
                 
                 # Send completion signal
                 complete_data = {
@@ -351,14 +351,14 @@ Conversation History:
                     "content": response_text,
                     "sources": []
                 }
-                yield f"data: {json.dumps(complete_data)}\n\n"
+                yield f"{json.dumps(complete_data)}\n\n"
             else:
                 logger.error("❌ No response received from Gemini")
                 error_data = {
                     "type": "error",
                     "content": "I'm sorry, but I couldn't generate a response. Please try again."
                 }
-                yield f"data: {json.dumps(error_data)}\n\n"
+                yield f"{json.dumps(error_data)}\n\n"
             
         except Exception as e:
             logger.error(f"Error processing message stream with RAG: {e}")
