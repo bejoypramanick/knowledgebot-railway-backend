@@ -86,13 +86,13 @@ class FileService:
             try:
                 async with get_db_connection() as conn:
                     db_record_id = await conn.fetchval(
-                        """INSERT INTO file_uploads (user_id, original_filename, display_name, file_extension, 
-                           gemini_file_name, gemini_file_uri, mime_type, size_bytes, sha256_hash, 
-                           gemini_state, processed_at, version, created_at) 
-                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()) RETURNING id""",
-                        user_id, original_filename, file_display_name, file_ext.lstrip('.'),
+                        """INSERT INTO file_uploads (user_role_id, original_filename, display_name, file_extension, 
+                           gemini_file_name, gemini_file_uri, mime_type, file_size, sha256_hash, 
+                           gemini_state, version, created_at) 
+                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()) RETURNING id""",
+                        1, original_filename, file_display_name, file_ext.lstrip('.'),  # user_role_id hardcoded to 1 for now
                         uploaded_file.name, getattr(uploaded_file, 'uri', None), mime_type,
-                        file_size, sha256_hash, final_state, gemini_processed_at, version
+                        file_size, sha256_hash, final_state, version
                     )
                     
                     # Log metric
@@ -180,7 +180,7 @@ class FileService:
             async with get_db_connection() as conn:
                 files = await conn.fetch(
                     """SELECT id, original_filename, display_name, file_extension, mime_type, 
-                       size_bytes, sha256_hash, gemini_state, processed_at, created_at, version
+                       file_size, sha256_hash, gemini_state, created_at, version
                        FROM file_uploads 
                        ORDER BY created_at DESC"""
                 )
@@ -194,10 +194,10 @@ class FileService:
                         "display_name": file['display_name'],
                         "file_extension": file['file_extension'],
                         "mime_type": file['mime_type'],
-                        "size_bytes": file['size_bytes'],
+                        "size_bytes": file['file_size'],  # Map file_size to size_bytes for API consistency
                         "sha256_hash": file['sha256_hash'],
                         "gemini_state": file['gemini_state'],
-                        "processed_at": file['processed_at'].isoformat() if file['processed_at'] else None,
+                        "processed_at": None,  # Not available in current schema
                         "created_at": file['created_at'].isoformat() if file['created_at'] else None,
                         "version": file.get('version', 1)
                     })
@@ -217,7 +217,7 @@ class FileService:
             async with get_db_connection() as conn:
                 file_record = await conn.fetchrow(
                     """SELECT id, original_filename, display_name, file_extension, mime_type, 
-                       size_bytes, sha256_hash, gemini_state, processed_at, created_at, version
+                       file_size, sha256_hash, gemini_state, created_at, version
                        FROM file_uploads 
                        WHERE id = $1""",
                     file_id
@@ -232,10 +232,10 @@ class FileService:
                     "display_name": file_record['display_name'],
                     "file_extension": file_record['file_extension'],
                     "mime_type": file_record['mime_type'],
-                    "size_bytes": file_record['size_bytes'],
+                    "size_bytes": file_record['file_size'],  # Map file_size to size_bytes for API consistency
                     "sha256_hash": file_record['sha256_hash'],
                     "gemini_state": file_record['gemini_state'],
-                    "processed_at": file_record['processed_at'].isoformat() if file_record['processed_at'] else None,
+                    "processed_at": None,  # Not available in current schema
                     "created_at": file_record['created_at'].isoformat() if file_record['created_at'] else None,
                     "version": file_record.get('version', 1)
                 }
