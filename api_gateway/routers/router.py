@@ -4,7 +4,7 @@ All API Gateway endpoints in one file for easier debugging
 """
 
 from fastapi import APIRouter, HTTPException, Request, Depends
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse, Response, JSONResponse
 import logging
 from typing import Dict, Any
 from httpx import AsyncClient
