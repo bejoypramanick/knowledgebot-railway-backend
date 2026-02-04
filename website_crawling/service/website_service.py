@@ -97,7 +97,7 @@ class WebsiteService:
                 return result
 
             # Upload to Gemini
-            from website_crawling.service.ingestion_service import upload_content_to_gemini, record_scraped_metadata
+            from website_crawling.service.ai_service import upload_content_to_gemini, record_scraped_metadata
 
             gemini_result = await upload_content_to_gemini(
                 content=result["content"],
