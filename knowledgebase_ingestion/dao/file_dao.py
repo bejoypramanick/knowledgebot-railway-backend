@@ -14,18 +14,15 @@ class FileDAO:
         pass  # No connection parameter - DAO manages its own connection
 
     async def get_user_by_email(self, email: str) -> Optional[str]:
-        """Get user identifier - delegates to UserDAO for user table access."""
+        """Get user identifier - check if user exists in users table."""
         try:
-            from .user_dao import UserDAO
-            user_dao = UserDAO()
-            
-            # Check if user exists in admins or human_agents tables
-            roles = await user_dao.get_user_roles(email)
-            if roles:
-                return email
-            return None
+            query = "SELECT email FROM users WHERE email = $1"
+            async with get_db_connection() as conn:
+                result = await conn.fetchval(query, email)
+                logger.log_db_query(query, {"email": email}, result)
+                return result if result else None
         except Exception as e:
-            logger.error(f"Error checking user tables for email {email}: {e}")
+            logger.error(f"Error checking user table for email {email}: {e}")
             return None
 
     async def record_api_usage(
@@ -92,13 +89,13 @@ class FileDAO:
         """Insert new file metadata record."""
         query = """
             INSERT INTO file_uploads 
-            (user_id, original_filename, file_size, mime_type, gemini_file_id, 
+            (user_role_id, original_filename, file_size, mime_type, gemini_file_id, 
              gemini_state, gemini_display_name, version, sha256_hash, upload_timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
             RETURNING id
         """
         params = [
-            record_data['user_id'],
+            record_data.get('user_role_id'),  # Updated to user_role_id
             record_data['original_filename'],
             record_data['file_size'],
             record_data['mime_type'],

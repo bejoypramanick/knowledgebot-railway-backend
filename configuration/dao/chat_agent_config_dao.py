@@ -13,11 +13,16 @@ class ChatAgentConfigDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def get_metadata(self) -> Optional[Dict[str, Any]]:
-        """Get chatbot metadata."""
+    async def get_widget_config(self) -> Optional[Dict[str, Any]]:
+        """Get complete widget configuration including metadata."""
         query = """
-            SELECT hil_enabled, response_policy
-            FROM configuration_metadata
+            SELECT 
+                display_name, initial_message, auto_show_duration, keep_showing_suggested,
+                theme, primary_color, use_primary_for_header, chat_bubble_color, align_bubble,
+                display_chatbot, profile_picture_url, chat_icon_url, profile_picture_filename,
+                chat_icon_filename, profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
+                hil_enabled, response_policy, hil_disabled_message, created_at, updated_at
+            FROM widget_configuration
             WHERE id = 1
         """
         try:
@@ -29,13 +34,13 @@ class ChatAgentConfigDAO:
             logger.log_db_query(query, None, error=e)
             return None
 
-    async def update_metadata(self, **kwargs):
-        """Update chatbot metadata."""
+    async def update_widget_config(self, **kwargs):
+        """Update complete widget configuration including metadata in single call."""
         try:
-            logger.info(f"🔍 DAO update_metadata called with kwargs: {kwargs}")
+            logger.info(f"🔍 DAO update_widget_config called with kwargs: {kwargs}")
             async with get_db_connection() as conn:
                 # First check if the row exists
-                check_query = "SELECT id FROM configuration_metadata WHERE id = 1"
+                check_query = "SELECT id FROM widget_configuration WHERE id = 1"
                 existing_row = await conn.fetchrow(check_query)
                 logger.info(f"🔍 Existing row check: {existing_row}")
                 
@@ -43,27 +48,66 @@ class ChatAgentConfigDAO:
                     logger.warning("⚠️ No row found with id = 1, attempting to insert")
                     # Insert the row if it doesn't exist
                     insert_query = """
-                        INSERT INTO configuration_metadata (id, hil_enabled, response_policy, created_at, updated_at)
-                        VALUES (1, $1, $2, NOW(), NOW())
+                        INSERT INTO widget_configuration (
+                            id, display_name, initial_message, auto_show_duration, keep_showing_suggested,
+                            theme, primary_color, use_primary_for_header, chat_bubble_color, align_bubble,
+                            display_chatbot, profile_picture_url, chat_icon_url, profile_picture_filename,
+                            chat_icon_filename, profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
+                            hil_enabled, response_policy, hil_disabled_message, created_at, updated_at
+                        ) VALUES (
+                            1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW()
+                        )
                     """
-                    insert_params = [kwargs.get('hil_enabled', False), kwargs.get('response_policy', 300)]
+                    insert_params = [
+                        kwargs.get('display_name', 'GLOBISTAAN'),
+                        kwargs.get('initial_message', 'Hi! What can I help you with?'),
+                        kwargs.get('auto_show_duration', 30),
+                        kwargs.get('keep_showing_suggested', False),
+                        kwargs.get('theme', 'light'),
+                        kwargs.get('primary_color', '#007bff'),
+                        kwargs.get('use_primary_for_header', True),
+                        kwargs.get('chat_bubble_color', '#f8f9fa'),
+                        kwargs.get('align_bubble', 'right'),
+                        kwargs.get('display_chatbot', True),
+                        kwargs.get('profile_picture_url'),
+                        kwargs.get('chat_icon_url'),
+                        kwargs.get('profile_picture_filename'),
+                        kwargs.get('chat_icon_filename'),
+                        kwargs.get('profile_zoom', 1.00),
+                        kwargs.get('chat_icon_zoom', 1.00),
+                        kwargs.get('profile_position', {"x": 0, "y": 0}),
+                        kwargs.get('chat_icon_position', {"x": 20, "y": 20}),
+                        kwargs.get('hil_enabled', True),
+                        kwargs.get('response_policy', 30),
+                        kwargs.get('hil_disabled_message', 'Human assistance is currently offline. Please leave a message or try again later.')
+                    ]
                     logger.info(f"🔍 Inserting row with params: {insert_params}")
                     await conn.execute(insert_query, *insert_params)
-                    logger.info("✅ Inserted new metadata row")
+                    logger.info("✅ Inserted new widget configuration row")
                 else:
                     logger.info(f"🔍 Row exists, proceeding with update")
-                    # Update existing row
+                    # Update existing row with all provided fields
                     set_clauses = []
                     params = []
                     
+                    # Define all valid fields that can be updated
+                    valid_fields = {
+                        'display_name', 'initial_message', 'auto_show_duration', 'keep_showing_suggested',
+                        'theme', 'primary_color', 'use_primary_for_header', 'chat_bubble_color', 'align_bubble',
+                        'display_chatbot', 'profile_picture_url', 'chat_icon_url', 'profile_picture_filename',
+                        'chat_icon_filename', 'profile_zoom', 'chat_icon_zoom', 'profile_position', 'chat_icon_position',
+                        'hil_enabled', 'response_policy', 'hil_disabled_message'
+                    }
+                    
                     for key, value in kwargs.items():
-                        set_clauses.append(f"{key} = ${len(params) + 1}")
-                        params.append(value)
-                        logger.info(f"🔍 Adding clause: {key} = ${len(params)} with value: {value}")
+                        if key in valid_fields:
+                            set_clauses.append(f"{key} = ${len(params) + 1}")
+                            params.append(value)
+                            logger.info(f"🔍 Adding clause: {key} = ${len(params)} with value: {value}")
                     
                     if set_clauses:
                         query = f"""
-                            UPDATE configuration_metadata
+                            UPDATE widget_configuration
                             SET {', '.join(set_clauses)}, updated_at = NOW()
                             WHERE id = 1
                         """
@@ -71,7 +115,7 @@ class ChatAgentConfigDAO:
                         logger.info(f"🔍 With params: {params}")
                         result = await conn.execute(query, *params)
                         logger.log_db_query(query, params, result)
-                        logger.info(f"✅ Updated chatbot metadata: {kwargs}")
+                        logger.info(f"✅ Updated widget configuration: {kwargs}")
                         logger.info(f"🔍 Update result: {result}")
                         
                         # Verify the update by checking affected rows
@@ -79,13 +123,10 @@ class ChatAgentConfigDAO:
                             logger.info(f"🔍 Rows affected: {result.rows_affected}")
                         else:
                             logger.info("🔍 Row count not available in result")
-                    else:
-                        logger.warning("⚠️ No set clauses generated for metadata update")
+                        
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
-            logger.error(f"❌ Error in update_metadata: {e}")
+            logger.error(f"Error updating widget configuration: {e}")
             raise
-
 
     async def get_security_settings(self) -> List[Dict[str, Any]]:
         """Get security settings."""
@@ -125,7 +166,13 @@ class ChatAgentConfigDAO:
 
     async def get_human_agents(self) -> List[str]:
         """Get all human agent emails."""
-        query = "SELECT email FROM human_agents"
+        query = """
+            SELECT DISTINCT u.email
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE r.role_name = 'human_agent'
+        """
         try:
             async with get_db_connection() as conn:
                 results = await conn.fetch(query)
@@ -137,7 +184,13 @@ class ChatAgentConfigDAO:
 
     async def get_admins(self) -> List[str]:
         """Get all admin emails."""
-        query = "SELECT email FROM admins WHERE status = 'active'"
+        query = """
+            SELECT DISTINCT u.email
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE r.role_name = 'admin'
+        """
         try:
             async with get_db_connection() as conn:
                 results = await conn.fetch(query)
@@ -172,29 +225,40 @@ class ChatAgentConfigDAO:
                 added_emails = []
                 for email in to_add:
                     try:
-                        await conn.execute(
-                            "INSERT INTO admins (email, status) VALUES ($1, 'active')",
-                            email
-                        )
+                        # Ensure user exists
+                        user_query = """
+                            INSERT INTO users (email, display_name, email_verified, created_at, updated_at)
+                            VALUES ($1, $2, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (email) DO NOTHING
+                        """
+                        await conn.execute(user_query, email, email.split('@')[0])
+                        
+                        # Add admin role
+                        role_query = """
+                            INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
+                            VALUES ((SELECT id FROM users WHERE email = $1), 
+                                   (SELECT id FROM roles WHERE role_name = 'admin'), 
+                                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (user_id, role_id) DO NOTHING
+                        """
+                        await conn.execute(role_query, email)
                         added_emails.append(email)
-                        logger.info(f"Added admin: {email}")
-                    except asyncpg.exceptions.UniqueViolationError:
-                        # Admin already exists, just update status
-                        await conn.execute(
-                            "UPDATE admins SET status = 'active' WHERE email = $1",
-                            email
-                        )
-                        added_emails.append(email)
+                        logger.info(f"Added admin role: {email}")
+                    except Exception as e:
+                        logger.error(f"Error adding admin {email}: {e}")
                 
-                # Remove admins (hard delete from database)
+                # Remove admins (remove role mapping)
                 removed_emails = []
                 for email in to_remove:
-                    await conn.execute(
-                        "DELETE FROM admins WHERE email = $1",
-                        email
-                    )
-                    removed_emails.append(email)
-                    logger.info(f"Deleted admin from database: {email}")
+                    try:
+                        await conn.execute(
+                            "DELETE FROM user_role_mapping WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')",
+                            email
+                        )
+                        removed_emails.append(email)
+                        logger.info(f"Removed admin role: {email}")
+                    except Exception as e:
+                        logger.error(f"Error removing admin {email}: {e}")
                 
                 return {
                     'added': list(added_emails),
@@ -231,29 +295,40 @@ class ChatAgentConfigDAO:
                 added_emails = []
                 for email in to_add:
                     try:
-                        await conn.execute(
-                            "INSERT INTO human_agents (email) VALUES ($1)",
-                            email
-                        )
+                        # Ensure user exists
+                        user_query = """
+                            INSERT INTO users (email, display_name, email_verified, created_at, updated_at)
+                            VALUES ($1, $2, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (email) DO NOTHING
+                        """
+                        await conn.execute(user_query, email, email.split('@')[0])
+                        
+                        # Add human agent role
+                        role_query = """
+                            INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
+                            VALUES ((SELECT id FROM users WHERE email = $1), 
+                                   (SELECT id FROM roles WHERE role_name = 'human_agent'), 
+                                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                            ON CONFLICT (user_id, role_id) DO NOTHING
+                        """
+                        await conn.execute(role_query, email)
                         added_emails.append(email)
-                        logger.info(f"Added human agent: {email}")
-                    except asyncpg.exceptions.UniqueViolationError:
-                        # Agent already exists, just ensure it's not removed
-                        await conn.execute(
-                            "UPDATE human_agents SET removed_at = NULL WHERE email = $1",
-                            email
-                        )
-                        added_emails.append(email)
+                        logger.info(f"Added human agent role: {email}")
+                    except Exception as e:
+                        logger.error(f"Error adding human agent {email}: {e}")
                 
-                # Remove human agents (hard delete from database)
+                # Remove human agents (remove role mapping)
                 removed_emails = []
                 for email in to_remove:
-                    await conn.execute(
-                        "DELETE FROM human_agents WHERE email = $1",
-                        email
-                    )
-                    removed_emails.append(email)
-                    logger.info(f"Deleted human agent from database: {email}")
+                    try:
+                        await conn.execute(
+                            "DELETE FROM user_role_mapping WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')",
+                            email
+                        )
+                        removed_emails.append(email)
+                        logger.info(f"Removed human agent role: {email}")
+                    except Exception as e:
+                        logger.error(f"Error removing human agent {email}: {e}")
                 
                 return {
                     'added': list(added_emails),

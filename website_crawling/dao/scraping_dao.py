@@ -51,12 +51,13 @@ class ScrapingDAO:
         """Record scraped metadata"""
         query = """
             INSERT INTO scraped_websites 
-            (url, domain, title, description, status, 
+            (user_role_id, original_url, domain, title, description, status, 
              pages_scraped, content_length, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
             RETURNING id
         """
         params = [
+            metadata.get('user_role_id'),  # Added user_role_id
             metadata.get('url'),
             metadata.get('domain'),
             metadata.get('title'),

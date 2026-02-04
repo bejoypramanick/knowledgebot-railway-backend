@@ -18,8 +18,8 @@ class ChatAgentConfigService:
     async def get_chatAgent_config(self):
         """Get complete chatbot configuration with all data transformations"""
         try:
-            # Get all raw data via direct DAO calls
-            metadata = await self._chatAgent_dao.get_metadata()
+            # Get all data via unified widget configuration call
+            widget_config = await self._chatAgent_dao.get_widget_config()
             security_rows = await self._chatAgent_dao.get_security_settings()
             llm_rows = await self._chatAgent_dao.get_llm_providers()
             persona = await self._chatAgent_dao.get_active_persona()
@@ -95,18 +95,39 @@ class ChatAgentConfigService:
         try:
             logger.info(f"🔍 Saving chatbot config: {config_data}")
             
-            # Save metadata if provided
+            # Prepare unified widget configuration data
+            widget_config_data = {}
+            
+            # Extract widget appearance settings
+            widget_fields = [
+                'display_name', 'initial_message', 'auto_show_duration', 'keep_showing_suggested',
+                'theme', 'primary_color', 'use_primary_for_header', 'chat_bubble_color', 'align_bubble',
+                'display_chatbot', 'profile_picture_url', 'chat_icon_url', 'profile_picture_filename',
+                'chat_icon_filename', 'profile_zoom', 'chat_icon_zoom', 'profile_position', 'chat_icon_position'
+            ]
+            
+            for field in widget_fields:
+                if field in config_data:
+                    widget_config_data[field] = config_data[field]
+            
+            # Extract metadata settings (HIL settings)
             if 'metadata' in config_data:
                 metadata = config_data['metadata']
-                logger.info(f"🔍 Found metadata in config_data: {metadata}")
                 if isinstance(metadata, dict):
-                    logger.info(f"🔍 Calling update_metadata with: {metadata}")
-                    await self._chatAgent_dao.update_metadata(**metadata)
-                    logger.info("✅ Metadata updated successfully")
-                else:
-                    logger.warning(f"⚠️ Metadata is not a dict: {type(metadata)}")
+                    if 'hil_enabled' in metadata:
+                        widget_config_data['hil_enabled'] = metadata['hil_enabled']
+                    if 'response_policy' in metadata:
+                        widget_config_data['response_policy'] = metadata['response_policy']
+                    if 'hil_disabled_message' in metadata:
+                        widget_config_data['hil_disabled_message'] = metadata['hil_disabled_message']
+            
+            # Update widget configuration in single call
+            if widget_config_data:
+                logger.info(f"🔍 Calling update_widget_config with: {widget_config_data}")
+                await self._chatAgent_dao.update_widget_config(**widget_config_data)
+                logger.info("✅ Widget configuration updated successfully")
             else:
-                logger.warning("⚠️ No metadata found in config_data")
+                logger.warning("⚠️ No widget configuration data found to update")
 
             # Save security settings
             if 'security' in config_data:

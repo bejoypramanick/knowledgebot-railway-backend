@@ -9,16 +9,17 @@ from configuration.core.otel_logger import get_otel_logger
 
 logger = get_otel_logger("auth_dao", "configuration")
 
+
 class AuthDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
-        """Check if admin exists for given email."""
+    async def check_user_exists(self, email: str) -> Optional[Dict[str, Any]]:
+        """Check if user exists for given email."""
         query = """
-            SELECT email, status, created_at 
-            FROM admins 
-            WHERE email = $1 AND status = 'active'
+            SELECT id, email, display_name, email_verified, created_at, updated_at
+            FROM users 
+            WHERE email = $1
         """
         
         try:
@@ -30,203 +31,241 @@ class AuthDAO:
             logger.log_db_query(query, {"email": email}, error=e)
             return None
 
+    async def check_user_has_role(self, email: str, role_name: str) -> Optional[Dict[str, Any]]:
+        """Check if user has specific role and return user role mapping."""
+        query = """
+            SELECT urm.user_role_id, urm.user_id, urm.role_id, urm.created_at,
+                   u.email, u.display_name, r.role_name, r.role_description
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE u.email = $1 AND r.role_name = $2
+        """
+        
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetchrow(query, email, role_name)
+                logger.log_db_query(query, {"email": email, "role_name": role_name}, result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, {"email": email, "role_name": role_name}, error=e)
+            return None
+
+    async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
+        """Check if admin exists for given email."""
+        return await self.check_user_has_role(email, 'admin')
+
     async def check_human_agent_exists(self, email: str) -> bool:
         """Check if human agent exists"""
+        result = await self.check_user_has_role(email, 'human_agent')
+        return result is not None
+
+    async def get_user_roles(self, email: str) -> List[Dict[str, Any]]:
+        """Get all roles for a user."""
         query = """
-            SELECT COUNT(*) 
-            FROM human_agents 
-            WHERE email = $1 AND status = 'active'
+            SELECT urm.user_role_id, r.role_name, r.role_description, urm.created_at
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE u.email = $1
+            ORDER BY r.role_name
         """
+        
         try:
             async with get_db_connection() as conn:
-                result = await conn.fetchval(query, email)
-                exists = bool(result)
-                logger.log_db_query(query, {"email": email}, result)
-                return exists
+                results = await conn.fetch(query, email)
+                logger.log_db_query(query, {"email": email}, results)
+                return [dict(row) for row in results]
         except Exception as e:
             logger.log_db_query(query, {"email": email}, error=e)
-            return False
+            return []
 
-    async def remove_admin(self, email: str) -> None:
-        """Remove an admin by setting status to removed."""
+    async def get_user_by_role_id(self, user_role_id: int) -> Optional[Dict[str, Any]]:
+        """Get user and role information by user_role_id."""
         query = """
-            UPDATE admins 
-            SET status = 'removed', updated_at = NOW() 
-            WHERE email = $1
+            SELECT urm.user_role_id, urm.user_id, urm.role_id, urm.created_at,
+                   u.email, u.display_name, u.email_verified, u.created_at as user_created_at,
+                   r.role_name, r.role_description
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE urm.user_role_id = $1
         """
+        
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute(query, email)
-                logger.log_db_query(query, {"email": email}, result)
+                result = await conn.fetchrow(query, user_role_id)
+                logger.log_db_query(query, {"user_role_id": user_role_id}, result)
+                return result
         except Exception as e:
-            logger.log_db_query(query, {"email": email}, error=e)
-            raise
+            logger.log_db_query(query, {"user_role_id": user_role_id}, error=e)
+            return None
 
-    async def add_admin(self, email: str) -> None:
-        """Add a new admin."""
-        query = """
-            INSERT INTO admins (email, status, created_by_email, created_at)
-            VALUES ($1, 'active', 'system', NOW())
-            ON CONFLICT (email) DO NOTHING
-        """
+    async def add_user_role(self, email: str, role_name: str) -> Optional[Dict[str, Any]]:
+        """Add a role to a user. Creates user if doesn't exist."""
+        # First, ensure user exists
+        user = await self.check_user_exists(email)
+        if not user:
+            # Create new user
+            create_user_query = """
+                INSERT INTO users (email, display_name, email_verified, created_at, updated_at)
+                VALUES ($1, $2, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                RETURNING id, email, display_name, email_verified, created_at, updated_at
+            """
+            try:
+                async with get_db_connection() as conn:
+                    user = await conn.fetchrow(create_user_query, email, email.split('@')[0])
+                    logger.log_db_query(create_user_query, {"email": email}, user)
+            except Exception as e:
+                logger.log_db_query(create_user_query, {"email": email}, error=e)
+                return None
+
+        # Get role_id
+        role_query = "SELECT id FROM roles WHERE role_name = $1"
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute(query, email)
-                logger.log_db_query(query, {"email": email}, result)
+                role = await conn.fetchrow(role_query, role_name)
+                if not role:
+                    logger.error(f"Role {role_name} not found")
+                    return None
+                role_id = role['id']
         except Exception as e:
-            logger.log_db_query(query, {"email": email}, error=e)
-            raise
+            logger.log_db_query(role_query, {"role_name": role_name}, error=e)
+            return None
 
-    async def add_human_agent(self, email: str) -> bool:
-        """Add a new human agent."""
-        query = """
-            INSERT INTO human_agents (email, status, created_by_email, created_at)
-            VALUES ($1, 'active', 'system', NOW())
-            ON CONFLICT (email) DO NOTHING
+        # Add user role mapping
+        mapping_query = """
+            INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
+            VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT (user_id, role_id) DO NOTHING
+            RETURNING user_role_id, user_id, role_id, created_at, updated_at
         """
+        
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute(query, email)
-                logger.log_db_query(query, {"email": email}, result)
+                result = await conn.fetchrow(mapping_query, user['id'], role_id)
+                logger.log_db_query(mapping_query, {"user_id": user['id'], "role_id": role_id}, result)
+                return result
+        except Exception as e:
+            logger.log_db_query(mapping_query, {"user_id": user['id'], "role_id": role_id}, error=e)
+            return None
+
+    async def remove_user_role(self, email: str, role_name: str) -> bool:
+        """Remove a role from a user."""
+        query = """
+            DELETE FROM user_role_mapping
+            WHERE user_id = (SELECT id FROM users WHERE email = $1)
+            AND role_id = (SELECT id FROM roles WHERE role_name = $2)
+        """
+        
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, email, role_name)
+                logger.log_db_query(query, {"email": email, "role_name": role_name}, result)
                 return True
         except Exception as e:
-            logger.log_db_query(query, {"email": email}, error=e)
+            logger.log_db_query(query, {"email": email, "role_name": role_name}, error=e)
             return False
 
     async def get_admins(self) -> List[Dict[str, Any]]:
-        """Get all admins"""
+        """Get all users with admin role."""
         query = """
-            SELECT email, status, created_at, updated_at
-            FROM admins
-            WHERE status = 'active'
-            ORDER BY created_at DESC
+            SELECT urm.user_role_id, u.email, u.display_name, u.created_at as user_created_at,
+                   urm.created_at as role_assigned_at
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE r.role_name = 'admin'
+            ORDER BY u.email
         """
+        
         try:
             async with get_db_connection() as conn:
-                records = await conn.fetch(query)
-                logger.log_db_query(query, None, records)
-                return records
+                results = await conn.fetch(query)
+                logger.log_db_query(query, None, results)
+                return [dict(row) for row in results]
         except Exception as e:
             logger.log_db_query(query, None, error=e)
-            raise
+            return []
 
     async def get_human_agents(self) -> List[Dict[str, Any]]:
-        """Get all human agents"""
+        """Get all users with human_agent role."""
         query = """
-            SELECT email, status, created_at, updated_at
-            FROM human_agents
-            WHERE status = 'active'
-            ORDER BY created_at DESC
+            SELECT urm.user_role_id, u.email, u.display_name, u.created_at as user_created_at,
+                   urm.created_at as role_assigned_at
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE r.role_name = 'human_agent'
+            ORDER BY u.email
         """
+        
         try:
             async with get_db_connection() as conn:
-                records = await conn.fetch(query)
-                logger.log_db_query(query, None, records)
-                return records
+                results = await conn.fetch(query)
+                logger.log_db_query(query, None, results)
+                return [dict(row) for row in results]
         except Exception as e:
             logger.log_db_query(query, None, error=e)
-            raise
+            return []
 
     async def get_available_agents(self) -> List[Dict[str, Any]]:
-        """Get available human agents for assignment."""
+        """Get all available human agents."""
+        # For now, all human agents are considered available
+        return await self.get_human_agents()
+
+    async def remove_admin(self, email: str) -> bool:
+        """Remove admin role from user."""
+        return await self.remove_user_role(email, 'admin')
+
+    async def remove_human_agent(self, email: str) -> bool:
+        """Remove human agent role from user."""
+        return await self.remove_user_role(email, 'human_agent')
+
+    async def add_admin(self, email: str) -> Optional[Dict[str, Any]]:
+        """Add admin role to user."""
+        return await self.add_user_role(email, 'admin')
+
+    async def add_human_agent(self, email: str) -> Optional[Dict[str, Any]]:
+        """Add human agent role to user."""
+        return await self.add_user_role(email, 'human_agent')
+
+    async def sync_admin_emails(self) -> List[str]:
+        """Get all admin emails."""
         query = """
-            SELECT email, status, created_at
-            FROM human_agents
-            WHERE status = 'active'
-            ORDER BY created_at DESC
+            SELECT DISTINCT u.email
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE r.role_name = 'admin'
         """
+        
         try:
             async with get_db_connection() as conn:
-                records = await conn.fetch(query)
-                logger.log_db_query(query, None, records)
-                return records
+                results = await conn.fetch(query)
+                emails = [row['email'] for row in results]
+                logger.log_db_query(query, None, emails)
+                return emails
         except Exception as e:
             logger.log_db_query(query, None, error=e)
-            raise
+            return []
 
-    async def remove_human_agent(self, email: str) -> None:
-        """Remove a human agent by setting status to removed."""
+    async def sync_human_agent_emails(self) -> List[str]:
+        """Get all human agent emails."""
         query = """
-            UPDATE human_agents 
-            SET status = 'removed', updated_at = NOW() 
-            WHERE email = $1
+            SELECT DISTINCT u.email
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE r.role_name = 'human_agent'
         """
+        
         try:
             async with get_db_connection() as conn:
-                result = await conn.execute(query, email)
-                logger.log_db_query(query, {"email": email}, result)
+                results = await conn.fetch(query)
+                emails = [row['email'] for row in results]
+                logger.log_db_query(query, None, emails)
+                return emails
         except Exception as e:
-            logger.log_db_query(query, {"email": email}, error=e)
-            raise
-
-    async def create_human_agent(self, email: str) -> str:
-        """Create a new human agent."""
-        query = """
-            INSERT INTO human_agents (email, status, created_by_email, created_at)
-            VALUES ($1, 'active', 'system', NOW())
-            RETURNING id
-        """
-        try:
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query, email)
-                logger.log_db_query(query, {"email": email}, result)
-                return result
-        except Exception as e:
-            logger.log_db_query(query, {"email": email}, error=e)
-            raise
-
-    async def execute_role_query(self, query: str, email: str) -> List[Dict[str, Any]]:
-        """Execute role query."""
-        try:
-            async with get_db_connection() as conn:
-                # This would need to be implemented based on actual requirements
-                # For now, return empty list
-                logger.log_db_query(query, {"email": email}, [])
-                return []
-        except Exception as e:
-            logger.log_db_query(query, {"email": email}, error=e)
-            raise
-
-    async def get_or_create_unique_id(self, email: str, role: str = "customer") -> Dict[str, Any]:
-        """Get or create a unique ID for a user by email and role."""
-        import uuid
-
-        select_query = """
-            SELECT unique_id, email, role, created_at
-            FROM user_unique_ids
-            WHERE email = $1 AND role = $2
-        """
-        params = {"email": email, "role": role}
-
-        try:
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(select_query, email, role)
-                logger.log_db_query(select_query, params, result)
-
-                if result:
-                    return {
-                        "unique_id": result["unique_id"],
-                        "email": result["email"],
-                        "role": result["role"]
-                    }
-                else:
-                    # If no existing unique ID, generate one and store it
-                    new_unique_id = str(uuid.uuid4())[:8]  # Short unique ID
-
-                    insert_query = """
-                        INSERT INTO user_unique_ids (email, unique_id, role)
-                        VALUES ($1, $2, $3)
-                        ON CONFLICT (email, role) DO NOTHING
-                    """
-                    insert_result = await conn.execute(insert_query, email, new_unique_id, role)
-                    logger.log_db_query(insert_query, {"email": email, "unique_id": new_unique_id, "role": role}, insert_result)
-
-                    return {
-                        "unique_id": new_unique_id,
-                        "email": email,
-                        "role": role,
-                        "created": True
-                    }
-        except Exception as e:
-            logger.log_db_query("get_or_create_unique_id", params, error=e)
-            raise
+            logger.log_db_query(query, None, error=e)
+            return []

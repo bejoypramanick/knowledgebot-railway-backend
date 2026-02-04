@@ -4,22 +4,6 @@ CREATE SCHEMA public AUTHORIZATION pg_database_owner;
 
 COMMENT ON SCHEMA public IS '3NF Normalized Schema - All tables follow Third Normal Form';
 
--- DROP SEQUENCE public.admins_id_seq;
-
-CREATE SEQUENCE public.admins_id_seq
-	INCREMENT BY 1
-	MINVALUE 1
-	MAXVALUE 9223372036854775807
-	START 1
-	CACHE 1
-	NO CYCLE;
-
--- Permissions
-
-ALTER SEQUENCE public.admins_id_seq OWNER TO postgres;
-GRANT ALL ON SEQUENCE public.admins_id_seq TO postgres;
-GRANT ALL ON SEQUENCE public.admins_id_seq TO pg_database_owner;
-
 -- DROP SEQUENCE public.api_usage_id_seq;
 
 CREATE SEQUENCE public.api_usage_id_seq
@@ -99,22 +83,6 @@ CREATE SEQUENCE public.file_uploads_id_seq
 ALTER SEQUENCE public.file_uploads_id_seq OWNER TO postgres;
 GRANT ALL ON SEQUENCE public.file_uploads_id_seq TO postgres;
 GRANT ALL ON SEQUENCE public.file_uploads_id_seq TO pg_database_owner;
-
--- DROP SEQUENCE public.human_agents_id_seq;
-
-CREATE SEQUENCE public.human_agents_id_seq
-	INCREMENT BY 1
-	MINVALUE 1
-	MAXVALUE 9223372036854775807
-	START 1
-	CACHE 1
-	NO CYCLE;
-
--- Permissions
-
-ALTER SEQUENCE public.human_agents_id_seq OWNER TO postgres;
-GRANT ALL ON SEQUENCE public.human_agents_id_seq TO postgres;
-GRANT ALL ON SEQUENCE public.human_agents_id_seq TO pg_database_owner;
 
 -- DROP SEQUENCE public.llm_providers_id_seq;
 
@@ -260,22 +228,6 @@ ALTER SEQUENCE public.token_usage_log_id_seq OWNER TO postgres;
 GRANT ALL ON SEQUENCE public.token_usage_log_id_seq TO postgres;
 GRANT ALL ON SEQUENCE public.token_usage_log_id_seq TO pg_database_owner;
 
--- DROP SEQUENCE public.user_unique_ids_id_seq;
-
-CREATE SEQUENCE public.user_unique_ids_id_seq
-	INCREMENT BY 1
-	MINVALUE 1
-	MAXVALUE 9223372036854775807
-	START 1
-	CACHE 1
-	NO CYCLE;
-
--- Permissions
-
-ALTER SEQUENCE public.user_unique_ids_id_seq OWNER TO postgres;
-GRANT ALL ON SEQUENCE public.user_unique_ids_id_seq TO postgres;
-GRANT ALL ON SEQUENCE public.user_unique_ids_id_seq TO pg_database_owner;
-
 -- DROP SEQUENCE public.users_id_seq;
 
 CREATE SEQUENCE public.users_id_seq
@@ -339,23 +291,6 @@ CREATE SEQUENCE public.widget_suggested_messages_id_seq
 ALTER SEQUENCE public.widget_suggested_messages_id_seq OWNER TO postgres;
 GRANT ALL ON SEQUENCE public.widget_suggested_messages_id_seq TO postgres;
 GRANT ALL ON SEQUENCE public.widget_suggested_messages_id_seq TO pg_database_owner;
--- public.admins definition
-
--- Drop table
-
--- DROP TABLE public.admins;
-
-CREATE TABLE public.admins ( id serial4 NOT NULL, email varchar(255) NOT NULL, created_by_email varchar(255) NULL, created_at timestamp DEFAULT now() NULL, removed_at timestamp NULL, updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT admins_email_key UNIQUE (email), CONSTRAINT admins_pkey PRIMARY KEY (id), CONSTRAINT check_email_domain CHECK (((email)::text ~* '@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'::text)), CONSTRAINT valid_admin_email CHECK (((email)::text ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'::text)));
-CREATE INDEX idx_admins_email ON public.admins USING btree (email);
-CREATE INDEX idx_admins_email_domain ON public.admins USING btree (split_part((email)::text, '@'::text, 2));
-COMMENT ON TABLE public.admins IS 'Admin users with immediate activation (no confirmation needed)';
-
--- Permissions
-
-ALTER TABLE public.admins OWNER TO postgres;
-GRANT ALL ON TABLE public.admins TO postgres;
-GRANT ALL ON TABLE public.admins TO pg_database_owner;
-
 
 -- public.api_usage definition
 
@@ -395,24 +330,6 @@ COMMENT ON TABLE public.chat_feedback IS 'User feedback on chat messages';
 ALTER TABLE public.chat_feedback OWNER TO postgres;
 GRANT ALL ON TABLE public.chat_feedback TO postgres;
 GRANT ALL ON TABLE public.chat_feedback TO pg_database_owner;
-
-
--- public.human_agents definition
-
--- Drop table
-
--- DROP TABLE public.human_agents;
-
-CREATE TABLE public.human_agents ( id serial4 NOT NULL, email varchar(255) NOT NULL, widget_link varchar(500) NULL, created_at timestamp DEFAULT now() NULL, removed_at timestamp NULL, updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT check_email_domain CHECK (((email)::text ~* '@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'::text)), CONSTRAINT human_agents_email_key UNIQUE (email), CONSTRAINT human_agents_pkey PRIMARY KEY (id), CONSTRAINT valid_agent_email CHECK (((email)::text ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'::text)));
-CREATE INDEX idx_human_agents_email ON public.human_agents USING btree (email);
-CREATE INDEX idx_human_agents_email_domain ON public.human_agents USING btree (split_part((email)::text, '@'::text, 2));
-COMMENT ON TABLE public.human_agents IS 'Human agents with immediate activation (no confirmation needed)';
-
--- Permissions
-
-ALTER TABLE public.human_agents OWNER TO postgres;
-GRANT ALL ON TABLE public.human_agents TO postgres;
-GRANT ALL ON TABLE public.human_agents TO pg_database_owner;
 
 
 -- public.llm_providers definition
@@ -507,25 +424,6 @@ GRANT ALL ON TABLE public.security_settings TO postgres;
 GRANT ALL ON TABLE public.security_settings TO pg_database_owner;
 
 
--- public.user_unique_ids definition
-
--- Drop table
-
--- DROP TABLE public.user_unique_ids;
-
-CREATE TABLE public.user_unique_ids ( id serial4 NOT NULL, email varchar(255) NOT NULL, unique_id varchar(100) NOT NULL, "role" varchar(50) NOT NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT user_unique_ids_email_role_key UNIQUE (email, role), CONSTRAINT user_unique_ids_pkey PRIMARY KEY (id), CONSTRAINT user_unique_ids_role_check CHECK (((role)::text = ANY (ARRAY[('customer'::character varying)::text, ('agent'::character varying)::text, ('admin'::character varying)::text]))));
-CREATE INDEX idx_user_unique_ids_email ON public.user_unique_ids USING btree (email);
-CREATE INDEX idx_user_unique_ids_role ON public.user_unique_ids USING btree (role);
-CREATE INDEX idx_user_unique_ids_unique_id ON public.user_unique_ids USING btree (unique_id);
-COMMENT ON TABLE public.user_unique_ids IS 'User display IDs for different roles';
-
--- Permissions
-
-ALTER TABLE public.user_unique_ids OWNER TO postgres;
-GRANT ALL ON TABLE public.user_unique_ids TO postgres;
-GRANT ALL ON TABLE public.user_unique_ids TO pg_database_owner;
-
-
 -- public.users definition
 
 -- Drop table
@@ -542,6 +440,63 @@ COMMENT ON TABLE public.users IS 'User accounts from Firebase Auth';
 ALTER TABLE public.users OWNER TO postgres;
 GRANT ALL ON TABLE public.users TO postgres;
 GRANT ALL ON TABLE public.users TO pg_database_owner;
+
+
+-- public.roles definition
+
+-- Drop table
+
+-- DROP TABLE public.roles;
+
+CREATE TABLE public.roles ( id serial4 NOT NULL, role_name varchar(50) NOT NULL, role_description text NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT roles_pkey PRIMARY KEY (id), CONSTRAINT roles_role_name_key UNIQUE (role_name));
+CREATE INDEX idx_roles_role_name ON public.roles USING btree (role_name);
+COMMENT ON TABLE public.roles IS 'User roles definition';
+
+-- Permissions
+
+ALTER TABLE public.roles OWNER TO postgres;
+GRANT ALL ON TABLE public.roles TO postgres;
+GRANT ALL ON TABLE public.roles TO pg_database_owner;
+
+
+-- public.user_role_mapping definition
+
+-- Drop table
+
+-- DROP TABLE public.user_role_mapping;
+
+CREATE TABLE public.user_role_mapping ( user_role_id serial4 NOT NULL, user_id int4 NOT NULL, role_id int4 NOT NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT user_role_mapping_pkey PRIMARY KEY (user_role_id), CONSTRAINT user_role_mapping_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE, CONSTRAINT user_role_mapping_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE, CONSTRAINT user_role_mapping_user_role_key UNIQUE (user_id, role_id));
+CREATE INDEX idx_user_role_mapping_role_id ON public.user_role_mapping USING btree (role_id);
+CREATE INDEX idx_user_role_mapping_user_id ON public.user_role_mapping USING btree (user_id);
+COMMENT ON TABLE public.user_role_mapping IS 'Mapping between users and their roles';
+
+-- Permissions
+
+ALTER TABLE public.user_role_mapping OWNER TO postgres;
+GRANT ALL ON TABLE public.user_role_mapping TO postgres;
+GRANT ALL ON TABLE public.user_role_mapping TO pg_database_owner;
+
+
+-- Insert initial data
+
+-- Insert users
+INSERT INTO public.users (id, email, display_name, email_verified, created_at, updated_at) VALUES 
+(1, 'globistaan@gmail.com', 'Globistaan Admin', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(2, 'v.pramanick@gmail.com', 'Vijay Pramanick', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (id) DO NOTHING;
+
+-- Insert roles
+INSERT INTO public.roles (id, role_name, role_description, created_at, updated_at) VALUES 
+(1, 'admin', 'System administrator with full access', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(2, 'human_agent', 'Human agent for customer support', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (id) DO NOTHING;
+
+-- Insert user role mappings
+INSERT INTO public.user_role_mapping (user_id, role_id, created_at, updated_at) VALUES 
+(1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(1, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+(2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+ON CONFLICT (user_id, role_id) DO NOTHING;
 
 
 -- public.widget_configuration definition
@@ -586,7 +541,7 @@ GRANT ALL ON TABLE public.widget_scripts TO pg_database_owner;
 
 -- DROP TABLE public.chat_sessions;
 
-CREATE TABLE public.chat_sessions ( id serial4 NOT NULL, session_id varchar(255) NOT NULL, user_id int4 NULL, started_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, last_activity_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, ended_at timestamptz NULL, is_active bool DEFAULT true NULL, message_count int4 DEFAULT 0 NULL, sentiment varchar(20) NULL, metadata jsonb DEFAULT '{}'::jsonb NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, archive_status varchar(20) DEFAULT 'active'::character varying NULL, conversation_summary text NULL, file_search_store_id varchar(255) NULL, cached_content_id varchar(255) NULL, CONSTRAINT chat_sessions_archive_status_check CHECK (((archive_status)::text = ANY (ARRAY[('active'::character varying)::text, ('closed'::character varying)::text, ('archived'::character varying)::text, ('transferred'::character varying)::text]))), CONSTRAINT chat_sessions_pkey PRIMARY KEY (id), CONSTRAINT chat_sessions_session_id_key UNIQUE (session_id), CONSTRAINT valid_sentiment CHECK (((sentiment)::text = ANY (ARRAY[('positive'::character varying)::text, ('negative'::character varying)::text, ('neutral'::character varying)::text]))), CONSTRAINT chat_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL);
+CREATE TABLE public.chat_sessions ( id serial4 NOT NULL, session_id varchar(255) NOT NULL, user_role_id int4 NULL, started_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, last_activity_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, ended_at timestamptz NULL, is_active bool DEFAULT true NULL, message_count int4 DEFAULT 0 NULL, sentiment varchar(20) NULL, metadata jsonb DEFAULT '{}'::jsonb NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, archive_status varchar(20) DEFAULT 'active'::character varying NULL, conversation_summary text NULL, file_search_store_id varchar(255) NULL, cached_content_id varchar(255) NULL, CONSTRAINT chat_sessions_archive_status_check CHECK (((archive_status)::text = ANY (ARRAY[('active'::character varying)::text, ('closed'::character varying)::text, ('archived'::character varying)::text, ('transferred'::character varying)::text]))), CONSTRAINT chat_sessions_pkey PRIMARY KEY (id), CONSTRAINT chat_sessions_session_id_key UNIQUE (session_id), CONSTRAINT valid_sentiment CHECK (((sentiment)::text = ANY (ARRAY[('positive'::character varying)::text, ('negative'::character varying)::text, ('neutral'::character varying)::text]))), CONSTRAINT chat_sessions_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL);
 CREATE INDEX idx_chat_sessions_archive_status ON public.chat_sessions USING btree (archive_status);
 CREATE INDEX idx_chat_sessions_archive_status_updated ON public.chat_sessions USING btree (archive_status, updated_at DESC);
 CREATE INDEX idx_chat_sessions_cached_content_id ON public.chat_sessions USING btree (cached_content_id);
@@ -596,7 +551,7 @@ CREATE INDEX idx_chat_sessions_is_active ON public.chat_sessions USING btree (is
 CREATE INDEX idx_chat_sessions_last_activity ON public.chat_sessions USING btree (last_activity_at DESC);
 CREATE INDEX idx_chat_sessions_sentiment ON public.chat_sessions USING btree (sentiment);
 CREATE INDEX idx_chat_sessions_session_id ON public.chat_sessions USING btree (session_id);
-CREATE INDEX idx_chat_sessions_user_id ON public.chat_sessions USING btree (user_id);
+CREATE INDEX idx_chat_sessions_user_role_id ON public.chat_sessions USING btree (user_role_id);
 COMMENT ON TABLE public.chat_sessions IS 'Chat session tracking';
 
 -- Column comments
@@ -620,11 +575,11 @@ GRANT ALL ON TABLE public.chat_sessions TO pg_database_owner;
 
 -- DROP TABLE public.file_uploads;
 
-CREATE TABLE public.file_uploads ( id serial4 NOT NULL, user_id int4 NULL, original_filename varchar(500) NOT NULL, display_name varchar(500) NULL, file_extension varchar(50) NULL, gemini_file_name varchar(500) NULL, gemini_file_uri text NULL, gemini_state varchar(50) DEFAULT 'pending'::character varying NULL, sha256_hash varchar(64) NULL, file_size int8 NULL, mime_type varchar(100) NULL, metadata jsonb DEFAULT '{}'::jsonb NULL, "version" int4 DEFAULT 1 NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT file_uploads_pkey PRIMARY KEY (id), CONSTRAINT file_uploads_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL);
+CREATE TABLE public.file_uploads ( id serial4 NOT NULL, user_role_id int4 NULL, original_filename varchar(500) NOT NULL, display_name varchar(500) NULL, file_extension varchar(50) NULL, gemini_file_name varchar(500) NULL, gemini_file_uri text NULL, gemini_state varchar(50) DEFAULT 'pending'::character varying NULL, sha256_hash varchar(64) NULL, file_size int8 NULL, mime_type varchar(100) NULL, metadata jsonb DEFAULT '{}'::jsonb NULL, "version" int4 DEFAULT 1 NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT file_uploads_pkey PRIMARY KEY (id), CONSTRAINT file_uploads_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL);
 CREATE INDEX idx_file_uploads_created_at ON public.file_uploads USING btree (created_at DESC);
 CREATE INDEX idx_file_uploads_gemini_file_name ON public.file_uploads USING btree (gemini_file_name);
 CREATE INDEX idx_file_uploads_gemini_state ON public.file_uploads USING btree (gemini_state);
-CREATE INDEX idx_file_uploads_user_id ON public.file_uploads USING btree (user_id);
+CREATE INDEX idx_file_uploads_user_role_id ON public.file_uploads USING btree (user_role_id);
 COMMENT ON TABLE public.file_uploads IS 'Uploaded files with Gemini FileSearch integration';
 
 -- Permissions
@@ -640,11 +595,11 @@ GRANT ALL ON TABLE public.file_uploads TO pg_database_owner;
 
 -- DROP TABLE public.scraped_websites;
 
-CREATE TABLE public.scraped_websites ( id serial4 NOT NULL, user_id int4 NULL, original_url text NOT NULL, "domain" varchar(500) NULL, title varchar(500) NULL, description text NULL, pages_scraped int4 DEFAULT 0 NULL, content_length int4 DEFAULT 0 NULL, gemini_state varchar(50) DEFAULT 'pending'::character varying NULL, gemini_file_name varchar(500) NULL, gemini_file_uri text NULL, metadata jsonb DEFAULT '{}'::jsonb NULL, "version" int4 DEFAULT 1 NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT scraped_websites_pkey PRIMARY KEY (id), CONSTRAINT scraped_websites_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL);
+CREATE TABLE public.scraped_websites ( id serial4 NOT NULL, user_role_id int4 NULL, original_url text NOT NULL, "domain" varchar(500) NULL, title varchar(500) NULL, description text NULL, pages_scraped int4 DEFAULT 0 NULL, content_length int4 DEFAULT 0 NULL, gemini_state varchar(50) DEFAULT 'pending'::character varying NULL, gemini_file_name varchar(500) NULL, gemini_file_uri text NULL, metadata jsonb DEFAULT '{}'::jsonb NULL, "version" int4 DEFAULT 1 NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT scraped_websites_pkey PRIMARY KEY (id), CONSTRAINT scraped_websites_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL);
 CREATE INDEX idx_scraped_websites_domain ON public.scraped_websites USING btree (domain);
 CREATE INDEX idx_scraped_websites_gemini_state ON public.scraped_websites USING btree (gemini_state);
 CREATE INDEX idx_scraped_websites_original_url ON public.scraped_websites USING btree (original_url);
-CREATE INDEX idx_scraped_websites_user_id ON public.scraped_websites USING btree (user_id);
+CREATE INDEX idx_scraped_websites_user_role_id ON public.scraped_websites USING btree (user_role_id);
 COMMENT ON TABLE public.scraped_websites IS 'Scraped website content for knowledge base';
 
 -- Permissions
@@ -754,27 +709,6 @@ ALTER TABLE public.feedback OWNER TO postgres;
 GRANT ALL ON TABLE public.feedback TO postgres;
 GRANT ALL ON TABLE public.feedback TO pg_database_owner;
 
-
--- public.configuration_metadata definition (for chat_agent_config_dao.py)
--- Drop table
-
--- DROP TABLE public.configuration_metadata;
-
-CREATE TABLE public.configuration_metadata ( id integer DEFAULT 1 NOT NULL, hil_enabled bool DEFAULT true NULL, response_policy integer DEFAULT 30 NULL, created_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL, hil_disabled_message text DEFAULT 'Human assistance is currently offline. Please leave a message or try again later.'::text NULL, CONSTRAINT configuration_metadata_pkey PRIMARY KEY (id), CONSTRAINT single_row CHECK ((id = 1)));
-COMMENT ON TABLE public.configuration_metadata IS 'Global configuration settings (single row)';
-
--- Permissions
-
-ALTER TABLE public.configuration_metadata OWNER TO postgres;
-GRANT ALL ON TABLE public.configuration_metadata TO postgres;
-GRANT ALL ON TABLE public.configuration_metadata TO pg_database_owner;
-
-
--- Add status column to admins and human_agents tables if not present
-ALTER TABLE public.admins ADD COLUMN IF NOT EXISTS status varchar(50) DEFAULT 'active' NULL;
-ALTER TABLE public.human_agents ADD COLUMN IF NOT EXISTS status varchar(50) DEFAULT 'active' NULL;
-ALTER TABLE public.admins ADD COLUMN IF NOT EXISTS created_by_email varchar(255) NULL;
-ALTER TABLE public.human_agents ADD COLUMN IF NOT EXISTS created_by_email varchar(255) NULL;
 
 -- Add persona_description column to persona_configurations if not present
 ALTER TABLE public.persona_configurations ADD COLUMN IF NOT EXISTS persona_description text NULL;

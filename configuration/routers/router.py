@@ -150,7 +150,7 @@ async def update_widget_config(request: Request):
     try:
         # Check if this is a multipart form request (with images) or JSON
         content_type = request.headers.get("content-type", "")
-        
+        logger.info(f"Content type: {content_type}")
         if content_type.startswith("multipart/form-data"):
             # Handle multipart form with images
             from fastapi import UploadFile, File, Form
@@ -664,35 +664,6 @@ async def request_human_agent(session_id: str):
         raise
     except Exception as e:
         logger.error(f"Error requesting human agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/users/unique-id")
-async def create_or_get_unique_id(request: Request):
-    """Create or get unique user ID by email and role"""
-    try:
-        body = await request.json()
-        email = body.get("email")
-        role = body.get("role", "customer")
-
-        if not email:
-            raise HTTPException(status_code=400, detail="Email is required")
-
-        result = await auth_service.get_or_create_unique_id(email, role)
-        return {"success": True, **result}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error creating/getting unique ID: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/users/unique-id")
-async def get_user_unique_id(email: str, role: str = "customer"):
-    """Get unique ID for a user by email and role"""
-    try:
-        result = await auth_service.get_or_create_unique_id(email, role)
-        return {"success": True, **result}
-    except Exception as e:
-        logger.error(f"Error getting user unique ID: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================

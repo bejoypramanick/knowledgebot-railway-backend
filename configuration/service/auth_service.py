@@ -123,12 +123,3 @@ class AuthService:
         except Exception as e:
             logger.error(f"Error removing human agent: {e}")
             raise
-
-    async def get_or_create_unique_id(self, email: str, role: str = "customer") -> Dict[str, Any]:
-        """Get or create a unique ID for a user by email and role"""
-        try:
-            result = await self.auth_dao.get_or_create_unique_id(email, role)
-            return result
-        except Exception as e:
-            logger.error(f"Error getting/creating unique ID: {e}")
-            raise

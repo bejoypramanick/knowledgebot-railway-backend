@@ -18,7 +18,13 @@ class ChatLogDAO:
 
     async def get_all_human_agents(self) -> List[str]:
         """Get all human agent emails."""
-        query = "SELECT email FROM human_agents WHERE status = 'active'"
+        query = """
+            SELECT DISTINCT u.email
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE r.role_name = 'human_agent'
+        """
         try:
             async with get_db_connection() as conn:
                 rows = await conn.fetch(query)
@@ -30,7 +36,13 @@ class ChatLogDAO:
 
     async def get_all_admins(self) -> List[str]:
         """Get all admin emails."""
-        query = "SELECT email FROM admins WHERE status = 'active'"
+        query = """
+            SELECT DISTINCT u.email
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE r.role_name = 'admin'
+        """
         try:
             async with get_db_connection() as conn:
                 rows = await conn.fetch(query)
@@ -44,16 +56,22 @@ class ChatLogDAO:
         """Check if user is agent or admin."""
         try:
             async with get_db_connection() as conn:
-                is_agent_query = "SELECT EXISTS(SELECT 1 FROM human_agents WHERE email = $1 AND status = 'active')"
-                is_admin_query = "SELECT EXISTS(SELECT 1 FROM admins WHERE email = $1 AND status = 'active')"
+                query = """
+                    SELECT 
+                        EXISTS(SELECT 1 FROM user_role_mapping urm 
+                              JOIN users u ON urm.user_id = u.id 
+                              JOIN roles r ON urm.role_id = r.id 
+                              WHERE u.email = $1 AND r.role_name = 'human_agent') as is_agent,
+                        EXISTS(SELECT 1 FROM user_role_mapping urm 
+                              JOIN users u ON urm.user_id = u.id 
+                              JOIN roles r ON urm.role_id = r.id 
+                              WHERE u.email = $1 AND r.role_name = 'admin') as is_admin
+                """
                 
-                is_agent = await conn.fetchval(is_agent_query, email)
-                logger.log_db_query(is_agent_query, {"email": email}, is_agent)
+                result = await conn.fetchrow(query, email)
+                logger.log_db_query(query, {"email": email}, result)
                 
-                is_admin = await conn.fetchval(is_admin_query, email)
-                logger.log_db_query(is_admin_query, {"email": email}, is_admin)
-                
-                return {"is_agent": is_agent, "is_admin": is_admin}
+                return {"is_agent": bool(result['is_agent']), "is_admin": bool(result['is_admin'])}
         except Exception as e:
             logger.log_db_query("check_user_role", {"email": email}, error=e)
             return {"is_agent": False, "is_admin": False}
@@ -349,7 +367,7 @@ class ChatLogDAO:
 
     async def get_hil_enabled(self) -> bool:
         """Get HIL enabled status from configuration."""
-        query = "SELECT hil_enabled FROM configuration_metadata WHERE id = 1"
+        query = "SELECT hil_enabled FROM widget_configuration WHERE id = 1"
 
         try:
             async with get_db_connection() as conn:
