@@ -276,6 +276,59 @@ ALTER SEQUENCE public.widget_suggested_messages_id_seq OWNER TO postgres;
 GRANT ALL ON SEQUENCE public.widget_suggested_messages_id_seq TO postgres;
 GRANT ALL ON SEQUENCE public.widget_suggested_messages_id_seq TO pg_database_owner;
 
+
+-- public.users definition
+
+-- Drop table
+
+-- DROP TABLE public.users;
+
+CREATE TABLE public.users ( id serial4 NOT NULL, email varchar(255) NOT NULL, display_name varchar(255) NULL, email_verified bool DEFAULT false NULL, photo_url text NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, last_login_at timestamptz NULL, CONSTRAINT users_email_key UNIQUE (email), CONSTRAINT users_pkey PRIMARY KEY (id), CONSTRAINT valid_user_email CHECK (((email)::text ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'::text)));
+CREATE INDEX idx_users_created_at ON public.users USING btree (created_at DESC);
+CREATE INDEX idx_users_email ON public.users USING btree (email);
+COMMENT ON TABLE public.users IS 'User accounts from Firebase Auth';
+
+-- Permissions
+
+ALTER TABLE public.users OWNER TO postgres;
+GRANT ALL ON TABLE public.users TO postgres;
+GRANT ALL ON TABLE public.users TO pg_database_owner;
+
+
+-- public.roles definition
+
+-- Drop table
+
+-- DROP TABLE public.roles;
+
+CREATE TABLE public.roles ( id serial4 NOT NULL, role_name varchar(50) NOT NULL, role_description text NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT roles_pkey PRIMARY KEY (id), CONSTRAINT roles_role_name_key UNIQUE (role_name));
+CREATE INDEX idx_roles_role_name ON public.roles USING btree (role_name);
+COMMENT ON TABLE public.roles IS 'User roles definition';
+
+-- Permissions
+
+ALTER TABLE public.roles OWNER TO postgres;
+GRANT ALL ON TABLE public.roles TO postgres;
+GRANT ALL ON TABLE public.roles TO pg_database_owner;
+
+
+-- public.user_role_mapping definition
+
+-- Drop table
+
+-- DROP TABLE public.user_role_mapping;
+
+CREATE TABLE public.user_role_mapping ( user_role_id serial4 NOT NULL, user_id int4 NOT NULL, role_id int4 NOT NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT user_role_mapping_pkey PRIMARY KEY (user_role_id), CONSTRAINT user_role_mapping_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE, CONSTRAINT user_role_mapping_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE, CONSTRAINT user_role_mapping_user_role_key UNIQUE (user_id, role_id));
+CREATE INDEX idx_user_role_mapping_role_id ON public.user_role_mapping USING btree (role_id);
+CREATE INDEX idx_user_role_mapping_user_id ON public.user_role_mapping USING btree (user_id);
+COMMENT ON TABLE public.user_role_mapping IS 'Mapping between users and their roles';
+
+-- Permissions
+
+ALTER TABLE public.user_role_mapping OWNER TO postgres;
+GRANT ALL ON TABLE public.user_role_mapping TO postgres;
+GRANT ALL ON TABLE public.user_role_mapping TO pg_database_owner;
+
 -- public.api_usage definition
 
 -- Drop table
@@ -406,81 +459,6 @@ COMMENT ON TABLE public.security_settings IS 'Security and configuration setting
 ALTER TABLE public.security_settings OWNER TO postgres;
 GRANT ALL ON TABLE public.security_settings TO postgres;
 GRANT ALL ON TABLE public.security_settings TO pg_database_owner;
-
-
--- public.users definition
-
--- Drop table
-
--- DROP TABLE public.users;
-
-CREATE TABLE public.users ( id serial4 NOT NULL, email varchar(255) NOT NULL, display_name varchar(255) NULL, email_verified bool DEFAULT false NULL, photo_url text NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, last_login_at timestamptz NULL, CONSTRAINT users_email_key UNIQUE (email), CONSTRAINT users_pkey PRIMARY KEY (id), CONSTRAINT valid_user_email CHECK (((email)::text ~* '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'::text)));
-CREATE INDEX idx_users_created_at ON public.users USING btree (created_at DESC);
-CREATE INDEX idx_users_email ON public.users USING btree (email);
-COMMENT ON TABLE public.users IS 'User accounts from Firebase Auth';
-
--- Permissions
-
-ALTER TABLE public.users OWNER TO postgres;
-GRANT ALL ON TABLE public.users TO postgres;
-GRANT ALL ON TABLE public.users TO pg_database_owner;
-
-
--- public.roles definition
-
--- Drop table
-
--- DROP TABLE public.roles;
-
-CREATE TABLE public.roles ( id serial4 NOT NULL, role_name varchar(50) NOT NULL, role_description text NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT roles_pkey PRIMARY KEY (id), CONSTRAINT roles_role_name_key UNIQUE (role_name));
-CREATE INDEX idx_roles_role_name ON public.roles USING btree (role_name);
-COMMENT ON TABLE public.roles IS 'User roles definition';
-
--- Permissions
-
-ALTER TABLE public.roles OWNER TO postgres;
-GRANT ALL ON TABLE public.roles TO postgres;
-GRANT ALL ON TABLE public.roles TO pg_database_owner;
-
-
--- public.user_role_mapping definition
-
--- Drop table
-
--- DROP TABLE public.user_role_mapping;
-
-CREATE TABLE public.user_role_mapping ( user_role_id serial4 NOT NULL, user_id int4 NOT NULL, role_id int4 NOT NULL, created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL, CONSTRAINT user_role_mapping_pkey PRIMARY KEY (user_role_id), CONSTRAINT user_role_mapping_role_id_fkey FOREIGN KEY (role_id) REFERENCES public.roles(id) ON DELETE CASCADE, CONSTRAINT user_role_mapping_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE, CONSTRAINT user_role_mapping_user_role_key UNIQUE (user_id, role_id));
-CREATE INDEX idx_user_role_mapping_role_id ON public.user_role_mapping USING btree (role_id);
-CREATE INDEX idx_user_role_mapping_user_id ON public.user_role_mapping USING btree (user_id);
-COMMENT ON TABLE public.user_role_mapping IS 'Mapping between users and their roles';
-
--- Permissions
-
-ALTER TABLE public.user_role_mapping OWNER TO postgres;
-GRANT ALL ON TABLE public.user_role_mapping TO postgres;
-GRANT ALL ON TABLE public.user_role_mapping TO pg_database_owner;
-
-
--- Insert initial data
-
--- Insert users
-INSERT INTO public.users (id, email, display_name, email_verified, created_at, updated_at) VALUES 
-(1, 'globistaan@gmail.com', 'Globistaan Admin', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(2, 'v.pramanick@gmail.com', 'Vijay Pramanick', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-ON CONFLICT (id) DO NOTHING;
-
--- Insert roles
-INSERT INTO public.roles (id, role_name, role_description, created_at, updated_at) VALUES 
-(1, 'admin', 'System administrator with full access', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(2, 'human_agent', 'Human agent for customer support', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-ON CONFLICT (id) DO NOTHING;
-
--- Insert user role mappings
-INSERT INTO public.user_role_mapping (user_id, role_id, created_at, updated_at) VALUES 
-(1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(1, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-(2, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-ON CONFLICT (user_id, role_id) DO NOTHING;
 
 
 -- public.widget_configuration definition
