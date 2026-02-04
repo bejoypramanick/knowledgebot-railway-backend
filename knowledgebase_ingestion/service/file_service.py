@@ -71,6 +71,29 @@ class FileService:
         except Exception as e:
             logger.error(f"Error deleting existing file record: {e}")
 
+    async def get_user_role_id(self, user_id: str) -> Optional[int]:
+        """Get user_role_id for a given user_id"""
+        try:
+            from knowledgebase_ingestion.core.db import get_db_connection
+            
+            async with get_db_connection() as conn:
+                # First get the user's role mapping
+                role_mapping = await conn.fetchrow(
+                    "SELECT user_role_id FROM user_role_mapping WHERE user_id = $1 AND is_active = true",
+                    user_id
+                )
+                
+                if role_mapping:
+                    return role_mapping['user_role_id']
+                
+                # If no role mapping exists, return None
+                logger.warning(f"No active role mapping found for user_id: {user_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting user role ID: {e}")
+            return None
+
     async def record_metadata(self, user_id: str, original_filename: str, file_display_name: str, 
                              file_ext: str, uploaded_file: Any, 
                              file_size: int, sha256_hash: str, 
@@ -82,6 +105,9 @@ class FileService:
             # Use the new DatabaseManager pattern
             from knowledgebase_ingestion.core.db import get_db_connection
             
+            # Get the actual user_role_id from user_id
+            user_role_id = await self.get_user_role_id(user_id)
+            
             db_record_id = None
             try:
                 async with get_db_connection() as conn:
@@ -90,7 +116,7 @@ class FileService:
                            gemini_file_name, gemini_file_uri, mime_type, file_size, sha256_hash, 
                            gemini_state, version, created_at) 
                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()) RETURNING id""",
-                        None, original_filename, file_display_name, file_ext.lstrip('.'),  # user_role_id = NULL for now
+                        user_role_id, original_filename, file_display_name, file_ext.lstrip('.'),  # Use actual user_role_id
                         uploaded_file.name, getattr(uploaded_file, 'uri', None), mime_type,
                         file_size, sha256_hash, final_state, version
                     )
