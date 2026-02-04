@@ -313,30 +313,13 @@ Conversation History:
             
             logger.info(f"🤖 Using cached Gemini model with structured prompt (system: {len(system_prompt)}, user: {len(user_message)} chars)")
             
-            # Step 4: Generate response using Gemini with RAG context and caching
+            # Step 4: Generate response using Gemini with File Search tool
             logger.info("🧠 Generating content with Gemini using RAG context and caching...")
             
-            # Use Pydantic AI's GoogleModel with File Search tool
-            from pydantic_ai import Agent
-            from pydantic_ai.models.google import GoogleModel
-            from google.genai import types
-            
-            # Configure the File Search tool for the final response
-            file_search_tool = types.Tool(
-                file_search=types.FileSearch(
-                    file_search_store_names=[file_search_store_name]
-                )
-            )
-            
-            # Create an agent with File Search capability
-            agent = Agent(
-                model,
-                system_prompt=system_prompt
-            )
-            
-            # Generate response with File Search
-            result = await agent.run(
-                user_message,
+            # Use the Gemini client directly with File Search tool (not Pydantic AI)
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=f"{system_prompt}\n\n{user_message}",
                 config=types.GenerateContentConfig(
                     tools=[file_search_tool],
                     temperature=0.1
@@ -344,14 +327,19 @@ Conversation History:
             )
             
             # Stream the response
-            response_text = result.data
-            logger.info(f"✅ Generated response length: {len(response_text)} characters")
-            
-            # Stream the response
-            for chunk in response_text:
-                yield f"data: {chunk}\n\n"
-            
-            yield "data: [DONE]\n\n"
+            if response and response.text:
+                response_text = response.text
+                logger.info(f"✅ Generated response length: {len(response_text)} characters")
+                
+                # Stream the response
+                for chunk in response_text:
+                    yield f"data: {chunk}\n\n"
+                
+                yield "data: [DONE]\n\n"
+            else:
+                logger.error("❌ No response received from Gemini")
+                yield "data: I'm sorry, but I couldn't generate a response. Please try again.\n\n"
+                yield "data: [DONE]\n\n"
             
         except Exception as e:
             logger.error(f"Error processing message stream with RAG: {e}")

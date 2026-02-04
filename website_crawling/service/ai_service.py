@@ -153,8 +153,14 @@ async def record_scraped_metadata(
     try:
         website_service = WebsiteService()
 
+        # Get admin user_role_id (same logic as file uploads)
+        admin_user_role_id = await get_admin_user_role_id()
+        if not admin_user_role_id:
+            logger.error("❌ Failed to get admin user_role_id for scraped metadata")
+            return None
+
         metadata = {
-            "user_role_id": user_id,
+            "user_role_id": admin_user_role_id,  # Use the admin user_role_id
             "url": url,
             "domain": domain,
             "title": title,
@@ -172,4 +178,42 @@ async def record_scraped_metadata(
 
     except Exception as e:
         logger.error(f"❌ Failed to persist scraped metadata: {e}")
+        return None
+
+
+async def get_admin_user_role_id() -> Optional[str]:
+    """Get user_role_id for admin role - same logic as file uploads"""
+    try:
+        from website_crawling.core.db import get_db_connection
+        
+        async with get_db_connection() as conn:
+            # First get the admin role ID
+            admin_role = await conn.fetchrow(
+                "SELECT id FROM roles WHERE role_name = 'admin'"
+            )
+            
+            if not admin_role:
+                logger.error("Admin role not found in roles table")
+                return None
+            
+            admin_role_id = admin_role['id']
+            
+            # Check if user has admin role mapping (use a default admin user)
+            admin_mapping = await conn.fetchrow(
+                """SELECT user_role_id 
+                   FROM user_role_mapping 
+                   WHERE role_id = $1 AND is_active = true
+                   LIMIT 1""",
+                admin_role_id
+            )
+            
+            if admin_mapping:
+                logger.info(f"Using admin user_role_id: {admin_mapping['user_role_id']}")
+                return admin_mapping['user_role_id']
+            else:
+                logger.warning("No admin user_role_mapping found - scraped websites may not be saved")
+                return None
+            
+    except Exception as e:
+        logger.error(f"Error getting admin user role ID: {e}")
         return None
