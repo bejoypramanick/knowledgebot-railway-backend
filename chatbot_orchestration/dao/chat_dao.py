@@ -18,7 +18,7 @@ class ChatDAO:
     async def get_session_metadata(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get session metadata from database"""
         query = """
-            SELECT session_id, user_email, created_at, last_activity_at, message_count
+            SELECT session_id, user_role_id, cached_content_id, created_at, last_activity_at, message_count
             FROM chat_sessions
             WHERE session_id = $1
         """
@@ -29,9 +29,14 @@ class ChatDAO:
                 logger.log_db_query(query, {"session_id": session_id}, record)
                 
                 if record:
+                    # Get user email from user_role_id
+                    user_email = await self.get_user_email_from_role_id(record["user_role_id"])
+                    
                     return {
                         "session_id": record["session_id"],
-                        "user_email": record["user_email"],
+                        "user_role_id": record["user_role_id"],
+                        "user_email": user_email,
+                        "cached_content_id": record["cached_content_id"],
                         "created_at": record["created_at"],
                         "last_activity_at": record["last_activity_at"],
                         "message_count": record["message_count"]
@@ -40,6 +45,25 @@ class ChatDAO:
                     return None
         except Exception as e:
             logger.log_db_query(query, {"session_id": session_id}, error=e)
+            return None
+
+    async def get_user_email_from_role_id(self, user_role_id: int) -> Optional[str]:
+        """Get user email from user_role_id by joining user_role_mapping and users tables"""
+        query = """
+            SELECT u.email
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            WHERE urm.user_role_id = $1 AND urm.is_active = true
+        """
+        
+        try:
+            async with get_db_connection() as conn:
+                record = await conn.fetchrow(query, user_role_id)
+                logger.log_db_query(query, {"user_role_id": user_role_id}, record)
+                
+                return record["email"] if record else None
+        except Exception as e:
+            logger.log_db_query(query, {"user_role_id": user_role_id}, error=e)
             return None
 
     async def get_chat_history(self, session_id: str) -> List[Dict[str, Any]]:
