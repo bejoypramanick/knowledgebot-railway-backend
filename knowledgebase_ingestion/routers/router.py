@@ -80,6 +80,32 @@ async def upload_file(
         logger.error(f"Error uploading file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/files/{file_id}")
+async def get_file_by_id(file_id: str, request: Request = None):
+    """Get a specific file by ID"""
+    try:
+        # Extract authenticated user information
+        user_email, user_id = extract_user_from_request(request)
+        
+        file_record = await file_service.get_file_by_id(file_id)
+        
+        if not file_record:
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        return {
+            "success": True,
+            "file": file_record,
+            "user": {
+                "email": user_email,
+                "id": user_id
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/files")
 async def list_files(request: Request = None):
     """List all files"""
