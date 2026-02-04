@@ -660,6 +660,128 @@ ALTER FUNCTION public.update_updated_at_column() OWNER TO postgres;
 GRANT ALL ON FUNCTION public.update_updated_at_column() TO postgres;
 
 
+-- Triggers for automatic updated_at timestamps
+
+-- Roles table trigger
+DROP TRIGGER IF EXISTS roles_updated_at_trigger ON public.roles;
+CREATE TRIGGER roles_updated_at_trigger
+    BEFORE UPDATE ON public.roles
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- User role mapping table trigger
+DROP TRIGGER IF EXISTS user_role_mapping_updated_at_trigger ON public.user_role_mapping;
+CREATE TRIGGER user_role_mapping_updated_at_trigger
+    BEFORE UPDATE ON public.user_role_mapping
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- API usage table trigger
+DROP TRIGGER IF EXISTS api_usage_updated_at_trigger ON public.api_usage;
+CREATE TRIGGER api_usage_updated_at_trigger
+    BEFORE UPDATE ON public.api_usage
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Chat feedback table trigger
+DROP TRIGGER IF EXISTS chat_feedback_updated_at_trigger ON public.chat_feedback;
+CREATE TRIGGER chat_feedback_updated_at_trigger
+    BEFORE UPDATE ON public.chat_feedback
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- LLM providers table trigger
+DROP TRIGGER IF EXISTS llm_providers_updated_at_trigger ON public.llm_providers;
+CREATE TRIGGER llm_providers_updated_at_trigger
+    BEFORE UPDATE ON public.llm_providers
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Metrics table trigger
+DROP TRIGGER IF EXISTS metrics_updated_at_trigger ON public.metrics;
+CREATE TRIGGER metrics_updated_at_trigger
+    BEFORE UPDATE ON public.metrics
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Notifications table trigger
+DROP TRIGGER IF EXISTS notifications_updated_at_trigger ON public.notifications;
+CREATE TRIGGER notifications_updated_at_trigger
+    BEFORE UPDATE ON public.notifications
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Persona configurations table trigger
+DROP TRIGGER IF EXISTS persona_configurations_updated_at_trigger ON public.persona_configurations;
+CREATE TRIGGER persona_configurations_updated_at_trigger
+    BEFORE UPDATE ON public.persona_configurations
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Security settings table trigger
+DROP TRIGGER IF EXISTS security_settings_updated_at_trigger ON public.security_settings;
+CREATE TRIGGER security_settings_updated_at_trigger
+    BEFORE UPDATE ON public.security_settings
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Widget configuration table trigger
+DROP TRIGGER IF EXISTS widget_configuration_updated_at_trigger ON public.widget_configuration;
+CREATE TRIGGER widget_configuration_updated_at_trigger
+    BEFORE UPDATE ON public.widget_configuration
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Chat sessions table trigger
+DROP TRIGGER IF EXISTS chat_sessions_updated_at_trigger ON public.chat_sessions;
+CREATE TRIGGER chat_sessions_updated_at_trigger
+    BEFORE UPDATE ON public.chat_sessions
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- File uploads table trigger
+DROP TRIGGER IF EXISTS file_uploads_updated_at_trigger ON public.file_uploads;
+CREATE TRIGGER file_uploads_updated_at_trigger
+    BEFORE UPDATE ON public.file_uploads
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Scraped websites table trigger
+DROP TRIGGER IF EXISTS scraped_websites_updated_at_trigger ON public.scraped_websites;
+CREATE TRIGGER scraped_websites_updated_at_trigger
+    BEFORE UPDATE ON public.scraped_websites
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Session assignments table trigger
+DROP TRIGGER IF EXISTS session_assignments_updated_at_trigger ON public.session_assignments;
+CREATE TRIGGER session_assignments_updated_at_trigger
+    BEFORE UPDATE ON public.session_assignments
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Widget suggested messages table trigger
+DROP TRIGGER IF EXISTS widget_suggested_messages_updated_at_trigger ON public.widget_suggested_messages;
+CREATE TRIGGER widget_suggested_messages_updated_at_trigger
+    BEFORE UPDATE ON public.widget_suggested_messages
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Chat messages table trigger
+DROP TRIGGER IF EXISTS chat_messages_updated_at_trigger ON public.chat_messages;
+CREATE TRIGGER chat_messages_updated_at_trigger
+    BEFORE UPDATE ON public.chat_messages
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Token usage log table trigger
+DROP TRIGGER IF EXISTS token_usage_log_updated_at_trigger ON public.token_usage_log;
+CREATE TRIGGER token_usage_log_updated_at_trigger
+    BEFORE UPDATE ON public.token_usage_log
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_updated_at_column();
+
+
 -- Permissions
 
 GRANT ALL ON SCHEMA public TO pg_database_owner;
