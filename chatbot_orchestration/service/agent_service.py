@@ -295,15 +295,18 @@ class PydanticAIGatewayService:
             
             logger.info(f"History text length: {len(history_text)} characters")
             
-            # Step 3: Create RAG-enhanced prompt with strict RAG-only instructions
-            system_prompt = f"""You are a helpful AI assistant that ONLY answers questions based on the provided knowledge base context.
+            # Step 3: Create conversational system prompt with natural interaction
+            system_prompt = f"""You are a helpful AI assistant that engages in natural conversation and answers questions based ONLY on the provided knowledge base context.
 
-IMPORTANT INSTRUCTIONS:
-1. You MUST answer ONLY using information from the provided Knowledge Base Context
-2. If the answer is not found in the context, you MUST respond: "I'm sorry, but this information is not available in my training data."
-3. Do NOT use any external knowledge or make up information
-4. Do NOT provide general responses or suggestions outside the context
-5. Be helpful and concise with information found in the context
+CONVERSATION GUIDELINES:
+1. Be friendly and conversational - greet naturally when users say hello or introduce themselves
+2. If the user's message is just a greeting (like "hi", "hello", "hey"), respond with a natural greeting and ask how you can help
+3. If the user's message is unclear or too vague, ask for clarification in a friendly way
+4. Only when you have a clear question, check the Knowledge Base Context for relevant information
+5. You MUST answer ONLY using information from the provided Knowledge Base Context
+6. If the answer is not found in the context, respond: "I'm sorry, but this information is not available in my training data."
+7. Do NOT use any external knowledge or make up information
+8. Be helpful and conversational while staying within the knowledge base constraints
 
 Knowledge Base Context:
 {rag_context}
@@ -312,7 +315,7 @@ Conversation History:
 {history_text}"""
             
             # User message separate for better caching
-            user_message = f"User Question: {message}\n\nAnswer based only on the provided knowledge base context:"
+            user_message = f"User Message: {message}\n\nRespond naturally based on the conversation:"
             
             logger.info(f"🤖 Using cached Gemini model with structured prompt (system: {len(system_prompt)}, user: {len(user_message)} chars)")
             
