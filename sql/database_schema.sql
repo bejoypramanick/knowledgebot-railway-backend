@@ -1,6 +1,6 @@
 -- DROP SCHEMA public;
 
-CREATE SCHEMA public AUTHORIZATION pg_database_owner;
+CREATE SCHEMA IF NOT EXISTS public AUTHORIZATION pg_database_owner;
 
 COMMENT ON SCHEMA public IS '3NF Normalized Schema - All tables follow Third Normal Form';
 
