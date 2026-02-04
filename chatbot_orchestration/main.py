@@ -23,27 +23,36 @@ async def lifespan(app: FastAPI):
     """
     Lifecycle manager for the Chatbot Orchestration Service.
     Handles startup initialization and shutdown cleanup.
-    """
-    # Startup
-    logger.info("🚀 Chatbot Orchestration Service starting up...")
-    
-    # Initialize Pydantic AI Service (and DBs lazily)
-    await pydantic_ai_service.initialize()
-    logger.info("🤖 Pydantic AI Service initialized")
-    
-    # Initialize database using centralized initializer
     try:
-        from chatbot_orchestration.core.database_initializer import database_initializer
-        await database_initializer.initialize_database()
-        logger.info("🗄️ Database connections initialized (singleton)")
-    except Exception as e:
-        logger.warning(f"⚠️ Initial database connection check failed: {e}")
+        # Log environment variables for debugging
+        import os
+        logger.info("� Environment Variables Check:")
+        logger.info(f"   GEMINI_API_KEY: {'✅ Set' if os.getenv('GEMINI_API_KEY') else '❌ Missing'}")
+        logger.info(f"   CHATBOT_MODEL: {os.getenv('CHATBOT_MODEL', 'Not set')}")
+        logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME: {os.getenv('GEMINI_FILE_SEARCH_STORE_NAME', 'Not set')}")
+        
+        # Initialize Gemini Client (Check)
+        from chatbot_orchestration.core.ai import get_genai_client
+        if get_genai_client():
+             logger.info("✅ Gemini client initialized")
+        else:
+             logger.warning("⚠️ Gemini client failed to initialize")
 
-    logger.info("✅ Chatbot Orchestration Service fully ready")
-    yield
-    
-    logger.info("🛑 Chatbot Orchestration Service shutting down...")
-    # Add cleanup logic here if needed
+        # Initialize Gemini Model (Check)
+        from chatbot_orchestration.core.ai import get_gemini_model
+        if get_gemini_model():
+             logger.info("✅ Gemini model initialized")
+        else:
+             logger.warning("⚠️ Gemini model failed to initialize")
+
+        logger.info("🚀 Chatbot orchestration service started successfully")
+        yield
+        
+        logger.info("🛑 Chatbot orchestration service shutdown complete")
+        
+    except Exception as e:
+        logger.error(f"❌ Error in lifespan handler: {e}")
+        raise
 
 app = FastAPI(
     title="Chatbot Orchestration Service",
