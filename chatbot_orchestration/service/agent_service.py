@@ -237,7 +237,7 @@ class PydanticAIGatewayService:
                 yield "AI service is currently unavailable. Please try again later."
                 return
             
-            # Step 1: RAG Search - Retrieve relevant documents from knowledge base
+            # Step 1: RAG Search - Use Gemini File Search tool
             logger.info("🔍 Performing RAG search in knowledge base...")
             rag_context = ""
             try:
@@ -246,16 +246,32 @@ class PydanticAIGatewayService:
                 file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
                 logger.info(f"📂 Using FileSearch store: {file_search_store_name}")
                 
-                # For now, skip RAG search as the retrieve_content method is not available
-                # TODO: Implement proper Gemini FileSearch API integration
-                logger.info("⚠️ RAG search temporarily disabled - API method not available")
-                rag_context = "No knowledge base search performed."
+                # Use Gemini File Search tool to search the knowledge base
+                from google.genai import types
                 
-                # Previous code that failed:
-                # search_response = await client.retrieve_content(
-                #     query=message,
-                #     file_search_stores=[file_search_store_name]
-                # )
+                # Configure the File Search tool
+                file_search_tool = types.Tool(
+                    file_search=types.FileSearch(
+                        file_search_store_names=[file_search_store_name]
+                    )
+                )
+                
+                # Perform a quick search to get context (this will be used in the main generation)
+                search_response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=f"Search for information related to: {message}",
+                    config=types.GenerateContentConfig(
+                        tools=[file_search_tool],
+                        temperature=0.1  # Low temperature for factual responses
+                    )
+                )
+                
+                if search_response and search_response.text:
+                    rag_context = search_response.text
+                    logger.info(f"📚 RAG search successful, context length: {len(rag_context)} characters")
+                else:
+                    logger.info("📚 No relevant documents found in knowledge base")
+                    rag_context = "No relevant documents found in the knowledge base."
                     
             except Exception as e:
                 logger.error(f"❌ RAG search failed: {e}")
@@ -300,18 +316,32 @@ Conversation History:
             # Step 4: Generate response using Gemini with RAG context and caching
             logger.info("🧠 Generating content with Gemini using RAG context and caching...")
             
-            # Use Pydantic AI's GoogleModel instead of direct Gemini client
+            # Use Pydantic AI's GoogleModel with File Search tool
             from pydantic_ai import Agent
             from pydantic_ai.models.google import GoogleModel
+            from google.genai import types
             
-            # Create a simple agent for this request
+            # Configure the File Search tool for the final response
+            file_search_tool = types.Tool(
+                file_search=types.FileSearch(
+                    file_search_store_names=[file_search_store_name]
+                )
+            )
+            
+            # Create an agent with File Search capability
             agent = Agent(
                 model,
                 system_prompt=system_prompt
             )
             
-            # Generate response
-            result = await agent.run(user_message)
+            # Generate response with File Search
+            result = await agent.run(
+                user_message,
+                config=types.GenerateContentConfig(
+                    tools=[file_search_tool],
+                    temperature=0.1
+                )
+            )
             
             # Stream the response
             response_text = result.data
