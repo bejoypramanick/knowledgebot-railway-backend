@@ -269,38 +269,40 @@ class PydanticAIGatewayService:
                     )
                 )
 
-                # Perform RAG search with a specific instruction prompt to extract relevant context
-                logger.info(f"🔎 Searching for relevant documents matching: {message[:100]}...")
+                # Perform RAG search - let Gemini use FileSearch naturally
+                logger.info(f"🔎 Searching FileSearch store for: {message[:100]}...")
 
+                # Direct question - let Gemini answer using FileSearch tool
                 search_response = client.models.generate_content(
                     model=MODEL_NAME,
-                    contents=f"""You are a document search assistant. The user is asking about: "{message}"
-
-Your task: Search the provided documents and extract the most relevant text passages that answer or relate to this question. Return only the relevant excerpts, properly formatted.
-
-If documents are found, return them as:
-DOCUMENT CONTENT:
-[extracted relevant text passages]
-
-If no relevant documents found, respond: "No relevant documents found"
-""",
+                    contents=message,  # Direct user query
                     config=types.GenerateContentConfig(
                         tools=[file_search_tool],
-                        temperature=0.1  # Low temperature for factual responses
+                        temperature=0.7,  # Normal temperature to get natural responses
+                        max_output_tokens=1024
                     )
                 )
 
                 if search_response and search_response.text:
-                    rag_context = search_response.text
-                    # Check if documents were actually found
-                    if "No relevant documents found" in rag_context or len(rag_context) < 10:
-                        logger.warning(f"⚠️ RAG search returned minimal results: {len(rag_context)} characters")
-                        rag_context = "No relevant documents found in the knowledge base for your query."
+                    rag_context = search_response.text.strip()
+                    logger.info(f"📄 RAG search response: {len(rag_context)} characters")
+                    logger.info(f"📄 Response preview: {rag_context[:200]}...")
+
+                    # Check if we got meaningful content
+                    if len(rag_context) < 20 or "not found" in rag_context.lower() or "no information" in rag_context.lower():
+                        logger.warning(f"⚠️ RAG search returned minimal/negative results: {rag_context}")
+                        rag_context = f"[FileSearch found no relevant documents]\n\nGemini's response: {rag_context}"
                     else:
-                        logger.info(f"✅ RAG search successful, extracted {len(rag_context)} characters of context")
+                        logger.info(f"✅ RAG search successful - found relevant information")
                 else:
-                    logger.warning("⚠️ RAG search returned no text")
-                    rag_context = "No relevant documents found in the knowledge base."
+                    logger.warning("⚠️ RAG search returned empty response")
+                    rag_context = "[No documents found in knowledge base]"
+
+                # Log grounding information if available
+                if hasattr(search_response, 'grounding_metadata') and search_response.grounding_metadata:
+                    logger.info(f"📚 Grounding metadata: {search_response.grounding_metadata}")
+                else:
+                    logger.info("⚠️ No grounding metadata in response (may mean no source documents)")
 
             except Exception as e:
                 logger.error(f"❌ RAG search failed: {e}", exc_info=True)
