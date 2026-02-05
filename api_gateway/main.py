@@ -94,20 +94,34 @@ async def lifespan(app: FastAPI):
                         # Update environment variable so other services can use it (only works within this process)
                         os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
                     else:
-                        # Create new store with display name (only if not found)
-                        logger.info(f"🔨 No store found with display_name '{store_name}', creating new one...")
-                        new_store = client.file_search_stores.create(
-                            config={'display_name': store_name}
-                        )
-                        store_id = new_store.name
-                        logger.info(f"✅ FileSearch store created: {store_id}")
-                        logger.info(f"   Display name: {getattr(new_store, 'display_name', store_name)}")
-                        logger.info("=" * 80)
-                        logger.info(f"📋 COPY THIS STORE ID TO RAILWAY ENVIRONMENT VARIABLES:")
-                        logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
-                        logger.info("=" * 80)
-                        # Update environment variable so other services can use it (only works within this process)
-                        os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
+                        # No store with matching display_name found
+                        # Check if there are any existing stores we can use
+                        if stores and len(stores) > 0:
+                            # Use the first available store
+                            store_id = stores[0].name
+                            logger.info(f"ℹ️ No store found with display_name '{store_name}'")
+                            logger.info(f"📌 Using existing store: {store_id}")
+                            logger.info("=" * 80)
+                            logger.info(f"📋 COPY THIS STORE ID TO RAILWAY ENVIRONMENT VARIABLES:")
+                            logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
+                            logger.info("=" * 80)
+                            logger.info(f"💡 TIP: To use display_name matching, create a new store with:")
+                            logger.info(f"   client.file_search_stores.create(config={{'display_name': '{store_name}'}})")
+                            os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
+                        else:
+                            # No existing stores, create a new one
+                            logger.info(f"🔨 No stores found, creating new store with display_name '{store_name}'...")
+                            new_store = client.file_search_stores.create(
+                                config={'display_name': store_name}
+                            )
+                            store_id = new_store.name
+                            logger.info(f"✅ FileSearch store created: {store_id}")
+                            logger.info(f"   Display name: {getattr(new_store, 'display_name', store_name)}")
+                            logger.info("=" * 80)
+                            logger.info(f"📋 COPY THIS STORE ID TO RAILWAY ENVIRONMENT VARIABLES:")
+                            logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
+                            logger.info("=" * 80)
+                            os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
 
         except Exception as e:
             logger.error(f"❌ Error initializing FileSearch store: {e}")

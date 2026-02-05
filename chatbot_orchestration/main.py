@@ -77,8 +77,14 @@ async def lifespan(app: FastAPI):
                 if _resolved_store_id:
                     logger.info(f"✅ Resolved FileSearch store ID: {_resolved_store_id}")
                 else:
-                    logger.warning(f"⚠️ No store found matching '{store_identifier}'")
-                    logger.warning("   Please ensure API Gateway has created the store with matching display_name")
+                    # No display_name match found, use first available store as fallback
+                    if stores and len(stores) > 0:
+                        _resolved_store_id = stores[0].name
+                        logger.warning(f"⚠️ No store found matching '{store_identifier}'")
+                        logger.info(f"📌 Using first available store as fallback: {_resolved_store_id}")
+                    else:
+                        logger.error(f"❌ No FileSearch stores available at all!")
+                        logger.error("   Please ensure API Gateway has initialized FileSearch stores")
         except Exception as list_error:
             logger.warning(f"⚠️ Could not lookup FileSearch store: {list_error}")
 
