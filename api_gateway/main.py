@@ -150,7 +150,8 @@ app = FastAPI(
     version="1.0.0",
     description="API Gateway for Knowledge Bot microservices",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    lifespan=lifespan
 )
 
 # Instrument FastAPI for OpenTelemetry immediately after app creation
