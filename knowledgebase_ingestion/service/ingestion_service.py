@@ -14,6 +14,7 @@ from google.genai import types
 
 from knowledgebase_ingestion.core.otel_logger import get_otel_logger
 from knowledgebase_ingestion.core.ai import get_genai_client
+from knowledgebase_ingestion.core.config import settings
 from knowledgebase_ingestion.schemas.models import BatchUploadItem, BatchDeleteItem, FileInfo
 from knowledgebase_ingestion.utils.validation import (
     validate_file_extension, validate_file_size, validate_mime_type,
@@ -21,6 +22,11 @@ from knowledgebase_ingestion.utils.validation import (
 )
 from knowledgebase_ingestion.utils.files import stream_to_temp_file, calculate_sha256
 from knowledgebase_ingestion.service.file_service import FileService
+from knowledgebase_ingestion.service.docling_integration import (
+    process_with_docling,
+    should_use_docling_for_file,
+    create_markdown_temp_file
+)
 
 logger = get_otel_logger("ingestion_service", "knowledgebase-ingestion")
 
@@ -339,7 +345,64 @@ async def process_single_file_upload(
 
         replaced = duplicate_check.get("reason") == "replaced"
 
-        # Process with Gemini
+        # Try to process with Docling (convert to markdown with OCR)
+        # This is plug-and-play: if disabled or fails, falls back to raw upload
+        markdown_tmp_path = None
+        docling_metadata = {}
+
+        if await should_use_docling_for_file(original_filename, detected_mime_type, file_size):
+            try:
+                logger.info(f"📄 Attempting docling conversion for {original_filename}")
+                markdown_content, docling_metadata = await process_with_docling(
+                    tmp_path,
+                    original_filename,
+                    detected_mime_type
+                )
+
+                if markdown_content:
+                    # Successfully converted to markdown
+                    try:
+                        markdown_tmp_path = await create_markdown_temp_file(markdown_content)
+                        # Use markdown instead of original file
+                        original_tmp_path = tmp_path
+                        tmp_path = markdown_tmp_path
+                        original_filename = original_filename.rsplit('.', 1)[0] + '.md'
+                        detected_mime_type = 'text/markdown'
+                        logger.info(
+                            f"✅ Converted to markdown: {len(markdown_content)} chars, "
+                            f"{docling_metadata.get('images_with_ocr', 0)} images with OCR"
+                        )
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to create markdown file: {e} - falling back to raw")
+                        # Fall back to original file
+                        if markdown_tmp_path and os.path.exists(markdown_tmp_path):
+                            os.unlink(markdown_tmp_path)
+                        tmp_path = original_tmp_path if 'original_tmp_path' in locals() else tmp_path
+                else:
+                    # Docling processing failed
+                    if settings.docling_fallback_to_raw:
+                        logger.info(f"⚠️ Docling failed for {original_filename} - falling back to raw upload")
+                    else:
+                        error_msg = docling_metadata.get("error", "Docling processing failed")
+                        logger.error(f"❌ Docling processing failed and fallback disabled: {error_msg}")
+                        if tmp_path and os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                        return BatchUploadItem(
+                            filename=original_filename,
+                            success=False,
+                            message="Document processing failed",
+                            error=error_msg
+                        )
+
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"⚠️ Docling timeout for {original_filename} "
+                    f"- falling back to raw upload"
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Docling processing error for {original_filename}: {e} - falling back to raw")
+
+        # Process with Gemini (with markdown if docling succeeded, or raw file)
         uploaded_file, final_state, gemini_processed_at = await process_with_gemini(
             tmp_path, file_display_name, original_filename, detected_mime_type, user_email
         )
@@ -354,6 +417,8 @@ async def process_single_file_upload(
                     pass
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+            if markdown_tmp_path and os.path.exists(markdown_tmp_path):
+                os.unlink(markdown_tmp_path)
 
             return BatchUploadItem(
                 filename=original_filename,
@@ -424,9 +489,15 @@ async def process_single_file_upload(
             error=str(e)
         )
     finally:
+        # Cleanup temporary files
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
+            except:
+                pass
+        if markdown_tmp_path and os.path.exists(markdown_tmp_path):
+            try:
+                os.unlink(markdown_tmp_path)
             except:
                 pass
 

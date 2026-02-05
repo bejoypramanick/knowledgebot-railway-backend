@@ -1,0 +1,37 @@
+# Docling Service - Document to Markdown Conversion
+# Core FastAPI
+fastapi>=0.124.0
+uvicorn[standard]>=0.38.0
+pydantic[email]>=2.12.0
+httpx>=0.28.0
+python-dotenv>=1.2.0
+
+# Database (for health checks and logging)
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.0
+pydantic-settings>=2.5.0
+psutil>=6.1.0
+tenacity>=8.2.2
+
+# Document Processing
+docling>=1.5.0
+docling-core>=2.5.0
+
+# Image OCR Extraction
+easyocr>=1.7.0
+pillow>=10.0.0
+opencv-python>=4.8.0
+
+# OpenTelemetry
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+opentelemetry-instrumentation-logging>=0.41b0
+opentelemetry-instrumentation-fastapi>=0.41b0
+opentelemetry-exporter-otlp>=1.20.0
+opentelemetry-instrumentation-httpx>=0.41b0
+
+# Email validation
+email-validator>=2.0.0
+
+# Security
+bleach>=6.0.0
