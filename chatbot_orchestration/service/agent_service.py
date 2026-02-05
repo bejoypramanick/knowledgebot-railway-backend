@@ -243,42 +243,23 @@ class PydanticAIGatewayService:
             logger.info("🔍 Performing RAG search in knowledge base...")
             rag_context = ""
             try:
-                # Get FileSearch store name from environment
-                # (Store is created by API Gateway during startup)
-                import os
-                formatted_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME")
+                # Get resolved store ID from startup (cached during lifespan)
+                from chatbot_orchestration.main import _resolved_store_id
 
-                if not formatted_store_name:
-                    logger.error("❌ GEMINI_FILE_SEARCH_STORE_NAME not set - RAG search cannot proceed")
-                    rag_context = "FileSearch store not configured. Please check API Gateway initialization."
-                    raise ValueError("FileSearch store not configured")
+                if not _resolved_store_id:
+                    logger.error("❌ FileSearch store not resolved during startup - RAG search cannot proceed")
+                    rag_context = "FileSearch store not configured. Please check API Gateway has created the store."
+                    raise ValueError("FileSearch store not resolved")
 
-                # Ensure store name is in correct format: fileSearchStores/{store-id}
-                if not formatted_store_name.startswith("fileSearchStores/"):
-                    logger.warning(f"⚠️ Store name missing prefix, adding it: {formatted_store_name}")
-                    formatted_store_name = f"fileSearchStores/{formatted_store_name}"
-
-                logger.info(f"📂 Using FileSearch store: {formatted_store_name}")
-
-                # List available FileSearch stores for debugging
-                try:
-                    if hasattr(client, 'file_search_stores'):
-                        stores = list(client.file_search_stores.list())
-                        logger.info(f"📋 Available FileSearch stores ({len(stores)}):")
-                        for idx, store in enumerate(stores):
-                            store_display_name = getattr(store, 'display_name', 'N/A')
-                            logger.info(f"   {idx+1}. {store.name} - Display: {store_display_name}")
-                        logger.info(f"🎯 Target store for RAG search: {formatted_store_name}")
-                except Exception as list_error:
-                    logger.warning(f"⚠️ Could not list FileSearch stores: {list_error}")
+                logger.info(f"📂 Using FileSearch store: {_resolved_store_id}")
 
                 # Use Gemini File Search tool to search the knowledge base
                 from google.genai import types
-                
+
                 # Configure the File Search tool
                 file_search_tool = types.Tool(
                     file_search=types.FileSearch(
-                        file_search_store_names=[formatted_store_name]
+                        file_search_store_names=[_resolved_store_id]
                     )
                 )
                 

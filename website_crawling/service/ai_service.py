@@ -66,29 +66,15 @@ async def upload_content_to_gemini(
 
         logger.info(f"🤖 [GEMINI] Uploading scraped content - Display: {display_name}")
 
-        # Get FileSearch store name from environment (same as file uploads)
-        import os
-        file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME")
+        # Get resolved store ID from startup (cached during lifespan)
+        from website_crawling.main import _resolved_store_id
 
-        if not file_search_store_name:
-            logger.error("❌ GEMINI_FILE_SEARCH_STORE_NAME not set")
+        if not _resolved_store_id:
+            logger.error("❌ FileSearch store not resolved during startup")
             raise ValueError("FileSearch store not configured")
 
-        # Validate and format FileSearch store name
-        if not file_search_store_name.startswith("fileSearchStores/"):
-            logger.warning(f"FileSearch store name missing prefix, adding: {file_search_store_name}")
-            file_search_store_name = f"fileSearchStores/{file_search_store_name}"
-
-        # List available FileSearch stores for debugging
-        try:
-            if hasattr(genai_client, 'file_search_stores'):
-                stores = list(genai_client.file_search_stores.list())
-                logger.info(f"📋 Available FileSearch stores ({len(stores)}):")
-                for idx, store in enumerate(stores):
-                    logger.info(f"   {idx+1}. {store.name} - Display: {getattr(store, 'display_name', 'N/A')}")
-                logger.info(f"📂 Target store for upload: {file_search_store_name}")
-        except Exception as list_error:
-            logger.warning(f"⚠️ Could not list FileSearch stores: {list_error}")
+        file_search_store_name = _resolved_store_id
+        logger.info(f"📂 Using FileSearch store: {file_search_store_name}")
 
         # Upload directly to FileSearch store (same as file uploads)
         logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
