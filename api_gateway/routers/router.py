@@ -415,11 +415,18 @@ async def generic_proxy_handler(request: Request, path: str):
         logger.error(f"❌ Service URL: {service_url}")
         logger.error(f"❌ This might mean the service is down or not accessible")
         raise HTTPException(status_code=503, detail=f"Service unavailable: {service_url}")
+    except httpx.TimeoutException as e:
+        logger.error(f"❌ Request timeout to {full_url}: {e}")
+        logger.error(f"❌ Service URL: {service_url}")
+        raise HTTPException(status_code=504, detail=f"Service timeout: {service_url}")
     except Exception as e:
-        logger.error(f"❌ Proxy error for path '{path}': {e}")
+        error_msg = str(e)
+        logger.error(f"❌ Proxy error for path '{path}': {error_msg}")
+        logger.error(f"❌ Error type: {type(e).__name__}")
         logger.error(f"❌ Full URL: {full_url}")
         logger.error(f"❌ Service URL: {service_url}")
-        raise HTTPException(status_code=500, detail=f"Proxy error: {str(e)}")
+        logger.error(f"❌ Full traceback: {type(e).__name__}: {error_msg}")
+        raise HTTPException(status_code=500, detail=f"Proxy error: {error_msg}")
 
 # Health check endpoint
 @router.get("/health")
