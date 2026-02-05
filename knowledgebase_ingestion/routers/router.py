@@ -151,8 +151,10 @@ async def list_files(request: Request = None):
 
 @router.post("/batchupload")
 async def upload_files_batch(request: Request):
-    """Upload multiple files in batch"""
+    """Upload multiple files in batch - PARALLEL processing"""
     try:
+        import asyncio
+
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
@@ -167,48 +169,61 @@ async def upload_files_batch(request: Request):
         # Get optional parameters
         replace_existing = form.get("replace_existing", "false").lower() == "true"
 
-        results = []
-        successful_uploads = 0
-        failed_uploads = 0
+        logger.info(f"📤 Starting PARALLEL batch upload of {len(files)} files")
 
-        # Process each file using the service layer
-        for file in files:
+        # Create tasks for all files to be processed concurrently
+        async def process_file_wrapper(file):
+            """Wrapper to handle individual file processing with error catching"""
             try:
-                # Use the proper service function
                 result = await process_single_file_upload(
                     file=file,
                     display_name=None,
                     user_email=user_email,
                     replace_existing=replace_existing
                 )
-
-                # Convert BatchUploadItem to dict for response
-                file_result = {
-                    "filename": result.filename,
-                    "success": result.success,
-                    "message": result.message,
-                    "error": result.error,
-                    "file_id": result.file.name if result.file else None,
-                    "replaced_existing": result.replaced_existing
-                }
-
-                if result.success:
-                    successful_uploads += 1
-                else:
-                    failed_uploads += 1
-
-                results.append(file_result)
-
+                return result
             except Exception as e:
                 logger.error(f"Error processing file {file.filename}: {e}")
-                results.append({
-                    "filename": file.filename,
-                    "success": False,
-                    "message": "Upload failed",
-                    "error": str(e),
-                    "file_id": None
-                })
+                # Return a failed BatchUploadItem
+                from knowledgebase_ingestion.schemas.models import BatchUploadItem
+                return BatchUploadItem(
+                    filename=file.filename,
+                    success=False,
+                    message="Upload failed",
+                    error=str(e)
+                )
+
+        # Process all files concurrently using asyncio.gather
+        logger.info(f"🚀 Launching {len(files)} concurrent upload tasks...")
+        upload_results = await asyncio.gather(
+            *[process_file_wrapper(file) for file in files],
+            return_exceptions=False
+        )
+
+        # Process results
+        results = []
+        successful_uploads = 0
+        failed_uploads = 0
+
+        for result in upload_results:
+            # Convert BatchUploadItem to dict for response
+            file_result = {
+                "filename": result.filename,
+                "success": result.success,
+                "message": result.message,
+                "error": result.error,
+                "file_id": result.file.name if result.file else None,
+                "replaced_existing": result.replaced_existing
+            }
+
+            if result.success:
+                successful_uploads += 1
+            else:
                 failed_uploads += 1
+
+            results.append(file_result)
+
+        logger.info(f"✅ Batch upload completed: {successful_uploads} successful, {failed_uploads} failed (total: {len(files)})")
 
         return {
             "success": True,
@@ -284,8 +299,10 @@ async def delete_file(file_id: str, request: Request = None):
 
 @router.post("/delete/batch")
 async def delete_files_batch(request: Request):
-    """Delete multiple files in batch"""
+    """Delete multiple files in batch - PARALLEL processing"""
     try:
+        import asyncio
+
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
@@ -297,42 +314,56 @@ async def delete_files_batch(request: Request):
         if not file_ids:
             raise HTTPException(status_code=400, detail="No file IDs provided")
 
+        logger.info(f"🗑️  Starting PARALLEL batch delete of {len(file_ids)} files")
+
+        # Create tasks for all files to be deleted concurrently
+        async def delete_file_wrapper(file_id):
+            """Wrapper to handle individual file deletion with error catching"""
+            try:
+                result = await process_single_file_delete(file_id)
+                return result
+            except Exception as e:
+                logger.error(f"Error deleting file {file_id}: {e}")
+                # Return a failed BatchDeleteItem
+                from knowledgebase_ingestion.schemas.models import BatchDeleteItem
+                return BatchDeleteItem(
+                    file_id=file_id,
+                    filename=file_id,
+                    success=False,
+                    message="Delete failed",
+                    error=str(e)
+                )
+
+        # Process all deletions concurrently using asyncio.gather
+        logger.info(f"🚀 Launching {len(file_ids)} concurrent delete tasks...")
+        delete_results = await asyncio.gather(
+            *[delete_file_wrapper(file_id) for file_id in file_ids],
+            return_exceptions=False
+        )
+
+        # Process results
         results = []
         successful_deletes = 0
         failed_deletes = 0
 
-        # Process each file deletion using the service layer
-        for file_id in file_ids:
-            try:
-                # Use the service function for single file delete
-                result = await process_single_file_delete(file_id)
+        for result in delete_results:
+            # Convert BatchDeleteItem to dict for response
+            delete_result = {
+                "file_id": result.file_id,
+                "success": result.success,
+                "message": result.message,
+                "error": result.error,
+                "details": result.details if hasattr(result, 'details') else None
+            }
 
-                # Convert BatchDeleteItem to dict for response
-                delete_result = {
-                    "file_id": result.file_id,
-                    "success": result.success,
-                    "message": result.message,
-                    "error": result.error,
-                    "details": result.details
-                }
-
-                if result.success:
-                    successful_deletes += 1
-                else:
-                    failed_deletes += 1
-
-                results.append(delete_result)
-
-            except Exception as e:
-                logger.error(f"Error deleting file {file_id}: {e}")
-                results.append({
-                    "file_id": file_id,
-                    "success": False,
-                    "message": "Delete failed",
-                    "error": str(e),
-                    "details": None
-                })
+            if result.success:
+                successful_deletes += 1
+            else:
                 failed_deletes += 1
+
+            results.append(delete_result)
+
+        logger.info(f"✅ Batch delete completed: {successful_deletes} successful, {failed_deletes} failed (total: {len(file_ids)})")
 
         return {
             "success": True,
