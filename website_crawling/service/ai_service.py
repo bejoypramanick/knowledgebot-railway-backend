@@ -68,7 +68,16 @@ async def upload_content_to_gemini(
 
         # Get FileSearch store name from environment (same as file uploads)
         import os
-        file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
+        file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME")
+
+        if not file_search_store_name:
+            logger.error("❌ GEMINI_FILE_SEARCH_STORE_NAME not set")
+            raise ValueError("FileSearch store not configured")
+
+        # Validate and format FileSearch store name
+        if not file_search_store_name.startswith("fileSearchStores/"):
+            logger.warning(f"FileSearch store name missing prefix, adding: {file_search_store_name}")
+            file_search_store_name = f"fileSearchStores/{file_search_store_name}"
 
         # List available FileSearch stores for debugging
         try:

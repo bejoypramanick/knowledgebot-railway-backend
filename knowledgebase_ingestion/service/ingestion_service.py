@@ -84,6 +84,11 @@ async def process_with_gemini(
 
     try:
         if file_search_store_name:
+            # Validate and format FileSearch store name
+            if not file_search_store_name.startswith("fileSearchStores/"):
+                logger.warning(f"FileSearch store name missing prefix, adding: {file_search_store_name}")
+                file_search_store_name = f"fileSearchStores/{file_search_store_name}"
+
             # List available FileSearch stores for debugging
             try:
                 if hasattr(genai_client, 'file_search_stores'):
