@@ -27,14 +27,14 @@ class TokenDAO:
         
         try:
             async with get_db_connection() as conn:
-                # Get integer session ID
+                # Get integer session ID (or None if session not found)
                 session_record = await conn.fetchrow(session_query, session_id)
                 integer_session_id = session_record["id"] if session_record else None
-                
-                # Get integer message ID
-                message_record = await conn.fetchrow(message_query, int(message_id)) if message_id else None
-                integer_message_id = message_record["id"] if message_record else None
-                
+
+                # For now, set message_id to None (message may not exist in DB yet)
+                # TODO: Properly link to chat_messages table if needed
+                integer_message_id = None
+
                 # Insert token usage record
                 query = """
                     INSERT INTO token_usage_log (

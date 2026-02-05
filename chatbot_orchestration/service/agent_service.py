@@ -390,14 +390,13 @@ Conversation History:
             if response and response.text:
                 response_text = response.text
                 logger.info(f"✅ Generated response length: {len(response_text)} characters")
+                logger.info(f"💬 Response text: {response_text[:200]}{'...' if len(response_text) > 200 else ''}")
 
-                # Debug: Log response object details
-                logger.info(f"🔍 Response object type: {type(response)}")
-                logger.info(f"🔍 Response attributes: {dir(response)}")
+                # Debug: Log response metadata
                 if hasattr(response, 'usage_metadata'):
-                    logger.info(f"🔍 Response usage_metadata: {response.usage_metadata}")
-                if hasattr(response, 'usage'):
-                    logger.info(f"🔍 Response usage: {response.usage}")
+                    logger.info(f"📊 Token usage - Prompt: {response.usage_metadata.prompt_token_count}, "
+                              f"Completion: {response.usage_metadata.candidates_token_count}, "
+                              f"Total: {response.usage_metadata.total_token_count}")
 
                 # Track token usage from the RAG response
                 await self._track_token_usage(response, session_id)
