@@ -8,9 +8,21 @@ from typing import Optional, Tuple
 import httpx
 
 from knowledgebase_ingestion.core.config import settings
-from docling_service.utils.validation import should_use_docling
 
 logger = logging.getLogger("ingestion_service")
+
+# Supported file types for docling processing
+SUPPORTED_FILE_TYPES = {
+    ".pdf", ".docx", ".doc", ".pptx", ".ppt",
+    ".xlsx", ".xls", ".html", ".htm"
+}
+
+# File types that should skip docling (already structured/text)
+SKIP_DOCLING_TYPES = {
+    ".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml"
+}
+
+MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
 
 
 async def process_with_docling(
@@ -121,8 +133,19 @@ async def should_use_docling_for_file(
     if not settings.docling_service_url:
         return False
 
+    # Get file extension
+    _, ext = os.path.splitext(filename.lower())
+
+    # Check if file type should skip docling
+    if ext in SKIP_DOCLING_TYPES:
+        return False
+
     # Check if file type is supported
-    if not should_use_docling(filename, mime_type, file_size):
+    if ext not in SUPPORTED_FILE_TYPES:
+        return False
+
+    # Check file size
+    if file_size > MAX_FILE_SIZE_BYTES:
         return False
 
     return True

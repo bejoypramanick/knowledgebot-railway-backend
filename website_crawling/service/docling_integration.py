@@ -11,6 +11,12 @@ from website_crawling.core.config import settings
 
 logger = logging.getLogger("website_crawling")
 
+# Supported file types for docling processing
+SUPPORTED_FILE_TYPES = {
+    ".pdf", ".docx", ".doc", ".pptx", ".ppt",
+    ".xlsx", ".xls", ".html", ".htm"
+}
+
 
 async def process_html_with_docling(
     html_content: str,
