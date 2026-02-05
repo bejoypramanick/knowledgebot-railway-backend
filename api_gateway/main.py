@@ -66,23 +66,31 @@ async def lifespan(app: FastAPI):
                     formatted_name = f"fileSearchStores/{store_name}"
                     logger.info(f"   Using store name directly: {formatted_name}")
                 else:
-                    logger.info(f"🔍 Checking for existing FileSearch store...")
+                    logger.info(f"🔍 Checking for existing FileSearch store with display_name: {store_name}")
 
                     # List existing stores
                     stores = list(client.file_search_stores.list())
                     logger.info(f"📋 Found {len(stores)} existing FileSearch stores")
 
-                    # Check if our store exists (by checking the first store or create new)
-                    if stores:
-                        # Use the first available store
-                        existing_store = stores[0]
-                        logger.info(f"✅ Using existing FileSearch store: {existing_store.name}")
-                        logger.info(f"   Display name: {getattr(existing_store, 'display_name', 'N/A')}")
+                    # Check if a store with our desired display_name already exists
+                    existing_store = None
+                    for store in stores:
+                        store_display_name = getattr(store, 'display_name', None)
+                        logger.info(f"   Store: {store.name} - Display name: {store_display_name}")
+                        if store_display_name == store_name:
+                            existing_store = store
+                            break
+
+                    if existing_store:
+                        # Use the existing store with matching display_name
+                        logger.info(f"✅ Found existing FileSearch store with matching display_name")
+                        logger.info(f"   Store ID: {existing_store.name}")
+                        logger.info(f"   Display name: {existing_store.display_name}")
                         # Update environment variable so other services can use it
                         os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = existing_store.name
                     else:
-                        # Create new store with display name
-                        logger.info(f"🔨 Creating new FileSearch store with name: {store_name}")
+                        # Create new store with display name (only if not found)
+                        logger.info(f"🔨 No store found with display_name '{store_name}', creating new one...")
                         new_store = client.file_search_stores.create(
                             config={'display_name': store_name}
                         )
