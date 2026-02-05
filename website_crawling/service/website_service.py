@@ -81,16 +81,50 @@ class WebsiteService:
             logger.info(f"🔄 Replacing existing website: {url}")
             await self.scraping_dao.delete_website_record(url)
 
-        # Perform the actual scraping
-        try:
-            if CRAWL4AI_AVAILABLE:
-                result = await self._scrape_with_crawl4ai(url, max_pages, max_depth, timeout)
-            elif HTTPX_AVAILABLE:
-                result = await self._scrape_with_httpx(url, max_pages, max_depth, timeout)
-            else:
+        # Check if this is a sitemap URL
+        from website_crawling.utils.sitemap_parser import is_sitemap_url, fetch_and_parse_sitemap
+
+        if is_sitemap_url(url):
+            logger.info(f"📄 Detected sitemap URL: {url}")
+            # Parse the sitemap and scrape all URLs
+            try:
+                sitemap_urls = await fetch_and_parse_sitemap(url)
+                if not sitemap_urls:
+                    return {
+                        "success": False,
+                        "error": "No URLs found in sitemap or failed to parse sitemap"
+                    }
+
+                logger.info(f"📋 Found {len(sitemap_urls)} URLs in sitemap, will scrape up to {max_pages}")
+                # Limit to max_pages
+                urls_to_scrape = sitemap_urls[:max_pages]
+
+                # Scrape all URLs from sitemap
+                result = await self._scrape_urls_from_sitemap(urls_to_scrape, timeout)
+
+            except Exception as e:
+                logger.error(f"❌ Error processing sitemap: {e}")
                 return {
                     "success": False,
-                    "error": "No scraping library available. Please install crawl4ai or httpx+beautifulsoup4."
+                    "error": f"Failed to process sitemap: {str(e)}"
+                }
+        else:
+            # Perform regular website scraping
+            try:
+                if CRAWL4AI_AVAILABLE:
+                    result = await self._scrape_with_crawl4ai(url, max_pages, max_depth, timeout)
+                elif HTTPX_AVAILABLE:
+                    result = await self._scrape_with_httpx(url, max_pages, max_depth, timeout)
+                else:
+                    return {
+                        "success": False,
+                        "error": "No scraping library available. Please install crawl4ai or httpx+beautifulsoup4."
+                    }
+            except Exception as e:
+                logger.error(f"❌ Error scraping website: {e}")
+                return {
+                    "success": False,
+                    "error": str(e)
                 }
 
             if not result["success"]:
@@ -304,6 +338,76 @@ class WebsiteService:
             "pages_scraped": len(scraped_urls),
             "scraped_urls": list(scraped_urls)
         }
+
+    async def _scrape_urls_from_sitemap(
+        self,
+        urls: List[str],
+        timeout: int
+    ) -> Dict[str, Any]:
+        """Scrape multiple URLs from a sitemap."""
+        all_content = []
+        scraped_urls: Set[str] = set()
+        title = "Sitemap Collection"
+
+        headers = {
+            "User-Agent": "KnowledgeBot-Crawler/1.0 (+https://globistaan.com)"
+        }
+
+        try:
+            import httpx
+            from bs4 import BeautifulSoup
+
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                for i, url in enumerate(urls):
+                    logger.info(f"📄 Scraping URL {i+1}/{len(urls)}: {url}")
+
+                    try:
+                        response = await client.get(url, headers=headers)
+                        response.raise_for_status()
+
+                        scraped_urls.add(url)
+
+                        # Parse HTML
+                        soup = BeautifulSoup(response.text, 'lxml')
+
+                        # Remove script and style elements
+                        for element in soup(['script', 'style', 'nav', 'footer', 'header']):
+                            element.decompose()
+
+                        # Get title from first page if not set
+                        if i == 0:
+                            title_tag = soup.find('title')
+                            if title_tag:
+                                title = title_tag.get_text(strip=True)
+
+                        # Extract text content
+                        text = soup.get_text(separator='\n', strip=True)
+                        text = re.sub(r'\n{3,}', '\n\n', text)
+
+                        if text:
+                            all_content.append(f"\n\n--- Page: {url} ---\n\n{text}")
+
+                    except httpx.HTTPStatusError as e:
+                        logger.warning(f"⚠️ HTTP error scraping {url}: {e.response.status_code}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error scraping {url}: {e}")
+
+            combined_content = "\n".join(all_content)
+
+            return {
+                "success": len(scraped_urls) > 0,
+                "content": combined_content,
+                "title": title,
+                "pages_scraped": len(scraped_urls),
+                "scraped_urls": list(scraped_urls)
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Error in sitemap scraping: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
     async def get_all_jobs(self) -> List[Dict[str, Any]]:
         """Get all scraping jobs from database."""

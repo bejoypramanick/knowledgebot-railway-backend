@@ -189,13 +189,14 @@ class FileService:
                     )
                     
                     logger.info(f"✅ [DB] Record created with ID: {db_record_id}, Size: {file_size} bytes")
-                    
+
                     # Log metric
+                    import json
                     await conn.execute(
                         """INSERT INTO metrics (metric_type, metric_name, value, unit, tags, created_at)
-                           VALUES ($1, $2, $3, $4, $5, NOW())""",
+                           VALUES ($1, $2, $3, $4, $5::jsonb, NOW())""",
                         'file_upload', 'file_size_bytes', file_size, 'bytes',
-                        {'user_email': user_email, 'file_id': db_record_id, 'filename': original_filename}
+                        json.dumps({'user_email': user_email, 'file_id': db_record_id, 'filename': original_filename})
                     )
             except Exception as db_error:
                 logger.error(f"❌ [DB] Database error during metadata recording: {db_error}")

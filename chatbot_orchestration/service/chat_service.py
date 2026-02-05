@@ -127,7 +127,7 @@ class ChatService:
                 
                 # Track token usage if available
                 if hasattr(result, 'usage') or hasattr(result, 'token_usage'):
-                    self._track_token_usage(result, session_id)
+                    await self._track_token_usage(result, session_id)
                 
                 break
                 
@@ -150,7 +150,7 @@ class ChatService:
             response_text = result.response.text if hasattr(result.response, 'text') else str(result.response)
         return response_text
     
-    def _track_token_usage(self, result, session_id: str):
+    async def _track_token_usage(self, result, session_id: str):
         """Track token usage from result"""
         try:
             # Extract token usage information
