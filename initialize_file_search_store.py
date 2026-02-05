@@ -73,9 +73,12 @@ def main():
 
         else:
             print(f"\n🔨 Creating new FileSearch store: {store_name}")
-            # Gemini API doesn't accept display_name during creation
-            new_store = client.file_search_stores.create()
-            print(f"✅ Created FileSearch store with auto-generated name: {new_store.name}")
+            # Create new store using correct Python client API
+            new_store = client.file_search_stores.create(
+                display_name=store_name
+            )
+            print(f"✅ FileSearch store created: {new_store.name}")
+            print(f"   Display name: {getattr(new_store, 'display_name', 'N/A')}")
             return new_store.name
 
         print("\n🎉 Initialization complete!")
