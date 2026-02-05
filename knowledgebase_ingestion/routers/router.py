@@ -282,6 +282,72 @@ async def delete_file(file_id: str, request: Request = None):
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/delete/batch")
+async def delete_files_batch(request: Request):
+    """Delete multiple files in batch"""
+    try:
+        # Extract authenticated user information
+        user_email, user_id = extract_user_from_request(request)
+
+        # Parse form data
+        form = await request.form()
+
+        # Get file IDs from form
+        file_ids = form.getlist("file_ids")
+        if not file_ids:
+            raise HTTPException(status_code=400, detail="No file IDs provided")
+
+        results = []
+        successful_deletes = 0
+        failed_deletes = 0
+
+        # Process each file deletion using the service layer
+        for file_id in file_ids:
+            try:
+                # Use the service function for single file delete
+                result = await process_single_file_delete(file_id)
+
+                # Convert BatchDeleteItem to dict for response
+                delete_result = {
+                    "file_id": result.file_id,
+                    "success": result.success,
+                    "message": result.message,
+                    "error": result.error,
+                    "details": result.details
+                }
+
+                if result.success:
+                    successful_deletes += 1
+                else:
+                    failed_deletes += 1
+
+                results.append(delete_result)
+
+            except Exception as e:
+                logger.error(f"Error deleting file {file_id}: {e}")
+                results.append({
+                    "file_id": file_id,
+                    "success": False,
+                    "message": "Delete failed",
+                    "error": str(e),
+                    "details": None
+                })
+                failed_deletes += 1
+
+        return {
+            "success": True,
+            "message": f"Batch delete completed: {successful_deletes} successful, {failed_deletes} failed",
+            "total_files": len(file_ids),
+            "successful_deletes": successful_deletes,
+            "failed_deletes": failed_deletes,
+            "results": results
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in batch delete: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # =================================
 # HEALTH ENDPOINTS
 # =================================
