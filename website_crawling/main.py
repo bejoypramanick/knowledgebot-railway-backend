@@ -48,7 +48,23 @@ async def lifespan(app: FastAPI):
         # Store name is read from GEMINI_FILE_SEARCH_STORE_NAME environment variable
         import os
         store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "not-set")
-        logger.info(f"📂 Using FileSearch store from environment: {store_name}")
+        logger.info(f"📂 Configured FileSearch store from environment: {store_name}")
+
+        # List available FileSearch stores for debugging
+        try:
+            genai_client = get_genai_client()
+            if genai_client and hasattr(genai_client, 'file_search_stores'):
+                stores = list(genai_client.file_search_stores.list())
+                logger.info(f"📋 Available FileSearch stores ({len(stores)}):")
+                for idx, store in enumerate(stores):
+                    store_display_name = getattr(store, 'display_name', 'N/A')
+                    logger.info(f"   {idx+1}. {store.name} - Display: {store_display_name}")
+                    if store.name == store_name:
+                        logger.info(f"      ✅ MATCHES configured store")
+                if not any(store.name == store_name for store in stores):
+                    logger.warning(f"⚠️ Configured store '{store_name}' NOT FOUND in available stores!")
+        except Exception as list_error:
+            logger.warning(f"⚠️ Could not list FileSearch stores: {list_error}")
 
         logger.info("🚀 Website scraping service started successfully")
         yield

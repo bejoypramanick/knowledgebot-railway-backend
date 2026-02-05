@@ -70,16 +70,16 @@ async def lifespan(app: FastAPI):
 
                     # List existing stores
                     stores = list(client.file_search_stores.list())
-                    logger.info(f"📋 Found {len(stores)} existing FileSearch stores")
+                    logger.info(f"📋 Available FileSearch stores ({len(stores)}):")
 
                     # Check if a store with our desired display_name already exists
                     existing_store = None
-                    for store in stores:
+                    for idx, store in enumerate(stores):
                         store_display_name = getattr(store, 'display_name', None)
-                        logger.info(f"   Store: {store.name} - Display name: {store_display_name}")
+                        logger.info(f"   {idx+1}. {store.name} - Display: {store_display_name}")
                         if store_display_name == store_name:
                             existing_store = store
-                            break
+                            logger.info(f"      ✅ MATCHES desired display_name")
 
                     if existing_store:
                         # Use the existing store with matching display_name
