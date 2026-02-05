@@ -5,6 +5,7 @@ uvicorn[standard]>=0.38.0
 pydantic[email]>=2.12.0
 httpx>=0.28.0
 python-dotenv>=1.2.0
+python-multipart>=0.0.6
 
 # Database (for health checks and logging)
 asyncpg>=0.29.0
