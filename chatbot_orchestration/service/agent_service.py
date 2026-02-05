@@ -269,78 +269,38 @@ class PydanticAIGatewayService:
                     )
                 )
 
-                # Perform RAG search with improved FileSearch strategy
+                # Perform RAG search - USING THE WORKING APPROACH
                 logger.info(f"🔎 Searching FileSearch store for: {message[:100]}...")
 
-                # Strategy 1: Direct question
-                logger.info("📋 Attempt 1: Direct question to FileSearch")
+                # Use explicit search prompt with low temperature (this was working before)
                 search_response = client.models.generate_content(
                     model=MODEL_NAME,
-                    contents=message,  # Direct user query
+                    contents=f"Search for information related to: {message}",
                     config=types.GenerateContentConfig(
                         tools=[file_search_tool],
-                        temperature=0.7,
-                        max_output_tokens=1024
+                        temperature=0.1  # Low temperature for factual, deterministic responses
                     )
                 )
 
                 rag_context = ""
                 if search_response and search_response.text:
                     rag_context = search_response.text.strip()
-                    logger.info(f"📄 Response: {len(rag_context)} chars - {rag_context[:150]}")
-
-                # Strategy 2: If first attempt failed, try extracting keywords and searching again
-                if len(rag_context) < 20 or "not found" in rag_context.lower() or "no information" in rag_context.lower():
-                    logger.warning(f"⚠️ Direct search failed, trying keyword extraction...")
-                    logger.info("📋 Attempt 2: Keyword-based search")
-
-                    # Try searching for just key nouns
-                    # Extract last 30 chars or key terms (rough extraction)
-                    import re
-                    keywords = re.findall(r'\b[A-Za-z]+\b', message)
-                    # Focus on longer words (likely nouns)
-                    keywords = [kw for kw in keywords if len(kw) > 3][-5:]  # Last 5+ char words
-                    keyword_query = " ".join(keywords) if keywords else message
-
-                    logger.info(f"   Keywords: {keyword_query}")
-
-                    retry_response = client.models.generate_content(
-                        model=MODEL_NAME,
-                        contents=f"Find information about: {keyword_query}",
-                        config=types.GenerateContentConfig(
-                            tools=[file_search_tool],
-                            temperature=0.5,  # Lower temp for more focused search
-                            max_output_tokens=1024
-                        )
-                    )
-
-                    if retry_response and retry_response.text:
-                        retry_text = retry_response.text.strip()
-                        if len(retry_text) > 20 and "not found" not in retry_text.lower():
-                            logger.info(f"✅ Keyword search succeeded: {len(retry_text)} chars")
-                            rag_context = retry_text
-                        else:
-                            logger.warning(f"⚠️ Keyword search also failed")
-                            rag_context = search_response.text if search_response else ""
-
-                # Log results
-                if rag_context:
-                    logger.info(f"📄 RAG context length: {len(rag_context)} characters")
+                    logger.info(f"📚 RAG search response: {len(rag_context)} characters")
                     logger.info(f"📄 Preview: {rag_context[:250]}")
 
-                    if len(rag_context) < 30:
-                        logger.warning(f"⚠️ RAG returned very short response (may not have found docs)")
-                    else:
+                    if len(rag_context) > 30:
                         logger.info(f"✅ RAG search successful - found relevant content")
+                    else:
+                        logger.warning(f"⚠️ RAG returned minimal content")
                 else:
-                    logger.warning("⚠️ RAG search returned empty after all attempts")
-                    rag_context = "[FileSearch could not find relevant documents]"
+                    logger.warning("⚠️ RAG search returned empty response")
+                    rag_context = "No relevant documents found in the knowledge base."
 
-                # Log grounding metadata
+                # Log grounding metadata if available
                 if hasattr(search_response, 'grounding_metadata') and search_response.grounding_metadata:
-                    logger.info(f"📚 Grounding metadata available: {str(search_response.grounding_metadata)[:100]}")
+                    logger.info(f"📚 Grounding metadata: {search_response.grounding_metadata}")
                 else:
-                    logger.info("⚠️ No grounding metadata (may need to enable citation)")
+                    logger.info("⚠️ No grounding metadata in response")
 
             except Exception as e:
                 logger.error(f"❌ RAG search failed: {e}", exc_info=True)
