@@ -1,5 +1,16 @@
 # FileSearch Issues Troubleshooting Guide
 
+## ✅ AUTOMATIC INITIALIZATION (v2.0)
+
+**Good news!** The FileSearch store is now **automatically created on service startup**. You no longer need to run manual initialization scripts!
+
+When the knowledgebase_ingestion or website_crawling services start, they will:
+1. Check if the FileSearch store exists
+2. Create it automatically if it doesn't exist
+3. Log the store status in the startup logs
+
+---
+
 ## 🔴 Issues Identified
 
 You're experiencing 4 interconnected problems, all stemming from a missing Gemini FileSearch store:
@@ -34,24 +45,11 @@ But the store was never created!
 
 ---
 
-## ✅ Solution 1: Create the FileSearch Store
+## ✅ Solution 1: Automatic Initialization (Recommended)
 
-###Step 1: Run the Initialization Script
+**The store is now auto-created on service startup!** Just ensure your environment is configured correctly:
 
-```bash
-cd /path/to/knowledgebot-railway-backend
-
-# Make sure you have your GEMINI_API_KEY in .env
-python initialize_file_search_store.py
-```
-
-This script will:
-1. Check if the FileSearch store exists
-2. Create it if it doesn't exist
-3. Verify it's accessible
-4. List any files already in it
-
-### Step 2: Verify Your .env File
+### Step 1: Verify Your .env File
 
 Ensure your `.env` file has:
 ```bash
@@ -59,16 +57,50 @@ GEMINI_API_KEY=your_actual_api_key_here
 GEMINI_FILE_SEARCH_STORE_NAME=knowledgebot-search-store
 ```
 
-### Step 3: Restart All Services
+### Step 2: Deploy/Restart Services
 
-After creating the store, restart your services:
+The store will be created automatically when services start:
+
+**If using Railway:**
+- Push to GitHub triggers automatic redeploy
+- Services will auto-create the store on startup
+
+**If running locally:**
 ```bash
-# If using docker-compose
-docker-compose restart
-
-# If running locally
-# Restart each service individually
+# Start services - store is created automatically
+docker-compose up
+# OR
+python -m uvicorn knowledgebase_ingestion.main:app --port 8001
+python -m uvicorn website_crawling.main:app --port 8002
 ```
+
+### Step 3: Check Startup Logs
+
+You should see in the logs:
+```
+✅ Gemini client initialized
+🔍 Checking FileSearch store: knowledgebot-search-store
+🔨 Creating FileSearch store: knowledgebot-search-store
+✅ FileSearch store created successfully: fileSearchStores/abc123
+✅ FileSearch store ready: fileSearchStores/abc123
+🚀 Knowledgebase ingestion service started successfully
+```
+
+---
+
+## ✅ Solution 1-B: Manual Initialization (If Needed)
+
+If automatic initialization fails, you can still run the manual script:
+
+```bash
+cd /path/to/knowledgebot-railway-backend
+python initialize_file_search_store.py
+```
+
+This is only needed if:
+- Automatic initialization is failing
+- You want to verify the store before starting services
+- You're debugging FileSearch issues
 
 ---
 
