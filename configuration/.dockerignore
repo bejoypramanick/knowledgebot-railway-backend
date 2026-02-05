@@ -1,0 +1,32 @@
+# Ignore changes in other services
+api_gateway/
+knowledgebase_ingestion/
+website_crawling/
+chatbot_orchestration/
+docling_service/
+
+# Ignore documentation
+*.md
+README.md
+DOCLING_*.md
+RAG_TROUBLESHOOTING.md
+TROUBLESHOOTING_*.md
+URL_STRUCTURE_TABLE.md
+OPENTELEMETRY_CONFIG_GUIDE.md
+
+# Ignore config files
+.git
+.gitignore
+.DS_Store
+.env
+docker-compose*.yml
+
+# Ignore SQL and other directories
+sql/
+firebase/
+check_file_sync.sql
+rag_diagnostics.py
+test_file_operations.py
+
+# Ignore node_modules if any
+node_modules/
