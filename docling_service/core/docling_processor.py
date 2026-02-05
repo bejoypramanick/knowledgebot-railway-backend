@@ -7,21 +7,40 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
+logger = logging.getLogger("docling_service")
+
 # Configure model cache directories BEFORE importing libraries
 # This ensures models download to the persistent volume
 os.environ.setdefault('HF_HOME', '/models/huggingface')
 os.environ.setdefault('EASYOCR_USER_AGENT_ORIGIN', '/models/easyocr')
 
 # Create cache directories if they don't exist
-os.makedirs('/models/huggingface', exist_ok=True)
-os.makedirs('/models/easyocr', exist_ok=True)
-os.makedirs(os.path.expanduser('~/.EasyOCR'), exist_ok=True)
+try:
+    os.makedirs('/models/huggingface', exist_ok=True)
+    os.makedirs('/models/easyocr', exist_ok=True)
+    os.makedirs(os.path.expanduser('~/.EasyOCR'), exist_ok=True)
+    logger.info("✅ Cache directories created/verified")
+except Exception as e:
+    logger.warning(f"⚠️ Could not create cache directories: {e}")
 
-from docling.document_converter import DocumentConverter
-from docling.models.document import ConvertedDocument
-import easyocr
+# Import docling libraries
+try:
+    from docling.document_converter import DocumentConverter
+    from docling.models.document import ConvertedDocument
+    logger.info("✅ Docling libraries imported successfully")
+except ImportError as e:
+    logger.error(f"❌ Failed to import docling: {e}")
+    logger.error("Make sure docling is installed: pip install docling")
+    raise
 
-logger = logging.getLogger("docling_service")
+# Import easyocr
+try:
+    import easyocr
+    logger.info("✅ EasyOCR library imported successfully")
+except ImportError as e:
+    logger.error(f"❌ Failed to import easyocr: {e}")
+    logger.error("Make sure easyocr is installed: pip install easyocr")
+    raise
 
 
 class DoclingProcessor:
