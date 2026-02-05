@@ -29,6 +29,10 @@ async def lifespan(app: FastAPI):
     Handles startup initialization and shutdown cleanup.
     """
     try:
+        logger.info("=" * 80)
+        logger.info("🚀 LIFESPAN STARTUP STARTING")
+        logger.info("=" * 80)
+
         # Log environment variables for debugging
         logger.info("🔧 Environment Variables Check:")
         gemini_key_status = "✅ Set" if os.getenv('GEMINI_API_KEY') else "❌ Missing"
@@ -75,9 +79,15 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Error looking up FileSearch store: {lookup_error}")
 
         logger.info("🚀 Chatbot orchestration service started successfully")
+        logger.info("=" * 80)
+        logger.info("✅ LIFESPAN STARTUP COMPLETE - YIELDING TO FASTAPI")
+        logger.info("=" * 80)
         yield
-        
+        logger.info("=" * 80)
+        logger.info("🛑 LIFESPAN SHUTDOWN STARTING")
+        logger.info("=" * 80)
         logger.info("🛑 Chatbot orchestration service shutdown complete")
+        logger.info("=" * 80)
         
     except Exception as e:
         logger.error(f"❌ Error in lifespan handler: {e}")
