@@ -186,8 +186,11 @@ class DoclingProcessor:
             raise RuntimeError("Docling converter not initialized")
 
         source = Path(file_path)
+        # converter.convert() returns a generator, consume it to get the document
         result = self._converter.convert(source)
-        return result.document
+        # Get the first (and usually only) result from the generator
+        conversion_result = next(result)
+        return conversion_result.document
 
     async def _extract_and_ocr_images(
         self,
