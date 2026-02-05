@@ -44,13 +44,11 @@ async def lifespan(app: FastAPI):
         else:
              logger.warning("⚠️ Gemini client failed to initialize")
 
-        # Initialize FileSearch store (auto-create if doesn't exist)
-        from knowledgebase_ingestion.core.file_search_initializer import initialize_file_search_store
-        store_name = await initialize_file_search_store()
-        if store_name:
-            logger.info(f"✅ FileSearch store ready: {store_name}")
-        else:
-            logger.warning("⚠️ FileSearch store initialization skipped")
+        # Note: FileSearch store is created by API Gateway during startup
+        # Store name is read from GEMINI_FILE_SEARCH_STORE_NAME environment variable
+        import os
+        store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "not-set")
+        logger.info(f"📂 Using FileSearch store from environment: {store_name}")
 
         logger.info("🚀 Knowledgebase ingestion service started successfully")
         yield

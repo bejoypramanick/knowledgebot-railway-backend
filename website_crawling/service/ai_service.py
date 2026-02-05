@@ -69,9 +69,20 @@ async def upload_content_to_gemini(
         # Get FileSearch store name from environment (same as file uploads)
         import os
         file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
-        logger.info(f"📂 [GEMINI] Uploading to FileSearch store: {file_search_store_name}")
+
+        # List available FileSearch stores for debugging
+        try:
+            if hasattr(genai_client, 'file_search_stores'):
+                stores = list(genai_client.file_search_stores.list())
+                logger.info(f"📋 Available FileSearch stores ({len(stores)}):")
+                for idx, store in enumerate(stores):
+                    logger.info(f"   {idx+1}. {store.name} - Display: {getattr(store, 'display_name', 'N/A')}")
+                logger.info(f"📂 Target store for upload: {file_search_store_name}")
+        except Exception as list_error:
+            logger.warning(f"⚠️ Could not list FileSearch stores: {list_error}")
 
         # Upload directly to FileSearch store (same as file uploads)
+        logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
         operation = genai_client.file_search_stores.upload_to_file_search_store(
             file=tmp_path,
             file_search_store_name=file_search_store_name,

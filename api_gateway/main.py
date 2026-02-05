@@ -42,6 +42,57 @@ async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     try:
         settings = get_settings()
+        logger.info(f"🚀 API Gateway ({settings.service_identity}) starting up...")
+
+        # Initialize Gemini FileSearch Store (centralized - done once here)
+        logger.info("📂 Initializing Gemini FileSearch store...")
+        try:
+            from google import genai
+
+            # Get Gemini API key
+            gemini_api_key = os.getenv("GEMINI_API_KEY")
+            if not gemini_api_key:
+                logger.warning("⚠️ GEMINI_API_KEY not set - FileSearch store initialization skipped")
+            else:
+                # Initialize Gemini client
+                client = genai.Client(api_key=gemini_api_key)
+
+                # Get store name from environment
+                store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
+
+                # Check if file_search_stores API is available
+                if not hasattr(client, 'file_search_stores'):
+                    logger.warning("⚠️ file_search_stores API not available")
+                    formatted_name = f"fileSearchStores/{store_name}"
+                    logger.info(f"   Using store name directly: {formatted_name}")
+                else:
+                    logger.info(f"🔍 Checking for existing FileSearch store...")
+
+                    # List existing stores
+                    stores = list(client.file_search_stores.list())
+                    logger.info(f"📋 Found {len(stores)} existing FileSearch stores")
+
+                    # Check if our store exists (by checking the first store or create new)
+                    if stores:
+                        # Use the first available store
+                        existing_store = stores[0]
+                        logger.info(f"✅ Using existing FileSearch store: {existing_store.name}")
+                        logger.info(f"   Display name: {getattr(existing_store, 'display_name', 'N/A')}")
+                        # Update environment variable so other services can use it
+                        os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = existing_store.name
+                    else:
+                        # Create new store (API creates with auto-generated name)
+                        logger.info(f"🔨 Creating new FileSearch store...")
+                        new_store = client.file_search_stores.create()
+                        logger.info(f"✅ FileSearch store created: {new_store.name}")
+                        logger.info(f"   Display name: {getattr(new_store, 'display_name', 'N/A')}")
+                        # Update environment variable so other services can use it
+                        os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = new_store.name
+
+        except Exception as e:
+            logger.error(f"❌ Error initializing FileSearch store: {e}")
+            logger.warning("⚠️ Services will continue but file uploads may fail")
+
         logger.info(f"🚀 API Gateway ({settings.service_identity}) started successfully")
         yield
         # Shutdown

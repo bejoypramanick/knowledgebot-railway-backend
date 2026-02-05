@@ -243,16 +243,10 @@ class PydanticAIGatewayService:
             logger.info("🔍 Performing RAG search in knowledge base...")
             rag_context = ""
             try:
-                # Get the initialized FileSearch store name from the initializer
-                from chatbot_orchestration.core.file_search_initializer import get_file_search_store_name
-                formatted_store_name = get_file_search_store_name()
-
-                if not formatted_store_name:
-                    logger.warning("⚠️ FileSearch store not initialized - using fallback")
-                    import os
-                    file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
-                    formatted_store_name = f"fileSearchStores/{file_search_store_name}"
-
+                # Get FileSearch store name from environment
+                # (Store is created by API Gateway during startup)
+                import os
+                formatted_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
                 logger.info(f"📂 Using FileSearch store: {formatted_store_name}")
                 
                 # Use Gemini File Search tool to search the knowledge base
