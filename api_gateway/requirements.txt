@@ -34,8 +34,9 @@ email-validator>=2.0.0
 # Input sanitization for security
 bleach>=6.0.0
 
-# Google Generative AI (for FileSearch store initialization)
-google-generativeai>=0.3.0
+# Google Gemini (for FileSearch store initialization)
+google-genai>=0.8.0
+google-auth>=2.38.0
 
 # OpenTelemetry
 opentelemetry-api>=1.20.0
