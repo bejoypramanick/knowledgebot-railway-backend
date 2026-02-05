@@ -73,15 +73,10 @@ def main():
 
         else:
             print(f"\n🔨 Creating new FileSearch store: {store_name}")
-            new_store = client.file_search_stores.create(
-                display_name=store_name,
-                config={
-                    'description': f"Knowledge base store for KnowledgeBot - stores uploaded documents and scraped websites"
-                }
-            )
-            print(f"✅ FileSearch store created successfully!")
-            print(f"   Store ID: {new_store.name}")
-            print(f"   Display Name: {new_store.display_name}")
+            # Gemini API doesn't accept display_name during creation
+            new_store = client.file_search_stores.create()
+            print(f"✅ Created FileSearch store with auto-generated name: {new_store.name}")
+            return new_store.name
 
         print("\n🎉 Initialization complete!")
         print(f"   Store Name: {store_name}")

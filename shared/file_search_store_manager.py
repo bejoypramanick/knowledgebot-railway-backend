@@ -45,14 +45,10 @@ class FileSearchStoreManager:
 
                 # Store not found, create it
                 print(f"🔨 Creating new FileSearch store: {store_name}")
-                new_store = client.file_search_stores.create(
-                    display_name=store_name,
-                    config={
-                        'description': f"Knowledge base store for {store_name}"
-                    }
-                )
+                # Gemini API doesn't accept display_name during creation
+                new_store = client.file_search_stores.create()
+                print(f"✅ FileSearch store created with auto-generated name: {new_store.name}")
                 cls._cached_store_name = new_store.name
-                print(f"✅ Created FileSearch store: {new_store.name}")
                 return new_store.name
             else:
                 # Client doesn't support file_search_stores API

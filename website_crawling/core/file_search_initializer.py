@@ -53,13 +53,11 @@ async def initialize_file_search_store() -> Optional[str]:
         else:
             # Create new store
             logger.info(f"🔨 Creating FileSearch store: {store_name}")
-            new_store = client.file_search_stores.create(
-                display_name=store_name,
-                config={
-                    'description': f"Knowledge base store for KnowledgeBot - stores uploaded documents and scraped websites"
-                }
-            )
+            # The Gemini API creates stores with auto-generated names
+            # display_name cannot be set during creation
+            new_store = client.file_search_stores.create()
             logger.info(f"✅ FileSearch store created successfully: {new_store.name}")
+            logger.info(f"   Note: Store was created with auto-generated name. Display name: {getattr(new_store, 'display_name', 'N/A')}")
             return new_store.name
 
     except Exception as e:

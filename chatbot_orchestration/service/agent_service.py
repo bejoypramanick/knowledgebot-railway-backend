@@ -61,10 +61,9 @@ class PydanticAIGatewayService:
                 if app_store:
                     return app_store.name
                 else:
-                    new_store = self.genai_client.stores.create(
-                        display_name="KnowledgeBot FileSearch Store",
-                        description="Centralized file search store for KnowledgeBot RAG operations"
-                    )
+                    # Create new store - Gemini API doesn't accept display_name during creation
+                    new_store = self.genai_client.stores.create()
+                    logger.info(f"Created FileSearch store with auto-generated name: {new_store.name}")
                     return new_store.name
             else:
                 return f"knowledgebot_store_{session_id[:8]}"
