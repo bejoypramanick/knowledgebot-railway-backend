@@ -362,19 +362,29 @@ async def process_single_file_upload(
                 error=f"Final state: {final_state}"
             )
 
-        # Store metadata
-        file_record_id = await file_service.record_metadata(
-            user_email=email,
-            original_filename=original_filename,
-            file_display_name=file_display_name,
-            file_ext=original_filename.rsplit('.', 1)[-1] if '.' in original_filename else '',
-            uploaded_file=uploaded_file,
-            file_size=file_size,
-            sha256_hash=sha256_hash,
-            final_state=final_state,
-            gemini_processed_at=gemini_processed_at,
-            mime_type=detected_mime_type
-        )
+        # Store metadata in database
+        try:
+            file_record_id = await file_service.record_metadata(
+                user_email=email,
+                original_filename=original_filename,
+                file_display_name=file_display_name,
+                file_ext=original_filename.rsplit('.', 1)[-1] if '.' in original_filename else '',
+                uploaded_file=uploaded_file,
+                file_size=file_size,
+                sha256_hash=sha256_hash,
+                final_state=final_state,
+                gemini_processed_at=gemini_processed_at,
+                mime_type=detected_mime_type
+            )
+        except Exception as db_error:
+            logger.error(f"❌ [DB ERROR] Failed to record metadata in database for {original_filename}: {db_error}")
+            logger.error(f"⚠️ File is in Gemini (ID: {uploaded_file.name}) but NOT in database!")
+            raise  # Re-raise to prevent marking upload as successful
+
+        if not file_record_id:
+            logger.error(f"❌ [DB ERROR] Database returned no ID for {original_filename}")
+            logger.error(f"⚠️ File is in Gemini (ID: {uploaded_file.name}) but NOT properly recorded in database!")
+            raise Exception("Database metadata recording failed - file orphaned in Gemini")
 
         file_info = FileInfo(
             name=uploaded_file.name,
@@ -390,7 +400,12 @@ async def process_single_file_upload(
         )
 
         processing_time = time.perf_counter() - start_time
-        logger.info(f"✅ Upload completed for {original_filename} in {processing_time:.2f}s", extra=log_context)
+        logger.info(f"✅ [SUCCESS] Upload completed for {original_filename}")
+        logger.info(f"   📁 Gemini File ID: {uploaded_file.name}")
+        logger.info(f"   🗄️  Database ID: {file_record_id}")
+        logger.info(f"   ⏱️  Time: {processing_time:.2f}s")
+        logger.info(f"   📊 Size: {file_size} bytes")
+        logger.info(f"   🔐 Hash: {sha256_hash}")
 
         return BatchUploadItem(
             filename=original_filename,
@@ -436,6 +451,7 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
             original_filename = record.get('original_filename', 'Unknown')
             table_name = record['table_name']
         else:
+            logger.error(f"❌ [DELETE] File not found in database: {file_id}")
             raise HTTPException(status_code=404, detail="File not found")
 
     deletion_results = {
@@ -443,38 +459,63 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
         "postgres": {"success": False, "error": None}
     }
 
+    logger.info(f"📋 File Details:")
+    logger.info(f"   ID: {file_id}")
+    logger.info(f"   Name: {original_filename}")
+    logger.info(f"   Gemini ID: {gemini_file_name}")
+    logger.info(f"   Table: {table_name}")
+
     # Delete from Gemini
     if genai_client and gemini_file_name:
         try:
             genai_client.files.delete(name=gemini_file_name)
             deletion_results["gemini"]["success"] = True
+            logger.info(f"✅ [GEMINI] Deleted: {gemini_file_name}")
         except Exception as e:
             if "404" in str(e) or "not found" in str(e).lower():
                 deletion_results["gemini"]["error"] = "File not found (already deleted)"
+                logger.warning(f"⚠️ [GEMINI] File already deleted or not found: {gemini_file_name}")
             else:
                 deletion_results["gemini"]["error"] = str(e)
+                logger.error(f"❌ [GEMINI] Error deleting: {e}")
     else:
         deletion_results["gemini"]["error"] = "Gemini client not available"
+        logger.warning(f"⚠️ [GEMINI] Client not available for deletion")
 
     # Delete from DB
     if table_name != "gemini_only":
         try:
             await file_service.delete_file_record(file_id, table_name)
             deletion_results["postgres"]["success"] = True
+            logger.info(f"✅ [DATABASE] Deleted from {table_name}: ID={file_id}")
         except Exception as e:
             deletion_results["postgres"]["error"] = str(e)
+            logger.error(f"❌ [DATABASE] Error deleting from {table_name}: {e}")
 
     # Determine success
     db_success = deletion_results["postgres"].get("success", False)
     gemini_success = deletion_results["gemini"].get("success", False)
 
-    if db_success or gemini_success:
+    if db_success and gemini_success:
+        logger.info(f"✅ [SUCCESS] File {original_filename} completely removed from Gemini and database")
         return {
             "success": True,
-            "message": "File deletion processed",
+            "message": "File deleted successfully from both Gemini FileSearch and database",
+            "details": deletion_results
+        }
+    elif db_success or gemini_success:
+        logger.warning(f"⚠️ [PARTIAL] File {original_filename} removed from one location only:")
+        logger.warning(f"   Gemini: {deletion_results['gemini'].get('success', False)}")
+        logger.warning(f"   Database: {deletion_results['postgres'].get('success', False)}")
+        return {
+            "success": True,
+            "message": "File deletion processed (removed from one location)",
             "details": deletion_results
         }
     else:
+        logger.error(f"❌ [FAILURE] Could not delete {original_filename} from either location!")
+        logger.error(f"   Gemini error: {deletion_results['gemini'].get('error')}")
+        logger.error(f"   Database error: {deletion_results['postgres'].get('error')}")
         raise HTTPException(status_code=500, detail="Failed to delete file from both Gemini and DB")
 
 

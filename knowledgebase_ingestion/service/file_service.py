@@ -61,9 +61,10 @@ class FileService:
             return None
 
     async def delete_existing_file_record(self, db_id: str):
-        """Delete an existing file record from database."""
+        """Delete an existing file record from both Gemini and database."""
         try:
             from knowledgebase_ingestion.core.db import get_db_connection
+            from knowledgebase_ingestion.core.ai import get_genai_client
 
             # Convert db_id to integer if it's a numeric string
             try:
@@ -72,10 +73,27 @@ class FileService:
                 numeric_id = db_id
 
             async with get_db_connection() as conn:
+                # First, get the gemini_file_name before deleting
+                record = await conn.fetchrow(
+                    "SELECT gemini_file_name, original_filename FROM file_uploads WHERE id = $1",
+                    numeric_id
+                )
+
+                if record and record['gemini_file_name']:
+                    # Delete from Gemini first
+                    try:
+                        genai_client = get_genai_client()
+                        if genai_client:
+                            genai_client.files.delete(name=record['gemini_file_name'])
+                            logger.info(f"✅ Deleted from Gemini: {record['gemini_file_name']}")
+                    except Exception as gemini_error:
+                        logger.warning(f"⚠️ Could not delete from Gemini (may already be deleted): {gemini_error}")
+
+                # Then delete from database
                 await conn.execute("DELETE FROM file_uploads WHERE id = $1", numeric_id)
-                logger.info(f"Deleted old file record from database: {db_id}")
+                logger.info(f"✅ Deleted old file record from database: {db_id}")
         except Exception as e:
-            logger.error(f"Error deleting existing file record: {e}")
+            logger.error(f"❌ Error deleting existing file record: {e}")
 
     async def get_admin_user_role_id(self, user_email: str) -> Optional[int]:
         """Get user_role_id for admin role only - only admins can upload files
@@ -402,17 +420,26 @@ class FileService:
             if existing_file:
                 match_type = existing_file.get("match_type", "unknown")
                 if match_type == "hash":
+                    logger.info(f"📋 Exact hash match found for {original_filename} (ID: {existing_file['id']})")
                     return {"allow": True, "reason": "exact_duplicate"}
                 else:
                     if not replace_existing:
+                        logger.warning(f"⚠️ File {original_filename} already exists. replace_existing=false, rejecting upload.")
                         return {"allow": False, "reason": "file_exists", "detail": f"File {original_filename} already exists. Set replace_existing=true."}
                     else:
-                        # Delete existing file
-                        await self.delete_existing_file_record(existing_file['id'])
-                        return {"allow": True, "reason": "replaced"}
+                        # Delete existing file from both Gemini and DB
+                        logger.info(f"🔄 Replacing existing file {original_filename} (ID: {existing_file['id']})")
+                        try:
+                            await self.delete_existing_file_record(existing_file['id'])
+                            logger.info(f"✅ Successfully deleted existing file {original_filename} from Gemini and DB")
+                            return {"allow": True, "reason": "replaced"}
+                        except Exception as delete_error:
+                            logger.error(f"❌ Failed to delete existing file during replacement: {delete_error}")
+                            return {"allow": False, "reason": "replacement_failed", "detail": f"Could not delete existing file: {delete_error}"}
+            logger.info(f"✅ No duplicates found for {original_filename}, allowing new upload")
             return {"allow": True, "reason": "new_file"}
         except Exception as e:
-            logger.error(f"Error checking duplicate file: {e}")
+            logger.error(f"❌ Error checking duplicate file: {e}")
             return {"allow": False, "reason": "error"}
 
 # Singleton instance
