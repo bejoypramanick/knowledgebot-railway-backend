@@ -134,9 +134,9 @@ class WebsiteService:
         # Upload to Gemini
         from website_crawling.service.ai_service import upload_content_to_gemini, record_scraped_metadata
 
-        # Get domain for use as fallback title
+        # Get domain
         domain = urlparse(url).netloc.replace('www.', '')
-        title = result.get("title") or domain  # Use domain as fallback instead of "Untitled"
+        title = result.get("title") or ""  # Empty string if no title found (URL is already shown)
 
         gemini_result = await upload_content_to_gemini(
             content=result["content"],
