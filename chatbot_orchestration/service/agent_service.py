@@ -260,6 +260,18 @@ class PydanticAIGatewayService:
 
                 logger.info(f"📂 Using FileSearch store: {formatted_store_name}")
 
+                # List available FileSearch stores for debugging
+                try:
+                    if hasattr(client, 'file_search_stores'):
+                        stores = list(client.file_search_stores.list())
+                        logger.info(f"📋 Available FileSearch stores ({len(stores)}):")
+                        for idx, store in enumerate(stores):
+                            store_display_name = getattr(store, 'display_name', 'N/A')
+                            logger.info(f"   {idx+1}. {store.name} - Display: {store_display_name}")
+                        logger.info(f"🎯 Target store for RAG search: {formatted_store_name}")
+                except Exception as list_error:
+                    logger.warning(f"⚠️ Could not list FileSearch stores: {list_error}")
+
                 # Use Gemini File Search tool to search the knowledge base
                 from google.genai import types
                 
