@@ -83,21 +83,31 @@ async def lifespan(app: FastAPI):
 
                     if existing_store:
                         # Use the existing store with matching display_name
+                        store_id = existing_store.name
                         logger.info(f"✅ Found existing FileSearch store with matching display_name")
-                        logger.info(f"   Store ID: {existing_store.name}")
+                        logger.info(f"   Store ID: {store_id}")
                         logger.info(f"   Display name: {existing_store.display_name}")
-                        # Update environment variable so other services can use it
-                        os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = existing_store.name
+                        logger.info("=" * 80)
+                        logger.info(f"📋 COPY THIS STORE ID TO RAILWAY ENVIRONMENT VARIABLES:")
+                        logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
+                        logger.info("=" * 80)
+                        # Update environment variable so other services can use it (only works within this process)
+                        os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
                     else:
                         # Create new store with display name (only if not found)
                         logger.info(f"🔨 No store found with display_name '{store_name}', creating new one...")
                         new_store = client.file_search_stores.create(
                             config={'display_name': store_name}
                         )
-                        logger.info(f"✅ FileSearch store created: {new_store.name}")
+                        store_id = new_store.name
+                        logger.info(f"✅ FileSearch store created: {store_id}")
                         logger.info(f"   Display name: {getattr(new_store, 'display_name', store_name)}")
-                        # Update environment variable so other services can use it
-                        os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = new_store.name
+                        logger.info("=" * 80)
+                        logger.info(f"📋 COPY THIS STORE ID TO RAILWAY ENVIRONMENT VARIABLES:")
+                        logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
+                        logger.info("=" * 80)
+                        # Update environment variable so other services can use it (only works within this process)
+                        os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
 
         except Exception as e:
             logger.error(f"❌ Error initializing FileSearch store: {e}")
