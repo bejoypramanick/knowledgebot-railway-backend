@@ -190,7 +190,17 @@ class DoclingProcessor:
         result = self._converter.convert(source)
         # Get the first (and usually only) result from the generator
         conversion_result = next(result)
-        return conversion_result.document
+
+        # Debug: log what we got
+        logger.info(f"🔍 Conversion result type: {type(conversion_result)}")
+        logger.info(f"🔍 Conversion result attributes: {dir(conversion_result)[:5]}")  # First 5 attributes
+
+        # Check if it has 'document' attribute, otherwise return the result itself
+        if hasattr(conversion_result, 'document'):
+            return conversion_result.document
+        else:
+            logger.info(f"🔍 No 'document' attribute, returning result directly")
+            return conversion_result
 
     async def _extract_and_ocr_images(
         self,
