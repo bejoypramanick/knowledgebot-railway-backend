@@ -47,7 +47,7 @@ class FileSearchStoreManager:
                 print(f"🔨 Creating new FileSearch store: {store_name}")
                 # Create new store using correct Python client API
                 new_store = client.file_search_stores.create(
-                    display_name=store_name
+                    displayName=store_name
                 )
                 print(f"✅ FileSearch store created: {new_store.name}")
                 print(f"   Display name: {getattr(new_store, 'display_name', 'N/A')}")

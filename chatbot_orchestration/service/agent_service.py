@@ -63,7 +63,7 @@ class PydanticAIGatewayService:
                 else:
                     # Create new store using correct Python client API
                     new_store = self.genai_client.stores.create(
-                        display_name="KnowledgeBot FileSearch Store"
+                        displayName="KnowledgeBot FileSearch Store"
                     )
                     logger.info(f"Created FileSearch store: {new_store.name}")
                     return new_store.name

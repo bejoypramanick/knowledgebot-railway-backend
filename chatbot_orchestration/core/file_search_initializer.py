@@ -67,7 +67,7 @@ async def initialize_file_search_store() -> Optional[str]:
             # Create new store using correct Python client API
             logger.info(f"🔨 Creating FileSearch store: {store_name}")
             new_store = client.file_search_stores.create(
-                display_name=store_name
+                displayName=store_name
             )
             logger.info(f"✅ FileSearch store created successfully: {new_store.name}")
             logger.info(f"   Display name: {getattr(new_store, 'display_name', 'N/A')}")
