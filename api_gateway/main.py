@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
         # Initialize Gemini FileSearch Store (centralized - done once here)
         logger.info("📂 Initializing Gemini FileSearch store...")
         try:
-            from google import genai
+            from google.genai import Client
 
             # Get Gemini API key
             gemini_api_key = os.getenv("GEMINI_API_KEY")
@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
                 logger.warning("⚠️ GEMINI_API_KEY not set - FileSearch store initialization skipped")
             else:
                 # Initialize Gemini client
-                client = genai.Client(api_key=gemini_api_key)
+                client = Client(api_key=gemini_api_key)
 
                 # Get store name from environment
                 store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
