@@ -49,8 +49,8 @@ async def lifespan(app: FastAPI):
              logger.warning("⚠️ Gemini client failed to initialize")
 
         # Note: FileSearch store is created by API Gateway during startup
-        # This service looks it up by display_name dynamically
-        store_display_name = "knowledgebot-search-store"
+        # Read display_name from environment variable and look it up
+        store_display_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
         logger.info(f"📂 Looking for FileSearch store by display_name: {store_display_name}")
 
         # Lookup store by display name using shared utility
