@@ -64,9 +64,15 @@ class FileService:
         """Delete an existing file record from database."""
         try:
             from knowledgebase_ingestion.core.db import get_db_connection
-            
+
+            # Convert db_id to integer if it's a numeric string
+            try:
+                numeric_id = int(db_id)
+            except ValueError:
+                numeric_id = db_id
+
             async with get_db_connection() as conn:
-                await conn.execute("DELETE FROM file_uploads WHERE id = $1", db_id)
+                await conn.execute("DELETE FROM file_uploads WHERE id = $1", numeric_id)
                 logger.info(f"Deleted old file record from database: {db_id}")
         except Exception as e:
             logger.error(f"Error deleting existing file record: {e}")
@@ -264,9 +270,16 @@ class FileService:
         """Delete file record from specified table"""
         try:
             from knowledgebase_ingestion.core.db import get_db_connection
-            
+
+            # Convert file_id to integer if it's a numeric string
+            try:
+                numeric_id = int(file_id)
+            except ValueError:
+                # If not a number, use as-is
+                numeric_id = file_id
+
             async with get_db_connection() as conn:
-                await conn.execute(f"DELETE FROM {table_name} WHERE id = $1", file_id)
+                await conn.execute(f"DELETE FROM {table_name} WHERE id = $1", numeric_id)
         except Exception as e:
             logger.error(f"Error deleting file record: {e}")
             raise
