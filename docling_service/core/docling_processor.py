@@ -26,7 +26,7 @@ except Exception as e:
 # Import docling libraries
 try:
     from docling.document_converter import DocumentConverter
-    from docling.models.document import ConvertedDocument
+    from docling_core.models.document import Document
     logger.info("✅ Docling libraries imported successfully")
 except ImportError as e:
     logger.error(f"❌ Failed to import docling: {e}")
@@ -178,7 +178,7 @@ class DoclingProcessor:
                 "filename": original_filename
             }
 
-    def _convert_document(self, file_path: str) -> ConvertedDocument:
+    def _convert_document(self, file_path: str) -> Document:
         """
         Blocking document conversion.
         Called in thread pool executor.
@@ -187,11 +187,12 @@ class DoclingProcessor:
             raise RuntimeError("Docling converter not initialized")
 
         source = Path(file_path)
-        return self._converter.convert(source)
+        result = self._converter.convert(source)
+        return result.document
 
     async def _extract_and_ocr_images(
         self,
-        converted_doc: ConvertedDocument,
+        converted_doc: Document,
         filename: str
     ) -> Dict[str, Any]:
         """
