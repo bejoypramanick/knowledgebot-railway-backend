@@ -193,7 +193,7 @@ async def record_metadata(
         file_ext = filename.rsplit('.', 1)[-1] if '.' in filename else ''
 
         result = await file_service.record_metadata(
-            user_id=user_id,
+            user_email=user_id,  # Note: user_id parameter actually contains email
             original_filename=filename,
             file_display_name=kwargs.get('display_name', filename),
             file_ext=file_ext,
@@ -342,7 +342,7 @@ async def process_single_file_upload(
 
         # Store metadata
         file_record_id = await file_service.record_metadata(
-            user_id=email,
+            user_email=email,
             original_filename=original_filename,
             file_display_name=file_display_name,
             file_ext=original_filename.rsplit('.', 1)[-1] if '.' in original_filename else '',

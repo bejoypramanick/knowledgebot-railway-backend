@@ -71,42 +71,61 @@ class FileService:
         except Exception as e:
             logger.error(f"Error deleting existing file record: {e}")
 
-    async def get_admin_user_role_id(self, user_id: str) -> Optional[int]:
-        """Get user_role_id for admin role only - only admins can upload files"""
+    async def get_admin_user_role_id(self, user_email: str) -> Optional[int]:
+        """Get user_role_id for admin role only - only admins can upload files
+
+        Args:
+            user_email: The user's email address (e.g., 'globistaan@gmail.com')
+
+        Returns:
+            user_role_id if the user has admin privileges, None otherwise
+        """
         try:
             from knowledgebase_ingestion.core.db import get_db_connection
-            
+
             async with get_db_connection() as conn:
-                # First get the admin role ID
+                # First, look up the user by email to get their user_id
+                user = await conn.fetchrow(
+                    "SELECT id, email FROM users WHERE email = $1",
+                    user_email
+                )
+
+                if not user:
+                    logger.error(f"User not found: {user_email}")
+                    return None
+
+                user_id = user['id']
+
+                # Get the admin role ID
                 admin_role = await conn.fetchrow(
                     "SELECT id FROM roles WHERE role_name = 'admin'"
                 )
-                
+
                 if not admin_role:
                     logger.error("Admin role not found in roles table")
                     return None
-                
+
                 admin_role_id = admin_role['id']
-                
+
                 # Check if user has admin role mapping
                 admin_mapping = await conn.fetchrow(
                     """SELECT user_role_id, user_id as mapped_user_id, is_active
-                       FROM user_role_mapping 
+                       FROM user_role_mapping
                        WHERE user_id = $1 AND role_id = $2 AND is_active = true""",
                     user_id, admin_role_id
                 )
-                
-                logger.info(f"🔍 Admin check for user {user_id}:")
+
+                logger.info(f"🔍 Admin check for user {user_email} (user_id={user_id}):")
                 logger.info(f"  - Looking for role_id {admin_role_id}")
                 logger.info(f"  - Found mapping: {admin_mapping}")
-                
+
                 if admin_mapping:
-                    logger.info(f"✅ User {user_id} has admin privileges (user_role_id: {admin_mapping['user_role_id']})")
+                    logger.info(f"✅ User {user_email} has admin privileges (user_role_id: {admin_mapping['user_role_id']})")
                     return admin_mapping['user_role_id']
                 else:
-                    logger.warning(f"❌ User {user_id} does not have admin role - file upload denied")
-                    logger.warning(f"  - Available mappings for user {user_id}:")
-                    
+                    logger.warning(f"❌ User {user_email} does not have admin role - file upload denied")
+                    logger.warning(f"  - Available mappings for user {user_email}:")
+
                     # Debug: Show all mappings for this user
                     all_mappings = await conn.fetch(
                         "SELECT urm.user_id, urm.role_id, r.role_name, urm.is_active "
@@ -115,32 +134,46 @@ class FileService:
                         "WHERE urm.user_id = $1",
                         user_id
                     )
-                    
+
                     for mapping in all_mappings:
                         logger.info(f"    - Mapping: user_id={mapping['user_id']}, role_id={mapping['role_id']}, role={mapping['role_name']}, active={mapping['is_active']}")
-                    
+
                     return None
-                
+
         except Exception as e:
             logger.error(f"Error checking admin user role ID: {e}")
             return None
 
-    async def record_metadata(self, user_id: str, original_filename: str, file_display_name: str, 
-                             file_ext: str, uploaded_file: Any, 
-                             file_size: int, sha256_hash: str, 
+    async def record_metadata(self, user_email: str, original_filename: str, file_display_name: str,
+                             file_ext: str, uploaded_file: Any,
+                             file_size: int, sha256_hash: str,
                              final_state: str, gemini_processed_at: Any, mime_type: str, version: int = 1):
-        """Persist file metadata and metrics to the PostgreSQL database."""
+        """Persist file metadata and metrics to the PostgreSQL database.
+
+        Args:
+            user_email: The user's email address
+            original_filename: Original name of the uploaded file
+            file_display_name: Display name for the file
+            file_ext: File extension
+            uploaded_file: The uploaded file object
+            file_size: File size in bytes
+            sha256_hash: SHA256 hash of the file
+            final_state: Gemini processing state
+            gemini_processed_at: Timestamp when Gemini processed the file
+            mime_type: MIME type of the file
+            version: File version number (default: 1)
+        """
         try:
             logger.info(f"🗄️ [DB] Saving metadata for {original_filename} (version {version}) - Size: {file_size} bytes")
-            
+
             # Use the new DatabaseManager pattern
             from knowledgebase_ingestion.core.db import get_db_connection
-            
+
             # Verify user has admin role and get the user_role_id
-            user_role_id = await self.get_admin_user_role_id(user_id)
-            
+            user_role_id = await self.get_admin_user_role_id(user_email)
+
             if user_role_id is None:
-                raise PermissionError(f"User {user_id} does not have admin privileges to upload files")
+                raise PermissionError(f"User {user_email} does not have admin privileges to upload files")
             
             db_record_id = None
             try:
@@ -159,10 +192,10 @@ class FileService:
                     
                     # Log metric
                     await conn.execute(
-                        """INSERT INTO metrics (metric_type, metric_name, value, unit, tags, created_at) 
+                        """INSERT INTO metrics (metric_type, metric_name, value, unit, tags, created_at)
                            VALUES ($1, $2, $3, $4, $5, NOW())""",
-                        'file_upload', 'file_size_bytes', file_size, 'bytes', 
-                        {'user_id': user_id, 'file_id': db_record_id, 'filename': original_filename}
+                        'file_upload', 'file_size_bytes', file_size, 'bytes',
+                        {'user_email': user_email, 'file_id': db_record_id, 'filename': original_filename}
                     )
             except Exception as db_error:
                 logger.error(f"❌ [DB] Database error during metadata recording: {db_error}")
