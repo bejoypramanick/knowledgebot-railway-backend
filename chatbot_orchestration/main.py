@@ -49,7 +49,6 @@ async def lifespan(app: FastAPI):
         # Note: FileSearch store is created by API Gateway during startup
         # Store name is read from GEMINI_FILE_SEARCH_STORE_NAME environment variable
         # No store listing here to avoid performance overhead (service called frequently)
-        import os
         store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "not-set")
         logger.info(f"📂 Using FileSearch store from environment: {store_name}")
 
