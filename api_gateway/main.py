@@ -81,11 +81,13 @@ async def lifespan(app: FastAPI):
                         # Update environment variable so other services can use it
                         os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = existing_store.name
                     else:
-                        # Create new store (API creates with auto-generated name)
-                        logger.info(f"🔨 Creating new FileSearch store...")
-                        new_store = client.file_search_stores.create()
+                        # Create new store with display name
+                        logger.info(f"🔨 Creating new FileSearch store with name: {store_name}")
+                        new_store = client.file_search_stores.create(
+                            config={'display_name': store_name}
+                        )
                         logger.info(f"✅ FileSearch store created: {new_store.name}")
-                        logger.info(f"   Display name: {getattr(new_store, 'display_name', 'N/A')}")
+                        logger.info(f"   Display name: {getattr(new_store, 'display_name', store_name)}")
                         # Update environment variable so other services can use it
                         os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = new_store.name
 
