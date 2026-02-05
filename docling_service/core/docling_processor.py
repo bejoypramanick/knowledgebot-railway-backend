@@ -7,6 +7,16 @@ import time
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
+# Configure model cache directories BEFORE importing libraries
+# This ensures models download to the persistent volume
+os.environ.setdefault('HF_HOME', '/models/huggingface')
+os.environ.setdefault('EASYOCR_USER_AGENT_ORIGIN', '/models/easyocr')
+
+# Create cache directories if they don't exist
+os.makedirs('/models/huggingface', exist_ok=True)
+os.makedirs('/models/easyocr', exist_ok=True)
+os.makedirs(os.path.expanduser('~/.EasyOCR'), exist_ok=True)
+
 from docling.document_converter import DocumentConverter
 from docling.models.document import ConvertedDocument
 import easyocr

@@ -37,6 +37,13 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("🚀 Docling Service starting...")
 
+        # Log cache directory configuration
+        hf_home = os.getenv('HF_HOME', '/models/huggingface')
+        easyocr_home = os.getenv('EASYOCR_USER_AGENT_ORIGIN', '/models/easyocr')
+        logger.info(f"📁 Model Cache Directories:")
+        logger.info(f"   Hugging Face: {hf_home}")
+        logger.info(f"   EasyOCR: {easyocr_home}")
+
         # Initialize Docling processor
         logger.info("⏳ Initializing Docling processor and OCR reader...")
         processor = await get_processor()

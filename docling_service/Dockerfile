@@ -5,6 +5,11 @@ WORKDIR /app
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 PYTHONHASHSEED=random PYTHONPATH="/app"
 
+# Set cache directories for models (will use volume if mounted)
+ENV HF_HOME=/models/huggingface
+ENV EASYOCR_USER_AGENT_ORIGIN=/models/easyocr
+ENV HOME=/root
+
 # Install system dependencies for document processing and image handling
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -18,6 +23,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy requirements and install
 COPY docling_service/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Create and configure model cache directory (for persistent volume)
+RUN mkdir -p /models/huggingface /models/easyocr /root/.EasyOCR && \
+    chmod -R 777 /models /root/.EasyOCR
 
 # Copy application code
 COPY shared/ ./shared/
