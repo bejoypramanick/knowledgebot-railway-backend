@@ -86,7 +86,7 @@ class DoclingProcessor:
 
     def _init_converter(self) -> DocumentConverter:
         """Blocking initialization of DocumentConverter."""
-        return DocumentConverter(model_name=self.model_name)
+        return DocumentConverter()
 
     def _init_ocr_reader(self) -> easyocr.Reader:
         """Blocking initialization of EasyOCR Reader."""
