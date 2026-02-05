@@ -101,7 +101,7 @@ async def lifespan(app: FastAPI):
                             for unnamed_store in unnamed_stores:
                                 try:
                                     logger.info(f"   🗑️ Deleting unnamed store: {unnamed_store.name}")
-                                    client.file_search_stores.delete(unnamed_store.name)
+                                    client.file_search_stores.delete(name=unnamed_store.name)
                                     logger.info(f"   ✅ Deleted: {unnamed_store.name}")
                                 except Exception as delete_error:
                                     logger.warning(f"   ⚠️ Failed to delete {unnamed_store.name}: {delete_error}")
@@ -134,7 +134,7 @@ async def lifespan(app: FastAPI):
                             for unnamed_store in unnamed_stores:
                                 try:
                                     logger.info(f"   🗑️ Deleting unnamed store: {unnamed_store.name}")
-                                    client.file_search_stores.delete(unnamed_store.name)
+                                    client.file_search_stores.delete(name=unnamed_store.name)
                                     logger.info(f"   ✅ Deleted: {unnamed_store.name}")
                                 except Exception as delete_error:
                                     logger.warning(f"   ⚠️ Failed to delete {unnamed_store.name}: {delete_error}")
