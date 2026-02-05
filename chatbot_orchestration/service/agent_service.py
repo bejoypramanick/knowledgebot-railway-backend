@@ -262,6 +262,21 @@ class PydanticAIGatewayService:
 
                 logger.info(f"📂 Using FileSearch store: {resolved_store_id}")
 
+                # DEBUG: List all files in the FileSearch store before searching
+                logger.info("📋 Files currently in FileSearch store:")
+                try:
+                    documents = list(client.file_search_stores.list_files(name=resolved_store_id))
+                    logger.info(f"   Total documents: {len(documents)}")
+                    for idx, doc in enumerate(documents[:20]):  # Show first 20
+                        doc_name = getattr(doc, 'name', 'N/A')
+                        doc_display = getattr(doc, 'display_name', 'N/A')
+                        doc_size = getattr(doc, 'size_bytes', 'N/A')
+                        logger.info(f"   [{idx+1}] ID: {doc_name}")
+                        logger.info(f"       Display: {doc_display}")
+                        logger.info(f"       Size: {doc_size}")
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Could not list files: {e}")
+
                 # Configure the File Search tool
                 file_search_tool = types.Tool(
                     file_search=types.FileSearch(
@@ -273,13 +288,28 @@ class PydanticAIGatewayService:
                 logger.info(f"🔎 Searching FileSearch store for: {message[:100]}...")
 
                 # Use explicit search prompt with low temperature (this was working before)
+                # Force tool use with explicit prompt
+                config_kwargs = {
+                    'tools': [file_search_tool],
+                    'temperature': 0.1,  # Low temperature for factual, deterministic responses
+                }
+
+                # Try to add tool_choice if supported (Gemini 2.5+)
+                try:
+                    if hasattr(types, 'ToolChoice'):
+                        config_kwargs['tool_choice'] = types.ToolChoice(
+                            mode=types.ToolChoiceMode.ANY if hasattr(types, 'ToolChoiceMode') else 'ANY'
+                        )
+                        logger.info("✅ Using tool_choice to force FileSearch invocation")
+                except Exception as e:
+                    logger.warning(f"⚠️ tool_choice not supported: {e}, continuing without it")
+
                 search_response = client.models.generate_content(
                     model=MODEL_NAME,
-                    contents=f"Search for information related to: {message}",
-                    config=types.GenerateContentConfig(
-                        tools=[file_search_tool],
-                        temperature=0.1  # Low temperature for factual, deterministic responses
-                    )
+                    contents=f"""Use the FileSearch tool to search for information related to: {message}
+
+IMPORTANT: You MUST use the FileSearch tool to search the documents. Return the exact information found in the documents.""",
+                    config=types.GenerateContentConfig(**config_kwargs)
                 )
 
                 rag_context = ""
@@ -296,11 +326,30 @@ class PydanticAIGatewayService:
                     logger.warning("⚠️ RAG search returned empty response")
                     rag_context = "No relevant documents found in the knowledge base."
 
-                # Log grounding metadata if available
+                # Log response attributes and grounding metadata
+                logger.info("📊 Response attributes:")
+                logger.info(f"   - text: {len(search_response.text) if search_response.text else 0} chars")
+                logger.info(f"   - has grounding_metadata: {hasattr(search_response, 'grounding_metadata')}")
+                if hasattr(search_response, 'candidates') and search_response.candidates:
+                    logger.info(f"   - candidates: {len(search_response.candidates)}")
+                    for idx, candidate in enumerate(search_response.candidates):
+                        logger.info(f"     [{idx}] content: {len(candidate.content.parts)} parts")
+
+                # Check for grounding metadata in multiple places
+                grounding_found = False
                 if hasattr(search_response, 'grounding_metadata') and search_response.grounding_metadata:
-                    logger.info(f"📚 Grounding metadata: {search_response.grounding_metadata}")
-                else:
-                    logger.info("⚠️ No grounding metadata in response")
+                    logger.info(f"✅ Found grounding_metadata on response: {search_response.grounding_metadata}")
+                    grounding_found = True
+
+                # Check in candidates
+                if hasattr(search_response, 'candidates') and search_response.candidates:
+                    for idx, candidate in enumerate(search_response.candidates):
+                        if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
+                            logger.info(f"✅ Found grounding_metadata in candidate {idx}: {candidate.grounding_metadata}")
+                            grounding_found = True
+
+                if not grounding_found:
+                    logger.warning("⚠️ No grounding metadata found in response or candidates")
 
             except Exception as e:
                 logger.error(f"❌ RAG search failed: {e}", exc_info=True)
