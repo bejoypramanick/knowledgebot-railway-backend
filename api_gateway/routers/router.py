@@ -120,7 +120,7 @@ async def public_chat_stream(request: Request):
             try:
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     response = await client.get(
-                        f"{config_service_url}/api/v1/configuration/widget-config",
+                        f"{config_service_url}/api/v1/configuration/widgetConfig",
                         timeout=5.0
                     )
                     
@@ -151,7 +151,7 @@ async def public_chat_stream(request: Request):
             try:
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     response = await client.get(
-                        f"{config_service_url}/api/v1/configuration/widget-config",
+                        f"{config_service_url}/api/v1/configuration/widgetConfig",
                         timeout=5.0
                     )
                     

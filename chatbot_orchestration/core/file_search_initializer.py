@@ -8,6 +8,14 @@ from typing import Optional
 
 logger = logging.getLogger("chatbot_orchestration")
 
+# Module-level variable to store the initialized FileSearch store name
+_initialized_store_name: Optional[str] = None
+
+
+def get_file_search_store_name() -> Optional[str]:
+    """Get the initialized FileSearch store name"""
+    return _initialized_store_name
+
 
 async def initialize_file_search_store() -> Optional[str]:
     """
@@ -17,6 +25,8 @@ async def initialize_file_search_store() -> Optional[str]:
     Returns:
         Store name if successful, None otherwise
     """
+    global _initialized_store_name
+
     try:
         from chatbot_orchestration.core.ai import get_genai_client
 
@@ -32,8 +42,10 @@ async def initialize_file_search_store() -> Optional[str]:
         # Check if file_search_stores API is available
         if not hasattr(client, 'file_search_stores'):
             logger.warning("⚠️ file_search_stores API not available - skipping initialization")
-            logger.info(f"   Using store name directly: fileSearchStores/{store_name}")
-            return f"fileSearchStores/{store_name}"
+            formatted_name = f"fileSearchStores/{store_name}"
+            logger.info(f"   Using store name directly: {formatted_name}")
+            _initialized_store_name = formatted_name
+            return formatted_name
 
         logger.info(f"🔍 Checking FileSearch store: {store_name}")
 
@@ -49,6 +61,7 @@ async def initialize_file_search_store() -> Optional[str]:
 
         if existing_store:
             logger.info(f"✅ FileSearch store already exists: {existing_store.name}")
+            _initialized_store_name = existing_store.name
             return existing_store.name
         else:
             # Create new store
@@ -60,6 +73,7 @@ async def initialize_file_search_store() -> Optional[str]:
                 }
             )
             logger.info(f"✅ FileSearch store created successfully: {new_store.name}")
+            _initialized_store_name = new_store.name
             return new_store.name
 
     except Exception as e:
