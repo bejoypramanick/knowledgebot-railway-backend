@@ -67,13 +67,15 @@ async def upload_content_to_gemini(
         logger.info(f"🤖 [GEMINI] Uploading scraped content - Display: {display_name}")
 
         # Get resolved store ID from startup (cached during lifespan)
-        from website_crawling.main import _resolved_store_id
+        # Use module import to ensure we get the value set during lifespan
+        import website_crawling.main as wc_main
+        resolved_store_id = wc_main._resolved_store_id
 
-        if not _resolved_store_id:
+        if not resolved_store_id:
             logger.error("❌ FileSearch store not resolved during startup")
             raise ValueError("FileSearch store not configured")
 
-        file_search_store_name = _resolved_store_id
+        file_search_store_name = resolved_store_id
         logger.info(f"📂 Using FileSearch store: {file_search_store_name}")
 
         # Upload directly to FileSearch store (same as file uploads)

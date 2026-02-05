@@ -85,8 +85,9 @@ async def process_with_gemini(
     try:
         # If no store name provided, get resolved store ID from startup
         if not file_search_store_name:
-            from knowledgebase_ingestion.main import _resolved_store_id
-            file_search_store_name = _resolved_store_id
+            # Use module import to ensure we get the value set during lifespan
+            import knowledgebase_ingestion.main as kb_main
+            file_search_store_name = kb_main._resolved_store_id
 
         if file_search_store_name:
             logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
