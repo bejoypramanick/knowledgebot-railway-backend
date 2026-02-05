@@ -16,11 +16,12 @@ load_dotenv()
 # Configure Shared Telemetry
 import logging
 from shared.telemetry import setup_telemetry, instrument_fastapi
+from api_gateway.core.otel_logger import get_otel_logger
 
 # Initialize Telemetry (Logging + Tracing)
 # Use default behavior (span exporter disabled by default via env var)
 setup_telemetry("api-gateway")
-logger = logging.getLogger("api_gateway")
+logger = get_otel_logger("api_gateway", "api-gateway")
 
 from api_gateway.core.config import get_settings
 from api_gateway.core.auth_middleware import get_current_user
@@ -42,7 +43,8 @@ async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     try:
         settings = get_settings()
-        logger.info(f"🚀 API Gateway ({settings.service_identity}) starting up...")
+        logger.info(f"🚀 API Gateway starting up...")
+        logger.info(f"({settings.service_identity})")
 
         # Initialize Gemini FileSearch Store (centralized - done once here)
         logger.info("📂 Initializing Gemini FileSearch store...")
@@ -71,6 +73,7 @@ async def lifespan(app: FastAPI):
                     # List existing stores
                     stores = list(client.file_search_stores.list())
                     logger.info(f"📋 Available FileSearch stores ({len(stores)}):")
+                    logger.log_file_search_operation("list_stores", details={"count": len(stores)})
 
                     # Check if a store with our desired display_name already exists
                     existing_store = None
@@ -87,6 +90,8 @@ async def lifespan(app: FastAPI):
                         logger.info(f"✅ Found existing FileSearch store with matching display_name")
                         logger.info(f"   Store ID: {store_id}")
                         logger.info(f"   Display name: {existing_store.display_name}")
+                        logger.log_file_search_operation("store_found", store_id=store_id,
+                                                        details={"display_name": existing_store.display_name})
                         logger.info("=" * 80)
                         logger.info(f"📋 COPY THIS STORE ID TO RAILWAY ENVIRONMENT VARIABLES:")
                         logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
@@ -101,6 +106,8 @@ async def lifespan(app: FastAPI):
                             store_id = stores[0].name
                             logger.info(f"ℹ️ No store found with display_name '{store_name}'")
                             logger.info(f"📌 Using existing store: {store_id}")
+                            logger.log_file_search_operation("store_reused", store_id=store_id,
+                                                            details={"reason": "no_matching_display_name", "available_stores": len(stores)})
                             logger.info("=" * 80)
                             logger.info(f"📋 COPY THIS STORE ID TO RAILWAY ENVIRONMENT VARIABLES:")
                             logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
@@ -117,6 +124,8 @@ async def lifespan(app: FastAPI):
                             store_id = new_store.name
                             logger.info(f"✅ FileSearch store created: {store_id}")
                             logger.info(f"   Display name: {getattr(new_store, 'display_name', store_name)}")
+                            logger.log_file_search_operation("store_created", store_id=store_id,
+                                                            details={"display_name": getattr(new_store, 'display_name', store_name)})
                             logger.info("=" * 80)
                             logger.info(f"📋 COPY THIS STORE ID TO RAILWAY ENVIRONMENT VARIABLES:")
                             logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
@@ -125,6 +134,7 @@ async def lifespan(app: FastAPI):
 
         except Exception as e:
             logger.error(f"❌ Error initializing FileSearch store: {e}")
+            logger.log_file_search_operation("initialization_error", details={"error": str(e)})
             logger.warning("⚠️ Services will continue but file uploads may fail")
 
         logger.info(f"🚀 API Gateway ({settings.service_identity}) started successfully")
