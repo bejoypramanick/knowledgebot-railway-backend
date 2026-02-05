@@ -14,13 +14,13 @@ psutil>=6.1.0
 tenacity>=8.2.2
 
 # Document Processing
-docling==1.5.1
-docling-core==2.5.0
+docling>=1.0.0,<2.0.0
+docling-core>=2.0.0,<3.0.0
 
 # Image OCR Extraction
-easyocr==1.7.1
-pillow==10.0.0
-opencv-python==4.8.1.78
+easyocr>=1.6.0
+pillow>=10.0.0
+opencv-python>=4.8.0
 
 # OpenTelemetry
 opentelemetry-api>=1.20.0
