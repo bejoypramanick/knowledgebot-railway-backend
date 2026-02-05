@@ -34,33 +34,46 @@ def get_file_search_store_by_display_name(
         return _store_cache[display_name]
 
     try:
-        logger.info(f"🔍 Looking up FileSearch store by display_name: {display_name}")
+        logger.info(f"🔍 Looking up FileSearch store by display_name: '{display_name}'")
+        logger.info(f"   Client type: {type(client)}")
+
+        # Check if client has file_search_stores API
+        if not hasattr(client, 'file_search_stores'):
+            logger.error(f"❌ Client does not have 'file_search_stores' API!")
+            logger.error(f"   Available attributes: {[attr for attr in dir(client) if not attr.startswith('_')]}")
+            return None
 
         # List all FileSearch stores
+        logger.info("📋 Attempting to list FileSearch stores...")
         stores = list(client.file_search_stores.list())
         logger.info(f"📋 Found {len(stores)} FileSearch store(s) to search")
+
+        if not stores:
+            logger.warning(f"⚠️ No FileSearch stores found at all!")
+            return None
 
         # Search for store with matching display_name
         for idx, store in enumerate(stores):
             store_display_name = getattr(store, 'display_name', None)
-            logger.info(f"   [{idx+1}] {store.name} | display_name: {store_display_name}")
+            store_name = getattr(store, 'name', 'N/A')
+            logger.info(f"   [{idx+1}] store.name={store_name}")
+            logger.info(f"       store.display_name='{store_display_name}'")
+            logger.info(f"       Match? {store_display_name == display_name}")
 
             if store_display_name == display_name:
-                logger.info(f"✅ Found FileSearch store: {store.name} (display_name: {display_name})")
-                _store_cache[display_name] = store.name
-                return store.name
+                logger.info(f"✅ FOUND! FileSearch store: {store_name} (display_name: {display_name})")
+                _store_cache[display_name] = store_name
+                return store_name
 
         # Store not found
-        logger.warning(f"⚠️ FileSearch store not found with display_name: {display_name}")
-        if stores:
-            available = [getattr(s, 'display_name', 'N/A') for s in stores]
-            logger.warning(f"   Available store display_names: {available}")
-        else:
-            logger.warning(f"   No FileSearch stores available at all!")
+        logger.error(f"❌ FileSearch store NOT FOUND with display_name: '{display_name}'")
+        available = [f"'{getattr(s, 'display_name', 'N/A')}'" for s in stores]
+        logger.error(f"   Available display_names: {available}")
         return None
 
     except Exception as e:
-        logger.error(f"❌ Error looking up FileSearch store: {e}", exc_info=True)
+        logger.error(f"❌ EXCEPTION during FileSearch store lookup: {e}", exc_info=True)
+        logger.error(f"   Exception type: {type(e).__name__}")
         return None
 
 
