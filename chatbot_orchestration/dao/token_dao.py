@@ -2,6 +2,7 @@
 Token Data Access Object for Chatbot Orchestration
 Handles database operations for token usage tracking
 """
+from typing import List, Dict, Any
 
 from chatbot_orchestration.core.db import get_db_connection
 from chatbot_orchestration.core.otel_logger import get_otel_logger

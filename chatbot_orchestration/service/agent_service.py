@@ -390,7 +390,15 @@ Conversation History:
             if response and response.text:
                 response_text = response.text
                 logger.info(f"✅ Generated response length: {len(response_text)} characters")
-                
+
+                # Debug: Log response object details
+                logger.info(f"🔍 Response object type: {type(response)}")
+                logger.info(f"🔍 Response attributes: {dir(response)}")
+                if hasattr(response, 'usage_metadata'):
+                    logger.info(f"🔍 Response usage_metadata: {response.usage_metadata}")
+                if hasattr(response, 'usage'):
+                    logger.info(f"🔍 Response usage: {response.usage}")
+
                 # Track token usage from the RAG response
                 await self._track_token_usage(response, session_id)
                 
