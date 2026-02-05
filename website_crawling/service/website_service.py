@@ -11,8 +11,13 @@ from urllib.parse import urlparse, urljoin
 from datetime import datetime
 
 from website_crawling.core.otel_logger import get_otel_logger
+from website_crawling.core.config import settings
 from website_crawling.dao.scraping_dao import ScrapingDAO
 from website_crawling.utils.links import extract_links_from_result
+from website_crawling.service.docling_integration import (
+    process_html_with_docling,
+    should_use_docling_for_website
+)
 
 logger = get_otel_logger("website_service", "website-crawling")
 
@@ -131,6 +136,45 @@ class WebsiteService:
         if not result["success"]:
             return result
 
+        # Try to process with Docling (convert HTML to markdown)
+        # This is plug-and-play: if disabled or fails, falls back to raw content
+        content_for_upload = result["content"]
+        docling_metadata = {}
+
+        if await should_use_docling_for_website():
+            try:
+                logger.info(f"🌐 Attempting docling conversion for {url}")
+                markdown_content, docling_metadata = await process_html_with_docling(
+                    result["content"],
+                    url
+                )
+
+                if markdown_content:
+                    # Successfully converted to markdown
+                    content_for_upload = markdown_content
+                    logger.info(
+                        f"✅ Converted to markdown: {len(markdown_content)} chars"
+                    )
+                else:
+                    # Docling processing failed
+                    if settings.docling_website_fallback_to_raw:
+                        logger.info(f"⚠️ Docling failed for {url} - falling back to raw HTML")
+                    else:
+                        error_msg = docling_metadata.get("error", "Docling processing failed")
+                        logger.error(f"❌ Docling processing failed and fallback disabled: {error_msg}")
+                        return {
+                            "success": False,
+                            "error": error_msg,
+                            "url": url
+                        }
+
+            except asyncio.TimeoutError:
+                logger.warning(
+                    f"⚠️ Docling timeout for {url} - falling back to raw HTML"
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Docling processing error for {url}: {e} - falling back to raw")
+
         # Upload to Gemini
         from website_crawling.service.ai_service import upload_content_to_gemini, record_scraped_metadata
 
@@ -139,7 +183,7 @@ class WebsiteService:
         title = result.get("title") or ""  # Empty string if no title found (URL is already shown)
 
         gemini_result = await upload_content_to_gemini(
-            content=result["content"],
+            content=content_for_upload,
             url=url,
             title=title,
             user_email=options.get("user_email")
