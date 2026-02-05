@@ -247,19 +247,21 @@ class PydanticAIGatewayService:
                 from google.genai import types
 
                 # Get resolved store ID from startup (cached during lifespan)
-                from chatbot_orchestration.main import _resolved_store_id
+                # Use module import to ensure we get the value set during lifespan
+                import chatbot_orchestration.main as chat_main
+                resolved_store_id = chat_main._resolved_store_id
 
-                if not _resolved_store_id:
+                if not resolved_store_id:
                     logger.error("❌ FileSearch store not resolved during startup - RAG search cannot proceed")
                     rag_context = "FileSearch store not configured. Please check API Gateway has created the store."
                     raise ValueError("FileSearch store not resolved")
 
-                logger.info(f"📂 Using FileSearch store: {_resolved_store_id}")
+                logger.info(f"📂 Using FileSearch store: {resolved_store_id}")
 
                 # Configure the File Search tool
                 file_search_tool = types.Tool(
                     file_search=types.FileSearch(
-                        file_search_store_names=[_resolved_store_id]
+                        file_search_store_names=[resolved_store_id]
                     )
                 )
                 
