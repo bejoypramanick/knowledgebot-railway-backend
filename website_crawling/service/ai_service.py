@@ -98,25 +98,38 @@ async def upload_content_to_gemini(
         # Poll for operation completion
         final_state = "PENDING"
         gemini_processed_at = None
+        document_name = None
 
         for i in range(15):  # Poll for up to 30 seconds
             current_operation = genai_client.operations.get(operation)
-            final_state = current_operation.response.state.name if hasattr(current_operation.response.state, 'name') else str(current_operation.response.state)
-            logger.info(f"🔄 [GEMINI] FileSearch operation state (Attempt {i+1}/15): {final_state}")
 
-            if final_state == "ACTIVE":
+            # FileSearch upload returns document_name when done, not state
+            if hasattr(current_operation.response, 'document_name'):
+                final_state = "ACTIVE"
+                document_name = current_operation.response.document_name
+                logger.info(f"✅ [GEMINI] FileSearch upload complete - Document: {document_name}")
                 gemini_processed_at = datetime.utcnow()
-                logger.info("⚡ [GEMINI] FileSearch upload complete - Content is now ACTIVE")
                 break
-            elif final_state == "FAILED":
-                logger.error(f"❌ [GEMINI] FileSearch upload FAILED for {url}")
-                break
+            elif hasattr(current_operation.response.state, 'name'):
+                # Fallback for other operation types that return state
+                final_state = current_operation.response.state.name
+                logger.info(f"🔄 [GEMINI] FileSearch operation state (Attempt {i+1}/15): {final_state}")
+
+                if final_state == "ACTIVE":
+                    gemini_processed_at = datetime.utcnow()
+                    logger.info("⚡ [GEMINI] FileSearch upload complete - Content is now ACTIVE")
+                    break
+                elif final_state == "FAILED":
+                    logger.error(f"❌ [GEMINI] FileSearch upload FAILED for {url}")
+                    break
+            else:
+                logger.warning(f"⚠️ [GEMINI] Unknown operation response structure (Attempt {i+1}/15)")
 
             await asyncio.sleep(2)
 
         return {
             "success": final_state == "ACTIVE",
-            "file_name": operation.response.name if hasattr(operation.response, 'name') else None,
+            "file_name": document_name or (operation.response.name if hasattr(operation.response, 'name') else None),
             "state": final_state,
             "processed_at": gemini_processed_at.isoformat() if gemini_processed_at else None,
             "file_search_store": file_search_store_name

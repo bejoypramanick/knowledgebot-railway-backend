@@ -120,7 +120,21 @@ async def process_with_gemini(
                 operation = genai_client.operations.get(operation)
 
             if operation.done:
-                if hasattr(operation, 'result') and operation.result:
+                # FileSearch upload returns result in response.document_name, not operation.result
+                if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
+                    document_name = operation.response.document_name
+                    final_state = "ACTIVE"
+                    gemini_processed_at = datetime.utcnow()
+
+                    # Create a placeholder file object with the document name
+                    class FileSearchDocument:
+                        def __init__(self, name):
+                            self.name = name
+                            self.uri = None
+
+                    uploaded_file = FileSearchDocument(document_name)
+                    logger.info(f"✅ [GEMINI] Upload complete to FileSearch store. Document: {document_name}")
+                elif hasattr(operation, 'result') and operation.result:
                     uploaded_file = operation.result
                     final_state = "ACTIVE"
                     gemini_processed_at = datetime.utcnow()
