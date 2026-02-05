@@ -30,20 +30,20 @@ def get_file_search_store_by_display_name(
     """
     # Check cache first
     if display_name in _store_cache:
-        logger.debug(f"📦 FileSearch store found in cache: {display_name}")
+        logger.info(f"📦 FileSearch store found in cache: {display_name} -> {_store_cache[display_name]}")
         return _store_cache[display_name]
 
     try:
-        logger.debug(f"🔍 Looking up FileSearch store by display_name: {display_name}")
+        logger.info(f"🔍 Looking up FileSearch store by display_name: {display_name}")
 
         # List all FileSearch stores
         stores = list(client.file_search_stores.list())
-        logger.debug(f"📋 Found {len(stores)} FileSearch store(s)")
+        logger.info(f"📋 Found {len(stores)} FileSearch store(s) to search")
 
         # Search for store with matching display_name
-        for store in stores:
+        for idx, store in enumerate(stores):
             store_display_name = getattr(store, 'display_name', None)
-            logger.debug(f"   - {store.name}: display_name={store_display_name}")
+            logger.info(f"   [{idx+1}] {store.name} | display_name: {store_display_name}")
 
             if store_display_name == display_name:
                 logger.info(f"✅ Found FileSearch store: {store.name} (display_name: {display_name})")
@@ -52,11 +52,15 @@ def get_file_search_store_by_display_name(
 
         # Store not found
         logger.warning(f"⚠️ FileSearch store not found with display_name: {display_name}")
-        logger.warning(f"   Available stores: {[getattr(s, 'display_name', 'N/A') for s in stores]}")
+        if stores:
+            available = [getattr(s, 'display_name', 'N/A') for s in stores]
+            logger.warning(f"   Available store display_names: {available}")
+        else:
+            logger.warning(f"   No FileSearch stores available at all!")
         return None
 
     except Exception as e:
-        logger.error(f"❌ Error looking up FileSearch store: {e}")
+        logger.error(f"❌ Error looking up FileSearch store: {e}", exc_info=True)
         return None
 
 
