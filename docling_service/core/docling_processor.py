@@ -138,7 +138,7 @@ class DoclingProcessor:
             elapsed_time = time.time() - start_time
 
             # Extract markdown
-            markdown_content = converted_doc.document_to_markdown()
+            markdown_content = converted_doc.export_to_markdown()
 
             # Extract and OCR images from document
             image_ocr_results = await self._extract_and_ocr_images(
