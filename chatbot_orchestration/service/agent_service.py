@@ -243,6 +243,9 @@ class PydanticAIGatewayService:
             logger.info("🔍 Performing RAG search in knowledge base...")
             rag_context = ""
             try:
+                # Import types at the top to avoid UnboundLocalError
+                from google.genai import types
+
                 # Get resolved store ID from startup (cached during lifespan)
                 from chatbot_orchestration.main import _resolved_store_id
 
@@ -252,9 +255,6 @@ class PydanticAIGatewayService:
                     raise ValueError("FileSearch store not resolved")
 
                 logger.info(f"📂 Using FileSearch store: {_resolved_store_id}")
-
-                # Use Gemini File Search tool to search the knowledge base
-                from google.genai import types
 
                 # Configure the File Search tool
                 file_search_tool = types.Tool(
