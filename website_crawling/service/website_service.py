@@ -127,61 +127,54 @@ class WebsiteService:
                     "error": str(e)
                 }
 
-            if not result["success"]:
-                return result
+        # Handle result from either sitemap or regular scraping
+        if not result["success"]:
+            return result
 
-            # Upload to Gemini
-            from website_crawling.service.ai_service import upload_content_to_gemini, record_scraped_metadata
+        # Upload to Gemini
+        from website_crawling.service.ai_service import upload_content_to_gemini, record_scraped_metadata
 
-            gemini_result = await upload_content_to_gemini(
-                content=result["content"],
-                url=url,
-                title=result.get("title", "Untitled"),
-                user_email=options.get("user_email")
-            )
+        gemini_result = await upload_content_to_gemini(
+            content=result["content"],
+            url=url,
+            title=result.get("title", "Untitled"),
+            user_email=options.get("user_email")
+        )
 
-            # Record metadata to database
-            domain = urlparse(url).netloc.replace('www.', '')
-            record_id = await record_scraped_metadata(
-                url=url,
-                domain=domain,
-                title=result.get("title", "Untitled"),
-                content_length=len(result["content"]),
-                pages_scraped=result.get("pages_scraped", 1),
-                gemini_file_name=gemini_result.get("file_name"),
-                gemini_file_uri=gemini_result.get("file_uri"),
-                gemini_state=gemini_result.get("state", "UNKNOWN"),
-                scraped_urls=result.get("scraped_urls", [url]),
-                scraping_config={
-                    "max_pages": max_pages,
-                    "max_depth": max_depth
-                }
-            )
-
-            processing_time = time.perf_counter() - start_time
-
-            return {
-                "success": True,
-                "job_id": f"job_{int(time.time())}",
-                "url": url,
-                "status": "completed",
-                "pages_scraped": result.get("pages_scraped", 1),
-                "content_length": len(result["content"]),
-                "title": result.get("title"),
-                "gemini_file": gemini_result.get("file_name"),
-                "gemini_state": gemini_result.get("state"),
-                "record_id": record_id,
-                "processing_time_seconds": round(processing_time, 2),
-                "scraped_urls": result.get("scraped_urls", [url])
+        # Record metadata to database
+        domain = urlparse(url).netloc.replace('www.', '')
+        record_id = await record_scraped_metadata(
+            url=url,
+            domain=domain,
+            title=result.get("title", "Untitled"),
+            content_length=len(result["content"]),
+            pages_scraped=result.get("pages_scraped", 1),
+            gemini_file_name=gemini_result.get("file_name"),
+            gemini_file_uri=gemini_result.get("file_uri"),
+            gemini_state=gemini_result.get("state", "UNKNOWN"),
+            scraped_urls=result.get("scraped_urls", [url]),
+            scraping_config={
+                "max_pages": max_pages,
+                "max_depth": max_depth
             }
+        )
 
-        except Exception as e:
-            logger.error(f"❌ Error scraping website {url}: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "url": url
-            }
+        processing_time = time.perf_counter() - start_time
+
+        return {
+            "success": True,
+            "job_id": f"job_{int(time.time())}",
+            "url": url,
+            "status": "completed",
+            "pages_scraped": result.get("pages_scraped", 1),
+            "content_length": len(result["content"]),
+            "title": result.get("title"),
+            "gemini_file": gemini_result.get("file_name"),
+            "gemini_state": gemini_result.get("state"),
+            "record_id": record_id,
+            "processing_time_seconds": round(processing_time, 2),
+            "scraped_urls": result.get("scraped_urls", [url])
+        }
 
     async def _scrape_with_crawl4ai(
         self,
