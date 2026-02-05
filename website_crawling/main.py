@@ -28,6 +28,9 @@ from shared.middleware import CorrelationIDMiddleware
 
 setup_global_exception_logging("website_scraping")
 
+# Global variable to cache resolved FileSearch store ID
+_resolved_store_id = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
@@ -77,9 +80,6 @@ async def lifespan(app: FastAPI):
                     logger.warning("   Please ensure API Gateway has created the store with matching display_name")
         except Exception as list_error:
             logger.warning(f"⚠️ Could not lookup FileSearch store: {list_error}")
-
-# Global variable to cache resolved store ID
-_resolved_store_id = None
 
         logger.info("🚀 Website scraping service started successfully")
         yield

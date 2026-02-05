@@ -18,6 +18,9 @@ from chatbot_orchestration.routers import router
 from chatbot_orchestration.service.agent_service import pydantic_ai_service
 from chatbot_orchestration.core.utils import log_endpoint_request
 
+# Global variable to cache resolved FileSearch store ID
+_resolved_store_id = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -78,9 +81,6 @@ async def lifespan(app: FastAPI):
                     logger.warning("   Please ensure API Gateway has created the store with matching display_name")
         except Exception as list_error:
             logger.warning(f"⚠️ Could not lookup FileSearch store: {list_error}")
-
-# Global variable to cache resolved store ID
-_resolved_store_id = None
 
         logger.info("🚀 Chatbot orchestration service started successfully")
         yield
