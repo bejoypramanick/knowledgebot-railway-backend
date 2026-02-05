@@ -45,6 +45,14 @@ async def lifespan(app: FastAPI):
         else:
              logger.warning("⚠️ Gemini model failed to initialize")
 
+        # Initialize FileSearch store (auto-create if doesn't exist)
+        from chatbot_orchestration.core.file_search_initializer import initialize_file_search_store
+        store_name = await initialize_file_search_store()
+        if store_name:
+            logger.info(f"✅ FileSearch store ready: {store_name}")
+        else:
+            logger.warning("⚠️ FileSearch store initialization skipped - RAG queries may fail")
+
         logger.info("🚀 Chatbot orchestration service started successfully")
         yield
         
