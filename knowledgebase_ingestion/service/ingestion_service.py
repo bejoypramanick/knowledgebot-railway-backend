@@ -83,11 +83,14 @@ async def process_with_gemini(
     gemini_processed_at = None
 
     try:
-        # If no store name provided, get resolved store ID from startup
+        # If no store name provided, resolve it on-demand
         if not file_search_store_name:
-            # Use module import to ensure we get the value set during lifespan
-            import knowledgebase_ingestion.main as kb_main
-            file_search_store_name = kb_main._resolved_store_id
+            # Resolve FileSearch store on-demand (not relying on module-level variable which may not be shared across workers)
+            from shared.file_search import get_file_search_store_by_display_name
+            file_search_store_name = get_file_search_store_by_display_name(
+                genai_client,
+                display_name="knowledgebot-search-store"
+            )
 
         if file_search_store_name:
             logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")

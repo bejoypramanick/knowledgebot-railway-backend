@@ -246,14 +246,17 @@ class PydanticAIGatewayService:
                 # Import types at the top to avoid UnboundLocalError
                 from google.genai import types
 
-                # Get resolved store ID from startup (cached during lifespan)
-                # Use module import to ensure we get the value set during lifespan
-                import chatbot_orchestration.main as chat_main
-                resolved_store_id = chat_main._resolved_store_id
+                # Resolve FileSearch store on-demand (not relying on module-level variable which may not be shared across workers)
+                from shared.file_search import get_file_search_store_by_display_name
+
+                resolved_store_id = get_file_search_store_by_display_name(
+                    client,
+                    display_name="knowledgebot-search-store"
+                )
 
                 if not resolved_store_id:
-                    logger.error("❌ FileSearch store not resolved during startup - RAG search cannot proceed")
-                    rag_context = "FileSearch store not configured. Please check API Gateway has created the store."
+                    logger.error("❌ FileSearch store could not be resolved - RAG search cannot proceed")
+                    rag_context = "FileSearch store not found. Please check API Gateway has created the store."
                     raise ValueError("FileSearch store not resolved")
 
                 logger.info(f"📂 Using FileSearch store: {resolved_store_id}")

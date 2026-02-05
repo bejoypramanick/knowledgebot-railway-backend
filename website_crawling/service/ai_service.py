@@ -66,16 +66,16 @@ async def upload_content_to_gemini(
 
         logger.info(f"🤖 [GEMINI] Uploading scraped content - Display: {display_name}")
 
-        # Get resolved store ID from startup (cached during lifespan)
-        # Use module import to ensure we get the value set during lifespan
-        import website_crawling.main as wc_main
-        resolved_store_id = wc_main._resolved_store_id
+        # Resolve FileSearch store on-demand (not relying on module-level variable which may not be shared across workers)
+        from shared.file_search import get_file_search_store_by_display_name
+        file_search_store_name = get_file_search_store_by_display_name(
+            genai_client,
+            display_name="knowledgebot-search-store"
+        )
 
-        if not resolved_store_id:
-            logger.error("❌ FileSearch store not resolved during startup")
+        if not file_search_store_name:
+            logger.error("❌ FileSearch store could not be resolved")
             raise ValueError("FileSearch store not configured")
-
-        file_search_store_name = resolved_store_id
         logger.info(f"📂 Using FileSearch store: {file_search_store_name}")
 
         # Upload directly to FileSearch store (same as file uploads)
