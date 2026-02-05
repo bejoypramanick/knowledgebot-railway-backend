@@ -217,14 +217,21 @@ class FileService:
         """Find file record by ID across multiple tables"""
         try:
             from knowledgebase_ingestion.core.db import get_db_connection
-            
+
             logger.info(f"🔍 Looking for file record with ID: {file_id}")
-            
+
+            # Convert file_id to integer if it's a numeric string
+            try:
+                numeric_id = int(file_id)
+            except ValueError:
+                # If not a number, use as-is (might be a Gemini file name)
+                numeric_id = file_id
+
             async with get_db_connection() as conn:
                 # Look up in file_uploads table
                 record = await conn.fetchrow(
                     "SELECT gemini_file_name, original_filename FROM file_uploads WHERE id = $1",
-                    file_id
+                    numeric_id
                 )
                 if record:
                     logger.info(f"✅ Found file record in file_uploads: {record}")
@@ -237,7 +244,7 @@ class FileService:
                 # Look up in scraped_websites table
                 record = await conn.fetchrow(
                     "SELECT gemini_file_name, original_url FROM scraped_websites WHERE id = $1",
-                    file_id
+                    numeric_id
                 )
                 if record:
                     logger.info(f"✅ Found file record in scraped_websites: {record}")
