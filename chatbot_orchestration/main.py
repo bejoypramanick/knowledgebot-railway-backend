@@ -27,7 +27,8 @@ async def lifespan(app: FastAPI):
     try:
         # Log environment variables for debugging
         logger.info("🔧 Environment Variables Check:")
-        logger.info(f"   GEMINI_API_KEY: {'✅ Set' if os.getenv('GEMINI_API_KEY') else '❌ Missing'}")
+        gemini_key_status = "✅ Set" if os.getenv('GEMINI_API_KEY') else "❌ Missing"
+        logger.info(f"   GEMINI_API_KEY: {gemini_key_status}")
         logger.info(f"   CHATBOT_MODEL: {os.getenv('CHATBOT_MODEL', 'Not set')}")
         logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME: {os.getenv('GEMINI_FILE_SEARCH_STORE_NAME', 'Not set')}")
         
