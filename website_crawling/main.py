@@ -25,6 +25,7 @@ from website_crawling.core.ai import get_genai_client
 from website_crawling.routers import router
 from website_crawling.utils.middleware import log_requests_middleware
 from shared.middleware import CorrelationIDMiddleware
+from shared.file_search import get_file_search_store_by_display_name
 
 setup_global_exception_logging("website_scraping")
 
@@ -48,44 +49,28 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ Gemini client failed to initialize")
 
         # Note: FileSearch store is created by API Gateway during startup
-        # Store name/display_name is read from GEMINI_FILE_SEARCH_STORE_NAME environment variable
-        import os
-        store_identifier = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
-        logger.info(f"📂 Looking for FileSearch store: {store_identifier}")
+        # This service looks it up by display_name dynamically
+        store_display_name = "knowledgebot-search-store"
+        logger.info(f"📂 Looking for FileSearch store by display_name: {store_display_name}")
 
-        # Lookup store by display name or ID
+        # Lookup store by display name using shared utility
         global _resolved_store_id
-        _resolved_store_id = None
         try:
             genai_client = get_genai_client()
-            if genai_client and hasattr(genai_client, 'file_search_stores'):
-                stores = list(genai_client.file_search_stores.list())
-                logger.info(f"📋 Available FileSearch stores ({len(stores)}):")
-
-                for idx, store in enumerate(stores):
-                    store_display_name = getattr(store, 'display_name', None)
-                    logger.info(f"   {idx+1}. {store.name} - Display: {store_display_name}")
-
-                    # Match by store ID or display name
-                    if store.name == store_identifier or store_display_name == store_identifier:
-                        _resolved_store_id = store.name
-                        logger.info(f"      ✅ MATCHED - Using this store")
-                        logger.info(f"      Store ID: {_resolved_store_id}")
-                        break
-
+            if genai_client:
+                _resolved_store_id = get_file_search_store_by_display_name(
+                    genai_client,
+                    display_name=store_display_name
+                )
                 if _resolved_store_id:
                     logger.info(f"✅ Resolved FileSearch store ID: {_resolved_store_id}")
                 else:
-                    # No display_name match found, use first available store as fallback
-                    if stores and len(stores) > 0:
-                        _resolved_store_id = stores[0].name
-                        logger.warning(f"⚠️ No store found matching '{store_identifier}'")
-                        logger.info(f"📌 Using first available store as fallback: {_resolved_store_id}")
-                    else:
-                        logger.error(f"❌ No FileSearch stores available at all!")
-                        logger.error("   Please ensure API Gateway has initialized FileSearch stores")
-        except Exception as list_error:
-            logger.warning(f"⚠️ Could not lookup FileSearch store: {list_error}")
+                    logger.error(f"❌ FileSearch store not found with display_name: {store_display_name}")
+                    logger.error("   Please ensure API Gateway has initialized FileSearch stores")
+            else:
+                logger.error("❌ Gemini client not available for FileSearch lookup")
+        except Exception as lookup_error:
+            logger.error(f"❌ Error looking up FileSearch store: {lookup_error}")
 
         logger.info("🚀 Website scraping service started successfully")
         yield
