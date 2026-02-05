@@ -242,6 +242,7 @@ class PydanticAIGatewayService:
             # Step 1: RAG Search - Use Gemini File Search tool
             logger.info("🔍 Performing RAG search in knowledge base...")
             rag_context = ""
+            file_search_tool = None
             try:
                 # Import types at the top to avoid UnboundLocalError
                 from google.genai import types
@@ -267,27 +268,43 @@ class PydanticAIGatewayService:
                         file_search_store_names=[resolved_store_id]
                     )
                 )
-                
-                # Perform a quick search to get context (this will be used in the main generation)
+
+                # Perform RAG search with a specific instruction prompt to extract relevant context
+                logger.info(f"🔎 Searching for relevant documents matching: {message[:100]}...")
+
                 search_response = client.models.generate_content(
                     model=MODEL_NAME,
-                    contents=f"Search for information related to: {message}",
+                    contents=f"""You are a document search assistant. The user is asking about: "{message}"
+
+Your task: Search the provided documents and extract the most relevant text passages that answer or relate to this question. Return only the relevant excerpts, properly formatted.
+
+If documents are found, return them as:
+DOCUMENT CONTENT:
+[extracted relevant text passages]
+
+If no relevant documents found, respond: "No relevant documents found"
+""",
                     config=types.GenerateContentConfig(
                         tools=[file_search_tool],
                         temperature=0.1  # Low temperature for factual responses
                     )
                 )
-                
+
                 if search_response and search_response.text:
                     rag_context = search_response.text
-                    logger.info(f"📚 RAG search successful, context length: {len(rag_context)} characters")
+                    # Check if documents were actually found
+                    if "No relevant documents found" in rag_context or len(rag_context) < 10:
+                        logger.warning(f"⚠️ RAG search returned minimal results: {len(rag_context)} characters")
+                        rag_context = "No relevant documents found in the knowledge base for your query."
+                    else:
+                        logger.info(f"✅ RAG search successful, extracted {len(rag_context)} characters of context")
                 else:
-                    logger.info("📚 No relevant documents found in knowledge base")
+                    logger.warning("⚠️ RAG search returned no text")
                     rag_context = "No relevant documents found in the knowledge base."
-                    
+
             except Exception as e:
-                logger.error(f"❌ RAG search failed: {e}")
-                rag_context = "Unable to search knowledge base due to an error."
+                logger.error(f"❌ RAG search failed: {e}", exc_info=True)
+                rag_context = f"Unable to search knowledge base: {str(e)}"
             
             # Step 2: Get chat history for context
             chat_history = await self.get_chat_history(session_id)
@@ -354,44 +371,50 @@ class PydanticAIGatewayService:
                 logger.info("🎭 Using default KnowledgeBot persona")
             
             # Create conversational system prompt with persona and response policy integration
-            system_prompt = f"""You are {persona_name}, a helpful AI assistant that engages in natural conversation and answers questions based ONLY on the provided knowledge base context.
+            system_prompt = f"""You are {persona_name}, a helpful AI assistant that answers questions based ONLY on the provided knowledge base context.
 
 {persona_prompt}
 
 RESPONSE POLICY:
 {response_policy if response_policy else "Be helpful, accurate, and concise in your responses."}
 
-CONVERSATION GUIDELINES:
-1. Be friendly and conversational - greet naturally when users say hello or introduce themselves
-2. If the user's message is just a greeting (like "hi", "hello", "hey"), respond with a natural greeting and ask how you can help
-3. If the user's message is unclear or too vague, ask for clarification in a friendly way
-4. Only when you have a clear question, check the Knowledge Base Context for relevant information
-5. You MUST answer ONLY using information from the provided Knowledge Base Context
-6. If the answer is not found in the context, respond: "I'm sorry, but this information is not available in my training data."
-7. Do NOT use any external knowledge or make up information
-8. Be helpful and conversational while staying within the knowledge base constraints
+CRITICAL INSTRUCTIONS:
+1. You have access to a knowledge base (Knowledge Base Context below)
+2. ALWAYS use ONLY the knowledge base context to answer questions
+3. If the answer is NOT found in the Knowledge Base Context, you MUST respond: "I'm sorry, but this information is not available in my knowledge base."
+4. Do NOT use any external knowledge, training data, or make up information
+5. Be friendly and natural in your tone while staying within the knowledge base constraints
+6. If the Knowledge Base Context is empty or says "No relevant documents found", tell the user you don't have information on that topic
 
-Knowledge Base Context:
-{rag_context}
+Knowledge Base Context (REQUIRED FOR ANSWERS):
+{rag_context if rag_context and rag_context != "No relevant documents found in the knowledge base." else "⚠️ No relevant documents found in the knowledge base for this query."}
 
-Conversation History:
-{history_text}"""
-            
+Conversation History (for context only):
+{history_text if history_text else "[No conversation history]"}"""
+
             # User message separate for better caching
-            user_message = f"User Message: {message}\n\nRespond naturally based on the conversation:"
-            
-            logger.info(f"🤖 Using cached Gemini model with structured prompt (system: {len(system_prompt)}, user: {len(user_message)} chars)")
-            
-            # Step 4: Generate response using Gemini with File Search tool
-            logger.info("🧠 Generating content with Gemini using RAG context and caching...")
-            
-            # Use the Gemini client directly with File Search tool (not Pydantic AI)
+            user_message = f"User Question: {message}\n\nAnswer ONLY using the Knowledge Base Context provided above. Do not use external knowledge."
+
+            logger.info(f"🤖 Using cached Gemini model with structured prompt")
+            logger.info(f"   System prompt: {len(system_prompt)} chars")
+            logger.info(f"   User message: {len(user_message)} chars")
+            logger.info(f"   RAG context: {len(rag_context)} chars")
+
+            # Step 4: Generate response using Gemini with File Search tool as fallback
+            logger.info("🧠 Generating content with Gemini using RAG context...")
+
+            # Build the full prompt with system instructions and RAG context
+            full_prompt = f"{system_prompt}\n\n{user_message}"
+
+            # Use the Gemini client directly
+            # Note: FileSearch tool is included as a backup/validation mechanism
             response = client.models.generate_content(
                 model=MODEL_NAME,
-                contents=f"{system_prompt}\n\n{user_message}",
+                contents=full_prompt,
                 config=types.GenerateContentConfig(
-                    tools=[file_search_tool],
-                    temperature=0.1
+                    tools=[file_search_tool] if file_search_tool else None,
+                    temperature=0.1,  # Low temperature for factual, consistent responses
+                    max_output_tokens=1024
                 )
             )
             
