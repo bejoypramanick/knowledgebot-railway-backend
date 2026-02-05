@@ -86,11 +86,11 @@ async def upload_content_to_gemini(
             config={
                 'display_name': display_name,
                 'custom_metadata': [
-                    {'key': 'source', 'value': 'website_scraping'},
-                    {'key': 'url', 'value': url},
-                    {'key': 'title', 'value': title},
-                    {'key': 'user_email', 'value': user_email or 'admin'},
-                    {'key': 'scraped_at', 'value': datetime.utcnow().isoformat()}
+                    {'key': 'source', 'string_value': 'website_scraping'},
+                    {'key': 'url', 'string_value': url},
+                    {'key': 'title', 'string_value': title},
+                    {'key': 'user_email', 'string_value': user_email or 'admin'},
+                    {'key': 'scraped_at', 'string_value': datetime.utcnow().isoformat()}
                 ]
             }
         )
