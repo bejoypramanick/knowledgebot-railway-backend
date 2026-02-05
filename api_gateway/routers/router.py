@@ -384,8 +384,14 @@ async def generic_proxy_handler(request: Request, path: str):
             logger.info(f"🔍 User data forwarded: {request.state.user}")
         
         # Make HTTP request to service
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            logger.info(f"🔍 About to make HTTP request to: {full_url}")
+        # Use longer timeout for batch operations (file uploads/deletes)
+        request_timeout = 30.0
+        if "batch" in backend_path or "batchupload" in backend_path or "delete/batch" in backend_path:
+            request_timeout = 300.0  # 5 minutes for batch operations
+            logger.info(f"⏱️  Using extended timeout {request_timeout}s for batch operation")
+
+        async with httpx.AsyncClient(timeout=request_timeout) as client:
+            logger.info(f"🔍 About to make HTTP request to: {full_url} (timeout={request_timeout}s)")
             response = await client.request(
                 method=request.method,
                 url=full_url,
@@ -418,7 +424,11 @@ async def generic_proxy_handler(request: Request, path: str):
     except httpx.TimeoutException as e:
         logger.error(f"❌ Request timeout to {full_url}: {e}")
         logger.error(f"❌ Service URL: {service_url}")
-        raise HTTPException(status_code=504, detail=f"Service timeout: {service_url}")
+        logger.error(f"❌ This could mean: service is slow, processing large files, or service is overloaded")
+        error_detail = f"Service timeout: {service_url}"
+        if "batch" in backend_path:
+            error_detail += " (batch operation took too long - check service logs)"
+        raise HTTPException(status_code=504, detail=error_detail)
     except Exception as e:
         error_msg = str(e)
         logger.error(f"❌ Proxy error for path '{path}': {error_msg}")
