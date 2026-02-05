@@ -92,45 +92,59 @@ async def lifespan(app: FastAPI):
                         logger.info(f"   Display name: {existing_store.display_name}")
                         logger.log_file_search_operation("store_found", store_id=store_id,
                                                         details={"display_name": existing_store.display_name})
-                        logger.info("=" * 80)
-                        logger.info(f"📋 COPY THIS STORE ID TO RAILWAY ENVIRONMENT VARIABLES:")
-                        logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
-                        logger.info("=" * 80)
-                        # Update environment variable so other services can use it (only works within this process)
                         os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
+
+                        # Clean up any stores without display_name
+                        logger.info("🧹 Cleaning up unnamed FileSearch stores...")
+                        unnamed_stores = [s for s in stores if not getattr(s, 'display_name', None)]
+                        if unnamed_stores:
+                            for unnamed_store in unnamed_stores:
+                                try:
+                                    logger.info(f"   🗑️ Deleting unnamed store: {unnamed_store.name}")
+                                    client.file_search_stores.delete(unnamed_store.name)
+                                    logger.info(f"   ✅ Deleted: {unnamed_store.name}")
+                                except Exception as delete_error:
+                                    logger.warning(f"   ⚠️ Failed to delete {unnamed_store.name}: {delete_error}")
+                            logger.log_file_search_operation("cleanup_unnamed", details={"count": len(unnamed_stores)})
+                        else:
+                            logger.info("   ✅ No unnamed stores to clean up")
+
+                        logger.info("=" * 80)
+                        logger.info(f"📋 GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
+                        logger.info("=" * 80)
                     else:
                         # No store with matching display_name found
-                        # Check if there are any existing stores we can use
-                        if stores and len(stores) > 0:
-                            # Use the first available store
-                            store_id = stores[0].name
-                            logger.info(f"ℹ️ No store found with display_name '{store_name}'")
-                            logger.info(f"📌 Using existing store: {store_id}")
-                            logger.log_file_search_operation("store_reused", store_id=store_id,
-                                                            details={"reason": "no_matching_display_name", "available_stores": len(stores)})
-                            logger.info("=" * 80)
-                            logger.info(f"📋 COPY THIS STORE ID TO RAILWAY ENVIRONMENT VARIABLES:")
-                            logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
-                            logger.info("=" * 80)
-                            logger.info(f"💡 TIP: To use display_name matching, create a new store with:")
-                            logger.info(f"   client.file_search_stores.create(config={{'display_name': '{store_name}'}})")
-                            os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
+                        # Create a new store with the proper display_name
+                        logger.info(f"🔨 No store found with display_name '{store_name}'")
+                        logger.info(f"   Creating new FileSearch store with display_name '{store_name}'...")
+                        new_store = client.file_search_stores.create(
+                            config={'display_name': store_name}
+                        )
+                        store_id = new_store.name
+                        logger.info(f"✅ FileSearch store created: {store_id}")
+                        logger.info(f"   Display name: {getattr(new_store, 'display_name', store_name)}")
+                        logger.log_file_search_operation("store_created", store_id=store_id,
+                                                        details={"display_name": getattr(new_store, 'display_name', store_name)})
+                        os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
+
+                        # Clean up any stores without display_name
+                        logger.info("🧹 Cleaning up unnamed FileSearch stores...")
+                        unnamed_stores = [s for s in stores if not getattr(s, 'display_name', None)]
+                        if unnamed_stores:
+                            for unnamed_store in unnamed_stores:
+                                try:
+                                    logger.info(f"   🗑️ Deleting unnamed store: {unnamed_store.name}")
+                                    client.file_search_stores.delete(unnamed_store.name)
+                                    logger.info(f"   ✅ Deleted: {unnamed_store.name}")
+                                except Exception as delete_error:
+                                    logger.warning(f"   ⚠️ Failed to delete {unnamed_store.name}: {delete_error}")
+                            logger.log_file_search_operation("cleanup_unnamed", details={"count": len(unnamed_stores)})
                         else:
-                            # No existing stores, create a new one
-                            logger.info(f"🔨 No stores found, creating new store with display_name '{store_name}'...")
-                            new_store = client.file_search_stores.create(
-                                config={'display_name': store_name}
-                            )
-                            store_id = new_store.name
-                            logger.info(f"✅ FileSearch store created: {store_id}")
-                            logger.info(f"   Display name: {getattr(new_store, 'display_name', store_name)}")
-                            logger.log_file_search_operation("store_created", store_id=store_id,
-                                                            details={"display_name": getattr(new_store, 'display_name', store_name)})
-                            logger.info("=" * 80)
-                            logger.info(f"📋 COPY THIS STORE ID TO RAILWAY ENVIRONMENT VARIABLES:")
-                            logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
-                            logger.info("=" * 80)
-                            os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
+                            logger.info("   ✅ No unnamed stores to clean up")
+
+                        logger.info("=" * 80)
+                        logger.info(f"📋 GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
+                        logger.info("=" * 80)
 
         except Exception as e:
             logger.error(f"❌ Error initializing FileSearch store: {e}")
