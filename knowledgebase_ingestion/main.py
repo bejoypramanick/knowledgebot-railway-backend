@@ -13,7 +13,11 @@ from shared.telemetry import setup_telemetry, instrument_fastapi
 
 # Initialize Telemetry
 # Use default behavior (span exporter disabled by default via env var)
-setup_telemetry("knowledgebase-ingestion")
+# Only set up once - add a guard to prevent re-initialization
+if not hasattr(logging, '_otel_initialized_for_kb'):
+    setup_telemetry("knowledgebase-ingestion")
+    logging._otel_initialized_for_kb = True
+
 logger = logging.getLogger("knowledgebase_ingestion")
 
 from knowledgebase_ingestion.core.ai import get_genai_client
@@ -30,7 +34,9 @@ from shared.file_search import get_file_search_store_by_display_name
 setup_global_exception_logging("knowledgebase_ingestion")
 
 # Global variable to cache resolved FileSearch store ID
-_resolved_store_id = None
+# Only initialize if not already set (to prevent re-initialization on module reload)
+if '_resolved_store_id' not in globals():
+    _resolved_store_id = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

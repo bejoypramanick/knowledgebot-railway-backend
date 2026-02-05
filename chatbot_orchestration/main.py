@@ -11,7 +11,11 @@ from shared.telemetry import setup_telemetry, instrument_fastapi
 
 # Initialize Telemetry
 # Use default behavior (span exporter disabled by default via env var)
-setup_telemetry("chatbot-orchestration")
+# Only set up once - add a guard to prevent re-initialization
+if not hasattr(logging, '_otel_initialized_for_chatbot'):
+    setup_telemetry("chatbot-orchestration")
+    logging._otel_initialized_for_chatbot = True
+
 logger = logging.getLogger("chatbot_orchestration")
 
 from chatbot_orchestration.routers import router
@@ -20,7 +24,9 @@ from chatbot_orchestration.core.utils import log_endpoint_request
 from shared.file_search import get_file_search_store_by_display_name
 
 # Global variable to cache resolved FileSearch store ID
-_resolved_store_id = None
+# Only initialize if not already set (to prevent re-initialization on module reload)
+if '_resolved_store_id' not in globals():
+    _resolved_store_id = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
