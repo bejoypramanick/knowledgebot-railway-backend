@@ -15,7 +15,7 @@ tenacity>=8.2.2
 
 # Document Processing
 docling>=1.0.0,<2.0.0
-docling-core>=2.0.0,<3.0.0
+docling-core>=1.1.0,<2.0.0
 
 # Image OCR Extraction
 easyocr>=1.6.0
