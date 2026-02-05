@@ -185,22 +185,37 @@ class DoclingProcessor:
         if not self._converter:
             raise RuntimeError("Docling converter not initialized")
 
-        source = Path(file_path)
-        # converter.convert() returns a generator, consume it to get the document
-        result = self._converter.convert(source)
-        # Get the first (and usually only) result from the generator
-        conversion_result = next(result)
+        try:
+            source = Path(file_path)
+            logger.info(f"🔍 Starting conversion for: {file_path}")
+            logger.info(f"🔍 Source type: {type(source)}, exists: {source.exists()}")
 
-        # Debug: log what we got
-        logger.info(f"🔍 Conversion result type: {type(conversion_result)}")
-        logger.info(f"🔍 Conversion result attributes: {dir(conversion_result)[:5]}")  # First 5 attributes
+            # converter.convert() returns a generator, consume it to get the document
+            logger.info(f"🔍 Calling converter.convert() with source: {source}")
+            result = self._converter.convert(source)
 
-        # Check if it has 'document' attribute, otherwise return the result itself
-        if hasattr(conversion_result, 'document'):
-            return conversion_result.document
-        else:
-            logger.info(f"🔍 No 'document' attribute, returning result directly")
-            return conversion_result
+            logger.info(f"🔍 Converter returned: {type(result)}")
+
+            # Get the first (and usually only) result from the generator
+            conversion_result = next(result)
+            logger.info(f"🔍 Conversion result type: {type(conversion_result)}")
+            logger.info(f"🔍 Has document attr: {hasattr(conversion_result, 'document')}")
+
+            # Try to get the document
+            if hasattr(conversion_result, 'document'):
+                doc = conversion_result.document
+                logger.info(f"🔍 Document type: {type(doc)}")
+                return doc
+            else:
+                # Return the conversion result itself
+                logger.info(f"🔍 No document attribute, returning result as-is")
+                return conversion_result
+
+        except Exception as e:
+            logger.error(f"🔍 Error in _convert_document: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(f"🔍 Traceback: {traceback.format_exc()}")
+            raise
 
     async def _extract_and_ocr_images(
         self,
