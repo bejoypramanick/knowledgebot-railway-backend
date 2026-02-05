@@ -37,12 +37,20 @@ async def lifespan(app: FastAPI):
             from knowledgebase_ingestion.core.database_initializer import database_initializer
             await database_initializer.initialize_and_validate(settings.railway_postgres_url)
             logger.info("✅ Railway PostgreSQL database initialized and validated")
-        
+
         # Initialize Gemini Client (Check)
         if get_genai_client():
              logger.info("✅ Gemini client initialized")
         else:
              logger.warning("⚠️ Gemini client failed to initialize")
+
+        # Initialize FileSearch store (auto-create if doesn't exist)
+        from knowledgebase_ingestion.core.file_search_initializer import initialize_file_search_store
+        store_name = await initialize_file_search_store()
+        if store_name:
+            logger.info(f"✅ FileSearch store ready: {store_name}")
+        else:
+            logger.warning("⚠️ FileSearch store initialization skipped")
 
         logger.info("🚀 Knowledgebase ingestion service started successfully")
         yield

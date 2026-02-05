@@ -44,6 +44,14 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("⚠️ Gemini client failed to initialize")
 
+        # Initialize FileSearch store (auto-create if doesn't exist)
+        from website_crawling.core.file_search_initializer import initialize_file_search_store
+        store_name = await initialize_file_search_store()
+        if store_name:
+            logger.info(f"✅ FileSearch store ready: {store_name}")
+        else:
+            logger.warning("⚠️ FileSearch store initialization skipped")
+
         logger.info("🚀 Website scraping service started successfully")
         yield
         
