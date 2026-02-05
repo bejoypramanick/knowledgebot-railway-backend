@@ -426,6 +426,53 @@ Conversation History:
             logger.error(f"Exception details: {str(e)}")
             yield "I encountered an error while processing your message. Please try again."
 
+    async def _track_token_usage(self, response, session_id: str):
+        """Track token usage from Gemini response"""
+        try:
+            # Extract token usage from Gemini response
+            usage_data = None
+            if hasattr(response, 'usage_metadata'):
+                usage_data = response.usage_metadata
+            elif hasattr(response, 'usage'):
+                usage_data = response.usage
+
+            if usage_data:
+                # Use TokenDAO for tracking
+                from ..dao.token_dao import TokenDAO
+                token_dao = TokenDAO()
+
+                # Generate a message ID
+                import uuid
+                message_id = str(uuid.uuid4())
+
+                # Extract token counts from Gemini usage data
+                prompt_tokens = getattr(usage_data, 'prompt_token_count', 0) or getattr(usage_data, 'promptTokenCount', 0) or getattr(usage_data, 'prompt_tokens', 0)
+                completion_tokens = getattr(usage_data, 'candidates_token_count', 0) or getattr(usage_data, 'candidatesTokenCount', 0) or getattr(usage_data, 'completion_tokens', 0)
+                total_tokens = getattr(usage_data, 'total_token_count', 0) or getattr(usage_data, 'totalTokenCount', 0) or getattr(usage_data, 'total_tokens', 0)
+
+                # Save to database using DAO
+                import os
+                model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash-lite")
+
+                success = await token_dao.save_token_usage(
+                    session_id=session_id,
+                    message_id=message_id,
+                    provider='gemini',
+                    model=model_name,
+                    prompt_tokens=int(prompt_tokens),
+                    completion_tokens=int(completion_tokens),
+                    total_tokens=int(total_tokens),
+                    api_call_type='rag'
+                )
+
+                if success:
+                    logger.info(f"✅ Tracked token usage: {total_tokens} tokens for session {session_id}")
+                else:
+                    logger.error(f"❌ Failed to track token usage for session {session_id}")
+
+        except Exception as e:
+            logger.error(f"Error tracking token usage: {e}")
+
     async def get_available_agents(self) -> list:
         """Get list of available agents"""
         try:
