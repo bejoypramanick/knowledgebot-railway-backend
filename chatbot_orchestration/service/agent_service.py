@@ -246,9 +246,20 @@ class PydanticAIGatewayService:
                 # Get FileSearch store name from environment
                 # (Store is created by API Gateway during startup)
                 import os
-                formatted_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
+                formatted_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME")
+
+                if not formatted_store_name:
+                    logger.error("❌ GEMINI_FILE_SEARCH_STORE_NAME not set - RAG search cannot proceed")
+                    rag_context = "FileSearch store not configured. Please check API Gateway initialization."
+                    raise ValueError("FileSearch store not configured")
+
+                # Ensure store name is in correct format: fileSearchStores/{store-id}
+                if not formatted_store_name.startswith("fileSearchStores/"):
+                    logger.warning(f"⚠️ Store name missing prefix, adding it: {formatted_store_name}")
+                    formatted_store_name = f"fileSearchStores/{formatted_store_name}"
+
                 logger.info(f"📂 Using FileSearch store: {formatted_store_name}")
-                
+
                 # Use Gemini File Search tool to search the knowledge base
                 from google.genai import types
                 
