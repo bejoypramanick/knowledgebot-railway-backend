@@ -134,19 +134,22 @@ class WebsiteService:
         # Upload to Gemini
         from website_crawling.service.ai_service import upload_content_to_gemini, record_scraped_metadata
 
+        # Get domain for use as fallback title
+        domain = urlparse(url).netloc.replace('www.', '')
+        title = result.get("title") or domain  # Use domain as fallback instead of "Untitled"
+
         gemini_result = await upload_content_to_gemini(
             content=result["content"],
             url=url,
-            title=result.get("title", "Untitled"),
+            title=title,
             user_email=options.get("user_email")
         )
 
         # Record metadata to database
-        domain = urlparse(url).netloc.replace('www.', '')
         record_id = await record_scraped_metadata(
             url=url,
             domain=domain,
-            title=result.get("title", "Untitled"),
+            title=title,
             content_length=len(result["content"]),
             pages_scraped=result.get("pages_scraped", 1),
             gemini_file_name=gemini_result.get("file_name"),
