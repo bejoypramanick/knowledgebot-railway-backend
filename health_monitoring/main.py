@@ -77,6 +77,17 @@ async def root():
     }
 
 
+# Health check endpoint for Railway and other services
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring and external health checks."""
+    return {
+        "status": "healthy",
+        "service": "health-monitoring",
+        "version": "1.0.0"
+    }
+
+
 # Include routers
 app.include_router(router, prefix="/api/v1/health", tags=["health"])
 

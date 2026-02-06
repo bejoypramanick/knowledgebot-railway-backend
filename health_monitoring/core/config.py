@@ -14,20 +14,20 @@ class Settings(BaseSettings):
     health_check_interval_seconds: int = 300  # 5 minutes
     health_check_timeout_seconds: int = 10
 
-    # Service URLs to Monitor
-    api_gateway_url: str = "http://localhost:8000"
-    configuration_service_url: str = "http://localhost:8001"
-    chatbot_orchestration_url: str = "http://localhost:8003"
-    knowledgebase_ingestion_url: str = "http://localhost:8005"
-    website_crawling_url: str = "http://localhost:8002"
-    docling_service_url: str = "http://localhost:8004"
+    # Service URLs to Monitor (read from environment variables)
+    api_gateway_url: str = "http://api-gateway.railway.internal:8080"
+    chatbot_orchestration_url: str = "http://chatbot-orchestration.railway.internal:8080"
+    configuration_service_url: str = "http://configuration.railway.internal:8080"
+    knowledgebase_ingestion_url: str = "http://knowledge-base.railway.internal:8080"
+    website_crawling_url: str = "http://web-crawling.railway.internal:8080"
+    docling_service_url: str = "http://docling.railway.internal:8080"
 
     # Service Health Check Endpoints
     api_gateway_health_endpoint: str = "/health"
     configuration_health_endpoint: str = "/api/v1/configuration/health"
     chatbot_health_endpoint: str = "/health"
     knowledgebase_health_endpoint: str = "/health"
-    website_crawling_health_endpoint: str = "/api/v1/scraping/health"
+    website_crawling_health_endpoint: str = "/health"
     docling_health_endpoint: str = "/health"
 
     # Port Configuration
