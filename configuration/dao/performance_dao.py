@@ -323,9 +323,13 @@ class PerformanceDAO:
 
             async with httpx.AsyncClient(timeout=10) as client:
                 try:
+                    # Try to fetch data with the requested period
+                    interval = "month" if days >= 90 else "day"
+                    logger.info(f"📊 Requesting uptime data for {days} days with interval: {interval}")
+
                     response = await client.get(
                         f"{health_monitoring_url}/api/v1/health/chart-data",
-                        params={"days": days, "interval": "month" if days >= 90 else "day"}
+                        params={"days": days, "interval": interval}
                     )
 
                     logger.info(f"📊 Health monitoring response status: {response.status_code}")
@@ -336,6 +340,18 @@ class PerformanceDAO:
                         logger.info(f"📊 Full chart result: {chart_result}")
                         raw_data = chart_result.get("data", [])
                         logger.info(f"📊 Raw uptime data from health monitoring: {len(raw_data)} records")
+
+                        # If no data with long period, try shorter period
+                        if not raw_data and days > 30:
+                            logger.info(f"📊 No data for {days} days, retrying with 30 days...")
+                            response = await client.get(
+                                f"{health_monitoring_url}/api/v1/health/chart-data",
+                                params={"days": 30, "interval": "day"}
+                            )
+                            if response.status_code == 200:
+                                chart_result = response.json()
+                                raw_data = chart_result.get("data", [])
+                                logger.info(f"📊 Retry returned {len(raw_data)} records for 30 days")
 
                         # Format for frontend: [{"month": "Jan", "uptime": 99.9}, ...]
                         formatted_history = []
