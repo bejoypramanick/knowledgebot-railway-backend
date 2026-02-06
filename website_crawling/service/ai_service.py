@@ -91,22 +91,44 @@ async def upload_content_to_gemini(
                 document_name = None
 
                 for i in range(15):  # Poll for up to 30 seconds
-                    current_operation = genai_client.operations.get(operation)
+                    try:
+                        current_operation = genai_client.operations.get(operation)
+                        if not current_operation:
+                            logger.warning(f"🔄 [GEMINI] Poll attempt {i+1}: Operation is None")
+                            await asyncio.sleep(2)
+                            continue
 
-                    if current_operation.response and hasattr(current_operation.response, 'document_name'):
-                        final_state = "ACTIVE"
-                        document_name = current_operation.response.document_name
-                        logger.info(f"✅ [GEMINI] FileSearch upload complete - Document: {document_name}")
-                        gemini_processed_at = datetime.utcnow()
-                        break
-                    elif current_operation.response and hasattr(current_operation.response, 'state') and hasattr(current_operation.response.state, 'name'):
-                        final_state = current_operation.response.state.name
-                        logger.info(f"🔄 [GEMINI] FileSearch operation state (Attempt {i+1}/15): {final_state}")
-                        if final_state == "ACTIVE":
-                            gemini_processed_at = datetime.utcnow()
-                            break
-                    
-                    await asyncio.sleep(2)
+                        # Extremely defensive check for response and state
+                        resp = getattr(current_operation, 'response', None)
+                        if resp:
+                            if hasattr(resp, 'document_name') and resp.document_name:
+                                final_state = "ACTIVE"
+                                document_name = resp.document_name
+                                logger.info(f"✅ [GEMINI] FileSearch upload complete - Document: {document_name}")
+                                gemini_processed_at = datetime.utcnow()
+                                break
+                            
+                            # Check for state nested in response
+                            state_obj = getattr(resp, 'state', None)
+                            if state_obj:
+                                final_state = getattr(state_obj, 'name', str(state_obj))
+                                logger.info(f"🔄 [GEMINI] FileSearch operation state (Attempt {i+1}/15): {final_state}")
+                                if final_state == "ACTIVE":
+                                    gemini_processed_at = datetime.utcnow()
+                                    break
+                        else:
+                            # Some operations have state at the top level
+                            top_state = getattr(current_operation, 'state', None)
+                            if top_state:
+                                final_state = getattr(top_state, 'name', str(top_state))
+                                logger.info(f"🔄 [GEMINI] Operation top-level state (Attempt {i+1}/15): {final_state}")
+                                if final_state == "ACTIVE":
+                                    break
+                        
+                        await asyncio.sleep(2)
+                    except Exception as poll_err:
+                        logger.warning(f"⚠️ [GEMINI] Error during polling attempt {i+1}: {poll_err}")
+                        await asyncio.sleep(2)
 
                 return {
                     "success": final_state == "ACTIVE",

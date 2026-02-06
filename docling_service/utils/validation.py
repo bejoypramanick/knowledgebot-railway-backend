@@ -26,12 +26,17 @@ def validate_file_for_processing(
     # Get file extension
     _, ext = os.path.splitext(filename.lower())
 
+    from docling_service.utils.logging import get_logger
+    logger = get_logger("docling_service")
+    logger.info(f"🔍 Validating file: {filename} (ext: {ext}, size: {file_size} bytes)")
+
     # Check if file type should skip docling
     if ext in SKIP_DOCLING_TYPES:
         return False, f"File type {ext} should be uploaded as-is (already text/structured)"
 
     # Check if file type is supported
     if ext not in SUPPORTED_FILE_TYPES:
+        logger.warning(f"⚠️ Unsupported file type: {ext}. Supported: {list(SUPPORTED_FILE_TYPES.keys())}")
         return False, f"File type {ext} not supported by docling"
 
     # Check file size
