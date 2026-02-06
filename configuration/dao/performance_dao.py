@@ -309,6 +309,7 @@ class PerformanceDAO:
 
             health_monitoring_url = os.getenv("HEALTH_MONITORING_URL", "http://localhost:8006")
             logger.info(f"📊 Fetching uptime history from {health_monitoring_url}/api/v1/health/chart-data")
+            logger.info(f"📊 HEALTH_MONITORING_URL env var: {os.getenv('HEALTH_MONITORING_URL', 'NOT SET')}")
 
             async with httpx.AsyncClient(timeout=10) as client:
                 try:
@@ -318,9 +319,11 @@ class PerformanceDAO:
                     )
 
                     logger.info(f"📊 Health monitoring response status: {response.status_code}")
+                    logger.info(f"📊 Health monitoring response headers: {response.headers}")
 
                     if response.status_code == 200:
                         chart_result = response.json()
+                        logger.info(f"📊 Full chart result: {chart_result}")
                         raw_data = chart_result.get("data", [])
                         logger.info(f"📊 Raw uptime data from health monitoring: {len(raw_data)} records")
 
@@ -334,7 +337,8 @@ class PerformanceDAO:
                                     from datetime import datetime
                                     date_obj = datetime.fromisoformat(time_period.replace('Z', '+00:00'))
                                     month_name = date_obj.strftime('%b')
-                                except:
+                                except Exception as parse_error:
+                                    logger.warning(f"⚠️ Failed to parse date {time_period}: {parse_error}")
                                     month_name = 'N/A'
                             elif hasattr(time_period, 'strftime'):
                                 month_name = time_period.strftime('%b')
@@ -349,12 +353,17 @@ class PerformanceDAO:
                         return formatted_history
                     else:
                         logger.warning(f"⚠️ Health monitoring returned status {response.status_code}")
+                        logger.warning(f"⚠️ Response body: {response.text}")
+                    return []
+                except httpx.ConnectError as ce:
+                    logger.error(f"❌ Connection error to health monitoring service: {ce}")
+                    logger.error(f"❌ Make sure HEALTH_MONITORING_URL is set correctly: {os.getenv('HEALTH_MONITORING_URL', 'NOT SET')}")
                     return []
                 except Exception as e:
-                    logger.error(f"❌ Error fetching uptime history: {e}")
+                    logger.error(f"❌ Error fetching uptime history: {e}", exc_info=True)
                     return []
         except Exception as e:
-            logger.error(f"❌ Error in get_uptime_over_time: {e}")
+            logger.error(f"❌ Error in get_uptime_over_time: {e}", exc_info=True)
             return []
 
     async def get_performance_metrics(self) -> Dict[str, Any]:
