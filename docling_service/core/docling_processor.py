@@ -26,7 +26,27 @@ except Exception as e:
 # Import docling libraries
 try:
     from docling.document_converter import DocumentConverter
+    from docling.datamodel.base_models import ConversionStatus
+
+    # Log Docling version for diagnostics
+    try:
+        import docling
+        logger.info(f"📦 Docling version: {docling.__version__}")
+    except Exception as e:
+        logger.warning(f"⚠️ Could not determine Docling version: {e}")
+
+    # Build list of acceptable conversion statuses (handles version differences)
+    # Docling 1.0.0-1.4.x use SUCCESS_WITH_ERRORS
+    # Docling 1.5.0+ use PARTIAL_SUCCESS
+    _acceptable_statuses = [ConversionStatus.SUCCESS]
+    if hasattr(ConversionStatus, 'PARTIAL_SUCCESS'):
+        _acceptable_statuses.append(ConversionStatus.PARTIAL_SUCCESS)
+    elif hasattr(ConversionStatus, 'SUCCESS_WITH_ERRORS'):
+        _acceptable_statuses.append(ConversionStatus.SUCCESS_WITH_ERRORS)
+    _ACCEPTABLE_CONVERSION_STATUSES = tuple(_acceptable_statuses)
+
     logger.info("✅ Docling libraries imported successfully")
+    logger.info(f"✅ Acceptable conversion statuses: {_ACCEPTABLE_CONVERSION_STATUSES}")
 except ImportError as e:
     logger.error(f"❌ Failed to import docling: {e}")
     logger.error("Make sure docling is installed: pip install docling")
@@ -137,8 +157,17 @@ class DoclingProcessor:
 
             elapsed_time = time.time() - start_time
 
-            # Extract markdown
-            markdown_content = converted_doc.export_to_markdown()
+            # Extract markdown using docling 1.x API
+            markdown_content = converted_doc.render_as_markdown()
+
+            # Log the converted markdown content
+            logger.info(
+                f"📄 Converted Markdown for {original_filename} "
+                f"({len(markdown_content)} chars):\n"
+                f"{'='*80}\n"
+                f"{markdown_content}\n"
+                f"{'='*80}"
+            )
 
             # Extract and OCR images from document
             image_ocr_results = await self._extract_and_ocr_images(
@@ -179,37 +208,34 @@ class DoclingProcessor:
 
     def _convert_document(self, file_path: str) -> Any:
         """
-        Blocking document conversion.
+        Blocking document conversion using docling convert_single() API.
         Called in thread pool executor.
         """
         if not self._converter:
             raise RuntimeError("Docling converter not initialized")
 
         try:
-            source = Path(file_path)
             logger.info(f"🔍 Starting conversion for: {file_path}")
-            logger.info(f"🔍 Source type: {type(source)}, exists: {source.exists()}")
 
-            # converter.convert() returns a generator, consume it to get the document
-            logger.info(f"🔍 Calling converter.convert() with source: {source}")
-            result = self._converter.convert(source)
+            # Use convert_single() for single document processing
+            # It accepts Path objects or string paths directly
+            conversion_result = self._converter.convert_single(file_path)
 
-            logger.info(f"🔍 Converter returned: {type(result)}")
+            logger.info(f"🔍 Conversion completed, status: {conversion_result.status}")
 
-            # Get the first (and usually only) result from the generator
-            conversion_result = next(result)
-            logger.info(f"🔍 Conversion result type: {type(conversion_result)}")
-            logger.info(f"🔍 Has document attr: {hasattr(conversion_result, 'document')}")
-
-            # Try to get the document
-            if hasattr(conversion_result, 'document'):
-                doc = conversion_result.document
-                logger.info(f"🔍 Document type: {type(doc)}")
-                return doc
-            else:
-                # Return the conversion result itself
-                logger.info(f"🔍 No document attribute, returning result as-is")
+            # Check if conversion was successful
+            # Handles both Docling 1.0.0-1.4.x (SUCCESS_WITH_ERRORS) and 1.5.0+ (PARTIAL_SUCCESS)
+            if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
+                logger.info(f"🔍 Conversion successful, returning ConversionResult")
                 return conversion_result
+            else:
+                # Build error message with details from conversion result
+                error_msg = f"Conversion failed with status: {conversion_result.status}"
+                if hasattr(conversion_result, 'errors') and conversion_result.errors:
+                    error_details = [e.error_message for e in conversion_result.errors]
+                    error_msg += f" - Errors: {error_details}"
+                logger.error(f"🔍 {error_msg}")
+                raise RuntimeError(error_msg)
 
         except Exception as e:
             logger.error(f"🔍 Error in _convert_document: {type(e).__name__}: {e}")
