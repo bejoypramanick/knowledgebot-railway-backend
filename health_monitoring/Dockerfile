@@ -11,6 +11,7 @@ COPY health_monitoring/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
+COPY shared/ ./shared/
 COPY health_monitoring/ ./health_monitoring/
 
 # Set working directory
