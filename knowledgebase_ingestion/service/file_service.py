@@ -4,7 +4,6 @@ Provides business logic for file operations
 """
 from typing import Any, Dict, Optional
 
-from knowledgebase_ingestion.core import db
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("file_service", "knowledgebase-ingestion")

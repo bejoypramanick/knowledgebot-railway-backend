@@ -74,17 +74,17 @@ class OpenTelemetryLogger:
             span.set_attribute("db.query", query)
             if params:
                 span.set_attribute("db.params", str(params))
-            
+
             if result is not None:
                 if hasattr(result, '__len__') and not isinstance(result, (str, bytes)):
                     span.set_attribute("db.rows_affected", len(result))
                 else:
                     span.set_attribute("db.result", str(result))
-            
+
             if error:
                 span.set_status(Status(StatusCode.ERROR, str(error)))
                 span.record_exception(error)
-        
+
         # Also log to console
         if error:
             self.error(f"❌ DB Query Error: {query} | Error: {error}")
@@ -92,5 +92,23 @@ class OpenTelemetryLogger:
             rows = len(result) if result is not None and hasattr(result, '__len__') and not isinstance(result, (str, bytes)) else 'N/A'
             self.info(f"✅ DB Query Success: {query} | Rows/Result: {rows}")
 
+    def log_file_search_operation(self, operation: str, **kwargs):
+        """Log FileSearch store operations"""
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            span.set_attribute("file_search.operation", operation)
+            for key, value in kwargs.items():
+                span.set_attribute(f"file_search.{key}", str(value))
+
+        # Also log to console
+        details = " | ".join(f"{k}={v}" for k, v in kwargs.items())
+        details_str = f" | {details}" if details else ""
+        self.info(f"📂 FileSearch Operation: {operation}{details_str}")
+
 def get_otel_logger(name: str, service_name: str) -> OpenTelemetryLogger:
     return OpenTelemetryLogger(name, service_name)
+
+def setup_otel_logging(service_name: str):
+    """Initialize OpenTelemetry logging for a service"""
+    from shared.telemetry import setup_telemetry, instrument_logger
+    setup_telemetry(service_name)

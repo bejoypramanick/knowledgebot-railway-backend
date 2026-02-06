@@ -23,7 +23,7 @@ logger = logging.getLogger("knowledgebase_ingestion")
 from knowledgebase_ingestion.core.ai import get_genai_client
 from knowledgebase_ingestion.routers import router
 from knowledgebase_ingestion.utils.middleware import log_requests_middleware
-from knowledgebase_ingestion.core import db
+from shared.db import close_databases
 from knowledgebase_ingestion.core.config import settings
 from knowledgebase_ingestion.core.utils import (log_endpoint_request,
                           register_fastapi_exception_handlers,
@@ -80,9 +80,8 @@ async def lifespan(app: FastAPI):
 
         logger.info("🚀 Knowledgebase ingestion service started successfully")
         yield
-        
-        if db.railway_db:
-             await db.railway_db.disconnect()
+
+        await close_databases()
         logger.info("🛑 Knowledgebase ingestion service shutdown complete")
         
     except Exception as e:

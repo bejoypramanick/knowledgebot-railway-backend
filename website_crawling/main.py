@@ -20,7 +20,7 @@ if not hasattr(logging, '_otel_initialized_for_wc'):
 
 logger = logging.getLogger("website_crawling")
 
-from website_crawling.core import db
+from shared.db import close_databases
 from website_crawling.core.config import settings
 from website_crawling.core.utils import (register_fastapi_exception_handlers,
                           setup_global_exception_logging,
@@ -80,9 +80,8 @@ async def lifespan(app: FastAPI):
 
         logger.info("🚀 Website scraping service started successfully")
         yield
-        
-        if db.railway_db:
-             await db.railway_db.disconnect()
+
+        await close_databases()
         logger.info("🛑 Website scraping service shutdown complete")
         
     except Exception as e:
