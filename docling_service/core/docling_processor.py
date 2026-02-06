@@ -216,42 +216,46 @@ class DoclingProcessor:
 
         try:
             logger.info(f"🔍 Starting conversion for: {file_path}")
-
-            # Use convert_single() for single document processing
-            # It accepts Path objects or string paths directly
-            conversion_result = self._converter.convert_single(file_path)
-
-            logger.info(f"🔍 Conversion completed, status: {conversion_result.status}")
-
-            # Check if conversion was successful
-            # Handles both Docling 1.0.0-1.4.x (SUCCESS_WITH_ERRORS) and 1.5.0+ (PARTIAL_SUCCESS)
-            if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
-                logger.info(f"🔍 Conversion successful, returning ConversionResult")
+            
+            # Check file extension to determine processing approach
+            file_ext = Path(file_path).suffix.lower()
+            logger.info(f"� File extension detected: {file_ext}")
+            
+            # For HTML files, we need to handle them differently
+            # HTML files should be processed directly by docling, not through convert_single
+            if file_ext in ['.html', '.htm']:
+                logger.info(f"🌐 Processing HTML file directly with docling")
+                # Use docling's document processing directly for HTML
+                from docling.document import load_document
+                doc = load_document(file_path)
+                conversion_result = doc.render_as_markdown()
+                
+                logger.info(f"🔍 HTML conversion completed, status: SUCCESS")
                 return conversion_result
             else:
-                # Build error message with details from conversion result
-                error_msg = f"Conversion failed with status: {conversion_result.status}"
-                error_details = []
+                # Use convert_single() for PDF and other supported formats
+                logger.info(f"📄 Using convert_single() for file: {file_path}")
+                conversion_result = self._converter.convert_single(file_path)
+                logger.info(f"🔍 Conversion completed, status: {conversion_result.status}")
 
-                # Try to extract error details
-                if hasattr(conversion_result, 'errors') and conversion_result.errors:
-                    try:
-                        error_details = [str(e) if not hasattr(e, 'error_message') else e.error_message for e in conversion_result.errors]
-                        error_msg += f" - Errors: {error_details}"
-                    except Exception as e:
-                        logger.warning(f"Could not extract error details: {e}")
+                # Check if conversion was successful
+                if conversion_result.status not in _ACCEPTABLE_CONVERSION_STATUSES:
+                    # Build error message with details from conversion result
+                    error_msg = f"Conversion failed with status: {conversion_result.status}"
+                    error_details = []
 
-                # For HTML files specifically, provide better context
-                if file_path.lower().endswith(('.html', '.htm')):
-                    logger.warning(
-                        f"🔍 HTML conversion not fully supported by docling. "
-                        f"Status: {conversion_result.status}. "
-                        f"Consider using raw HTML extraction instead."
-                    )
-                else:
+                    # Try to extract error details
+                    if hasattr(conversion_result, 'errors') and conversion_result.errors:
+                        try:
+                            error_details = [str(e) if not hasattr(e, 'error_message') else e.error_message for e in conversion_result.errors]
+                        except Exception as extract_error:
+                            logger.warning(f"Failed to extract error details: {extract_error}")
+                            error_details = [str(conversion_result.status)]
+
                     logger.error(f"🔍 {error_msg}")
+                    raise RuntimeError(f"{error_msg}. Details: {error_details}")
 
-                raise RuntimeError(error_msg)
+                return conversion_result
 
         except Exception as e:
             logger.error(f"🔍 Error in _convert_document: {type(e).__name__}: {e}")
@@ -314,6 +318,12 @@ class DoclingProcessor:
                                         f"\n### Image {page_idx + 1}.{img_idx + 1} OCR Text\n"
                                         f"{extracted_text}\n"
                                     )
+                                else:
+                                    logger.warning(
+                                        f"⚠️ No OCR results for image {page_idx}.{img_idx} "
+                                        f"in {filename}"
+                                    )
+                                    continue
 
                             except Exception as e:
                                 logger.warning(
