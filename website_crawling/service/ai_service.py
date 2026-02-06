@@ -27,13 +27,11 @@ async def upload_content_to_gemini(
 ) -> Dict[str, Any]:
     """
     Upload scraped content to Gemini FileSearch.
-
     Args:
         content: The scraped text content
         url: Original URL that was scraped
         title: Page title
         user_email: User email for metadata
-
     Returns:
         Dict with upload result including file name and state
     """
@@ -46,53 +44,65 @@ async def upload_content_to_gemini(
             "file_name": None,
             "state": "FAILED"
         }
-
-    tmp_path = None
+    
     try:
-        # Create a temporary file with the content
-        domain = urlparse(url).netloc.replace('www.', '')
-        safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_'))[:50]
-        filename = f"{domain}_{safe_title}.txt".replace(' ', '_')
-
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
-            f.write(f"# {title}\n")
-            f.write(f"URL: {url}\n")
-            f.write(f"Scraped: {datetime.utcnow().isoformat()}\n")
-            f.write("---\n\n")
-            f.write(content)
-            tmp_path = f.name
-
-        display_name = f"{title} | {url}"
-
-        logger.info(f"🤖 [GEMINI] Uploading scraped content - Display: {display_name}")
-
-        # Resolve FileSearch store on-demand (not relying on module-level variable which may not be shared across workers)
-        from shared.file_search import get_file_search_store_by_display_name
-        file_search_store_name = get_file_search_store_by_display_name(
-            genai_client,
-            display_name="knowledgebot-search-store"
-        )
-
-        if not file_search_store_name:
-            logger.error("❌ FileSearch store could not be resolved")
-            raise ValueError("FileSearch store not configured")
-        logger.info(f"📂 Using FileSearch store: {file_search_store_name}")
-
-        # Upload directly to FileSearch store (same as file uploads)
-        logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
-        operation = genai_client.file_search_stores.upload_to_file_search_store(
-            file=tmp_path,
-            file_search_store_name=file_search_store_name,
-            config={
-                'display_name': display_name,
-                'custom_metadata': [
-                    {'key': 'source', 'string_value': 'website_scraping'},
-                    {'key': 'url', 'string_value': url},
-                    {'key': 'title', 'string_value': title},
-                    {'key': 'user_email', 'string_value': user_email or 'admin'},
-                    {'key': 'scraped_at', 'string_value': datetime.utcnow().isoformat()}
-                ]
+        # Create a temporary file for the content
+        fd, temp_path = tempfile.mkstemp(suffix='.json')
+        try:
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "content": content,
+                    "url": url,
+                    "title": title,
+                    "user_email": user_email,
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "website_crawling"
+                }, f, indent=2)
+                temp_filename = f"scraped_content_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                
+                # Upload to Gemini FileSearch
+                gemini_file = genai_client.upload_file(
+                    file_path=temp_path,
+                    display_name=temp_filename,
+                    mime_type="application/json"
+                )
+                
+                # Get the file metadata
+                file_metadata = genai_client.get_file(gemini_file.name)
+                
+                if file_metadata:
+                    logger.info(f"✅ Successfully uploaded to Gemini FileSearch: {temp_filename}")
+                    logger.info(f"📄 File ID: {file_metadata.name}")
+                    logger.info(f"� File URI: {file_metadata.uri}")
+                    
+                    return {
+                        "success": True,
+                        "file_name": temp_filename,
+                        "file_uri": file_metadata.uri,
+                        "state": file_metadata.state
+                    }
+                else:
+                    logger.error(f"❌ Failed to upload to Gemini FileSearch: {temp_filename}")
+                    return {
+                        "success": False,
+                        "error": "Upload failed",
+                        "file_name": None,
+                        "state": "FAILED"
+                    }
+        except Exception as e:
+            logger.error(f"❌ Error uploading to Gemini FileSearch: {e}")
+            return {
+                "success": False,
+                "error": f"Upload error: {str(e)}",
+                "file_name": None,
+                "state": "ERROR"
             }
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to delete temporary file: {e}")
         )
 
         # Poll for operation completion
