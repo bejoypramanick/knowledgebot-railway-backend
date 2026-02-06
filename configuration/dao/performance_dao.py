@@ -94,50 +94,53 @@ class PerformanceDAO:
             logger.log_db_query(query, None, error=e)
             return 0
 
-    # AI vs Human Metrics
+    # AI vs Human Metrics - Now session-based for accuracy
     async def get_ai_handled_chats(self) -> int:
-        """Get number of chats handled by AI."""
+        """Get number of sessions handled purely by AI (no human assignment)."""
         query = """
             SELECT COUNT(*)
-            FROM chat_messages cm
-            WHERE cm.role = 'user'
-            AND NOT EXISTS (
+            FROM chat_sessions cs
+            WHERE NOT EXISTS (
                 SELECT 1 FROM session_assignments sa
-                WHERE sa.session_id = cm.session_id
-                AND sa.status != 'ended'
+                WHERE sa.session_id = cs.id
             )
         """
         try:
             logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return result
+                return result or 0
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            logger.error(f"Error getting AI handled chats: {e}")
             return 0
 
     async def get_human_agent_handoffs(self) -> int:
-        """Get number of chats handed off to human agents."""
+        """Get number of sessions that were assigned to a human agent."""
         query = """
-            SELECT COUNT(*)
-            FROM chat_messages cm
-            WHERE cm.role = 'user'
-            AND EXISTS (
-                SELECT 1 FROM session_assignments sa
-                WHERE sa.session_id = cm.session_id
-                AND sa.status != 'ended'
-            )
+            SELECT COUNT(DISTINCT session_id)
+            FROM session_assignments
         """
         try:
             logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return result
+                return result or 0
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            logger.error(f"Error getting human handoffs: {e}")
             return 0
+
+    async def get_deflection_rate(self) -> float:
+        """Calculate deflection rate as (AI Handled Sessions / Total Sessions) * 100."""
+        try:
+            total_sessions = await self.get_total_sessions()
+            if total_sessions == 0:
+                return 0.0
+            
+            ai_handled = await self.get_ai_handled_chats()
+            return (ai_handled / total_sessions) * 100.0
+        except Exception as e:
+            logger.error(f"Error calculating deflection rate: {e}")
+            return 0.0
 
     async def get_interactions_over_time(self) -> List[Dict[str, Any]]:
         """Get interactions breakdown over time (last 6 months)."""
@@ -320,18 +323,23 @@ class PerformanceDAO:
                         # Format for frontend: [{"month": "Jan", "uptime": 99.9}, ...]
                         formatted_history = []
                         for item in raw_data:
-                            # Parse ISO timestamp if necessary, but here we just need the month
-                            # The health service returns 'time_period' as a string date
-                            try:
-                                from datetime import datetime
-                                date_obj = datetime.fromisoformat(item['time_period'].replace('Z', '+00:00'))
-                                month_name = date_obj.strftime('%b')
-                            except:
+                            # Handle both string and datetime objects
+                            time_period = item.get('time_period')
+                            if isinstance(time_period, str):
+                                try:
+                                    from datetime import datetime
+                                    date_obj = datetime.fromisoformat(time_period.replace('Z', '+00:00'))
+                                    month_name = date_obj.strftime('%b')
+                                except:
+                                    month_name = 'N/A'
+                            elif hasattr(time_period, 'strftime'):
+                                month_name = time_period.strftime('%b')
+                            else:
                                 month_name = 'N/A'
                                 
                             formatted_history.append({
                                 "month": month_name,
-                                "uptime": round(item['uptime_percentage'], 2)
+                                "uptime": round(item.get('uptime_percentage', 0), 2)
                             })
                         return formatted_history
                     return []
@@ -342,44 +350,61 @@ class PerformanceDAO:
             return []
 
     async def get_performance_metrics(self) -> Dict[str, Any]:
-        """Get comprehensive performance metrics."""
         try:
-            total_interactions = await self.get_total_interactions()
-            total_sessions = await self.get_total_sessions()
-            active_sessions = await self.get_active_sessions()
-            avg_engagement = await self.get_average_engagement_time()
-            sessions_with_human = await self.get_sessions_with_human()
-            ai_handled_chats = await self.get_ai_handled_chats()
-            human_handoffs = await self.get_human_agent_handoffs()
-            ai_handled_percentage = (ai_handled_chats / total_interactions * 100) if total_interactions > 0 else 0
-            human_handoff_percentage = (human_handoffs / total_interactions * 100) if total_interactions > 0 else 0
+            total_interactions = await self.get_total_interactions() or 0
+            total_sessions = await self.get_total_sessions() or 0
+            active_sessions = await self.get_active_sessions() or 0
+            avg_engagement = await self.get_average_engagement_time() or 0
+            sessions_with_human = await self.get_sessions_with_human() or 0
+            
+            ai_handled_chats = await self.get_ai_handled_chats() or 0
+            human_handoffs = await self.get_human_agent_handoffs() or 0
+            
+            # Use sessions for percentages if possible, otherwise interactions
+            total_for_calc = total_sessions if total_sessions > 0 else total_interactions
+            ai_handled_percentage = (ai_handled_chats / total_for_calc * 100) if total_for_calc > 0 else 0
+            human_handoff_percentage = (human_handoffs / total_for_calc * 100) if total_for_calc > 0 else 0
+            
+            # Use specialized deflection rate method
+            deflection_rate = await self.get_deflection_rate()
+            
             interactions_over_time = await self.get_interactions_over_time()
-            previous_period_interactions = sum(item['total'] for item in interactions_over_time[:-1]) if len(interactions_over_time) > 1 else 0
-            current_period_interactions = interactions_over_time[-1]['total'] if interactions_over_time else 0
-            interactions_growth = ((current_period_interactions - previous_period_interactions) / previous_period_interactions * 100) if previous_period_interactions > 0 else 0
+            
+            # Calculate growth based on last two time periods
+            interactions_growth = 0
+            if len(interactions_over_time) >= 2:
+                prev = interactions_over_time[-2].get('total', 0)
+                curr = interactions_over_time[-1].get('total', 0)
+                if prev > 0:
+                    interactions_growth = ((curr - prev) / prev) * 100
+                elif curr > 0:
+                    interactions_growth = 100
+
             satisfaction_score = await self.get_satisfaction_score()
             satisfaction_over_time = await self.get_satisfaction_over_time()
+            
             uptime_percentage = await self.get_uptime_percentage()
             uptime_by_service = await self.get_uptime_by_service()
+            uptime_history = await self.get_uptime_over_time(180)
 
             return {
                 "total_interactions": total_interactions,
                 "total_sessions": total_sessions,
                 "active_sessions": active_sessions,
-                "average_engagement_minutes": round(avg_engagement or 0, 2),
+                "average_engagement_minutes": round(avg_engagement, 2),
                 "sessions_with_human": sessions_with_human,
                 "ai_handled_chats": ai_handled_chats,
                 "human_agent_handoffs": human_handoffs,
                 "ai_handled_percentage": round(ai_handled_percentage, 2),
                 "human_handoff_percentage": round(human_handoff_percentage, 2),
-                "deflection_rate": round(ai_handled_percentage, 2),
+                "deflection_rate": round(deflection_rate, 2),
                 "interactions_growth": round(interactions_growth, 2),
                 "interactions_over_time": interactions_over_time,
                 "satisfaction_score": round(satisfaction_score, 2),
                 "satisfaction_over_time": satisfaction_over_time,
                 "uptime": round(uptime_percentage, 2),
                 "uptime_by_service": uptime_by_service,
-                "uptime_over_time": await self.get_uptime_over_time(180)  # 6 months history
+                "uptime_over_time": uptime_history
             }
         except Exception as e:
             logger.error(f"Error getting performance metrics: {e}")

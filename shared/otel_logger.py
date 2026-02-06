@@ -65,7 +65,7 @@ class OpenTelemetryLogger:
         
         # Also log to console
         param_str = f" | Params: {params}" if params else ""
-        self.info(f"🔍 DB Executing: {query[:200]}...{param_str}")
+        self.info(f"🔍 DB Executing: {query}{param_str}")
 
     def log_db_query(self, query: str, params: Any = None, result: Any = None, error: Exception = None):
         """Log database query AFTER execution with result or error"""
@@ -87,10 +87,10 @@ class OpenTelemetryLogger:
         
         # Also log to console
         if error:
-            self.error(f"❌ DB Query Error: {query[:100]}... | Error: {error}")
+            self.error(f"❌ DB Query Error: {query} | Error: {error}")
         else:
             rows = len(result) if result is not None and hasattr(result, '__len__') and not isinstance(result, (str, bytes)) else 'N/A'
-            self.info(f"✅ DB Query Success: {query[:100]}... | Rows/Result: {rows}")
+            self.info(f"✅ DB Query Success: {query} | Rows/Result: {rows}")
 
 def get_otel_logger(name: str, service_name: str) -> OpenTelemetryLogger:
     return OpenTelemetryLogger(name, service_name)
