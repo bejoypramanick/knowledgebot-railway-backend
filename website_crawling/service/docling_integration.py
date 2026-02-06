@@ -45,8 +45,14 @@ async def process_html_with_docling(
                 f.write(html_content)
 
             # Prepare multipart form data
+            # Clean URL for filename (remove protocol, slashes, special chars)
+            clean_url = page_url.replace('https://', '').replace('http://', '')
+            clean_url = clean_url.replace('/', '_').replace(':', '_').replace('?', '_')
+            clean_url = clean_url[:50]  # Limit length
+            filename = f'page-{clean_url}.html'
+
             with open(temp_html_path, 'rb') as f:
-                files = {'file': (f'page-{page_url[-20:]}.html', f, 'text/html')}
+                files = {'file': (filename, f, 'text/html')}
 
                 async with httpx.AsyncClient(timeout=timeout_seconds + 10) as client:
                     logger.info(
