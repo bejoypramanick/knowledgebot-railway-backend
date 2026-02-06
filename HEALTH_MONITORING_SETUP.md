@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The health monitoring service is deployed on Railway but **cannot persist health checks to the database** due to missing environment variables.
+The health monitoring service is deployed on Railway but has three critical issues preventing it from working:
 
 ### Issues Fixed ✅
 
@@ -10,20 +10,27 @@ The health monitoring service is deployed on Railway but **cannot persist health
    - Error: `invalid input for query argument $6: {'endpoint': '/health'} (expected str, got dict)`
    - Root Cause: metadata dict was passed directly to PostgreSQL asyncpg
    - Fix: Convert metadata dict to JSON string before insertion
-   - Status: ✅ COMMITTED
+   - Status: ✅ COMMITTED & AWAITING DEPLOYMENT
+
+2. **Service URL Validation** (FIXED in commit 3594c20)
+   - Error: "Request URL is missing an 'http://' or 'https://' protocol"
+   - Root Cause: Service URL might be empty/None, causing invalid URL construction
+   - Fix: Added validation to check if service URL is configured before making request
+   - Status: ✅ COMMITTED & AWAITING DEPLOYMENT
+
+3. **Configuration Service Database Schema Error** (FIXED in commit 3594c20)
+   - Error: "column sa.assignee_type does not exist"
+   - Root Cause: Query referenced non-existent column in session_assignments table
+   - Fix: Updated query to join with user_role_mapping and roles tables correctly
+   - Status: ✅ COMMITTED & AWAITING DEPLOYMENT
 
 ### Issues Remaining ❌
 
-1. **DATABASE_URL Not Configured**
+1. **DATABASE_URL Not Configured** (CRITICAL)
    - Error: "Database URL not configured - health checks will not be persisted"
    - Root Cause: Environment variable `DATABASE_URL` or `RAILWAY_POSTGRES_URL` not set in Railway
    - Impact: Health checks run every 5 minutes but are NOT stored in database
    - Fix: See Railway Setup Instructions below
-
-2. **Service URLs May Be Unconfigured** (Potential)
-   - Error: "Request URL is missing an 'http://' or 'https://' protocol"
-   - Possible Cause: Service URLs are empty or None if not read from environment
-   - Status: Added logging to config.py to debug this on startup
 
 ---
 
