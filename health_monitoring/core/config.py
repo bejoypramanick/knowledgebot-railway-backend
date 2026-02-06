@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     # Port Configuration
     health_monitoring_port: int = 8006
 
+    # Validate service URLs
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Log service URLs on startup
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"📡 Service URLs configured: api_gateway={self.api_gateway_url}, chatbot={self.chatbot_orchestration_url}")
+
     model_config = {
         'env_file': ".env",
         'case_sensitive': False

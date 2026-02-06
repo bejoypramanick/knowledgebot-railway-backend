@@ -1,4 +1,5 @@
 """Data Access Object for health monitoring operations."""
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
@@ -24,6 +25,9 @@ class HealthDAO:
         if timestamp is None:
             timestamp = datetime.utcnow()
 
+        # Convert metadata dict to JSON string for asyncpg JSONB handling
+        metadata_json = json.dumps(metadata) if metadata else None
+
         query = """
             INSERT INTO service_health_checks
             (service_name, status, response_time_ms, checked_at, error_message, metadata)
@@ -40,7 +44,7 @@ class HealthDAO:
                     response_time_ms,
                     timestamp,
                     error_message,
-                    metadata
+                    metadata_json
                 )
                 logger.info(f"✅ Inserted health check for {service_name}: {status}")
                 return result
