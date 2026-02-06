@@ -431,10 +431,37 @@ class PerformanceDAO:
                     return empty_months
                 except Exception as e:
                     logger.error(f"❌ Error fetching uptime history: {e}", exc_info=True)
-                    return []
+                    # Return 6 empty months on any error
+                    now = datetime.utcnow()
+                    empty_months = []
+                    for i in range(5, -1, -1):
+                        temp = now.replace(day=1) - timedelta(days=1)
+                        for _ in range(i):
+                            temp = temp.replace(day=1) - timedelta(days=1)
+                        month_date = temp.replace(day=1)
+                        empty_months.append({
+                            "month": month_date.strftime('%b %Y'),
+                            "uptime": 0
+                        })
+                    return empty_months
         except Exception as e:
             logger.error(f"❌ Error in get_uptime_over_time: {e}", exc_info=True)
-            return []
+            # Return 6 empty months even on outer exception
+            try:
+                now = datetime.utcnow()
+                empty_months = []
+                for i in range(5, -1, -1):
+                    temp = now.replace(day=1) - timedelta(days=1)
+                    for _ in range(i):
+                        temp = temp.replace(day=1) - timedelta(days=1)
+                    month_date = temp.replace(day=1)
+                    empty_months.append({
+                        "month": month_date.strftime('%b %Y'),
+                        "uptime": 0
+                    })
+                return empty_months
+            except:
+                return []
 
     async def get_performance_metrics(self) -> Dict[str, Any]:
         try:
