@@ -235,7 +235,10 @@ class PerformanceDAO:
             import os
             import httpx
 
-            health_monitoring_url = os.getenv("HEALTH_MONITORING_URL", "http://localhost:8006")
+            health_monitoring_url = os.getenv(
+                "HEALTH_MONITORING_URL",
+                "http://health-monitoring.railway.internal:8006"
+            )
 
             async with httpx.AsyncClient(timeout=10) as client:
                 try:
@@ -272,7 +275,10 @@ class PerformanceDAO:
             import os
             import httpx
 
-            health_monitoring_url = os.getenv("HEALTH_MONITORING_URL", "http://localhost:8006")
+            health_monitoring_url = os.getenv(
+                "HEALTH_MONITORING_URL",
+                "http://health-monitoring.railway.internal:8006"
+            )
 
             async with httpx.AsyncClient(timeout=10) as client:
                 try:
@@ -307,9 +313,13 @@ class PerformanceDAO:
             import os
             import httpx
 
-            health_monitoring_url = os.getenv("HEALTH_MONITORING_URL", "http://localhost:8006")
+            # Use Railway internal URL as default, fallback to localhost for development
+            health_monitoring_url = os.getenv(
+                "HEALTH_MONITORING_URL",
+                "http://health-monitoring.railway.internal:8006"
+            )
             logger.info(f"📊 Fetching uptime history from {health_monitoring_url}/api/v1/health/chart-data")
-            logger.info(f"📊 HEALTH_MONITORING_URL env var: {os.getenv('HEALTH_MONITORING_URL', 'NOT SET')}")
+            logger.info(f"📊 HEALTH_MONITORING_URL env var: {os.getenv('HEALTH_MONITORING_URL', 'USING DEFAULT RAILWAY URL')}")
 
             async with httpx.AsyncClient(timeout=10) as client:
                 try:
