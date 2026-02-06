@@ -232,6 +232,42 @@ class PerformanceDAO:
             logger.warning(f"Error fetching uptime percentage: {e}")
             return 99.5  # Conservative default
 
+    async def get_uptime_by_service(self) -> List[Dict[str, Any]]:
+        """Get uptime percentage for each service from health monitoring."""
+        try:
+            import os
+            import httpx
+
+            health_monitoring_url = os.getenv("HEALTH_MONITORING_URL", "http://localhost:8006")
+
+            async with httpx.AsyncClient(timeout=10) as client:
+                try:
+                    response = await client.get(
+                        f"{health_monitoring_url}/api/v1/health/availability"
+                    )
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        services = data.get("services", {})
+
+                        # Return list of service uptime data
+                        return [
+                            {
+                                "service": service_name,
+                                "uptime": round(uptime, 2)
+                            }
+                            for service_name, uptime in services.items()
+                        ]
+                    else:
+                        logger.warning(f"Health monitoring returned status {response.status_code}")
+                        return []
+                except httpx.RequestError as e:
+                    logger.warning(f"Could not reach health monitoring service: {e}")
+                    return []
+        except Exception as e:
+            logger.warning(f"Error fetching service uptime data: {e}")
+            return []
+
     async def get_performance_metrics(self) -> Dict[str, Any]:
         """Get comprehensive performance metrics."""
         try:
@@ -265,6 +301,9 @@ class PerformanceDAO:
             # Get uptime percentage from health monitoring service
             uptime_percentage = await self.get_uptime_percentage()
 
+            # Get per-service uptime data
+            uptime_by_service = await self.get_uptime_by_service()
+
             return {
                 "total_interactions": total_interactions,
                 "total_sessions": total_sessions,
@@ -279,7 +318,8 @@ class PerformanceDAO:
                 "interactions_over_time": interactions_over_time,
                 "user_satisfaction": round(satisfaction_score, 2),
                 "satisfaction_over_time": satisfaction_over_time,
-                "uptime_percentage": round(uptime_percentage, 2)
+                "uptime_percentage": round(uptime_percentage, 2),
+                "uptime_by_service": uptime_by_service
             }
         except Exception as e:
             logger.error(f"Error getting performance metrics: {e}")

@@ -189,7 +189,8 @@ async def public_chat_stream(request: Request):
         chatbot_service_url = settings.chatbot_orchestration_url
         
         # Log the request
-        correlation_id = request.headers.get("X-Correlation-ID", "no-correlation-id")
+        import uuid
+        correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
         logger.info(f"🔍 [{correlation_id}] Public chat stream request received from authorized domain")
         
         # Prepare headers - remove auth-related headers for public endpoint
@@ -308,7 +309,8 @@ async def public_widget(request: Request):
 async def generic_proxy_handler(request: Request, path: str):
     """Generic proxy handler that routes ALL requests to appropriate services"""
     # Log every incoming request for debugging
-    correlation_id = request.headers.get("X-Correlation-ID", "no-correlation-id")
+    import uuid
+    correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
     logger.info(f"🔍 [{correlation_id}] API Gateway received {request.method} {request.url.path}")
     
     try:

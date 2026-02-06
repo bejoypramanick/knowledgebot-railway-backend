@@ -231,10 +231,26 @@ class DoclingProcessor:
             else:
                 # Build error message with details from conversion result
                 error_msg = f"Conversion failed with status: {conversion_result.status}"
+                error_details = []
+
+                # Try to extract error details
                 if hasattr(conversion_result, 'errors') and conversion_result.errors:
-                    error_details = [e.error_message for e in conversion_result.errors]
-                    error_msg += f" - Errors: {error_details}"
-                logger.error(f"🔍 {error_msg}")
+                    try:
+                        error_details = [str(e) if not hasattr(e, 'error_message') else e.error_message for e in conversion_result.errors]
+                        error_msg += f" - Errors: {error_details}"
+                    except Exception as e:
+                        logger.warning(f"Could not extract error details: {e}")
+
+                # For HTML files specifically, provide better context
+                if file_path.lower().endswith(('.html', '.htm')):
+                    logger.warning(
+                        f"🔍 HTML conversion not fully supported by docling. "
+                        f"Status: {conversion_result.status}. "
+                        f"Consider using raw HTML extraction instead."
+                    )
+                else:
+                    logger.error(f"🔍 {error_msg}")
+
                 raise RuntimeError(error_msg)
 
         except Exception as e:

@@ -77,10 +77,17 @@ async def process_html_with_docling(
                             return markdown_content, metadata
                         else:
                             error = result.get("error", "Unknown error")
-                            logger.warning(
-                                f"⚠️ [DOCLING] HTML conversion failed for {page_url}: {error}"
-                            )
-                            return None, {"error": error}
+                            # Check if this is a known docling limitation with HTML
+                            if "ConversionStatus.FAILURE" in error or "HTML" in error:
+                                logger.info(
+                                    f"ℹ️ [DOCLING] HTML conversion not supported by docling for {page_url}. "
+                                    f"This is expected - will use raw HTML extraction instead."
+                                )
+                            else:
+                                logger.warning(
+                                    f"⚠️ [DOCLING] HTML conversion failed for {page_url}: {error}"
+                                )
+                            return None, {"error": error, "expected": "ConversionStatus.FAILURE" in error}
                     else:
                         error_msg = f"HTTP {response.status_code}: {response.text}"
                         logger.warning(f"⚠️ [DOCLING] Request failed for {page_url}: {error_msg}")
