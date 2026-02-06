@@ -308,6 +308,7 @@ class PerformanceDAO:
             import httpx
 
             health_monitoring_url = os.getenv("HEALTH_MONITORING_URL", "http://localhost:8006")
+            logger.info(f"📊 Fetching uptime history from {health_monitoring_url}/api/v1/health/chart-data")
 
             async with httpx.AsyncClient(timeout=10) as client:
                 try:
@@ -316,10 +317,13 @@ class PerformanceDAO:
                         params={"days": days, "interval": "month" if days >= 90 else "day"}
                     )
 
+                    logger.info(f"📊 Health monitoring response status: {response.status_code}")
+
                     if response.status_code == 200:
                         chart_result = response.json()
                         raw_data = chart_result.get("data", [])
-                        
+                        logger.info(f"📊 Raw uptime data from health monitoring: {len(raw_data)} records")
+
                         # Format for frontend: [{"month": "Jan", "uptime": 99.9}, ...]
                         formatted_history = []
                         for item in raw_data:
@@ -336,17 +340,21 @@ class PerformanceDAO:
                                 month_name = time_period.strftime('%b')
                             else:
                                 month_name = 'N/A'
-                                
+
                             formatted_history.append({
                                 "month": month_name,
                                 "uptime": round(item.get('uptime_percentage', 0), 2)
                             })
+                        logger.info(f"✅ Formatted uptime history: {len(formatted_history)} records")
                         return formatted_history
+                    else:
+                        logger.warning(f"⚠️ Health monitoring returned status {response.status_code}")
                     return []
                 except Exception as e:
-                    logger.warning(f"Error fetching uptime history: {e}")
+                    logger.error(f"❌ Error fetching uptime history: {e}")
                     return []
         except Exception as e:
+            logger.error(f"❌ Error in get_uptime_over_time: {e}")
             return []
 
     async def get_performance_metrics(self) -> Dict[str, Any]:
