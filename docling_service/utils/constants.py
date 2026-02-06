@@ -1,7 +1,6 @@
 """Constants and file type configurations for Docling Service."""
 
 # Supported file types for docling processing
-# Note: HTML files are NOT supported by docling (it tries to process them as PDFs which fails)
 SUPPORTED_FILE_TYPES = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -10,6 +9,7 @@ SUPPORTED_FILE_TYPES = {
     ".ppt": "application/vnd.ms-powerpoint",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".xls": "application/vnd.ms-excel",
+    ".html": "text/html",
 }
 
 # File types that should skip docling (already structured/text)

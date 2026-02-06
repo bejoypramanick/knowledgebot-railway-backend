@@ -93,13 +93,13 @@ async def upload_content_to_gemini(
                 for i in range(15):  # Poll for up to 30 seconds
                     current_operation = genai_client.operations.get(operation)
 
-                    if hasattr(current_operation.response, 'document_name'):
+                    if current_operation.response and hasattr(current_operation.response, 'document_name'):
                         final_state = "ACTIVE"
                         document_name = current_operation.response.document_name
                         logger.info(f"✅ [GEMINI] FileSearch upload complete - Document: {document_name}")
                         gemini_processed_at = datetime.utcnow()
                         break
-                    elif hasattr(current_operation.response, 'state') and hasattr(current_operation.response.state, 'name'):
+                    elif current_operation.response and hasattr(current_operation.response, 'state') and hasattr(current_operation.response.state, 'name'):
                         final_state = current_operation.response.state.name
                         logger.info(f"🔄 [GEMINI] FileSearch operation state (Attempt {i+1}/15): {final_state}")
                         if final_state == "ACTIVE":
@@ -156,9 +156,9 @@ async def upload_content_to_gemini(
             "state": "FAILED"
         }
     finally:
-        if tmp_path and os.path.exists(tmp_path):
+        if temp_path and os.path.exists(temp_path):
             try:
-                os.unlink(tmp_path)
+                os.unlink(temp_path)
             except:
                 pass
 
