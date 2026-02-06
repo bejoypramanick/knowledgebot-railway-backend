@@ -1,9 +1,10 @@
 [build]
-builder = "dockerfile"
-dockerfile = "./Dockerfile"
-context = "./"
+dockerfilePath = "health_monitoring/Dockerfile"
+rootDirectory = ".."
 
 [deploy]
-startCommand = "python -m uvicorn health_monitoring.main:app --host 0.0.0.0 --port $PORT"
-restartPolicyMaxRetries = 5
-restartPolicyMaxRetryDelay = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+# startCommand omitted - Railway uses CMD from Dockerfile
