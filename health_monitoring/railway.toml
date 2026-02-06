@@ -1,0 +1,10 @@
+[build]
+builder = "docker"
+
+[build.cmd]
+dockerfile = "./Dockerfile"
+
+[deploy]
+startCommand = "python -m uvicorn health_monitoring.main:app --host 0.0.0.0 --port $PORT"
+restartPolicyMaxRetries = 5
+restartPolicyMaxRetryDelay = 300

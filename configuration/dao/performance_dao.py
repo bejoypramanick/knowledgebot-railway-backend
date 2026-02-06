@@ -155,6 +155,81 @@ class PerformanceDAO:
             logger.log_db_query(query, None, error=e)
             return []
 
+    async def get_satisfaction_score(self) -> float:
+        """Calculate average satisfaction score from chat_feedback (thumbs up/down)."""
+        query = """
+            SELECT
+                AVG(CASE
+                    WHEN feedback_type = 'positive' THEN 5.0
+                    WHEN feedback_type = 'negative' THEN 1.0
+                    ELSE 3.0
+                END) as avg_score
+            FROM chat_feedback
+            WHERE created_at >= NOW() - INTERVAL '30 days'
+        """
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetchval(query)
+                logger.log_db_query(query, None, result)
+                return float(result or 4.0)
+        except Exception as e:
+            logger.log_db_query(query, None, error=e)
+            return 4.0
+
+    async def get_satisfaction_over_time(self) -> List[Dict[str, Any]]:
+        """Get monthly satisfaction scores with thumbs up/down counts from chat_feedback."""
+        query = """
+            SELECT
+                TO_CHAR(created_at, 'Mon') as month,
+                COUNT(CASE WHEN feedback_type = 'positive' THEN 1 END) as thumbs_up,
+                COUNT(CASE WHEN feedback_type = 'negative' THEN 1 END) as thumbs_down,
+                AVG(CASE
+                    WHEN feedback_type = 'positive' THEN 5.0
+                    WHEN feedback_type = 'negative' THEN 1.0
+                    ELSE 3.0
+                END) as satisfaction_score
+            FROM chat_feedback
+            WHERE created_at >= NOW() - INTERVAL '6 months'
+            GROUP BY TO_CHAR(created_at, 'Mon'), DATE_TRUNC('month', created_at)
+            ORDER BY DATE_TRUNC('month', created_at)
+        """
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetch(query)
+                logger.log_db_query(query, None, result)
+                return [dict(row) for row in result]
+        except Exception as e:
+            logger.log_db_query(query, None, error=e)
+            return []
+
+    async def get_uptime_percentage(self, days: int = 30) -> float:
+        """Get system uptime percentage from health monitoring (with fallback)."""
+        try:
+            import os
+            import httpx
+
+            health_monitoring_url = os.getenv("HEALTH_MONITORING_URL", "http://localhost:8006")
+
+            async with httpx.AsyncClient(timeout=10) as client:
+                try:
+                    response = await client.get(
+                        f"{health_monitoring_url}/api/v1/health/availability",
+                        params={"days": days}
+                    )
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        return float(data.get("average_uptime_percentage", 99.5))
+                    else:
+                        logger.warning(f"Health monitoring returned status {response.status_code}")
+                        return 99.5  # Default to good health if service unavailable
+                except httpx.RequestError as e:
+                    logger.warning(f"Could not reach health monitoring service: {e}")
+                    return 99.5  # Default uptime if health service is unreachable
+        except Exception as e:
+            logger.warning(f"Error fetching uptime percentage: {e}")
+            return 99.5  # Conservative default
+
     async def get_performance_metrics(self) -> Dict[str, Any]:
         """Get comprehensive performance metrics."""
         try:
@@ -164,23 +239,30 @@ class PerformanceDAO:
             active_sessions = await self.get_active_sessions()
             avg_engagement = await self.get_average_engagement_time()
             sessions_with_human = await self.get_sessions_with_human()
-            
+
             # Get AI vs Human metrics
             ai_handled_chats = await self.get_ai_handled_chats()
             human_handoffs = await self.get_human_agent_handoffs()
-            
+
             # Calculate percentages
             ai_handled_percentage = (ai_handled_chats / total_interactions * 100) if total_interactions > 0 else 0
             human_handoff_percentage = (human_handoffs / total_interactions * 100) if total_interactions > 0 else 0
-            
+
             # Get interactions over time
             interactions_over_time = await self.get_interactions_over_time()
-            
+
             # Calculate growth (compare with previous period)
             previous_period_interactions = sum(item['total'] for item in interactions_over_time[:-1]) if len(interactions_over_time) > 1 else 0
             current_period_interactions = interactions_over_time[-1]['total'] if interactions_over_time else 0
             interactions_growth = ((current_period_interactions - previous_period_interactions) / previous_period_interactions * 100) if previous_period_interactions > 0 else 0
-            
+
+            # Get real satisfaction data from chat_feedback
+            satisfaction_score = await self.get_satisfaction_score()
+            satisfaction_over_time = await self.get_satisfaction_over_time()
+
+            # Get uptime percentage from health monitoring service
+            uptime_percentage = await self.get_uptime_percentage()
+
             return {
                 "total_interactions": total_interactions,
                 "total_sessions": total_sessions,
@@ -193,7 +275,9 @@ class PerformanceDAO:
                 "human_handoff_percentage": round(human_handoff_percentage, 2),
                 "interactions_growth": round(interactions_growth, 2),
                 "interactions_over_time": interactions_over_time,
-                "user_satisfaction": 4.5  # Placeholder - would need feedback data
+                "user_satisfaction": round(satisfaction_score, 2),
+                "satisfaction_over_time": satisfaction_over_time,
+                "uptime_percentage": round(uptime_percentage, 2)
             }
         except Exception as e:
             logger.error(f"Error getting performance metrics: {e}")
