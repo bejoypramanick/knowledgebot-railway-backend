@@ -298,6 +298,49 @@ class PerformanceDAO:
         except Exception as e:
             return default_services
 
+    async def get_uptime_over_time(self, days: int = 180) -> List[Dict[str, Any]]:
+        """Get uptime history for the last N days from health monitoring."""
+        try:
+            import os
+            import httpx
+
+            health_monitoring_url = os.getenv("HEALTH_MONITORING_URL", "http://localhost:8006")
+
+            async with httpx.AsyncClient(timeout=10) as client:
+                try:
+                    response = await client.get(
+                        f"{health_monitoring_url}/api/v1/health/chart-data",
+                        params={"days": days, "interval": "month" if days >= 90 else "day"}
+                    )
+
+                    if response.status_code == 200:
+                        chart_result = response.json()
+                        raw_data = chart_result.get("data", [])
+                        
+                        # Format for frontend: [{"month": "Jan", "uptime": 99.9}, ...]
+                        formatted_history = []
+                        for item in raw_data:
+                            # Parse ISO timestamp if necessary, but here we just need the month
+                            # The health service returns 'time_period' as a string date
+                            try:
+                                from datetime import datetime
+                                date_obj = datetime.fromisoformat(item['time_period'].replace('Z', '+00:00'))
+                                month_name = date_obj.strftime('%b')
+                            except:
+                                month_name = 'N/A'
+                                
+                            formatted_history.append({
+                                "month": month_name,
+                                "uptime": round(item['uptime_percentage'], 2)
+                            })
+                        return formatted_history
+                    return []
+                except Exception as e:
+                    logger.warning(f"Error fetching uptime history: {e}")
+                    return []
+        except Exception as e:
+            return []
+
     async def get_performance_metrics(self) -> Dict[str, Any]:
         """Get comprehensive performance metrics."""
         try:
@@ -335,7 +378,8 @@ class PerformanceDAO:
                 "satisfaction_score": round(satisfaction_score, 2),
                 "satisfaction_over_time": satisfaction_over_time,
                 "uptime": round(uptime_percentage, 2),
-                "uptime_by_service": uptime_by_service
+                "uptime_by_service": uptime_by_service,
+                "uptime_over_time": await self.get_uptime_over_time(180)  # 6 months history
             }
         except Exception as e:
             logger.error(f"Error getting performance metrics: {e}")

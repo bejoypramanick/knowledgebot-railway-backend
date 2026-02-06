@@ -29,6 +29,10 @@ google-auth>=2.38.0
 # File handling
 aiofiles>=24.1.0
 python-multipart>=0.0.9
+pure-magic>=1.28
+trafilatura>=1.12.0
+beautifulsoup4>=4.12.0
+lxml>=5.3.0
 
 # Enhanced email validation
 email-validator>=2.0.0

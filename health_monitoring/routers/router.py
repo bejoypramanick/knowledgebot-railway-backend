@@ -31,7 +31,7 @@ async def get_all_services_status():
 
 @router.get("/uptime")
 async def get_uptime_report(
-    days: Optional[int] = Query(30, ge=1, le=90),
+    days: Optional[int] = Query(30, ge=1, le=180),
     service: Optional[str] = Query(None)
 ):
     """
@@ -57,7 +57,7 @@ async def get_uptime_report(
 async def get_uptime_chart_data(
     service: Optional[str] = Query(None),
     interval: Optional[str] = Query("day", regex="^(hour|day|week|month)$"),
-    days: Optional[int] = Query(30, ge=1, le=90)
+    days: Optional[int] = Query(30, ge=1, le=180)
 ):
     """
     Get chart data for uptime visualization.

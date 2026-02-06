@@ -1,6 +1,6 @@
-import mimetypes
 import os
 import re
+import puremagic
 from typing import Optional, Tuple
 
 from ..utils.constants import (ALLOWED_FILE_EXTENSIONS, ALLOWED_MIME_TYPES,
@@ -58,33 +58,13 @@ def sanitize_filename(filename: str) -> str:
         filename = name[:255-len(ext)] + ext
     return filename
 
-def detect_mime_type_from_extension(filename: str, provided_mime_type: Optional[str] = None) -> str:
-    """Detect proper MIME type from file extension, falling back to provided type or default."""
-    
-    if provided_mime_type and provided_mime_type != "application/octet-stream":
-        return provided_mime_type
-    
-    extension_to_mime = {
-        'pdf': 'application/pdf',
-        'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'txt': 'text/plain',
-        'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'csv': 'text/csv',
-        'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        'py': 'text/x-python',
-        'js': 'application/javascript',
-        'html': 'text/html',
-        'json': 'application/json',
-        'md': 'text/markdown',
-    }
-    
-    ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-    
-    if ext in extension_to_mime:
-        return extension_to_mime[ext]
-    
-    guessed_type, _ = mimetypes.guess_type(filename)
-    if guessed_type:
-        return guessed_type
-    
-    return provided_mime_type or "application/octet-stream"
+from shared.file_utils import detect_mime_type as detect_mime_type_from_shared
+
+def detect_mime_type_robust(file_path: str) -> str:
+    """Delegate robust MIME detection to shared utility."""
+    from shared.file_utils import detect_mime_type_robust as shared_detect
+    return shared_detect(file_path)
+
+def detect_mime_type_from_extension(filename: str, provided_mime_type: Optional[str] = None, file_path: Optional[str] = None) -> str:
+    """Delegate MIME detection to shared utility."""
+    return detect_mime_type_from_shared(filename, provided_mime_type, file_path)

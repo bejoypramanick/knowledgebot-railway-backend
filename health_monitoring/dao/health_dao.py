@@ -147,7 +147,8 @@ class HealthDAO:
     @staticmethod
     async def get_uptime_over_time(
         service_name: Optional[str] = None,
-        interval: str = 'day'
+        interval: str = 'day',
+        days: int = 180  # Default to 6 months
     ) -> List[Dict[str, Any]]:
         """Get uptime data over time for charting."""
         if interval not in ['hour', 'day', 'week', 'month']:
@@ -169,15 +170,15 @@ class HealthDAO:
                     COUNT(CASE WHEN status = 'healthy' THEN 1 END) * 100.0 / COUNT(*) as uptime_percentage
                 FROM service_health_checks
                 WHERE service_name = $1
-                AND checked_at >= NOW() - INTERVAL '90 days'
+                AND checked_at >= NOW() - ($2 * INTERVAL '1 day')
                 GROUP BY {time_bucket}
                 ORDER BY {time_bucket}
             """
             try:
-                params = (service_name,)
+                params = (service_name, days)
                 logger.log_db_operation(query, params)
                 async with get_db_connection() as conn:
-                    results = await conn.fetch(query, service_name)
+                    results = await conn.fetch(query, service_name, days)
                     logger.log_db_query(query, params, results)
                     return [dict(row) for row in results]
             except Exception as e:
@@ -187,21 +188,21 @@ class HealthDAO:
             query = f"""
                 SELECT
                     {time_bucket} as time_period,
-                    service_name,
                     COUNT(CASE WHEN status = 'healthy' THEN 1 END) * 100.0 / COUNT(*) as uptime_percentage
                 FROM service_health_checks
-                WHERE checked_at >= NOW() - INTERVAL '90 days'
-                GROUP BY {time_bucket}, service_name
-                ORDER BY {time_bucket}, service_name
+                WHERE checked_at >= NOW() - ($1 * INTERVAL '1 day')
+                GROUP BY {time_bucket}
+                ORDER BY {time_bucket}
             """
             try:
-                logger.log_db_operation(query)
+                params = (days,)
+                logger.log_db_operation(query, params)
                 async with get_db_connection() as conn:
-                    results = await conn.fetch(query)
-                    logger.log_db_query(query, None, results)
+                    results = await conn.fetch(query, days)
+                    logger.log_db_query(query, params, results)
                     return [dict(row) for row in results]
             except Exception as e:
-                logger.log_db_query(query, None, error=e)
+                logger.log_db_query(query, params, error=e)
                 return []
 
     @staticmethod

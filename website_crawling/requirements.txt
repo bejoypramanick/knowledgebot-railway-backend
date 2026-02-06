@@ -24,6 +24,8 @@ crawl4ai>=0.7.0
 beautifulsoup4>=4.12.0
 lxml>=5.3.0
 playwright>=1.56.0
+pure-magic>=1.28
+trafilatura>=1.12.0
 
 # Google Gemini
 google-genai>=0.8.0

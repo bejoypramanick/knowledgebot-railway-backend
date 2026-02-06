@@ -73,8 +73,8 @@ async def process_with_gemini(
                 self.uri = None
         return PlaceholderFile(f"files/{original_filename}"), "ACTIVE", datetime.utcnow()
 
-    # Detect proper MIME type
-    final_mime_type = detect_mime_type_from_extension(original_filename, mime_type)
+    # Detect proper MIME type - use magic bytes from file path
+    final_mime_type = detect_mime_type_from_extension(original_filename, mime_type, tmp_path)
 
     # Create display name
     if file_display_name != original_filename:
@@ -111,6 +111,10 @@ async def process_with_gemini(
                     ]
                 }
             )
+
+            if not operation:
+                logger.error("❌ [GEMINI] Failed to create upload operation")
+                raise Exception("Gemini operation creation failed")
 
             # Wait for the upload operation to complete
             start_time = time.time()
@@ -161,9 +165,16 @@ async def process_with_gemini(
                 )
             )
 
-            # Poll for processing completion
-            final_state = uploaded_file.state.name if hasattr(uploaded_file.state, 'name') else str(uploaded_file.state)
+            # Guard: ensure file was actually uploaded
+            if not uploaded_file:
+                logger.error("❌ [GEMINI] uploaded_file is None after upload call")
+                raise Exception("Gemini upload failed - no file object returned")
 
+            # Poll for processing completion
+            final_state = "PENDING"
+            if hasattr(uploaded_file, 'state'):
+                final_state = uploaded_file.state.name if hasattr(uploaded_file.state, 'name') else str(uploaded_file.state)
+            
             try:
                 for i in range(15):  # Poll for up to 30 seconds
                     current_file = genai_client.files.get(name=uploaded_file.name)
@@ -327,9 +338,11 @@ async def process_single_file_upload(
                 error=size_error
             )
 
-        # Calculate hash and detect MIME type
+        # Calculate hash and detect MIME type robustly using magic bytes
         sha256_hash = calculate_sha256(tmp_path)
-        detected_mime_type = detect_mime_type_from_extension(original_filename, file.content_type)
+        detected_mime_type = detect_mime_type_from_extension(original_filename, file.content_type, tmp_path)
+        
+        logger.info(f"🔍 [ROUTING] Detected MIME: {detected_mime_type} for {original_filename}")
 
         # Check for duplicates
         duplicate_check = await file_service.handle_duplicate_check(sha256_hash, original_filename, replace_existing)
@@ -345,14 +358,68 @@ async def process_single_file_upload(
 
         replaced = duplicate_check.get("reason") == "replaced"
 
-        # Try to process with Docling (convert to markdown with OCR)
-        # This is plug-and-play: if disabled or fails, falls back to raw upload
+        # ---------------------------------------------------------
+        # STRICT INGESTION ROUTING
+        # ---------------------------------------------------------
         markdown_tmp_path = None
         docling_metadata = {}
+        processed_successfully = False
 
-        if await should_use_docling_for_file(original_filename, detected_mime_type, file_size):
+        # 1. Route HTML files to HTML-specific pipeline
+        if detected_mime_type == 'text/html' or original_filename.lower().endswith(('.html', '.htm')):
+            logger.info(f"🌐 [ROUTING] Routing {original_filename} to HTML-specific pipeline")
             try:
-                logger.info(f"📄 Attempting docling conversion for {original_filename}")
+                from shared.html_processor import extract_content_from_html
+                markdown_content, html_metadata = extract_content_from_html(tmp_path)
+                
+                if markdown_content:
+                    markdown_tmp_path = await create_markdown_temp_file(markdown_content)
+                    # Switch to markdown artifact
+                    original_tmp_path = tmp_path
+                    tmp_path = markdown_tmp_path
+                    original_filename = original_filename.rsplit('.', 1)[0] + '.md'
+                    detected_mime_type = 'text/markdown'
+                    processed_successfully = True
+                    logger.info(f"✅ [HTML] Extracted {len(markdown_content)} characters from HTML")
+                else:
+                    error_msg = html_metadata.get("error", "HTML extraction failed")
+                    logger.error(f"❌ [HTML] Extraction failed for {original_filename}: {error_msg}")
+                    # HARD FAILURE: Do not return 200, stop processing
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                    return BatchUploadItem(
+                        filename=original_filename,
+                        success=False,
+                        message="HTML extraction failed",
+                        error=error_msg
+                    )
+            except Exception as e:
+                logger.error(f"❌ [HTML] Unexpected error processing HTML: {e}")
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                return BatchUploadItem(
+                    filename=original_filename,
+                    success=False,
+                    message="HTML processing error",
+                    error=str(e)
+                )
+
+        # 2. Route PDFs and other Docling-supported files
+        elif await should_use_docling_for_file(original_filename, detected_mime_type, file_size):
+            logger.info(f"📄 [ROUTING] Routing {original_filename} to Docling (PDF/DOCX) pipeline")
+            # Strict check: Never send HTML to Docling
+            if detected_mime_type == 'text/html' or original_filename.lower().endswith(('.html', '.htm')):
+                logger.error(f"🚫 [ROUTING] Refusing to send HTML to Docling for {original_filename}")
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                return BatchUploadItem(
+                    filename=original_filename,
+                    success=False,
+                    message="Routing error",
+                    error="HTML files must use HTML pipeline, not Docling"
+                )
+
+            try:
                 markdown_content, docling_metadata = await process_with_docling(
                     tmp_path,
                     original_filename,
@@ -360,49 +427,47 @@ async def process_single_file_upload(
                 )
 
                 if markdown_content:
-                    # Successfully converted to markdown
-                    try:
-                        markdown_tmp_path = await create_markdown_temp_file(markdown_content)
-                        # Use markdown instead of original file
-                        original_tmp_path = tmp_path
-                        tmp_path = markdown_tmp_path
-                        original_filename = original_filename.rsplit('.', 1)[0] + '.md'
-                        detected_mime_type = 'text/markdown'
-                        logger.info(
-                            f"✅ Converted to markdown: {len(markdown_content)} chars, "
-                            f"{docling_metadata.get('images_with_ocr', 0)} images with OCR"
-                        )
-                    except Exception as e:
-                        logger.warning(f"⚠️ Failed to create markdown file: {e} - falling back to raw")
-                        # Fall back to original file
-                        if markdown_tmp_path and os.path.exists(markdown_tmp_path):
-                            os.unlink(markdown_tmp_path)
-                        tmp_path = original_tmp_path if 'original_tmp_path' in locals() else tmp_path
+                    markdown_tmp_path = await create_markdown_temp_file(markdown_content)
+                    # Switch to markdown artifact
+                    original_tmp_path = tmp_path
+                    tmp_path = markdown_tmp_path
+                    original_filename = original_filename.rsplit('.', 1)[0] + '.md'
+                    detected_mime_type = 'text/markdown'
+                    processed_successfully = True
+                    logger.info(f"✅ [DOCLING] Converted {original_filename} to markdown")
                 else:
-                    # Docling processing failed
-                    if settings.docling_fallback_to_raw:
-                        logger.info(f"⚠️ Docling failed for {original_filename} - falling back to raw upload")
-                    else:
-                        error_msg = docling_metadata.get("error", "Docling processing failed")
-                        logger.error(f"❌ Docling processing failed and fallback disabled: {error_msg}")
-                        if tmp_path and os.path.exists(tmp_path):
-                            os.unlink(tmp_path)
-                        return BatchUploadItem(
-                            filename=original_filename,
-                            success=False,
-                            message="Document processing failed",
-                            error=error_msg
-                        )
-
-            except asyncio.TimeoutError:
-                logger.warning(
-                    f"⚠️ Docling timeout for {original_filename} "
-                    f"- falling back to raw upload"
-                )
+                    error_msg = docling_metadata.get("error", "Docling processing failed")
+                    logger.error(f"❌ [DOCLING] Processing failed for {original_filename}: {error_msg}")
+                    
+                    # HARD FAILURE (no fallback to raw if it's a PDF/DOCX that failed)
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                    return BatchUploadItem(
+                        filename=original_filename,
+                        success=False,
+                        message="Document conversion failed",
+                        error=error_msg
+                    )
             except Exception as e:
-                logger.warning(f"⚠️ Docling processing error for {original_filename}: {e} - falling back to raw")
+                logger.error(f"❌ [DOCLING] Unexpected error in Docling pipeline: {e}")
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                return BatchUploadItem(
+                    filename=original_filename,
+                    success=False,
+                    message="Docling processing error",
+                    error=str(e)
+                )
+        else:
+            # For types that skip docling (txt, md, etc.), we mark as processed successfully
+            logger.info(f"📝 [ROUTING] Skipping special processing for {detected_mime_type}")
+            processed_successfully = True
 
-        # Process with Gemini (with markdown if docling succeeded, or raw file)
+        # ---------------------------------------------------------
+        # GEMINI UPLOAD GUARD
+        # ---------------------------------------------------------
+        # We only reach here if processed_successfully is True or it was a skip-docling type
+        logger.info(f"🚀 [GEMINI] Initiating upload for {original_filename}")
         uploaded_file, final_state, gemini_processed_at = await process_with_gemini(
             tmp_path, file_display_name, original_filename, detected_mime_type, user_email
         )

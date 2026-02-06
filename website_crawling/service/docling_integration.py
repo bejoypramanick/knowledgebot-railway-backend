@@ -38,86 +38,21 @@ async def process_html_with_docling(
         timeout_seconds = settings.docling_website_timeout_seconds
 
     try:
-        # Create temporary HTML file for docling
-        fd, temp_html_path = tempfile.mkstemp(suffix='.html')
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                f.write(html_content)
-
-            # Prepare multipart form data
-            # Clean URL for filename (remove protocol, slashes, special chars)
-            clean_url = page_url.replace('https://', '').replace('http://', '')
-            clean_url = clean_url.replace('/', '_').replace(':', '_').replace('?', '_')
-            clean_url = clean_url[:50]  # Limit length
-            filename = f'page-{clean_url}.html'
-
-            with open(temp_html_path, 'rb') as f:
-                files = {'file': (filename, f, 'text/html')}
-
-                async with httpx.AsyncClient(timeout=timeout_seconds + 10) as client:
-                    logger.info(
-                        f"🌐 [DOCLING] Calling docling service for website: {page_url} "
-                        f"(timeout={timeout_seconds}s)"
-                    )
-
-                    response = await client.post(
-                        f"{settings.docling_service_url}/api/v1/docling/process",
-                        files=files,
-                        timeout=timeout_seconds
-                    )
-
-                    logger.info(f"🌐 [DOCLING] Response status: {response.status_code}")
-
-                    if response.status_code == 200:
-                        result = response.json()
-
-                        if result.get("success"):
-                            markdown_content = result.get("content")
-                            metadata = result.get("metadata", {})
-
-                            logger.info(
-                                f"✅ [DOCLING] Successfully converted website HTML: "
-                                f"{len(markdown_content)} chars"
-                            )
-
-                            return markdown_content, metadata
-                        else:
-                            error = result.get("error", "Unknown error")
-                            # Check if this is a known docling limitation with HTML
-                            if "ConversionStatus.FAILURE" in error or "HTML" in error:
-                                logger.info(
-                                    f"ℹ️ [DOCLING] HTML conversion not supported by docling for {page_url}. "
-                                    f"This is expected - will use raw HTML extraction instead."
-                                )
-                            else:
-                                logger.warning(
-                                    f"⚠️ [DOCLING] HTML conversion failed for {page_url}: {error}"
-                                )
-                            return None, {"error": error, "expected": "ConversionStatus.FAILURE" in error}
-                    else:
-                        error_msg = f"HTTP {response.status_code}: {response.text}"
-                        logger.warning(f"⚠️ [DOCLING] Request failed for {page_url}: {error_msg}")
-                        return None, {"error": error_msg}
-
-        finally:
-            # Cleanup temp file
-            if os.path.exists(temp_html_path):
-                try:
-                    os.unlink(temp_html_path)
-                except:
-                    pass
-
-    except asyncio.TimeoutError:
-        logger.warning(
-            f"⚠️ [DOCLING] Timeout converting HTML for {page_url} "
-            f"(timeout={timeout_seconds}s)"
-        )
-        return None, {"error": "Docling processing timeout"}
+        logger.info(f"🌐 [ROUTING] Routing HTML content for {page_url} to strict HTML pipeline")
+        
+        from shared.html_processor import extract_content_from_html
+        markdown_content, html_metadata = extract_content_from_html(html_content=html_content)
+        
+        if markdown_content:
+            logger.info(f"✅ [HTML] Successfully extracted {len(markdown_content)} characters using trafilatura")
+            return markdown_content, html_metadata
+        else:
+            error_msg = html_metadata.get("error", "HTML extraction failed")
+            logger.error(f"❌ [HTML] Extraction failed for {page_url}: {error_msg}")
+            return None, {"error": error_msg}
 
     except Exception as e:
-        logger.warning(
-            f"⚠️ [DOCLING] Error calling docling service for {page_url}: {e}"
-        )
+        logger.error(f"❌ [HTML] Error in HTML pipeline for {page_url}: {e}")
         return None, {"error": str(e)}
 
 

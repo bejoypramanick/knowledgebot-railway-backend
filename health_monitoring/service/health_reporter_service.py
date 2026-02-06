@@ -84,7 +84,7 @@ class HealthReporterService:
         days: int = 30
     ) -> Dict[str, Any]:
         """Generate data for uptime charts."""
-        data = await HealthDAO.get_uptime_over_time(service_name, interval)
+        data = await HealthDAO.get_uptime_over_time(service_name, interval, days)
 
         return {
             'type': 'uptime_chart_data',

@@ -65,11 +65,10 @@ async def process_document(request: Request, file: UploadFile = File(...)) -> Do
         if not markdown_content:
             error_msg = metadata.get("error", "Unknown error")
             logger.warning(f"⚠️ Processing failed for {file.filename}: {error_msg}")
-            return DoclingProcessResponse(
-                success=False,
-                content=None,
-                metadata=metadata,
-                error=error_msg
+            # Raise exception instead of returning 200 with success=False
+            raise HTTPException(
+                status_code=422,
+                detail=f"Conversion failed: {error_msg}"
             )
 
         logger.info(f"✅ Successfully processed: {file.filename}")
@@ -85,11 +84,9 @@ async def process_document(request: Request, file: UploadFile = File(...)) -> Do
         raise
     except Exception as e:
         logger.error(f"❌ Unexpected error processing {file.filename}: {e}")
-        return DoclingProcessResponse(
-            success=False,
-            content=None,
-            metadata={"error": str(e)},
-            error=str(e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected processing error: {str(e)}"
         )
 
     finally:
