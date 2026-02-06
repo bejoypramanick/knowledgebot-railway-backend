@@ -380,6 +380,147 @@ async def delete_files_batch(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
+# CLEAR ALL ENDPOINTS (KILL SWITCH)
+# =================================
+
+@router.post("/clear-all")
+async def clear_all_knowledge_base(request: Request):
+    """
+    KILL SWITCH: Delete ALL files and websites from database and Gemini FileSearch
+    This is an admin-only, dangerous operation that clears the entire knowledge base.
+    Requires explicit confirmation via header.
+    """
+    try:
+        from shared.db import get_db_connection
+        from ..core.ai import get_genai_client
+        import json
+
+        # Get confirmation header (prevents accidental deletions)
+        confirmation = request.headers.get("X-Confirm-Clear-All", "false").lower() == "true"
+        if not confirmation:
+            logger.warning("❌ Clear-all requested without confirmation header")
+            raise HTTPException(
+                status_code=400,
+                detail="This operation requires X-Confirm-Clear-All: true header"
+            )
+
+        genai_client = get_genai_client()
+        if not genai_client:
+            raise HTTPException(status_code=500, detail="Gemini client not available")
+
+        logger.critical("🗑️🔥 [KILL SWITCH] Starting complete knowledge base clearance!")
+
+        deletion_stats = {
+            "files_from_db": 0,
+            "files_from_filesearch": 0,
+            "files_failed": 0,
+            "websites_from_db": 0,
+            "websites_from_filesearch": 0,
+            "websites_failed": 0,
+            "total_deleted": 0,
+            "errors": []
+        }
+
+        async with get_db_connection() as conn:
+            # Get all files to delete
+            files = await conn.fetch("SELECT id, gemini_file_name, metadata FROM file_uploads")
+            logger.info(f"📋 Found {len(files)} files to delete")
+
+            for file_record in files:
+                try:
+                    file_id = file_record['id']
+                    metadata = file_record['metadata']
+
+                    # Delete from FileSearch if metadata exists
+                    if metadata:
+                        try:
+                            if isinstance(metadata, str):
+                                meta = json.loads(metadata)
+                            else:
+                                meta = metadata
+
+                            if meta.get('type') == 'file_search' and meta.get('file_search_store_name') and meta.get('document_name'):
+                                store_name = meta['file_search_store_name']
+                                document_name = meta['document_name']
+                                genai_client.file_search_stores.delete_document(
+                                    file_search_store_name=store_name,
+                                    document_name=document_name
+                                )
+                                deletion_stats["files_from_filesearch"] += 1
+                                logger.info(f"✅ Deleted file document from FileSearch: {file_id}")
+                        except Exception as fs_error:
+                            logger.warning(f"⚠️ Could not delete from FileSearch: {fs_error}")
+                            deletion_stats["files_failed"] += 1
+
+                    # Delete from database
+                    await conn.execute("DELETE FROM file_uploads WHERE id = $1", file_id)
+                    deletion_stats["files_from_db"] += 1
+                    deletion_stats["total_deleted"] += 1
+                    logger.info(f"✅ Deleted file from database: {file_id}")
+
+                except Exception as e:
+                    deletion_stats["files_failed"] += 1
+                    deletion_stats["errors"].append(f"File {file_id}: {str(e)}")
+                    logger.error(f"❌ Error deleting file {file_id}: {e}")
+
+            # Get all websites to delete
+            websites = await conn.fetch("SELECT id, gemini_file_name, metadata FROM scraped_websites")
+            logger.info(f"📋 Found {len(websites)} websites to delete")
+
+            for website_record in websites:
+                try:
+                    website_id = website_record['id']
+                    metadata = website_record['metadata']
+
+                    # Delete from FileSearch if metadata exists
+                    if metadata:
+                        try:
+                            if isinstance(metadata, str):
+                                meta = json.loads(metadata)
+                            else:
+                                meta = metadata
+
+                            if meta.get('type') == 'file_search' and meta.get('file_search_store_name') and meta.get('document_name'):
+                                store_name = meta['file_search_store_name']
+                                document_name = meta['document_name']
+                                genai_client.file_search_stores.delete_document(
+                                    file_search_store_name=store_name,
+                                    document_name=document_name
+                                )
+                                deletion_stats["websites_from_filesearch"] += 1
+                                logger.info(f"✅ Deleted website document from FileSearch: {website_id}")
+                        except Exception as fs_error:
+                            logger.warning(f"⚠️ Could not delete website from FileSearch: {fs_error}")
+                            deletion_stats["websites_failed"] += 1
+
+                    # Delete from database
+                    await conn.execute("DELETE FROM scraped_websites WHERE id = $1", website_id)
+                    deletion_stats["websites_from_db"] += 1
+                    deletion_stats["total_deleted"] += 1
+                    logger.info(f"✅ Deleted website from database: {website_id}")
+
+                except Exception as e:
+                    deletion_stats["websites_failed"] += 1
+                    deletion_stats["errors"].append(f"Website {website_id}: {str(e)}")
+                    logger.error(f"❌ Error deleting website {website_id}: {e}")
+
+        logger.critical(f"🗑️🔥 [KILL SWITCH] Complete! Deleted {deletion_stats['total_deleted']} items")
+        logger.critical(f"   Files: {deletion_stats['files_from_db']} from DB, {deletion_stats['files_from_filesearch']} from FileSearch")
+        logger.critical(f"   Websites: {deletion_stats['websites_from_db']} from DB, {deletion_stats['websites_from_filesearch']} from FileSearch")
+
+        return {
+            "success": True,
+            "message": f"Knowledge base cleared! Deleted {deletion_stats['total_deleted']} items total",
+            "stats": deletion_stats
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Fatal error during knowledge base clearance: {e}")
+        raise HTTPException(status_code=500, detail=f"Error clearing knowledge base: {e}")
+
+# =================================
 # HEALTH ENDPOINTS
 # =================================
 
