@@ -155,6 +155,9 @@ class WebsiteService:
                     logger.info(
                         f"✅ Converted to markdown: {len(markdown_content)} chars"
                     )
+                    # Print first 500 chars of markdown content for debugging
+                    preview = markdown_content[:500] + ("..." if len(markdown_content) > 500 else "")
+                    logger.info(f"📄 Markdown content preview:\n{preview}")
                 else:
                     # Docling processing failed
                     if settings.docling_website_fallback_to_raw:

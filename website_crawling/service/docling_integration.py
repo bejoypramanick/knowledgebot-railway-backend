@@ -39,12 +39,16 @@ async def process_html_with_docling(
 
     try:
         logger.info(f"🌐 [ROUTING] Routing HTML content for {page_url} to strict HTML pipeline")
-        
+        logger.debug(f"📥 HTML input size: {len(html_content)} characters")
+
         from shared.html_processor import extract_content_from_html
         markdown_content, html_metadata = extract_content_from_html(html_content=html_content)
-        
+
         if markdown_content:
             logger.info(f"✅ [HTML] Successfully extracted {len(markdown_content)} characters using trafilatura")
+            # Log the first part of the content for debugging
+            preview = markdown_content[:300] + ("..." if len(markdown_content) > 300 else "")
+            logger.debug(f"📋 Extracted content preview:\n{preview}")
             return markdown_content, html_metadata
         else:
             error_msg = html_metadata.get("error", "HTML extraction failed")
