@@ -1,6 +1,6 @@
 [build]
 builder = "dockerfile"
-dockerfile = "./Dockerfile"
+dockerfile = "health_monitoring/Dockerfile"
 context = "."
 
 [deploy]
