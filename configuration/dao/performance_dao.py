@@ -75,7 +75,9 @@ class PerformanceDAO:
             SELECT COUNT(DISTINCT cs.id)
             FROM chat_sessions cs
             INNER JOIN session_assignments sa ON cs.id = sa.session_id
-            WHERE sa.assignee_type IN ('agent', 'admin')
+            INNER JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+            INNER JOIN roles r ON urm.role_id = r.id
+            WHERE r.role_name IN ('human_agent', 'admin')
             AND sa.status != 'ended'
         """
         try:

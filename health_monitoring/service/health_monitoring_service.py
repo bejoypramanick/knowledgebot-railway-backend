@@ -53,6 +53,12 @@ class HealthMonitoringService:
 
         Returns: (status, response_time_ms, error_message)
         """
+        # Validate URL is not empty
+        if not service_config.get('url'):
+            error_msg = f"Service URL not configured (got: {service_config.get('url')})"
+            logger.error(f"❌ {service_name}: {error_msg}")
+            return 'down', None, error_msg
+
         url = f"{service_config['url']}{service_config['endpoint']}"
         start_time = time.time()
 

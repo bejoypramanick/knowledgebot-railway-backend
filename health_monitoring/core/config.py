@@ -39,7 +39,13 @@ class Settings(BaseSettings):
         # Log service URLs on startup
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"📡 Service URLs configured: api_gateway={self.api_gateway_url}, chatbot={self.chatbot_orchestration_url}")
+        logger.info(f"📡 Service URLs configured:")
+        logger.info(f"   - api_gateway: {self.api_gateway_url}")
+        logger.info(f"   - configuration: {self.configuration_service_url}")
+        logger.info(f"   - chatbot_orchestration: {self.chatbot_orchestration_url}")
+        logger.info(f"   - knowledgebase_ingestion: {self.knowledgebase_ingestion_url}")
+        logger.info(f"   - website_crawling: {self.website_crawling_url}")
+        logger.info(f"   - docling_service: {self.docling_service_url}")
 
     model_config = {
         'env_file': ".env",
