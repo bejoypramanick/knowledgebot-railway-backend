@@ -368,18 +368,22 @@ class PerformanceDAO:
                             except Exception as parse_error:
                                 logger.warning(f"⚠️ Failed to parse date {time_period}: {parse_error}")
 
-                        # Generate all 6 months (180 days)
+                        # Generate all 6 months (current month + 5 previous months)
                         now = datetime.utcnow()
                         formatted_history = []
 
-                        # Generate 6 months of dates (current month + 5 previous months)
-                        for i in range(5, -1, -1):  # 5, 4, 3, 2, 1, 0 (6 months)
-                            # Calculate first day of month i months ago
-                            temp = now.replace(day=1) - timedelta(days=1)
+                        # Generate 6 months backwards from current month
+                        current_month = now.replace(day=1)
+                        for i in range(5, -1, -1):  # 5, 4, 3, 2, 1, 0 (6 months back from current)
+                            # Calculate month date by going back i months
+                            month_date = current_month
                             for _ in range(i):
-                                temp = temp.replace(day=1) - timedelta(days=1)
+                                # Go to previous month
+                                if month_date.month == 1:
+                                    month_date = month_date.replace(year=month_date.year - 1, month=12)
+                                else:
+                                    month_date = month_date.replace(month=month_date.month - 1)
 
-                            month_date = temp.replace(day=1)
                             month_key = month_date.strftime('%Y-%m')
                             month_label = month_date.strftime('%b %Y')
 
@@ -400,12 +404,15 @@ class PerformanceDAO:
 
                         # Return 6 empty months even if request fails
                         now = datetime.utcnow()
+                        current_month = now.replace(day=1)
                         empty_months = []
                         for i in range(5, -1, -1):
-                            temp = now.replace(day=1) - timedelta(days=1)
+                            month_date = current_month
                             for _ in range(i):
-                                temp = temp.replace(day=1) - timedelta(days=1)
-                            month_date = temp.replace(day=1)
+                                if month_date.month == 1:
+                                    month_date = month_date.replace(year=month_date.year - 1, month=12)
+                                else:
+                                    month_date = month_date.replace(month=month_date.month - 1)
                             empty_months.append({
                                 "month": month_date.strftime('%b %Y'),
                                 "uptime": 0
@@ -418,12 +425,15 @@ class PerformanceDAO:
 
                     # Return 6 empty months on connection error
                     now = datetime.utcnow()
+                    current_month = now.replace(day=1)
                     empty_months = []
                     for i in range(5, -1, -1):
-                        temp = now.replace(day=1) - timedelta(days=1)
+                        month_date = current_month
                         for _ in range(i):
-                            temp = temp.replace(day=1) - timedelta(days=1)
-                        month_date = temp.replace(day=1)
+                            if month_date.month == 1:
+                                month_date = month_date.replace(year=month_date.year - 1, month=12)
+                            else:
+                                month_date = month_date.replace(month=month_date.month - 1)
                         empty_months.append({
                             "month": month_date.strftime('%b %Y'),
                             "uptime": 0
@@ -433,12 +443,15 @@ class PerformanceDAO:
                     logger.error(f"❌ Error fetching uptime history: {e}", exc_info=True)
                     # Return 6 empty months on any error
                     now = datetime.utcnow()
+                    current_month = now.replace(day=1)
                     empty_months = []
                     for i in range(5, -1, -1):
-                        temp = now.replace(day=1) - timedelta(days=1)
+                        month_date = current_month
                         for _ in range(i):
-                            temp = temp.replace(day=1) - timedelta(days=1)
-                        month_date = temp.replace(day=1)
+                            if month_date.month == 1:
+                                month_date = month_date.replace(year=month_date.year - 1, month=12)
+                            else:
+                                month_date = month_date.replace(month=month_date.month - 1)
                         empty_months.append({
                             "month": month_date.strftime('%b %Y'),
                             "uptime": 0
@@ -449,12 +462,15 @@ class PerformanceDAO:
             # Return 6 empty months even on outer exception
             try:
                 now = datetime.utcnow()
+                current_month = now.replace(day=1)
                 empty_months = []
                 for i in range(5, -1, -1):
-                    temp = now.replace(day=1) - timedelta(days=1)
+                    month_date = current_month
                     for _ in range(i):
-                        temp = temp.replace(day=1) - timedelta(days=1)
-                    month_date = temp.replace(day=1)
+                        if month_date.month == 1:
+                            month_date = month_date.replace(year=month_date.year - 1, month=12)
+                        else:
+                            month_date = month_date.replace(month=month_date.month - 1)
                     empty_months.append({
                         "month": month_date.strftime('%b %Y'),
                         "uptime": 0
