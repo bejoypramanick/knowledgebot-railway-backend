@@ -4,7 +4,7 @@ Provides business logic layer for widget configuration operations
 """
 from typing import Any, Dict, List, Optional, Tuple
 
-from configuration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from configuration.dao.widget_config_dao import WidgetConfigDAO
 
 logger = get_otel_logger("widget_config_service", "configuration")

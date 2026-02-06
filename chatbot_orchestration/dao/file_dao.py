@@ -2,9 +2,9 @@
 File Data Access Object for Chatbot Orchestration
 Handles database operations for file management
 """
-
-from chatbot_orchestration.core.db import get_db_connection
-from chatbot_orchestration.core.otel_logger import get_otel_logger
+from typing import Dict, Any, Optional
+from shared.db import get_db_connection
+from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("file_dao", "chatbot-orchestration")
 
@@ -17,11 +17,13 @@ class FileDAO:
     async def get_file_metadata(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get file metadata from database"""
         query = "SELECT * FROM file_uploads WHERE id = $1"
+        params = {"file_id": file_id}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, file_id)
-                logger.log_db_query(query, {"file_id": file_id}, result)
+                logger.log_db_query(query, params, result)
                 return dict(result) if result else None
         except Exception as e:
-            logger.log_db_query(query, {"file_id": file_id}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None

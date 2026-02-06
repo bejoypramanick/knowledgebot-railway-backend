@@ -16,7 +16,7 @@ load_dotenv()
 # Configure Shared Telemetry
 import logging
 from shared.telemetry import setup_telemetry, instrument_fastapi
-from api_gateway.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 
 # Initialize Telemetry (Logging + Tracing)
 # Use default behavior (span exporter disabled by default via env var)

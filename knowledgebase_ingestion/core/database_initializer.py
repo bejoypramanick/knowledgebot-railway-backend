@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from .db import init_railway_db
+from shared.db import init_railway_db
 
 logger = logging.getLogger(__name__)
 

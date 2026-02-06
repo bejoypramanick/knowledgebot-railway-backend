@@ -5,7 +5,7 @@ Provides business logic layer for token usage tracking operations
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from configuration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from configuration.dao.token_dao import TokenDAO
 
 logger = get_otel_logger("token_usage_service", "configuration")

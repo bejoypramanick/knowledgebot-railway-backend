@@ -4,8 +4,8 @@ Handles database operations for chat sessions and messages
 """
 from typing import Dict, List, Any, Optional
 
-from chatbot_orchestration.core.db import get_db_connection
-from chatbot_orchestration.core.otel_logger import get_otel_logger
+from shared.db import get_db_connection
+from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("chat_dao", "chatbot-orchestration")
 
@@ -15,18 +15,19 @@ class ChatDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def create_session(self, session_id: str, user_role_id: int = None) -> Dict[str, Any]:
+    async def create_session(self, session_id: str, user_role_id: int = None) -> Optional[Dict[str, Any]]:
         """Create a new chat session record"""
         query = """
             INSERT INTO chat_sessions (session_id, user_role_id, started_at, last_activity_at, is_active, message_count)
             VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
             RETURNING id, session_id, user_role_id, started_at, last_activity_at, is_active, message_count
         """
-        
+        params = {"session_id": session_id, "user_role_id": user_role_id}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 record = await conn.fetchrow(query, session_id, user_role_id)
-                logger.log_db_query(query, {"session_id": session_id, "user_role_id": user_role_id}, record)
+                logger.log_db_query(query, params, record)
                 
                 if record:
                     return {
@@ -41,7 +42,7 @@ class ChatDAO:
                 else:
                     return None
         except Exception as e:
-            logger.log_db_query(query, {"session_id": session_id, "user_role_id": user_role_id}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None
 
     async def get_session_metadata(self, session_id: str) -> Optional[Dict[str, Any]]:
@@ -51,14 +52,14 @@ class ChatDAO:
             FROM chat_sessions
             WHERE session_id = $1
         """
-        
+        params = {"session_id": session_id}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 record = await conn.fetchrow(query, session_id)
-                logger.log_db_query(query, {"session_id": session_id}, record)
+                logger.log_db_query(query, params, record)
                 
                 if record:
-                    # Get user email from user_role_id
                     user_email = await self.get_user_email_from_role_id(record["user_role_id"])
                     
                     return {
@@ -70,63 +71,56 @@ class ChatDAO:
                         "last_activity_at": record["last_activity_at"],
                         "message_count": record["message_count"]
                     }
-                else:
-                    return None
+                return None
         except Exception as e:
-            logger.log_db_query(query, {"session_id": session_id}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None
 
     async def get_user_email_from_role_id(self, user_role_id: int) -> Optional[str]:
-        """Get user email from user_role_id by joining user_role_mapping and users tables"""
+        """Get user email from user_role_id"""
+        if user_role_id is None:
+            return None
         query = """
             SELECT u.email
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             WHERE urm.user_role_id = $1 AND urm.is_active = true
         """
-        
+        params = {"user_role_id": user_role_id}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 record = await conn.fetchrow(query, user_role_id)
-                logger.log_db_query(query, {"user_role_id": user_role_id}, record)
-                
+                logger.log_db_query(query, params, record)
                 return record["email"] if record else None
         except Exception as e:
-            logger.log_db_query(query, {"user_role_id": user_role_id}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None
 
-    async def get_chat_history(self, session_id: str) -> List[Dict[str, Any]]:
+    async def get_chat_history(self, session_id: str) -> Dict[str, Any]:
         """Get chat history for a session"""
-        # First get the session record to find the integer ID
         session_query = """
             SELECT id, session_id, user_role_id, cached_content_id, created_at, last_activity_at, message_count
             FROM chat_sessions
             WHERE session_id = $1
         """
-        
         try:
             async with get_db_connection() as conn:
-                # Get session record first
+                logger.log_db_operation(session_query, session_id)
                 session_record = await conn.fetchrow(session_query, session_id)
-                logger.log_db_query(session_query, {"session_id": session_id}, session_record)
+                logger.log_db_query(session_query, session_id, session_record)
                 
                 if not session_record:
-                    logger.info(f"Session not found: {session_id}, creating new session")
-                    # Create the session if it doesn't exist
-                    session_record = await conn.fetchrow(
-                        """INSERT INTO chat_sessions (session_id, user_role_id, started_at, last_activity_at, is_active, message_count)
-                           VALUES ($1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
-                           RETURNING id, session_id, user_role_id, cached_content_id, created_at, last_activity_at, message_count""",
-                        session_id
-                    )
+                    insert_query = """INSERT INTO chat_sessions (session_id, user_role_id, started_at, last_activity_at, is_active, message_count)
+                                   VALUES ($1, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
+                                   RETURNING id, session_id, user_role_id, cached_content_id, created_at, last_activity_at, message_count"""
+                    logger.log_db_operation(insert_query, session_id)
+                    session_record = await conn.fetchrow(insert_query, session_id)
+                    logger.log_db_query(insert_query, session_id, session_record)
                     
                     if not session_record:
-                        logger.error(f"Failed to create session: {session_id}")
-                        return []
-                    
-                    logger.info(f"✅ Created new session: {session_id} -> ID: {session_record['id']}")
+                        return {"messages": []}
                 
-                # Use the integer session ID for chat messages query
                 integer_session_id = session_record["id"]
                 
                 query = """
@@ -135,11 +129,10 @@ class ChatDAO:
                     WHERE session_id = $1
                     ORDER BY created_at ASC
                 """
-                
+                logger.log_db_operation(query, integer_session_id)
                 records = await conn.fetch(query, integer_session_id)
-                logger.log_db_query(query, {"session_id": integer_session_id}, records)
+                logger.log_db_query(query, integer_session_id, records)
                 
-                # Convert to expected format for the service
                 messages = []
                 for record in records:
                     messages.append({
@@ -155,20 +148,21 @@ class ChatDAO:
                 
                 return {"messages": messages}
         except Exception as e:
-            logger.log_db_query(session_query, {"session_id": session_id}, error=e)
+            logger.error(f"Error getting chat history for {session_id}: {e}")
             return {"messages": []}
 
     async def delete_session(self, session_id: str) -> bool:
         """Delete a chat session"""
         query = "DELETE FROM chat_sessions WHERE session_id = $1"
-        
+        params = {"session_id": session_id}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, session_id)
-                logger.log_db_query(query, {"session_id": session_id}, result)
+                logger.log_db_query(query, params, result)
                 return True
         except Exception as e:
-            logger.log_db_query(query, {"session_id": session_id}, error=e)
+            logger.log_db_query(query, params, error=e)
             return False
 
     async def get_all_sessions(self) -> List[Dict[str, Any]]:
@@ -178,8 +172,8 @@ class ChatDAO:
             FROM chat_sessions
             ORDER BY last_activity_at DESC
         """
-        
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 records = await conn.fetch(query)
                 logger.log_db_query(query, None, records)

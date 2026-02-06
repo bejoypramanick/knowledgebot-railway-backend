@@ -263,7 +263,7 @@ async def main():
     try:
         # Import required modules
         from knowledgebase_ingestion.core.ai import get_genai_client
-        from knowledgebase_ingestion.core.db import get_db_connection
+        from shared.db import get_db_connection
 
         genai_client = get_genai_client()
         if not genai_client:

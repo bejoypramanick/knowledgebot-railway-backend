@@ -6,15 +6,14 @@ from typing import Dict, List, Any, Optional
 import json
 from datetime import datetime
 
-from configuration.core.db import get_db_connection
-from configuration.core.otel_logger import get_otel_logger
+from shared.db import get_db_connection
+from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("chat_log_dao", "configuration")
 
 class ChatLogDAO:
     def __init__(self):
-        self.conn = None  # Connection is managed via get_db_connection context manager usually, but some methods might expect self.conn if they were designed differently. 
-        # However, looking at usage, it seems methods use `async with get_db_connection() as conn`.
+        self.conn = None
 
     async def get_all_human_agents(self) -> List[str]:
         """Get all human agent emails."""
@@ -26,6 +25,7 @@ class ChatLogDAO:
             WHERE r.role_name = 'human_agent'
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 rows = await conn.fetch(query)
                 logger.log_db_query(query, None, rows)
@@ -44,6 +44,7 @@ class ChatLogDAO:
             WHERE r.role_name = 'admin'
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 rows = await conn.fetch(query)
                 logger.log_db_query(query, None, rows)
@@ -54,26 +55,26 @@ class ChatLogDAO:
 
     async def check_user_role(self, email: str) -> Dict[str, bool]:
         """Check if user is agent or admin."""
+        query = """
+            SELECT 
+                EXISTS(SELECT 1 FROM user_role_mapping urm 
+                      JOIN users u ON urm.user_id = u.id 
+                      JOIN roles r ON urm.role_id = r.id 
+                      WHERE u.email = $1 AND r.role_name = 'human_agent') as is_agent,
+                EXISTS(SELECT 1 FROM user_role_mapping urm 
+                      JOIN users u ON urm.user_id = u.id 
+                      JOIN roles r ON urm.role_id = r.id 
+                      WHERE u.email = $1 AND r.role_name = 'admin') as is_admin
+        """
         try:
+            params = {"email": email}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                query = """
-                    SELECT 
-                        EXISTS(SELECT 1 FROM user_role_mapping urm 
-                              JOIN users u ON urm.user_id = u.id 
-                              JOIN roles r ON urm.role_id = r.id 
-                              WHERE u.email = $1 AND r.role_name = 'human_agent') as is_agent,
-                        EXISTS(SELECT 1 FROM user_role_mapping urm 
-                              JOIN users u ON urm.user_id = u.id 
-                              JOIN roles r ON urm.role_id = r.id 
-                              WHERE u.email = $1 AND r.role_name = 'admin') as is_admin
-                """
-                
                 result = await conn.fetchrow(query, email)
-                logger.log_db_query(query, {"email": email}, result)
-                
+                logger.log_db_query(query, params, result)
                 return {"is_agent": bool(result['is_agent']), "is_admin": bool(result['is_admin'])}
         except Exception as e:
-            logger.log_db_query("check_user_role", {"email": email}, error=e)
+            logger.log_db_query(query, {"email": email}, error=e)
             return {"is_agent": False, "is_admin": False}
 
     async def get_user_role_id(self, email: str) -> Optional[int]:
@@ -85,9 +86,11 @@ class ChatLogDAO:
             WHERE u.email = $1
         """
         try:
+            params = {"email": email}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, email)
-                logger.log_db_query(query, {"email": email}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
             logger.log_db_query(query, {"email": email}, error=e)
@@ -104,9 +107,11 @@ class ChatLogDAO:
             WHERE user_role_id = $1 AND status = 'active'
         """
         try:
+            params = {"user_role_id": user_role_id}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, user_role_id)
-                logger.log_db_query(query, {"user_role_id": user_role_id}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
             logger.log_db_query(query, {"user_role_id": user_role_id}, error=e)
@@ -116,9 +121,11 @@ class ChatLogDAO:
         """Get database ID for a session UUID string."""
         query = "SELECT id FROM chat_sessions WHERE session_id = $1"
         try:
+            params = {"session_id": session_id}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, session_id)
-                logger.log_db_query(query, {"session_id": session_id}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
             logger.log_db_query(query, {"session_id": session_id}, error=e)
@@ -132,9 +139,11 @@ class ChatLogDAO:
             RETURNING id
         """
         try:
+            params = {"session_id": session_id, "metadata": metadata}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, session_id, json.dumps(metadata))
-                logger.log_db_query(query, {"session_id": session_id, "metadata": metadata}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
             logger.log_db_query(query, {"session_id": session_id, "metadata": metadata}, error=e)
@@ -151,9 +160,11 @@ class ChatLogDAO:
         """Get assignment for a session."""
         query = "SELECT * FROM session_assignments WHERE session_id = $1"
         try:
+            params = {"session_db_id": session_db_id}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, session_db_id)
-                logger.log_db_query(query, {"session_db_id": session_db_id}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
             logger.log_db_query(query, {"session_db_id": session_db_id}, error=e)
@@ -171,9 +182,11 @@ class ChatLogDAO:
             WHERE session_id = $1
         """
         try:
+            params = {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, session_db_id, user_role_id, status)
-                logger.log_db_query(query, {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}, result)
+                logger.log_db_query(query, params, result)
         except Exception as e:
             logger.log_db_query(query, {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}, error=e)
             raise
@@ -189,9 +202,11 @@ class ChatLogDAO:
             VALUES ($1, $2, $3, NOW(), NOW(), NOW())
         """
         try:
+            params = {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, session_db_id, user_role_id, status)
-                logger.log_db_query(query, {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}, result)
+                logger.log_db_query(query, params, result)
         except Exception as e:
             logger.log_db_query(query, {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}, error=e)
             raise
@@ -212,12 +227,14 @@ class ChatLogDAO:
             LIMIT $3 OFFSET $4
         """
         try:
+            params = {"user_role_id": user_role_id, "archive_status": archive_status, "limit": limit, "offset": offset}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query, user_role_id, archive_status, limit, offset)
-                logger.log_db_query(query, {"user_role_id": user_role_id, "archive_status": archive_status, "limit": limit, "offset": offset}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"user_role_id": user_role_id, "archive_status": archive_status, "limit": limit, "offset": offset}, error=e)
+            logger.log_db_query(query, params, error=e)
             return []
 
     async def count_sessions_for_agent(self, email: str, archive_status: str) -> int:
@@ -232,12 +249,14 @@ class ChatLogDAO:
             WHERE sa.user_role_id = $1 AND cs.archive_status = $2
         """
         try:
+            params = {"user_role_id": user_role_id, "archive_status": archive_status}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, user_role_id, archive_status)
-                logger.log_db_query(query, {"user_role_id": user_role_id, "archive_status": archive_status}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"user_role_id": user_role_id, "archive_status": archive_status}, error=e)
+            logger.log_db_query(query, params, error=e)
             return 0
 
     async def get_all_sessions(self, archive_status: str, limit: int, offset: int) -> List[Dict[str, Any]]:
@@ -252,23 +271,27 @@ class ChatLogDAO:
             LIMIT $2 OFFSET $3
         """
         try:
+            params = {"archive_status": archive_status, "limit": limit, "offset": offset}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query, archive_status, limit, offset)
-                logger.log_db_query(query, {"archive_status": archive_status, "limit": limit, "offset": offset}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"archive_status": archive_status, "limit": limit, "offset": offset}, error=e)
+            logger.log_db_query(query, params, error=e)
             return []
 
     async def count_all_sessions(self, archive_status: str) -> int:
         query = "SELECT COUNT(*) FROM chat_sessions WHERE archive_status = $1"
         try:
+            params = {"archive_status": archive_status}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, archive_status)
-                logger.log_db_query(query, {"archive_status": archive_status}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"archive_status": archive_status}, error=e)
+            logger.log_db_query(query, params, error=e)
             return 0
 
     async def get_messages_for_sessions(self, session_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
@@ -279,9 +302,11 @@ class ChatLogDAO:
             ORDER BY created_at ASC
         """
         try:
+            params = {"session_ids": session_ids}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 rows = await conn.fetch(query, session_ids)
-                logger.log_db_query(query, {"session_ids": session_ids}, rows)
+                logger.log_db_query(query, params, rows)
                 
                 result = {}
                 for r in rows:
@@ -290,18 +315,20 @@ class ChatLogDAO:
                     result[sid].append(r)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"session_ids": session_ids}, error=e)
+            logger.log_db_query(query, params, error=e)
             return {}
 
     async def get_messages(self, session_db_id: int) -> List[Dict[str, Any]]:
         query = "SELECT * FROM chat_messages WHERE session_id = $1 ORDER BY created_at ASC"
         try:
+            params = {"session_db_id": session_db_id}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query, session_db_id)
-                logger.log_db_query(query, {"session_db_id": session_db_id}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"session_db_id": session_db_id}, error=e)
+            logger.log_db_query(query, params, error=e)
             return []
 
     async def create_message(self, session_db_id: int, role: str, content: str) -> int:
@@ -311,12 +338,14 @@ class ChatLogDAO:
             RETURNING id
         """
         try:
+            params = {"session_db_id": session_db_id, "role": role, "content": content}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, session_db_id, role, content)
-                logger.log_db_query(query, {"session_db_id": session_db_id, "role": role, "content": content}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"session_db_id": session_db_id, "role": role, "content": content}, error=e)
+            logger.log_db_query(query, params, error=e)
             raise
 
     async def increment_message_count(self, session_db_id: int):
@@ -329,33 +358,39 @@ class ChatLogDAO:
             WHERE session_id = $1
         """
         try:
+            params = {"session_id": session_id, "status": status}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, session_id, status)
-                logger.log_db_query(query, {"session_id": session_id, "status": status}, result)
+                logger.log_db_query(query, params, result)
                 return result != "UPDATE 0"
         except Exception as e:
-            logger.log_db_query(query, {"session_id": session_id, "status": status}, error=e)
+            logger.log_db_query(query, params, error=e)
             return False
 
     async def get_session_by_id_with_messages(self, session_id: str) -> Optional[Dict[str, Any]]:
         query = "SELECT * FROM chat_sessions WHERE session_id = $1"
         try:
+            params = {"session_id": session_id}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, session_id)
-                logger.log_db_query(query, {"session_id": session_id}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"session_id": session_id}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None
 
     async def update_chat_session_metadata(self, session_db_id: int, metadata: Dict[str, Any]):
         query = "UPDATE chat_sessions SET metadata = $2 WHERE id = $1"
         try:
+            params = {"session_db_id": session_db_id, "metadata": metadata}
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, session_db_id, json.dumps(metadata))
-                logger.log_db_query(query, {"session_db_id": session_db_id, "metadata": metadata}, result)
+                logger.log_db_query(query, params, result)
         except Exception as e:
-            logger.log_db_query(query, {"session_db_id": session_db_id, "metadata": metadata}, error=e)
+            logger.log_db_query(query, params, error=e)
             raise
     
     async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
@@ -375,6 +410,7 @@ class ChatLogDAO:
         params = {"session_id": session_id, "feedback_type": feedback_type, "user_role_id": user_role_id}
 
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, "session_feedback", session_id, feedback_type, user_role_id)
                 logger.log_db_query(query, params, result)
@@ -395,6 +431,7 @@ class ChatLogDAO:
         params = {"session_id": session_id}
 
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, session_id)
                 logger.log_db_query(query, params, result)
@@ -411,6 +448,7 @@ class ChatLogDAO:
         query = "SELECT hil_enabled FROM widget_configuration WHERE id = 1"
 
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query)
                 logger.log_db_query(query, None, result)

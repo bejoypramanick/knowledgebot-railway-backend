@@ -3,7 +3,7 @@ Token Service Layer for Chatbot Orchestration
 Provides business logic for token usage tracking
 """
 
-from chatbot_orchestration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("token_service", "chatbot-orchestration")
 

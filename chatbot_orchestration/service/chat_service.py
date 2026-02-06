@@ -8,7 +8,7 @@ import uuid
 
 from fastapi.responses import StreamingResponse
 
-from chatbot_orchestration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from chatbot_orchestration.core.token_tracker import track_gemini_usage_from_response
 
 from ..agent.prompt import get_system_prompt

@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from google.genai import types
 
-from website_crawling.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from website_crawling.core.ai import get_genai_client
 from website_crawling.service.website_service import WebsiteService
 
@@ -239,7 +239,7 @@ async def record_scraped_metadata(
 async def get_admin_user_role_id() -> Optional[str]:
     """Get user_role_id for admin role - same logic as file uploads"""
     try:
-        from website_crawling.core.db import get_db_connection
+        from shared.db import get_db_connection
         
         async with get_db_connection() as conn:
             # First get the admin role ID

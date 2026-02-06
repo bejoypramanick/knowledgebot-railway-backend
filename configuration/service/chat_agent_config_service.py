@@ -4,7 +4,7 @@ Provides business logic layer for chat agent configuration operations
 """
 from typing import Any, Dict, List, Optional
 
-from configuration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
 
 logger = get_otel_logger("chat_agent_config_service", "configuration")

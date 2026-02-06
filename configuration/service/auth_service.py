@@ -5,7 +5,7 @@ Provides business logic for authentication operations
 from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
-from configuration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 
 from ..dao.auth_dao import AuthDAO
 

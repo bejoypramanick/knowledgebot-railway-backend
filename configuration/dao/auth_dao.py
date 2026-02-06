@@ -4,11 +4,10 @@ Handles database operations for user authentication and role management
 """
 from typing import Any, Dict, List, Optional
 
-from configuration.core.db import get_db_connection
-from configuration.core.otel_logger import get_otel_logger
+from shared.db import get_db_connection
+from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("auth_dao", "configuration")
-
 
 class AuthDAO:
     def __init__(self):
@@ -21,14 +20,15 @@ class AuthDAO:
             FROM users 
             WHERE email = $1
         """
-        
+        params = {"email": email}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, email)
-                logger.log_db_query(query, {"email": email}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"email": email}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None
 
     async def check_user_has_role(self, email: str, role_name: str) -> Optional[Dict[str, Any]]:
@@ -41,14 +41,15 @@ class AuthDAO:
             JOIN roles r ON urm.role_id = r.id
             WHERE u.email = $1 AND r.role_name = $2
         """
-        
+        params = {"email": email, "role_name": role_name}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, email, role_name)
-                logger.log_db_query(query, {"email": email, "role_name": role_name}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"email": email, "role_name": role_name}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None
 
     async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
@@ -72,14 +73,15 @@ class AuthDAO:
             AND urm.is_active = true
             ORDER BY r.role_name
         """
-        
+        params = {"email": email}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 results = await conn.fetch(query, email)
-                logger.log_db_query(query, {"email": email}, results)
+                logger.log_db_query(query, params, results)
                 return [dict(row) for row in results]
         except Exception as e:
-            logger.log_db_query(query, {"email": email}, error=e)
+            logger.log_db_query(query, params, error=e)
             return []
 
     async def get_user_by_role_id(self, user_role_id: int) -> Optional[Dict[str, Any]]:
@@ -93,14 +95,15 @@ class AuthDAO:
             JOIN roles r ON urm.role_id = r.id
             WHERE urm.user_role_id = $1
         """
-        
+        params = {"user_role_id": user_role_id}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, user_role_id)
-                logger.log_db_query(query, {"user_role_id": user_role_id}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"user_role_id": user_role_id}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None
 
     async def add_user_role(self, email: str, role_name: str) -> Optional[Dict[str, Any]]:
@@ -114,25 +117,30 @@ class AuthDAO:
                 VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 RETURNING id, email, created_at, updated_at
             """
+            params = {"email": email}
             try:
+                logger.log_db_operation(create_user_query, params)
                 async with get_db_connection() as conn:
                     user = await conn.fetchrow(create_user_query, email)
-                    logger.log_db_query(create_user_query, {"email": email}, user)
+                    logger.log_db_query(create_user_query, params, user)
             except Exception as e:
-                logger.log_db_query(create_user_query, {"email": email}, error=e)
+                logger.log_db_query(create_user_query, params, error=e)
                 return None
 
         # Get role_id
         role_query = "SELECT id FROM roles WHERE role_name = $1"
+        params = {"role_name": role_name}
         try:
+            logger.log_db_operation(role_query, params)
             async with get_db_connection() as conn:
                 role = await conn.fetchrow(role_query, role_name)
+                logger.log_db_query(role_query, params, role)
                 if not role:
                     logger.error(f"Role {role_name} not found")
                     return None
                 role_id = role['id']
         except Exception as e:
-            logger.log_db_query(role_query, {"role_name": role_name}, error=e)
+            logger.log_db_query(role_query, params, error=e)
             return None
 
         # Add user role mapping
@@ -142,14 +150,15 @@ class AuthDAO:
             ON CONFLICT (user_id, role_id) DO NOTHING
             RETURNING user_role_id, user_id, role_id, created_at, updated_at
         """
-        
+        params = {"user_id": user['id'], "role_id": role_id}
         try:
+            logger.log_db_operation(mapping_query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(mapping_query, user['id'], role_id)
-                logger.log_db_query(mapping_query, {"user_id": user['id'], "role_id": role_id}, result)
+                logger.log_db_query(mapping_query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(mapping_query, {"user_id": user['id'], "role_id": role_id}, error=e)
+            logger.log_db_query(mapping_query, params, error=e)
             return None
 
     async def remove_user_role(self, email: str, role_name: str) -> bool:
@@ -159,14 +168,15 @@ class AuthDAO:
             WHERE user_id = (SELECT id FROM users WHERE email = $1)
             AND role_id = (SELECT id FROM roles WHERE role_name = $2)
         """
-        
+        params = {"email": email, "role_name": role_name}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, email, role_name)
-                logger.log_db_query(query, {"email": email, "role_name": role_name}, result)
+                logger.log_db_query(query, params, result)
                 return True
         except Exception as e:
-            logger.log_db_query(query, {"email": email, "role_name": role_name}, error=e)
+            logger.log_db_query(query, params, error=e)
             return False
 
     async def get_admins(self) -> List[Dict[str, Any]]:
@@ -182,8 +192,8 @@ class AuthDAO:
             AND urm.is_active = true
             ORDER BY u.email
         """
-        
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 results = await conn.fetch(query)
                 logger.log_db_query(query, None, results)
@@ -205,8 +215,8 @@ class AuthDAO:
             AND urm.is_active = true
             ORDER BY u.email
         """
-        
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 results = await conn.fetch(query)
                 logger.log_db_query(query, None, results)
@@ -245,8 +255,8 @@ class AuthDAO:
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'admin'
         """
-        
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 results = await conn.fetch(query)
                 emails = [row['email'] for row in results]
@@ -265,8 +275,8 @@ class AuthDAO:
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'human_agent'
         """
-        
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 results = await conn.fetch(query)
                 emails = [row['email'] for row in results]

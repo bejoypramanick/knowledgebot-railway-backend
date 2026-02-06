@@ -87,7 +87,7 @@ async def check_database():
     print("="*80)
 
     try:
-        from knowledgebase_ingestion.core.db import get_db_connection
+        from shared.db import get_db_connection
 
         async with get_db_connection() as conn:
             # Get file uploads

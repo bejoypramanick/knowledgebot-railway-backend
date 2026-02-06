@@ -5,7 +5,7 @@ Provides business logic for file operations
 from typing import Any, Dict, Optional
 
 from knowledgebase_ingestion.core import db
-from knowledgebase_ingestion.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("file_service", "knowledgebase-ingestion")
 
@@ -18,7 +18,7 @@ class FileService:
     async def check_duplicate_file(self, sha256_hash: str, original_filename: str) -> Optional[Dict[str, Any]]:
         """Check if a file with the same hash or name already exists."""
         try:
-            from knowledgebase_ingestion.core.db import get_db_connection
+            from shared.db import get_db_connection
             
             async with get_db_connection() as conn:
                 # Check by hash first (exact duplicate)
@@ -63,7 +63,7 @@ class FileService:
     async def delete_existing_file_record(self, db_id: str):
         """Delete an existing file record from both Gemini and database."""
         try:
-            from knowledgebase_ingestion.core.db import get_db_connection
+            from shared.db import get_db_connection
             from knowledgebase_ingestion.core.ai import get_genai_client
 
             # Convert db_id to integer if it's a numeric string
@@ -105,7 +105,7 @@ class FileService:
             user_role_id if the user has admin privileges, None otherwise
         """
         try:
-            from knowledgebase_ingestion.core.db import get_db_connection
+            from shared.db import get_db_connection
 
             async with get_db_connection() as conn:
                 # First, look up the user by email to get their user_id
@@ -191,7 +191,7 @@ class FileService:
             logger.info(f"🗄️ [DB] Saving metadata for {original_filename} (version {version}) - Size: {file_size} bytes")
 
             # Use the new DatabaseManager pattern
-            from knowledgebase_ingestion.core.db import get_db_connection
+            from shared.db import get_db_connection
 
             # Verify user has admin role and get the user_role_id
             user_role_id = await self.get_admin_user_role_id(user_email)
@@ -240,7 +240,7 @@ class FileService:
     async def find_file_record(self, file_id: str):
         """Find file record by ID across multiple tables"""
         try:
-            from knowledgebase_ingestion.core.db import get_db_connection
+            from shared.db import get_db_connection
 
             logger.info(f"🔍 Looking for file record with ID: {file_id}")
 
@@ -287,7 +287,7 @@ class FileService:
     async def delete_file_record(self, file_id: str, table_name: str):
         """Delete file record from specified table"""
         try:
-            from knowledgebase_ingestion.core.db import get_db_connection
+            from shared.db import get_db_connection
 
             # Convert file_id to integer if it's a numeric string
             try:
@@ -318,7 +318,7 @@ class FileService:
     async def get_all_files(self) -> list:
         """Get all uploaded files from the database."""
         try:
-            from knowledgebase_ingestion.core.db import get_db_connection
+            from shared.db import get_db_connection
             
             async with get_db_connection() as conn:
                 files = await conn.fetch(
@@ -357,7 +357,7 @@ class FileService:
     async def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get file record by ID"""
         try:
-            from knowledgebase_ingestion.core.db import get_db_connection
+            from shared.db import get_db_connection
             
             async with get_db_connection() as conn:
                 file_record = await conn.fetchrow(
@@ -394,7 +394,7 @@ class FileService:
     async def delete_file(self, file_id: str) -> bool:
         """Delete file by ID"""
         try:
-            from knowledgebase_ingestion.core.db import get_db_connection
+            from shared.db import get_db_connection
             
             async with get_db_connection() as conn:
                 # First get the file record

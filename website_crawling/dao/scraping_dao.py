@@ -3,8 +3,8 @@ Scraping Data Access Object for Website Crawling
 Handles database operations for web scraping
 """
 from typing import Dict, List, Any, Optional
-from website_crawling.core.db import get_db_connection
-from website_crawling.core.otel_logger import get_otel_logger
+from shared.db import get_db_connection
+from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("scraping_dao", "website-crawling")
 
@@ -22,13 +22,15 @@ class ScrapingDAO:
             ORDER BY created_at DESC
             LIMIT 1
         """
+        params = {"url": url}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, url)
-                logger.log_db_query(query, {"url": url}, result)
+                logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"url": url}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None
 
     async def delete_website_record(self, url: str) -> bool:
@@ -37,14 +39,15 @@ class ScrapingDAO:
             DELETE FROM scraped_websites
             WHERE original_url = $1
         """
+        params = {"url": url}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, url)
-                logger.log_db_query(query, {"url": url}, result)
-                logger.info(f"Website record deleted: {url}")
+                logger.log_db_query(query, params, result)
                 return True
         except Exception as e:
-            logger.log_db_query(query, {"url": url}, error=e)
+            logger.log_db_query(query, params, error=e)
             raise
 
     async def record_scraped_metadata(self, metadata: Dict[str, Any]) -> str:
@@ -69,6 +72,7 @@ class ScrapingDAO:
             metadata.get('content_length', 0)
         ]
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, *params)
                 logger.log_db_query(query, params, result)

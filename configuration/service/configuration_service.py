@@ -4,7 +4,7 @@ Provides business logic layer for configuration operations
 """
 from typing import Any, Dict, Optional
 
-from configuration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
 from configuration.dao.widget_config_dao import WidgetConfigDAO
 

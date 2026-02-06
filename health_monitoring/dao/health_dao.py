@@ -4,9 +4,10 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
-from health_monitoring.core.db import get_db_connection
+from shared.db import get_db_connection
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger("health_dao", "health_monitoring")
 
 
 class HealthDAO:
@@ -36,6 +37,7 @@ class HealthDAO:
         """
 
         try:
+            logger.log_db_operation(query, (service_name, status, response_time_ms, timestamp, error_message, metadata_json))
             async with get_db_connection() as conn:
                 result = await conn.fetchval(
                     query,
@@ -46,10 +48,10 @@ class HealthDAO:
                     error_message,
                     metadata_json
                 )
-                logger.info(f"✅ Inserted health check for {service_name}: {status}")
+                logger.log_db_query(query, (service_name, status, response_time_ms, timestamp, error_message, metadata_json), result)
                 return result
         except Exception as e:
-            logger.error(f"❌ Failed to insert health check for {service_name}: {e}")
+            logger.log_db_query(query, (service_name, status, response_time_ms, timestamp, error_message, metadata_json), error=e)
             raise
 
     @staticmethod
@@ -74,11 +76,14 @@ class HealthDAO:
         """
 
         try:
+            params = (service_name, start_date, end_date)
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, service_name, start_date, end_date)
+                logger.log_db_query(query, params, result)
                 return float(result) if result else 0.0
         except Exception as e:
-            logger.error(f"❌ Failed to get uptime for {service_name}: {e}")
+            logger.log_db_query(query, params, error=e)
             return 0.0
 
     @staticmethod
@@ -103,11 +108,14 @@ class HealthDAO:
         """
 
         try:
+            params = (start_date, end_date)
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 results = await conn.fetch(query, start_date, end_date)
+                logger.log_db_query(query, params, results)
                 return {row['service_name']: float(row['uptime_percentage']) for row in results}
         except Exception as e:
-            logger.error(f"❌ Failed to get uptime for all services: {e}")
+            logger.log_db_query(query, params, error=e)
             return {}
 
     @staticmethod
@@ -127,11 +135,13 @@ class HealthDAO:
         """
 
         try:
+            logger.log_db_operation(query, (limit,))
             async with get_db_connection() as conn:
                 results = await conn.fetch(query, limit)
+                logger.log_db_query(query, (limit,), results)
                 return [dict(row) for row in results]
         except Exception as e:
-            logger.error(f"❌ Failed to get recent failures: {e}")
+            logger.log_db_query(query, (limit,), error=e)
             return []
 
     @staticmethod
@@ -164,11 +174,14 @@ class HealthDAO:
                 ORDER BY {time_bucket}
             """
             try:
+                params = (service_name,)
+                logger.log_db_operation(query, params)
                 async with get_db_connection() as conn:
                     results = await conn.fetch(query, service_name)
+                    logger.log_db_query(query, params, results)
                     return [dict(row) for row in results]
             except Exception as e:
-                logger.error(f"❌ Failed to get uptime over time for {service_name}: {e}")
+                logger.log_db_query(query, params, error=e)
                 return []
         else:
             query = f"""
@@ -182,11 +195,13 @@ class HealthDAO:
                 ORDER BY {time_bucket}, service_name
             """
             try:
+                logger.log_db_operation(query)
                 async with get_db_connection() as conn:
                     results = await conn.fetch(query)
+                    logger.log_db_query(query, None, results)
                     return [dict(row) for row in results]
             except Exception as e:
-                logger.error(f"❌ Failed to get uptime over time for all services: {e}")
+                logger.log_db_query(query, None, error=e)
                 return []
 
     @staticmethod
@@ -207,11 +222,14 @@ class HealthDAO:
         """
 
         try:
+            params = (service_name,)
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, service_name)
+                logger.log_db_query(query, params, result)
                 return dict(result) if result else None
         except Exception as e:
-            logger.error(f"❌ Failed to get latest check for {service_name}: {e}")
+            logger.log_db_query(query, params, error=e)
             return None
 
     @staticmethod
@@ -236,9 +254,11 @@ class HealthDAO:
         """
 
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 results = await conn.fetch(query)
+                logger.log_db_query(query, None, results)
                 return [dict(row) for row in results]
         except Exception as e:
-            logger.error(f"❌ Failed to get all latest checks: {e}")
+            logger.log_db_query(query, None, error=e)
             return []

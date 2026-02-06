@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse, urljoin
 from datetime import datetime
 
-from website_crawling.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from website_crawling.core.config import settings
 from website_crawling.dao.scraping_dao import ScrapingDAO
 from website_crawling.utils.links import extract_links_from_result
@@ -457,7 +457,7 @@ class WebsiteService:
         """Get all scraping jobs from database."""
         try:
             # Query database for all scraped websites
-            from website_crawling.core.db import get_db_connection
+            from shared.db import get_db_connection
             query = """
                 SELECT id, original_url as url, domain, title, description,
                        gemini_state, pages_scraped, content_length, created_at
@@ -475,7 +475,7 @@ class WebsiteService:
     async def get_job_details(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Get details of a specific scraping job."""
         try:
-            from website_crawling.core.db import get_db_connection
+            from shared.db import get_db_connection
             query = """
                 SELECT id, original_url as url, domain, title, description,
                        gemini_state, pages_scraped, content_length,
@@ -494,7 +494,7 @@ class WebsiteService:
     async def delete_job(self, job_id: str) -> Dict[str, Any]:
         """Delete a scraping job."""
         try:
-            from website_crawling.core.db import get_db_connection
+            from shared.db import get_db_connection
             from website_crawling.core.ai import get_genai_client
 
             # First get the record to find Gemini file
@@ -553,7 +553,7 @@ class WebsiteService:
     async def search_content(self, query: str, user_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Search scraped content."""
         try:
-            from website_crawling.core.db import get_db_connection
+            from shared.db import get_db_connection
             search_query = """
                 SELECT id, original_url as url, domain, title, description,
                        pages_scraped, created_at
@@ -572,7 +572,7 @@ class WebsiteService:
     async def get_analytics_summary(self, user_id: str) -> Dict[str, Any]:
         """Get scraping analytics summary."""
         try:
-            from website_crawling.core.db import get_db_connection
+            from shared.db import get_db_connection
             query = """
                 SELECT
                     COUNT(*) as total_jobs,
@@ -610,7 +610,7 @@ class WebsiteService:
     async def get_domain_analytics(self, user_id: str) -> Dict[str, Any]:
         """Get domain-specific analytics."""
         try:
-            from website_crawling.core.db import get_db_connection
+            from shared.db import get_db_connection
             query = """
                 SELECT domain, COUNT(*) as count, SUM(pages_scraped) as total_pages
                 FROM scraped_websites

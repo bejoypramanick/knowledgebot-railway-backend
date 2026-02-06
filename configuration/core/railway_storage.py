@@ -3,7 +3,7 @@ import uuid
 import boto3
 from typing import Optional, Tuple
 from botocore.exceptions import ClientError, NoCredentialsError
-from configuration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("railway_storage", "configuration")
 

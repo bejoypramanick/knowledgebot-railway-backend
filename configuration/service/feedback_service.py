@@ -4,7 +4,7 @@ Provides business logic for feedback management operations
 """
 from typing import Any, Dict, List, Optional
 
-from configuration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 
 from ..dao.feedback_dao import FeedbackDAO
 

@@ -4,8 +4,8 @@ Handles database operations for admin and agent configuration management
 """
 from typing import Dict, List, Any, Optional
 
-from configuration.core.db import get_db_connection
-from configuration.core.otel_logger import get_otel_logger
+from shared.db import get_db_connection
+from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("chatbot_dao", "configuration")
 
@@ -26,6 +26,7 @@ class ChatAgentConfigDAO:
             WHERE id = 1
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query)
                 logger.log_db_query(query, None, result)
@@ -37,15 +38,14 @@ class ChatAgentConfigDAO:
     async def update_widget_config(self, **kwargs):
         """Update complete widget configuration including metadata in single call."""
         try:
-            logger.info(f"🔍 DAO update_widget_config called with kwargs: {kwargs}")
             async with get_db_connection() as conn:
                 # First check if the row exists
                 check_query = "SELECT id FROM widget_configuration WHERE id = 1"
+                logger.log_db_operation(check_query)
                 existing_row = await conn.fetchrow(check_query)
-                logger.info(f"🔍 Existing row check: {existing_row}")
+                logger.log_db_query(check_query, None, existing_row)
                 
                 if not existing_row:
-                    logger.warning("⚠️ No row found with id = 1, attempting to insert")
                     # Insert the row if it doesn't exist
                     insert_query = """
                         INSERT INTO widget_configuration (
@@ -55,7 +55,7 @@ class ChatAgentConfigDAO:
                             chat_icon_filename, profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
                             hil_enabled, response_policy, hil_disabled_message, created_at, updated_at
                         ) VALUES (
-                            1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, NOW(), NOW()
+                            1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW(), NOW()
                         )
                     """
                     insert_params = [
@@ -81,11 +81,10 @@ class ChatAgentConfigDAO:
                         kwargs.get('response_policy', 30),
                         kwargs.get('hil_disabled_message', 'Human assistance is currently offline. Please leave a message or try again later.')
                     ]
-                    logger.info(f"🔍 Inserting row with params: {insert_params}")
+                    logger.log_db_operation(insert_query, insert_params)
                     await conn.execute(insert_query, *insert_params)
-                    logger.info("✅ Inserted new widget configuration row")
+                    logger.log_db_query(insert_query, insert_params, "INSERT 1")
                 else:
-                    logger.info(f"🔍 Row exists, proceeding with update")
                     # Update existing row with all provided fields
                     set_clauses = []
                     params = []
@@ -103,7 +102,6 @@ class ChatAgentConfigDAO:
                         if key in valid_fields:
                             set_clauses.append(f"{key} = ${len(params) + 1}")
                             params.append(value)
-                            logger.info(f"🔍 Adding clause: {key} = ${len(params)} with value: {value}")
                     
                     if set_clauses:
                         query = f"""
@@ -111,18 +109,9 @@ class ChatAgentConfigDAO:
                             SET {', '.join(set_clauses)}, updated_at = NOW()
                             WHERE id = 1
                         """
-                        logger.info(f"🔍 Executing query: {query}")
-                        logger.info(f"🔍 With params: {params}")
+                        logger.log_db_operation(query, params)
                         result = await conn.execute(query, *params)
                         logger.log_db_query(query, params, result)
-                        logger.info(f"✅ Updated widget configuration: {kwargs}")
-                        logger.info(f"🔍 Update result: {result}")
-                        
-                        # Verify the update by checking affected rows
-                        if hasattr(result, 'rows_affected'):
-                            logger.info(f"🔍 Rows affected: {result.rows_affected}")
-                        else:
-                            logger.info("🔍 Row count not available in result")
                         
         except Exception as e:
             logger.error(f"Error updating widget configuration: {e}")
@@ -136,6 +125,7 @@ class ChatAgentConfigDAO:
             ORDER BY setting_name
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query)
                 logger.log_db_query(query, None, result)
@@ -143,8 +133,6 @@ class ChatAgentConfigDAO:
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return []
-
-    
 
     async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'text'):
         """Upsert security setting."""
@@ -156,13 +144,13 @@ class ChatAgentConfigDAO:
         """
         params = [name, value, setting_type]
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, *params)
                 logger.log_db_query(query, params, result)
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
-
 
     async def get_human_agents(self) -> List[str]:
         """Get all human agent emails."""
@@ -176,6 +164,7 @@ class ChatAgentConfigDAO:
             AND urm.is_active = true
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 results = await conn.fetch(query)
                 logger.log_db_query(query, None, results)
@@ -196,6 +185,7 @@ class ChatAgentConfigDAO:
             AND urm.is_active = true
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 results = await conn.fetch(query)
                 logger.log_db_query(query, None, results)
@@ -204,147 +194,6 @@ class ChatAgentConfigDAO:
             logger.log_db_query(query, None, error=e)
             return []
 
-    async def sync_admin_emails(self, ui_emails: List[str]) -> Dict[str, List[str]]:
-        """Sync admin emails by comparing database with UI request.
-        
-        Args:
-            ui_emails: List of emails from the UI request
-            
-        Returns:
-            Dict with 'added', 'removed', and 'unchanged' email lists
-        """
-        try:
-            async with get_db_connection() as conn:
-                # Get current admin emails from database
-                current_admins = await self.get_admins()
-                current_admins_set = set(current_admins)
-                ui_emails_set = set(ui_emails)
-                
-                # Calculate differences
-                to_add = ui_emails_set - current_admins_set  # UI has, DB doesn't
-                to_remove = current_admins_set - ui_emails_set  # DB has, UI doesn't
-                unchanged = current_admins_set & ui_emails_set  # Both have
-                
-                # Add new admins
-                added_emails = []
-                for email in to_add:
-                    try:
-                        # Ensure user exists
-                        user_query = """
-                            INSERT INTO users (email, created_at, updated_at)
-                            VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (email) DO NOTHING
-                        """
-                        await conn.execute(user_query, email)
-                        
-                        # Add admin role
-                        role_query = """
-                            INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
-                            VALUES ((SELECT id FROM users WHERE email = $1), 
-                                   (SELECT id FROM roles WHERE role_name = 'admin'), 
-                                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (user_id, role_id) DO NOTHING
-                        """
-                        await conn.execute(role_query, email)
-                        added_emails.append(email)
-                        logger.info(f"Added admin role: {email}")
-                    except Exception as e:
-                        logger.error(f"Error adding admin {email}: {e}")
-                
-                # Remove admins (remove role mapping)
-                removed_emails = []
-                for email in to_remove:
-                    try:
-                        await conn.execute(
-                            "DELETE FROM user_role_mapping WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')",
-                            email
-                        )
-                        removed_emails.append(email)
-                        logger.info(f"Removed admin role: {email}")
-                    except Exception as e:
-                        logger.error(f"Error removing admin {email}: {e}")
-                
-                return {
-                    'added': list(added_emails),
-                    'removed': list(removed_emails),
-                    'unchanged': list(unchanged)
-                }
-                
-        except Exception as e:
-            logger.error(f"Error syncing admin emails: {e}")
-            raise
-
-    async def sync_human_agent_emails(self, ui_emails: List[str]) -> Dict[str, List[str]]:
-        """Sync human agent emails by comparing database with UI request.
-        
-        Args:
-            ui_emails: List of emails from the UI request
-            
-        Returns:
-            Dict with 'added', 'removed', and 'unchanged' email lists
-        """
-        try:
-            async with get_db_connection() as conn:
-                # Get current human agent emails from database
-                current_agents = await self.get_human_agents()
-                current_agents_set = set(current_agents)
-                ui_emails_set = set(ui_emails)
-                
-                # Calculate differences
-                to_add = ui_emails_set - current_agents_set  # UI has, DB doesn't
-                to_remove = current_agents_set - ui_emails_set  # DB has, UI doesn't
-                unchanged = current_agents_set & ui_emails_set  # Both have
-                
-                # Add new human agents
-                added_emails = []
-                for email in to_add:
-                    try:
-                        # Ensure user exists
-                        user_query = """
-                            INSERT INTO users (email, created_at, updated_at)
-                            VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (email) DO NOTHING
-                        """
-                        await conn.execute(user_query, email)
-                        
-                        # Add human agent role
-                        role_query = """
-                            INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
-                            VALUES ((SELECT id FROM users WHERE email = $1), 
-                                   (SELECT id FROM roles WHERE role_name = 'human_agent'), 
-                                   CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (user_id, role_id) DO NOTHING
-                        """
-                        await conn.execute(role_query, email)
-                        added_emails.append(email)
-                        logger.info(f"Added human agent role: {email}")
-                    except Exception as e:
-                        logger.error(f"Error adding human agent {email}: {e}")
-                
-                # Remove human agents (remove role mapping)
-                removed_emails = []
-                for email in to_remove:
-                    try:
-                        await conn.execute(
-                            "DELETE FROM user_role_mapping WHERE user_id = (SELECT id FROM users WHERE email = $1) AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')",
-                            email
-                        )
-                        removed_emails.append(email)
-                        logger.info(f"Removed human agent role: {email}")
-                    except Exception as e:
-                        logger.error(f"Error removing human agent {email}: {e}")
-                
-                return {
-                    'added': list(added_emails),
-                    'removed': list(removed_emails),
-                    'unchanged': list(unchanged)
-                }
-                
-        except Exception as e:
-            logger.error(f"Error syncing human agent emails: {e}")
-            raise
-
-
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
         """Get all LLM providers."""
         query = """
@@ -352,8 +201,8 @@ class ChatAgentConfigDAO:
             FROM llm_providers
             ORDER BY provider_name
         """
-        
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query)
                 logger.log_db_query(query, None, result)
@@ -362,23 +211,19 @@ class ChatAgentConfigDAO:
             logger.log_db_query(query, None, error=e)
             return []
 
-    # =================================
-    # PERSONAS METHODS
-    # =================================
-
     async def get_all_personas(self) -> List[Dict[str, Any]]:
         """Get all personas from database"""
+        query = """
+            SELECT id, persona_name, system_prompt, 
+                    is_active, created_at, updated_at
+            FROM public.persona_configurations
+            ORDER BY id ASC
+        """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
-                query = """
-                    SELECT id, persona_name, system_prompt, 
-                           is_active, created_at, updated_at
-                    FROM public.persona_configurations
-                    ORDER BY id ASC
-                """
                 rows = await conn.fetch(query)
                 logger.log_db_query(query, None, rows)
-            
             return [dict(row) for row in rows]
         except Exception as e:
             logger.error(f"Error fetching personas: {e}")
@@ -395,6 +240,7 @@ class ChatAgentConfigDAO:
             LIMIT 1
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query)
                 logger.log_db_query(query, None, result)
@@ -403,7 +249,6 @@ class ChatAgentConfigDAO:
             logger.log_db_query(query, None, error=e)
             return None
     
-
     async def update_persona(self, persona_name: str, system_prompt: str, is_active: bool = True):
         """Update existing persona configuration only (no insert)."""
         try:
@@ -411,6 +256,7 @@ class ChatAgentConfigDAO:
                 async with conn.transaction():
                     if is_active:
                         deactivate_query = "UPDATE persona_configurations SET is_active = false"
+                        logger.log_db_operation(deactivate_query)
                         deactivate_result = await conn.execute(deactivate_query)
                         logger.log_db_query(deactivate_query, None, deactivate_result)
                     
@@ -420,13 +266,13 @@ class ChatAgentConfigDAO:
                         WHERE persona_name = $3
                     """
                     params = [system_prompt, is_active, persona_name]
+                    logger.log_db_operation(update_query, params)
                     result = await conn.execute(update_query, *params)
                     
-                    # Check if the persona was actually updated
                     if result == "UPDATE 0":
                         raise ValueError(f"Persona '{persona_name}' not found. Cannot update non-existent persona.")
                     
                     logger.log_db_query(update_query, params, result)
         except Exception as e:
-            logger.log_db_query("UPDATE persona_configurations", {"persona_name": persona_name, "system_prompt": system_prompt, "is_active": is_active}, error=e)
+            logger.log_db_query("update_persona", {"persona_name": persona_name, "system_prompt": system_prompt, "is_active": is_active}, error=e)
             raise

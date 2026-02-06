@@ -40,7 +40,7 @@ except Exception as e:
 
 # Import core utilities
 from configuration.core.database_initializer import database_initializer
-from configuration.core.db import close_databases, railway_db
+from shared.db import close_databases, railway_db
 from configuration.core.utils import (
     validate_environment,
     wait_for_railway_network,

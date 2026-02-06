@@ -4,7 +4,7 @@ Provides business logic layer for notifications operations
 """
 from typing import Any, Dict, List, Optional
 
-from configuration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from configuration.dao.notifications_dao import NotificationsDAO
 
 logger = get_otel_logger("notifications_service", "configuration")

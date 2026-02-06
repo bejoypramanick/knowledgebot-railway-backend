@@ -3,9 +3,10 @@ File Data Access Object for Knowledgebase Ingestion
 Handles database operations for file management
 """
 from typing import Any, Dict, List, Optional
+import json
 
-from knowledgebase_ingestion.core.db import get_db_connection
-from knowledgebase_ingestion.core.otel_logger import get_otel_logger
+from shared.db import get_db_connection
+from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("file_dao", "knowledgebase-ingestion")
 
@@ -15,14 +16,16 @@ class FileDAO:
 
     async def get_user_by_email(self, email: str) -> Optional[str]:
         """Get user identifier - check if user exists in users table."""
+        query = "SELECT email FROM users WHERE email = $1"
+        params = {"email": email}
         try:
-            query = "SELECT email FROM users WHERE email = $1"
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, email)
-                logger.log_db_query(query, {"email": email}, result)
+                logger.log_db_query(query, params, result)
                 return result if result else None
         except Exception as e:
-            logger.error(f"Error checking user table for email {email}: {e}")
+            logger.log_db_query(query, params, error=e)
             return None
 
     async def record_api_usage(
@@ -45,6 +48,7 @@ class FileDAO:
         params = [user_id, provider, model, prompt_tokens, completion_tokens, total_tokens, api_call_type,
                   json.dumps(request_metadata) if request_metadata else None]
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, *params)
                 logger.log_db_query(query, params, result)
@@ -54,36 +58,42 @@ class FileDAO:
     async def find_duplicate_by_hash(self, sha256_hash: str) -> Optional[Dict[str, Any]]:
         """Find a file by its SHA256 hash."""
         query = "SELECT * FROM file_uploads WHERE sha256_hash = $1"
+        params = {"sha256_hash": sha256_hash}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, sha256_hash)
-                logger.log_db_query(query, {"sha256_hash": sha256_hash}, result)
+                logger.log_db_query(query, params, result)
                 return dict(result) if result else None
         except Exception as e:
-            logger.log_db_query(query, {"sha256_hash": sha256_hash}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None
 
     async def find_duplicate_by_name(self, original_filename: str) -> Optional[Dict[str, Any]]:
         """Find a file by its original filename."""
         query = "SELECT * FROM file_uploads WHERE original_filename = $1"
+        params = {"original_filename": original_filename}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, original_filename)
-                logger.log_db_query(query, {"original_filename": original_filename}, result)
+                logger.log_db_query(query, params, result)
                 return dict(result) if result else None
         except Exception as e:
-            logger.log_db_query(query, {"original_filename": original_filename}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None
 
     async def delete_file_record(self, db_id: str):
         """Delete a file record from the database."""
         query = "DELETE FROM file_uploads WHERE id = $1"
+        params = {"db_id": db_id}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, db_id)
-                logger.log_db_query(query, {"db_id": db_id}, result)
+                logger.log_db_query(query, params, result)
         except Exception as e:
-            logger.log_db_query(query, {"db_id": db_id}, error=e)
+            logger.log_db_query(query, params, error=e)
 
     async def insert_file_record(self, record_data: Dict[str, Any]) -> str:
         """Insert new file metadata record."""
@@ -95,7 +105,7 @@ class FileDAO:
             RETURNING id
         """
         params = [
-            record_data.get('user_role_id'),  # Updated to user_role_id
+            record_data.get('user_role_id'),
             record_data['original_filename'],
             record_data['file_size'],
             record_data['mime_type'],
@@ -106,6 +116,7 @@ class FileDAO:
             record_data['sha256_hash']
         ]
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, *params)
                 logger.log_db_query(query, params, result)
@@ -127,6 +138,7 @@ class FileDAO:
             json.dumps(metric_data['metadata'])
         ]
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, *params)
                 logger.log_db_query(query, params, result)
@@ -137,6 +149,7 @@ class FileDAO:
         """Get count of active files."""
         query = "SELECT COUNT(*) FROM file_uploads WHERE gemini_state = 'ACTIVE'"
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -154,13 +167,15 @@ class FileDAO:
             ORDER BY upload_timestamp DESC
             LIMIT $1
         """
+        params = {"limit": limit}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query, limit)
-                logger.log_db_query(query, {"limit": limit}, result)
+                logger.log_db_query(query, params, result)
                 return [dict(row) for row in result]
         except Exception as e:
-            logger.log_db_query(query, {"limit": limit}, error=e)
+            logger.log_db_query(query, params, error=e)
             return []
 
     async def get_files(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -172,13 +187,15 @@ class FileDAO:
             ORDER BY upload_timestamp DESC
             LIMIT $1
         """
+        params = {"limit": limit}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query, limit)
-                logger.log_db_query(query, {"limit": limit}, result)
+                logger.log_db_query(query, params, result)
                 return [dict(row) for row in result]
         except Exception as e:
-            logger.log_db_query(query, {"limit": limit}, error=e)
+            logger.log_db_query(query, params, error=e)
             return []
 
     async def get_recent_metrics(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -189,37 +206,43 @@ class FileDAO:
             ORDER BY created_at DESC
             LIMIT $1
         """
+        params = {"limit": limit}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query, limit)
-                logger.log_db_query(query, {"limit": limit}, result)
+                logger.log_db_query(query, params, result)
                 return [dict(row) for row in result]
         except Exception as e:
-            logger.log_db_query(query, {"limit": limit}, error=e)
+            logger.log_db_query(query, params, error=e)
             return []
 
     async def find_file_by_id(self, file_id: str, table_name: str):
         """Find file by ID in specified table"""
+        if table_name not in ['file_uploads']:
+            return None
+        query = f"SELECT * FROM {table_name} WHERE id = $1"
+        params = {"file_id": file_id}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                if table_name == 'file_uploads':
-                    query = "SELECT * FROM file_uploads WHERE id = $1"
-                    result = await conn.fetchrow(query, file_id)
-                    logger.log_db_query(query, {"file_id": file_id}, result)
-                    return dict(result) if result else None
-                else:
-                    logger.warning(f"Unknown table name: {table_name}")
-                    return None
+                result = await conn.fetchrow(query, file_id)
+                logger.log_db_query(query, params, result)
+                return dict(result) if result else None
         except Exception as e:
-            logger.log_db_query("find_file_by_id", {"file_id": file_id, "table_name": table_name}, error=e)
+            logger.log_db_query(query, params, error=e)
             return None
 
     async def delete_file_by_id(self, file_id: str, table_name: str):
         """Delete file by ID from specified table"""
+        if table_name not in ['file_uploads', 'scraped_websites']: # Allow specific tables
+            return
+        query = f"DELETE FROM {table_name} WHERE id = $1"
+        params = {"file_id": file_id}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                query = f"DELETE FROM {table_name} WHERE id = $1"
                 result = await conn.execute(query, file_id)
-                logger.log_db_query(query, {"file_id": file_id}, result)
+                logger.log_db_query(query, params, result)
         except Exception as e:
-            logger.log_db_query(query, {"file_id": file_id}, error=e)
+            logger.log_db_query(query, params, error=e)

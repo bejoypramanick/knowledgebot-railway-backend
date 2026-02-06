@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import UploadFile, HTTPException
 from google.genai import types
 
-from knowledgebase_ingestion.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from knowledgebase_ingestion.core.ai import get_genai_client
 from knowledgebase_ingestion.core.config import settings
 from knowledgebase_ingestion.schemas.models import BatchUploadItem, BatchDeleteItem, FileInfo

@@ -1,11 +1,11 @@
-f"""
+"""
 Performance Data Access Object for Configuration Service
 Handles database operations for performance metrics
 """
 from typing import Dict, List, Any, Optional
 
-from configuration.core.db import get_db_connection
-from configuration.core.otel_logger import get_otel_logger
+from shared.db import get_db_connection
+from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("performance_dao", "configuration")
 
@@ -18,6 +18,7 @@ class PerformanceDAO:
         """Get total number of user interactions."""
         query = "SELECT COUNT(*) FROM chat_messages WHERE role = 'user'"
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -30,6 +31,7 @@ class PerformanceDAO:
         """Get total number of chat sessions."""
         query = "SELECT COUNT(*) FROM chat_sessions"
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -45,6 +47,7 @@ class PerformanceDAO:
             WHERE last_activity_at >= NOW() - INTERVAL '24 hours'
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -61,6 +64,7 @@ class PerformanceDAO:
             WHERE last_activity_at IS NOT NULL AND created_at IS NOT NULL
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -81,6 +85,7 @@ class PerformanceDAO:
             AND sa.status != 'ended'
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -103,6 +108,7 @@ class PerformanceDAO:
             )
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -124,6 +130,7 @@ class PerformanceDAO:
             )
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -143,12 +150,13 @@ class PerformanceDAO:
             FROM chat_messages cm
             LEFT JOIN session_assignments sa ON cm.session_id = sa.session_id
                 AND sa.status != 'ended'
-        WHERE cm.role = 'user'
-        AND cm.created_at >= NOW() - INTERVAL '6 months'
-        GROUP BY TO_CHAR(cm.created_at, 'Mon'), DATE_TRUNC('month', cm.created_at)
-        ORDER BY DATE_TRUNC('month', cm.created_at)
+            WHERE cm.role = 'user'
+            AND cm.created_at >= NOW() - INTERVAL '6 months'
+            GROUP BY TO_CHAR(cm.created_at, 'Mon'), DATE_TRUNC('month', cm.created_at)
+            ORDER BY DATE_TRUNC('month', cm.created_at)
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query)
                 logger.log_db_query(query, None, result)
@@ -170,6 +178,7 @@ class PerformanceDAO:
             WHERE created_at >= NOW() - INTERVAL '30 days'
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -196,6 +205,7 @@ class PerformanceDAO:
             ORDER BY DATE_TRUNC('month', created_at)
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query)
                 logger.log_db_query(query, None, result)
@@ -236,48 +246,16 @@ class PerformanceDAO:
                         return float(data.get("average_uptime_percentage", 99.5))
                     else:
                         logger.warning(f"Health monitoring returned status {response.status_code}")
-                        return 99.5  # Default to good health if service unavailable
+                        return 99.5
                 except httpx.RequestError as e:
                     logger.warning(f"Could not reach health monitoring service: {e}")
-                    return 99.5  # Default uptime if health service is unreachable
+                    return 99.5
         except Exception as e:
             logger.warning(f"Error fetching uptime percentage: {e}")
-            return 99.5  # Conservative default
-
-    async def get_uptime_over_time(self) -> List[Dict[str, Any]]:
-        """Get monthly uptime percentages for each service (last 6 months)."""
-        # Current service list
-        services = await self.get_uptime_by_service()
-        
-        # Months for last 6 months
-        import datetime
-        from dateutil.relativedelta import relativedelta
-        
-        months = []
-        for i in range(5, -1, -1):
-            date = datetime.datetime.now() - relativedelta(months=i)
-            months.append(date.strftime('%b'))
-            
-        # Since we don't have historical data in DB for uptime per service yet,
-        # we generate it based on current data with small random variations
-        import random
-        historical_data = []
-        
-        for month in months:
-            month_data = {"month": month}
-            for s in services:
-                # Base uptime around current value with +/- 0.5% variation
-                # Most services should be high, so we bias towards 99%+
-                variation = random.uniform(-0.8, 0.3)
-                uptime = max(95.0, min(100.0, s['uptime'] + variation))
-                month_data[s['service']] = round(uptime, 2)
-            historical_data.append(month_data)
-            
-        return historical_data
+            return 99.5
 
     async def get_uptime_by_service(self) -> List[Dict[str, Any]]:
         """Get uptime percentage for each service from health monitoring."""
-        # Default fallback data if health monitoring service is unavailable
         default_services = [
             {"service": "api_gateway", "uptime": 99.9},
             {"service": "chatbot_orchestration", "uptime": 99.8},
@@ -303,7 +281,6 @@ class PerformanceDAO:
                         data = response.json()
                         services = data.get("services", {})
 
-                        # Return list of service uptime data
                         if services:
                             return [
                                 {
@@ -313,57 +290,34 @@ class PerformanceDAO:
                                 for service_name, uptime in services.items()
                             ]
                         else:
-                            logger.info("No service data in health monitoring response, using defaults")
                             return default_services
                     else:
-                        logger.warning(f"Health monitoring returned status {response.status_code}, using defaults")
                         return default_services
                 except httpx.RequestError as e:
-                    logger.warning(f"Could not reach health monitoring service: {e}, using defaults")
                     return default_services
         except Exception as e:
-            logger.warning(f"Error fetching service uptime data: {e}, using defaults")
             return default_services
 
     async def get_performance_metrics(self) -> Dict[str, Any]:
         """Get comprehensive performance metrics."""
         try:
-            # Get basic metrics
             total_interactions = await self.get_total_interactions()
             total_sessions = await self.get_total_sessions()
             active_sessions = await self.get_active_sessions()
             avg_engagement = await self.get_average_engagement_time()
             sessions_with_human = await self.get_sessions_with_human()
-
-            # Get AI vs Human metrics
             ai_handled_chats = await self.get_ai_handled_chats()
             human_handoffs = await self.get_human_agent_handoffs()
-
-            # Calculate percentages
             ai_handled_percentage = (ai_handled_chats / total_interactions * 100) if total_interactions > 0 else 0
             human_handoff_percentage = (human_handoffs / total_interactions * 100) if total_interactions > 0 else 0
-
-            # Get interactions over time
             interactions_over_time = await self.get_interactions_over_time()
-
-            # Calculate growth (compare with previous period)
             previous_period_interactions = sum(item['total'] for item in interactions_over_time[:-1]) if len(interactions_over_time) > 1 else 0
             current_period_interactions = interactions_over_time[-1]['total'] if interactions_over_time else 0
             interactions_growth = ((current_period_interactions - previous_period_interactions) / previous_period_interactions * 100) if previous_period_interactions > 0 else 0
-
-            # Get real satisfaction data from chat_feedback
             satisfaction_score = await self.get_satisfaction_score()
             satisfaction_over_time = await self.get_satisfaction_over_time()
-
-            # Get uptime percentage from health monitoring service
             uptime_percentage = await self.get_uptime_percentage()
-
-            # Get per-service uptime data
             uptime_by_service = await self.get_uptime_by_service()
-            uptime_over_time = await self.get_uptime_over_time()
-            
-            # Clean up service names for frontend bar components
-            services_only = [s['service'] for s in uptime_by_service]
 
             return {
                 "total_interactions": total_interactions,
@@ -373,28 +327,20 @@ class PerformanceDAO:
                 "sessions_with_human": sessions_with_human,
                 "ai_handled_chats": ai_handled_chats,
                 "human_agent_handoffs": human_handoffs,
-                "human_handoffs": human_handoffs, # Keep for backward compatibility
                 "ai_handled_percentage": round(ai_handled_percentage, 2),
                 "human_handoff_percentage": round(human_handoff_percentage, 2),
-                "deflection_rate": round(ai_handled_percentage, 2), # Deflection is ai_handled%
-                "deflection_growth": 0,
+                "deflection_rate": round(ai_handled_percentage, 2),
                 "interactions_growth": round(interactions_growth, 2),
                 "interactions_over_time": interactions_over_time,
                 "satisfaction_score": round(satisfaction_score, 2),
-                "user_satisfaction": round(satisfaction_score, 2), # Keep for backward compatibility
                 "satisfaction_over_time": satisfaction_over_time,
                 "uptime": round(uptime_percentage, 2),
-                "uptime_percentage": round(uptime_percentage, 2),
-                "average_uptime_percentage": round(uptime_percentage, 2),
-                "uptime_by_service": uptime_by_service,
-                "uptime_over_time": uptime_over_time,
-                "available_services": services_only
+                "uptime_by_service": uptime_by_service
             }
         except Exception as e:
             logger.error(f"Error getting performance metrics: {e}")
             raise
 
-    # Satisfaction Metrics
     async def get_satisfaction_metrics(self) -> List[Dict[str, Any]]:
         """Get satisfaction metrics over time."""
         query = """
@@ -417,6 +363,7 @@ class PerformanceDAO:
             ORDER BY month_date
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query)
                 logger.log_db_query(query, None, result)
@@ -425,11 +372,11 @@ class PerformanceDAO:
             logger.log_db_query(query, None, error=e)
             return []
 
-    # Comparison Metrics
     async def get_recent_interactions(self) -> int:
         """Get interactions in last 30 days."""
         query = "SELECT COUNT(*) FROM chat_messages WHERE role = 'user' AND created_at >= NOW() - INTERVAL '30 days'"
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -442,6 +389,7 @@ class PerformanceDAO:
         """Get interactions from 30-60 days ago."""
         query = "SELECT COUNT(*) FROM chat_messages WHERE role = 'user' AND created_at >= NOW() - INTERVAL '60 days' AND created_at < NOW() - INTERVAL '30 days'"
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -459,6 +407,7 @@ class PerformanceDAO:
             AND last_activity_at IS NOT NULL AND created_at IS NOT NULL
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -477,6 +426,7 @@ class PerformanceDAO:
             AND last_activity_at IS NOT NULL AND created_at IS NOT NULL
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query)
                 logger.log_db_query(query, None, result)
@@ -485,7 +435,6 @@ class PerformanceDAO:
             logger.log_db_query(query, None, error=e)
             return None
 
-    # Uptime Metrics
     async def get_uptime_metrics(self) -> List[Dict[str, Any]]:
         """Get uptime metrics over time."""
         query = """
@@ -499,6 +448,7 @@ class PerformanceDAO:
             ORDER BY DATE_TRUNC('month', created_at)
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetch(query)
                 logger.log_db_query(query, None, result)

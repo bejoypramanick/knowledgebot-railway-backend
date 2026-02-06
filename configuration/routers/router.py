@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from typing import Dict, List, Any, Optional
 import json
 
-from configuration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from ..service.configuration_service import ConfigurationService
 from ..service.auth_service import AuthService
 from ..service.chat_log_service import ChatLogService

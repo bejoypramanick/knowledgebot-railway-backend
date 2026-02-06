@@ -1,32 +1,44 @@
-"""Database connection utilities for Health Monitoring Service."""
+"""Unified database utilities for PostgreSQL connections across all services."""
 import asyncio
 import os
 import logging
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, Any
 
 import asyncpg
 from tenacity import retry, stop_after_attempt, wait_exponential
+from shared.correlation_id import get_correlation_id
 
 logger = logging.getLogger(__name__)
 
-
 class DatabaseManager:
     """Robust database connection pool manager with health checks and auto-recovery."""
-
+    
     _instance: Optional['DatabaseManager'] = None
     _lock = asyncio.Lock()
 
     def __init__(self, connection_url: Optional[str] = None):
         self._pool: Optional[asyncpg.Pool] = None
-        self._connection_url = connection_url or os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL")
+        self._connection_url = connection_url or os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+        
+        # Ensure SSL mode is properly configured for Railway
+        if self._connection_url and 'sslmode=' not in self._connection_url:
+            self._connection_url += '&sslmode=require' if '?' in self._connection_url else '?sslmode=require'
+        
+        # Optimized for Railway memory limits and reliability
         self._pool_config = {
-            'min_size': 2,
-            'max_size': 10,
-            'command_timeout': 60.0,
+            'min_size': 1,
+            'max_size': 5,
+            'command_timeout': 15.0,
+            'max_inactive_connection_lifetime': 120.0,
+            'max_queries': 10000,
             'server_settings': {
                 'timezone': 'UTC',
-                'application_name': 'health_monitoring'
+                'application_name': 'knowledgebot_backend_shared',
+                'tcp_keepalives_idle': '30',
+                'tcp_keepalives_interval': '10',
+                'tcp_keepalives_count': '3',
+                'statement_timeout': '15000'
             }
         }
         self._last_health_check = 0
@@ -34,60 +46,53 @@ class DatabaseManager:
 
     @classmethod
     async def get_instance(cls) -> 'DatabaseManager':
-        """Get or create the singleton instance of DatabaseManager."""
         if cls._instance is None:
             async with cls._lock:
                 if cls._instance is None:
                     cls._instance = DatabaseManager()
         return cls._instance
 
-    def configure(self, **kwargs):
-        """Configure pool settings before initialization."""
-        if 'min_size' in kwargs:
-            self._pool_config['min_size'] = kwargs['min_size']
-        if 'max_size' in kwargs:
-            self._pool_config['max_size'] = kwargs['max_size']
-        if 'command_timeout' in kwargs:
-            self._pool_config['command_timeout'] = kwargs['command_timeout']
-
     @retry(
         stop=stop_after_attempt(5),
-        wait=wait_exponential(multiplier=2, min=1, max=10),
-        retry=lambda e: isinstance(e, (ConnectionRefusedError, OSError, asyncpg.exceptions.ConnectionDoesNotExistError, asyncpg.exceptions.InterfaceError)),
-        before_sleep=lambda rs: logger.warning(f"⏳ DB connect retry {rs.attempt_number}/5...")
+        wait=wait_exponential(multiplier=1, min=1, max=8),
+        retry=lambda e: isinstance(e, (
+            ConnectionRefusedError, 
+            OSError, 
+            asyncpg.exceptions.ConnectionDoesNotExistError, 
+            asyncpg.exceptions.InterfaceError,
+            asyncpg.exceptions.ConnectionFailureError,
+            asyncpg.exceptions.PostgresConnectionError,
+            ConnectionResetError
+        )),
+        before_sleep=lambda rs: logger.warning(f"⏳ DB connect retry {rs.attempt_number}/5 after {rs.outcome.exception()}")
     )
     async def _create_pool(self):
-        """Internal method to create the pool."""
         if not self._connection_url:
             raise RuntimeError("Database URL not configured")
-
-        logger.info(f"🆕 Initializing DB pool (min={self._pool_config['min_size']}, max={self._pool_config['max_size']})")
-
+        
+        logger.info(f"🆕 Initializing unified DB pool (min={self._pool_config['min_size']}, max={self._pool_config['max_size']})")
+        
         try:
             self._pool = await asyncpg.create_pool(
                 dsn=self._connection_url,
                 **self._pool_config
             )
-            # Basic validation
             async with self._pool.acquire() as conn:
                 await conn.execute("SELECT 1")
-            logger.info("✅ DB pool initialized successfully")
+            logger.info("✅ DB pool initialized and validated successfully")
         except Exception as e:
-            logger.error(f"❌ Failed to create DB pool: {e}")
+            logger.error(f"❌ Failed to initialize DB pool: {e}")
             self._pool = None
             raise
 
     async def initialize(self):
-        """Carefully initialize the pool if not already done."""
         if self._pool is not None:
             return
-
         async with self._lock:
             if self._pool is None:
                 await self._create_pool()
 
     async def ensure_healthy(self):
-        """Ensure the pool is alive, recreate if broken."""
         if self._pool is None:
             await self.initialize()
             return
@@ -98,7 +103,7 @@ class DatabaseManager:
 
         self._last_health_check = now
         try:
-            async with self._pool.acquire(timeout=5.0) as conn:
+            async with self._pool.acquire(timeout=3.0) as conn:
                 await conn.execute("SELECT 1")
         except Exception as e:
             logger.warning(f"⚠️ DB pool health check failed: {e}. Attempting recovery...")
@@ -108,16 +113,22 @@ class DatabaseManager:
 
     @asynccontextmanager
     async def connection(self):
-        """Standard connection context manager."""
         await self.ensure_healthy()
         if not self._pool:
             raise RuntimeError("Database pool not available")
-
-        async with self._pool.acquire() as conn:
-            yield conn
+        
+        cid = get_correlation_id()
+        cid_str = f" [{cid}]" if cid else ""
+        
+        logger.debug(f"🔌{cid_str} Acquiring database connection...")
+        try:
+            async with self._pool.acquire() as conn:
+                yield conn
+        except Exception as e:
+            logger.error(f"❌{cid_str} Failed to acquire DB connection: {e}")
+            raise
 
     async def close(self):
-        """Close the pool."""
         if self._pool:
             await self._pool.close()
             self._pool = None
@@ -139,26 +150,27 @@ class DatabaseManager:
         async with self.connection() as conn:
             return await conn.fetchval(query, *args)
 
-
 @asynccontextmanager
 async def get_db_connection():
-    """Get a database connection context manager."""
+    """Unified entry point for getting a DB connection with correlation logging."""
     manager = await DatabaseManager.get_instance()
     async with manager.connection() as conn:
         yield conn
 
+async def close_databases():
+    manager = await DatabaseManager.get_instance()
+    await manager.close()
 
 async def init_railway_db(url: Optional[str] = None):
-    """Initialize the database."""
+    """Helper for pool initialization."""
     manager = await DatabaseManager.get_instance()
     if url:
         manager._connection_url = url
     await manager.initialize()
     return manager
 
-
+# Global instance for easy access
 railway_db: Optional[DatabaseManager] = None
-
 
 async def get_railway_db():
     global railway_db

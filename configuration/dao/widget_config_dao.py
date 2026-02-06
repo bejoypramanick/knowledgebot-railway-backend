@@ -4,10 +4,9 @@ Handles database operations for widget configuration
 """
 from typing import Dict, List, Any, Optional, Tuple
 import json
-import base64
 
-from configuration.core.db import get_db_connection
-from configuration.core.otel_logger import get_otel_logger
+from shared.db import get_db_connection
+from shared.otel_logger import get_otel_logger
 from configuration.core.railway_storage import railway_storage
 
 logger = get_otel_logger("widget_dao", "configuration")
@@ -30,6 +29,7 @@ class WidgetConfigDAO:
             WHERE id = 1
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query)
                 logger.log_db_query(query, None, result)
@@ -48,6 +48,7 @@ class WidgetConfigDAO:
             ORDER BY display_order
         """
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 rows = await conn.fetch(query)
                 logger.log_db_query(query, None, rows)
@@ -103,11 +104,12 @@ class WidgetConfigDAO:
             json.dumps(config_data.get("chat_icon_position", {"x": 0, "y": 0}))
         ]
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, *params)
-                logger.log_db_query(query, config_data, result)
+                logger.log_db_query(query, params, result)
         except Exception as e:
-            logger.log_db_query(query, config_data, error=e)
+            logger.log_db_query(query, params, error=e)
             raise
 
     async def update_suggested_messages(self, messages: List[str]):
@@ -117,7 +119,9 @@ class WidgetConfigDAO:
                 async with conn.transaction():
                     # Get the widget config ID (should be ID 1 for the main config)
                     config_id_query = "SELECT id FROM widget_configuration LIMIT 1"
+                    logger.log_db_operation(config_id_query)
                     config_id_row = await conn.fetchrow(config_id_query)
+                    logger.log_db_query(config_id_query, None, config_id_row)
                     
                     if not config_id_row:
                         raise ValueError("No widget configuration found")
@@ -126,8 +130,10 @@ class WidgetConfigDAO:
                     
                     # Clear existing messages for this widget config
                     delete_query = "DELETE FROM widget_suggested_messages WHERE widget_config_id = $1"
+                    delete_params = {"widget_config_id": widget_config_id}
+                    logger.log_db_operation(delete_query, delete_params)
                     delete_result = await conn.execute(delete_query, widget_config_id)
-                    logger.log_db_query(delete_query, {"widget_config_id": widget_config_id}, delete_result)
+                    logger.log_db_query(delete_query, delete_params, delete_result)
                     
                     # Insert new messages
                     insert_query = """
@@ -135,43 +141,30 @@ class WidgetConfigDAO:
                         VALUES ($1, $2, $3, true, NOW(), NOW())
                     """
                     for i, message in enumerate(messages):
+                        insert_params = {"widget_config_id": widget_config_id, "message": message, "display_order": i}
+                        logger.log_db_operation(insert_query, insert_params)
                         result = await conn.execute(insert_query, widget_config_id, message, i)
-                        logger.log_db_query(insert_query, {"widget_config_id": widget_config_id, "message": message, "display_order": i}, result)
+                        logger.log_db_query(insert_query, insert_params, result)
         except Exception as e:
-            logger.log_db_query("update_suggested_messages", {"messages": messages}, error=e)
+            logger.error(f"Error updating suggested messages: {e}")
             raise
 
     async def update_widget_image(self, image_type: str, image_data: bytes, filename: str) -> Tuple[str, str]:
         """
         Update widget image by uploading to Railway storage and updating database with URL.
-        
-        Args:
-            image_type: Type of image ('profile', 'chatIcon', 'headerIcon')
-            image_data: Raw image data bytes
-            filename: Original filename
-            
-        Returns:
-            Tuple of (storage_url, storage_filename)
         """
         try:
             # Determine content type from filename or default to JPEG
             content_type = 'image/jpeg'
-            if filename.lower().endswith('.png'):
-                content_type = 'image/png'
-            elif filename.lower().endswith('.gif'):
-                content_type = 'image/gif'
-            elif filename.lower().endswith('.webp'):
-                content_type = 'image/webp'
-            elif filename.lower().endswith('.svg'):
-                content_type = 'image/svg+xml'
+            if filename.lower().endswith('.png'): content_type = 'image/png'
+            elif filename.lower().endswith('.gif'): content_type = 'image/gif'
+            elif filename.lower().endswith('.webp'): content_type = 'image/webp'
+            elif filename.lower().endswith('.svg'): content_type = 'image/svg+xml'
             
             # Upload to Railway storage with consistent naming
             storage_url, storage_filename = await railway_storage.upload_image(
                 image_data, filename, content_type, image_type
             )
-            
-            # Update database with storage URL
-            # The storage_filename is already properly handled by the storage service
             
             column_mapping = {
                 "profile": ("profile_picture_url", "profile_picture_filename"),
@@ -180,8 +173,8 @@ class WidgetConfigDAO:
             }
             
             if image_type not in column_mapping:
-                logger.error(f"❌ Invalid image type: {image_type}")
-                return False
+                logger.error(f"Invalid image type: {image_type}")
+                return False, ""
             
             url_column, filename_column = column_mapping[image_type]
             
@@ -190,26 +183,23 @@ class WidgetConfigDAO:
                 SET {url_column} = $1, {filename_column} = $2, updated_at = NOW()
                 WHERE id = 1
             """
+            params = {"storage_url": storage_url, "storage_filename": storage_filename}
             
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, storage_url, storage_filename)
-                logger.log_db_query(query, {
-                    "image_type": image_type,
-                    "storage_url": storage_url,
-                    "storage_filename": storage_filename
-                }, result)
-                
-                logger.info(f"✅ Widget image '{image_type}' updated successfully with URL: {storage_url}")
+                logger.log_db_query(query, params, result)
                 return storage_url, storage_filename
                 
         except Exception as e:
-            logger.error(f"❌ Error updating widget image '{image_type}': {e}")
+            logger.error(f"Error updating widget image '{image_type}': {e}")
             raise
 
     async def clear_suggested_messages(self):
         """Clear all suggested messages."""
         query = "DELETE FROM widget_suggested_messages"
         try:
+            logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.execute(query)
                 logger.log_db_query(query, None, result)
@@ -225,6 +215,7 @@ class WidgetConfigDAO:
         """
         params = {"message": message, "index": index}
         try:
+            logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.execute(query, message, index)
                 logger.log_db_query(query, params, result)

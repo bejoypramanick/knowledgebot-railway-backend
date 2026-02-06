@@ -4,7 +4,7 @@ Provides business logic for performance metrics operations
 """
 from typing import Any, Dict
 
-from configuration.core.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 
 from ..dao.performance_dao import PerformanceDAO
 
