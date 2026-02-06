@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     docling_host: str = "0.0.0.0"
 
     # Docling Processing Configuration
-    docling_model_name: str = "granite-3.0-small"  # Smaller, faster model for better performance
+    docling_model_name: str = "granite-docling-258m"  # Larger model for better quality, despite slower performance
     docling_max_file_size_mb: int = 50
     docling_processing_timeout_seconds: int = 270
 
