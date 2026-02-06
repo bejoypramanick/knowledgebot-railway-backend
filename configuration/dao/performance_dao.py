@@ -230,16 +230,15 @@ class PerformanceDAO:
             return []
 
     async def get_uptime_percentage(self, days: int = 30) -> float:
-        """Get system uptime percentage from health monitoring via API Gateway (with fallback)."""
+        """Get system uptime percentage from health monitoring (with fallback)."""
         try:
             import os
             import httpx
 
-            api_gateway_url = os.getenv(
-                "API_GATEWAY_URL",
-                "http://api-gateway.railway.internal:8080"
+            health_monitoring_url = os.getenv(
+                "HEALTH_MONITORING_URL",
+                "http://health-monitoring.railway.internal:8080"
             )
-            health_monitoring_url = f"{api_gateway_url}/api/v1/health"
 
             async with httpx.AsyncClient(timeout=10) as client:
                 try:
@@ -276,16 +275,15 @@ class PerformanceDAO:
             import os
             import httpx
 
-            api_gateway_url = os.getenv(
-                "API_GATEWAY_URL",
-                "http://api-gateway.railway.internal:8080"
+            health_monitoring_url = os.getenv(
+                "HEALTH_MONITORING_URL",
+                "http://health-monitoring.railway.internal:8080"
             )
-            health_monitoring_url = f"{api_gateway_url}/api/v1/health"
 
             async with httpx.AsyncClient(timeout=10) as client:
                 try:
                     response = await client.get(
-                        f"{health_monitoring_url}/availability"
+                        f"{health_monitoring_url}/api/v1/health/availability"
                     )
 
                     if response.status_code == 200:
@@ -310,19 +308,18 @@ class PerformanceDAO:
             return default_services
 
     async def get_uptime_over_time(self, days: int = 180) -> List[Dict[str, Any]]:
-        """Get uptime history for the last N days from health monitoring via API Gateway."""
+        """Get uptime history for the last N days from health monitoring."""
         try:
             import os
             import httpx
 
-            # Call through API Gateway (Railway internal URL)
-            api_gateway_url = os.getenv(
-                "API_GATEWAY_URL",
-                "http://api-gateway.railway.internal:8080"
+            # Use Railway internal URL as default (Railway exposes all services on port 8080)
+            health_monitoring_url = os.getenv(
+                "HEALTH_MONITORING_URL",
+                "http://health-monitoring.railway.internal:8080"
             )
-            health_monitoring_url = f"{api_gateway_url}/api/v1/health"
-            logger.info(f"📊 Fetching uptime history from {health_monitoring_url}/chart-data")
-            logger.info(f"📊 API_GATEWAY_URL env var: {os.getenv('API_GATEWAY_URL', 'USING DEFAULT RAILWAY INTERNAL URL')}")
+            logger.info(f"📊 Fetching uptime history from {health_monitoring_url}/api/v1/health/chart-data")
+            logger.info(f"📊 HEALTH_MONITORING_URL env var: {os.getenv('HEALTH_MONITORING_URL', 'USING DEFAULT RAILWAY INTERNAL URL')}")
 
             async with httpx.AsyncClient(timeout=10) as client:
                 try:
