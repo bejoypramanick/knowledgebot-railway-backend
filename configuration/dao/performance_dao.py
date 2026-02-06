@@ -356,20 +356,20 @@ class PerformanceDAO:
             active_sessions = await self.get_active_sessions() or 0
             avg_engagement = await self.get_average_engagement_time() or 0
             sessions_with_human = await self.get_sessions_with_human() or 0
-            
+
             ai_handled_chats = await self.get_ai_handled_chats() or 0
             human_handoffs = await self.get_human_agent_handoffs() or 0
-            
+
             # Use sessions for percentages if possible, otherwise interactions
             total_for_calc = total_sessions if total_sessions > 0 else total_interactions
             ai_handled_percentage = (ai_handled_chats / total_for_calc * 100) if total_for_calc > 0 else 0
             human_handoff_percentage = (human_handoffs / total_for_calc * 100) if total_for_calc > 0 else 0
-            
+
             # Use specialized deflection rate method
             deflection_rate = await self.get_deflection_rate()
-            
+
             interactions_over_time = await self.get_interactions_over_time()
-            
+
             # Calculate growth based on last two time periods
             interactions_growth = 0
             if len(interactions_over_time) >= 2:
@@ -382,10 +382,13 @@ class PerformanceDAO:
 
             satisfaction_score = await self.get_satisfaction_score()
             satisfaction_over_time = await self.get_satisfaction_over_time()
-            
+
             uptime_percentage = await self.get_uptime_percentage()
             uptime_by_service = await self.get_uptime_by_service()
             uptime_history = await self.get_uptime_over_time(180)
+
+            # Extract available services from uptime_by_service
+            available_services = [service["service"] for service in uptime_by_service]
 
             return {
                 "total_interactions": total_interactions,
@@ -404,7 +407,9 @@ class PerformanceDAO:
                 "satisfaction_over_time": satisfaction_over_time,
                 "uptime": round(uptime_percentage, 2),
                 "uptime_by_service": uptime_by_service,
-                "uptime_over_time": uptime_history
+                "uptime_over_time": uptime_history,
+                "average_uptime_percentage": round(uptime_percentage, 2),
+                "available_services": available_services
             }
         except Exception as e:
             logger.error(f"Error getting performance metrics: {e}")

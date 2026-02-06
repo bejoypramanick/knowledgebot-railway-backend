@@ -11,6 +11,7 @@ from shared.db import init_railway_db
 from shared.otel_logger import setup_otel_logging
 from health_monitoring.routers.router import router
 from health_monitoring.scheduler.health_checker import get_scheduler
+from health_monitoring.core.database_initializer import database_initializer
 
 # Setup logging
 setup_otel_logging("health-monitoring")
@@ -25,8 +26,10 @@ async def lifespan(app: FastAPI):
 
         # Initialize database
         if settings.railway_postgres_url or settings.database_url:
-            await init_railway_db(settings.railway_postgres_url or settings.database_url)
-            logger.info("✅ Database initialized")
+            db_url = settings.railway_postgres_url or settings.database_url
+            await init_railway_db(db_url)
+            await database_initializer.initialize_and_validate(db_url)
+            logger.info("✅ Database initialized and schema validated")
         else:
             logger.warning("⚠️ Database URL not configured - health checks will not be persisted")
 
