@@ -308,14 +308,15 @@ class PerformanceDAO:
             return default_services
 
     async def get_uptime_over_time(self, days: int = 180) -> List[Dict[str, Any]]:
-        """Get uptime history for the last N days (up to 6 months) from health monitoring.
+        """Get uptime history for the last N days (6 months). Shows all months with data or 0 for empty months.
 
-        Returns data for each month that has health check records. If no data exists yet,
-        returns empty list. Displays only months with actual data (e.g., 1 month if only 1 month has data).
+        Returns all 6 months regardless of data availability. Months without health check records
+        show uptime as 0. This provides a consistent 6-month view.
         """
         try:
             import os
             import httpx
+            from datetime import datetime, timedelta
 
             # Use Railway internal URL as default (Railway exposes all services on port 8080)
             health_monitoring_url = os.getenv(
@@ -342,45 +343,92 @@ class PerformanceDAO:
                         raw_data = chart_result.get("data", [])
                         logger.info(f"📊 Received {len(raw_data)} month(s) with data from health monitoring")
 
-                        if not raw_data:
-                            logger.info(f"📊 No health check data available yet (may still be collecting data)")
-                            return []
-
-                        # Format for frontend: [{"month": "Jan", "uptime": 99.9}, ...]
-                        formatted_history = []
+                        # Create a mapping of months to uptime from the response data
+                        data_map = {}
                         for item in raw_data:
                             time_period = item.get('time_period')
                             uptime = item.get('uptime_percentage', 0)
 
-                            # Parse time_period (could be string or datetime)
-                            month_name = 'N/A'
+                            # Parse time_period to extract year-month key
                             try:
                                 if isinstance(time_period, str):
-                                    from datetime import datetime
                                     date_obj = datetime.fromisoformat(time_period.replace('Z', '+00:00'))
-                                    month_name = date_obj.strftime('%b %Y')
-                                elif hasattr(time_period, 'strftime'):
-                                    month_name = time_period.strftime('%b %Y')
+                                elif hasattr(time_period, 'year'):
+                                    date_obj = time_period
+                                else:
+                                    continue
+
+                                # Use year-month as key for the map
+                                month_key = date_obj.strftime('%Y-%m')
+                                month_label = date_obj.strftime('%b %Y')
+                                data_map[month_key] = {
+                                    "month": month_label,
+                                    "uptime": round(uptime, 2)
+                                }
                             except Exception as parse_error:
                                 logger.warning(f"⚠️ Failed to parse date {time_period}: {parse_error}")
-                                month_name = 'N/A'
 
-                            formatted_history.append({
-                                "month": month_name,
-                                "uptime": round(uptime, 2)
-                            })
+                        # Generate all 6 months (180 days)
+                        now = datetime.utcnow()
+                        formatted_history = []
 
-                        logger.info(f"✅ Formatted {len(formatted_history)} month(s) of uptime history for chart")
+                        # Generate 6 months of dates (current month + 5 previous months)
+                        for i in range(5, -1, -1):  # 5, 4, 3, 2, 1, 0 (6 months)
+                            # Calculate first day of month i months ago
+                            temp = now.replace(day=1) - timedelta(days=1)
+                            for _ in range(i):
+                                temp = temp.replace(day=1) - timedelta(days=1)
+
+                            month_date = temp.replace(day=1)
+                            month_key = month_date.strftime('%Y-%m')
+                            month_label = month_date.strftime('%b %Y')
+
+                            # Get uptime from data_map if available, otherwise 0
+                            if month_key in data_map:
+                                formatted_history.append(data_map[month_key])
+                            else:
+                                formatted_history.append({
+                                    "month": month_label,
+                                    "uptime": 0
+                                })
+
+                        logger.info(f"✅ Formatted 6 months of uptime history (with {len(data_map)} months having data)")
                         return formatted_history
                     else:
                         logger.warning(f"⚠️ Health monitoring returned status {response.status_code}")
                         logger.warning(f"⚠️ Response: {response.text[:200]}")
-                        return []
+
+                        # Return 6 empty months even if request fails
+                        now = datetime.utcnow()
+                        empty_months = []
+                        for i in range(5, -1, -1):
+                            temp = now.replace(day=1) - timedelta(days=1)
+                            for _ in range(i):
+                                temp = temp.replace(day=1) - timedelta(days=1)
+                            month_date = temp.replace(day=1)
+                            empty_months.append({
+                                "month": month_date.strftime('%b %Y'),
+                                "uptime": 0
+                            })
+                        return empty_months
 
                 except httpx.ConnectError as ce:
                     logger.error(f"❌ Cannot connect to health_monitoring service at {health_monitoring_url}")
                     logger.error(f"❌ Error: {ce}")
-                    return []
+
+                    # Return 6 empty months on connection error
+                    now = datetime.utcnow()
+                    empty_months = []
+                    for i in range(5, -1, -1):
+                        temp = now.replace(day=1) - timedelta(days=1)
+                        for _ in range(i):
+                            temp = temp.replace(day=1) - timedelta(days=1)
+                        month_date = temp.replace(day=1)
+                        empty_months.append({
+                            "month": month_date.strftime('%b %Y'),
+                            "uptime": 0
+                        })
+                    return empty_months
                 except Exception as e:
                     logger.error(f"❌ Error fetching uptime history: {e}", exc_info=True)
                     return []
