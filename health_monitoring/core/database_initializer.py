@@ -1,8 +1,8 @@
 """Database initialization for Health Monitoring Service."""
-import logging
 from shared.db import get_db_connection
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger("database_initializer", "health-monitoring")
 
 
 class DatabaseInitializer:
