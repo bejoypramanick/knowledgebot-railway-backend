@@ -3,22 +3,22 @@ Consolidated Configuration Router
 All configuration endpoints in one file for easier debugging
 """
 
-from fastapi import APIRouter, HTTPException, Request, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, Depends
 from typing import Dict, List, Any, Optional
 import json
-from datetime import datetime
 
 from configuration.core.otel_logger import get_otel_logger
-from ..service.chat_agent_config_service import ChatAgentConfigService
-from ..service.widget_config_service import WidgetConfigService
+from ..service.configuration_service import ConfigurationService
 from ..service.auth_service import AuthService
 from ..service.chat_log_service import ChatLogService
+from ..service.notifications_service import NotificationsService
 from ..service.performance_service import PerformanceService
 from ..service.feedback_service import FeedbackService
-
+from ..service.token_usage_service import TokenUsageService
 from ..schemas.models import (
     ChatbotConfigRequest,
     AdminManagementRequest,
+    NotificationRequest,
     FeedbackRequest,
     WidgetConfigRequest
 )
@@ -28,6 +28,25 @@ from ..schemas.models import (
 logger = get_otel_logger("configuration_router", "configuration")
 router = APIRouter()
 
+@router.get("/version")
+async def get_version():
+    """Simple version check endpoint"""
+    return {
+        "service": "configuration",
+        "version": "2.2",
+        "status": "enhanced_debugging_deployed",
+        "timestamp": "2026-01-31T13:28:00Z"
+    }
+
+@router.get("/test")
+async def test_endpoint():
+    """Simple test endpoint without authentication"""
+    logger.info("🔍 TEST ENDPOINT CALLED - SERVICE IS WORKING!")
+    return {
+        "message": "Configuration service is working!",
+        "version": "2.2",
+        "timestamp": "2026-01-31T13:35:00Z"
+    }
 
 # Simple function to get current user from request state or headers (set by API Gateway middleware)
 async def get_current_user(request: Request):
@@ -63,38 +82,38 @@ async def get_current_user(request: Request):
     raise HTTPException(status_code=401, detail="User not found in request state or headers")
 
 # Initialize services
-chat_agent_config_service = ChatAgentConfigService()
-widget_config_service = WidgetConfigService()
+config_service = ConfigurationService()
 auth_service = AuthService()
 chat_log_service = ChatLogService()
+notifications_service = NotificationsService(notifications_dao=None)
 performance_service = PerformanceService()
 feedback_service = FeedbackService()
-
+token_usage_service = TokenUsageService()
 
 # =================================
-# CHATADMIN CONFIGURATION ENDPOINTS
+# CHATBOT CONFIGURATION ENDPOINTS
 # =================================
 
 @router.get("/chatAgentConfig")
-async def get_chatAgent_config():
+async def get_chatbot_config(cache: bool = True):
     """Get complete chatbot configuration with caching support"""
     try:
-        logger.info(f"🔍 GET /chatAgentConfig called")
-        config = await chat_agent_config_service.get_chatAgent_config()
-        logger.info(f"✅ Chatbot config retrieved successfully")
+        logger.info(f"🔍 GET /chatAgentConfig called with cache={cache}")
+        config = await config_service.get_chatAgent_config()
+        logger.info(f"✅ Chatbot config retrieved successfully (cache={cache})")
         return {"success": True, "data": config}
     except Exception as e:
         logger.error(f"Error getting chatbot config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/chatAgentConfig")
-async def save_chatAgent_config(config: ChatbotConfigRequest, request: Request):
+async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
     """Save chatbot configuration"""
     try:
         logger.info(f"🔍 POST /chatAgentConfig received: {config}")
         logger.info(f"🔍 Request headers: {dict(request.headers)}")
         
-        await chat_agent_config_service.save_chatAgent_config(config.dict())
+        await config_service.save_chatbot_config(config.dict())
         
         logger.info("✅ Chatbot config saved successfully")
         return {"success": True, "message": "Chatbot configuration saved successfully"}
@@ -109,10 +128,10 @@ async def save_chatAgent_config(config: ChatbotConfigRequest, request: Request):
 # =================================
 
 @router.get("/widgetConfig")
-async def get_widget_config(request: Request):
+async def get_widget_config():
     """Get widget configuration"""
     try:
-        config = await widget_config_service.get_widget_config()
+        config = await config_service.get_widget_config()
         
         # If no config exists, return default configuration
         if not config:
@@ -145,43 +164,10 @@ async def get_widget_config(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/widgetConfig")
-async def update_widget_config(request: Request):
-    """Update widget configuration with optional image uploads"""
+async def update_widget_config(config: WidgetConfigRequest, request: Request):
+    """Update widget configuration"""
     try:
-        # Check if this is a multipart form request (with images) or JSON
-        content_type = request.headers.get("content-type", "")
-        logger.info(f"Content type: {content_type}")
-        if content_type.startswith("multipart/form-data"):
-            # Handle multipart form with images
-            from fastapi import UploadFile, File, Form
-            import json
-            
-            # Parse multipart form data
-            form = await request.form()
-            
-            # Extract config data
-            config_json = form.get("config")
-            if not config_json:
-                raise HTTPException(status_code=400, detail="Configuration data is required")
-            
-            config_data = json.loads(config_json)
-            
-            # Extract image files
-            profile_file = form.get("profile_image")
-            chat_icon_file = form.get("chat_icon_image")
-            
-            # Call service with clean parameters
-            await widget_config_service.update_widget_config_with_images(
-                config_data, 
-                profile_file, 
-                chat_icon_file
-            )
-            
-        else:
-            # Handle regular JSON request (no images)
-            config_data = await request.json()
-            await widget_config_service.update_widget_config(config_data)
-        
+        await config_service.update_widget_config(config.dict())
         return {"success": True, "message": "Widget configuration updated successfully"}
     except Exception as e:
         logger.error(f"Error updating widget config: {e}")
@@ -189,132 +175,213 @@ async def update_widget_config(request: Request):
 
 @router.post("/widget/embed-script")
 async def generate_widget_embed_script(request: Request):
-    """Generate widget embed script based on latest widget configuration"""
+    """Generate widget embed script based on configuration"""
     try:
-        # Extract request data
         body = await request.json()
         embed_type = body.get("embedType", "bubble")
-        widget_url = body.get("baseUrl", body.get("widgetUrl", "https://your-widget-url.com"))
-        
-        # Extract fallback config values from request body
-        fallback_config = {
-            "theme": body.get("theme"),
-            "primaryColor": body.get("primaryColor"),
-            "position": body.get("position"),
-            "alignBubble": body.get("alignBubble"),
-            "chatBubbleColor": body.get("chatBubbleColor"),
-            "displayChatbot": body.get("displayChatbot"),
-            "displayName": body.get("displayName"),
-            "initialMessage": body.get("initialMessage"),
-            "suggestedMessages": body.get("suggestedMessages"),
-            "profilePictureUrl": body.get("profilePictureUrl"),
-            "chatIconUrl": body.get("chatIconUrl"),
-            "baseUrl": body.get("baseUrl")
+        theme = body.get("theme", "light")
+        primary_color = body.get("primaryColor", "#3b82f6")
+        position = body.get("position", "bottom-right")
+        widget_url = body.get("widgetUrl", "https://your-widget-url.com")
+
+        if embed_type == "iframe":
+            script = f'''<!-- Knowledgebot Widget - Iframe Embed -->
+<iframe
+    src="{widget_url}"
+    style="position: fixed; {position.replace('-', ': 20px; ')}; width: 400px; height: 600px; border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 9999;"
+    title="Chat Widget"
+></iframe>'''
+        else:
+            # Bubble embed (default)
+            script = f'''<!-- Knowledgebot Widget - Bubble Embed -->
+<script>
+(function() {{
+    var w = window;
+    var d = document;
+    var s = d.createElement('script');
+    s.src = '{widget_url}/widget.js';
+    s.async = true;
+    s.onload = function() {{
+        w.KnowledgeBot.init({{
+            theme: '{theme}',
+            primaryColor: '{primary_color}',
+            position: '{position}'
+        }});
+    }};
+    d.head.appendChild(s);
+}})();
+</script>'''
+
+        return {
+            "success": True,
+            "script": script,
+            "embedType": embed_type
         }
-        
-        # Delegate to service layer for business logic
-        result = await widget_config_service.generate_embed_script(embed_type, widget_url, fallback_config)
-        
-        return result
     except Exception as e:
         logger.error(f"Error generating embed script: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+from fastapi import UploadFile, File, Form
+import base64
+import os
 
-# =================================
-# REAL-TIME WIDGET WEBSOCKET ENDPOINTS
-# =================================
-
-@router.websocket("/widget/ws")
-async def widget_websocket_endpoint(websocket: WebSocket):
-    """WebSocket endpoint for real-time widget state synchronization"""
-    await websocket.accept()
-    logger.info("🔌 Widget WebSocket connection accepted")
-    
-    # Generate unique widget ID for this connection
-    import uuid
-    widget_id = f"widget_{uuid.uuid4().hex[:8]}"
-    logger.info(f"🔌 Generated widget ID: {widget_id}")
-    
+@router.post("/widget/upload-image")
+async def upload_widget_image(
+    file: UploadFile = File(...),
+    type: str = Form(...)  # profile, chatIcon, headerIcon
+):
+    """Upload an image for the widget (profile picture, chat icon, or header icon)"""
     try:
-        from .service.widget_realtime_service import widget_realtime_service
-        
-        # Register connection
-        await widget_realtime_service.register_connection(widget_id, websocket)
-        logger.info(f"🔌 Widget {widget_id} registered with realtime service")
-        
-        # Keep connection alive and handle messages
-        while True:
-            try:
-                # Receive ping/pong messages to keep connection alive
-                message = await websocket.receive_text()
-                logger.info(f"🔌 Received message from {widget_id}: {message}")
-                data = json.loads(message)
-                
-                if data.get("type") == "ping":
-                    await websocket.send_text(json.dumps({"type": "pong", "timestamp": datetime.utcnow().isoformat()}))
-                    logger.info(f"🔌 Sent pong to {widget_id}")
-                elif data.get("type") == "get_state":
-                    # Send current state on request
-                    current_state = await widget_realtime_service.get_widget_state()
-                    await websocket.send_text(json.dumps({
-                        "type": "state_update",
-                        "state": current_state
-                    }))
-                    logger.info(f"🔌 Sent state to {widget_id}")
-                    
-            except WebSocketDisconnect:
-                logger.info(f"🔌 Widget {widget_id} disconnected normally")
-                break
-            except Exception as e:
-                logger.error(f"🔌 Error in WebSocket message handling for {widget_id}: {e}")
-                break
-                
-    except WebSocketDisconnect:
-        logger.info(f"🔌 Widget {widget_id} disconnected during setup")
-    except Exception as e:
-        logger.error(f"🔌 Error in WebSocket connection for {widget_id}: {e}")
-    finally:
-        # Unregister connection
-        try:
-            from .service.widget_realtime_service import widget_realtime_service
-            await widget_realtime_service.unregister_connection(widget_id, websocket)
-            logger.info(f"🔌 Widget {widget_id} unregistered")
-        except:
-            pass
+        # Validate file type
+        allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"]
+        if file.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file type. Allowed types: {', '.join(allowed_types)}"
+            )
 
+        # Validate image type parameter
+        valid_types = ["profile", "chatIcon", "headerIcon"]
+        if type not in valid_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid type. Allowed types: {', '.join(valid_types)}"
+            )
 
-@router.post("/widget/broadcast-state")
-async def trigger_state_broadcast(request: Request):
-    """Trigger broadcast of current widget state to all connected widgets"""
-    try:
-        from .service.widget_realtime_service import widget_realtime_service
-        
-        # Get the field that changed (if specified)
-        body = await request.json()
-        changed_field = body.get("changed_field")
-        
-        # Broadcast to all connected widgets
-        await widget_realtime_service.broadcast_state_change(changed_field)
-        
-        return {"success": True, "message": "State broadcast triggered"}
-        
+        # Read file content
+        content = await file.read()
+
+        # Convert to base64 data URL for storage
+        base64_content = base64.b64encode(content).decode('utf-8')
+        data_url = f"data:{file.content_type};base64,{base64_content}"
+
+        # Store in widget_configuration table via service
+        await config_service.update_widget_image(type, data_url, file.filename)
+
+        return {
+            "success": True,
+            "url": data_url,
+            "filename": file.filename,
+            "type": type,
+            "message": f"Image uploaded successfully for {type}"
+        }
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error triggering state broadcast: {e}")
+        logger.error(f"Error uploading widget image: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# =================================
+# PERSONAS ENDPOINT
+# =================================
 
-@router.get("/widget/stats")
-async def get_widget_stats():
-    """Get statistics about widget connections"""
+@router.get("/personas")
+async def get_personas():
+    """Get all available personas with active status details"""
     try:
-        from .service.widget_realtime_service import widget_realtime_service
-        stats = widget_realtime_service.get_connection_stats()
-        return {"success": True, "stats": stats}
+        config = await config_service.get_chatAgent_config()
+        all_personas = config.get("available_personas", [])
+
+        # Format personas with proper timestamps
+        formatted_personas = []
+        for p in all_personas:
+            formatted_personas.append({
+                "id": str(p.get("id", "")),
+                "persona_name": p.get("persona_name", ""),
+                "system_prompt": p.get("system_prompt", ""),
+                "is_active": p.get("is_active", False),
+                "created_at": p.get("created_at").isoformat() if hasattr(p.get("created_at"), "isoformat") else str(p.get("created_at", "")),
+                "updated_at": p.get("updated_at").isoformat() if hasattr(p.get("updated_at"), "isoformat") else str(p.get("updated_at", ""))
+            })
+
+        # Filter active personas
+        active_personas = [p for p in formatted_personas if p.get("is_active")]
+
+        # Get current active persona (first active one)
+        current_active = active_personas[0] if active_personas else None
+
+        return {
+            "success": True,
+            "data": {
+                "all_personas": formatted_personas,
+                "active_personas": active_personas,
+                "current_active_persona": current_active,
+                "total_count": len(formatted_personas),
+                "active_count": len(active_personas)
+            }
+        }
     except Exception as e:
-        logger.error(f"Error getting widget stats: {e}")
+        logger.error(f"Error getting personas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# =================================
+# ADMIN MANAGEMENT ENDPOINTS
+# =================================
+
+@router.get("/admins")
+async def get_admin_users():
+    """Get all admin users"""
+    try:
+        admins = await auth_service.get_admin_users()
+        return {"success": True, "data": admins}
+    except Exception as e:
+        logger.error(f"Error getting admin users: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/admins")
+async def add_admin_user(request_data: AdminManagementRequest, request: Request):
+    """Add a new admin user"""
+    try:
+        result = await auth_service.add_admin(request_data.email)
+        return {"success": True, "message": "Admin user added successfully"}
+    except Exception as e:
+        logger.error(f"Error adding admin user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/admins/{email}")
+async def remove_admin_user(email: str, request: Request):
+    """Remove an admin user"""
+    try:
+        result = await auth_service.remove_admin(email, "admin@example.com")
+        return {"success": True, "message": "Admin user removed successfully"}
+    except Exception as e:
+        logger.error(f"Error removing admin user: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/human-agents")
+async def get_human_agents():
+    """Get all human agents"""
+    try:
+        agents = await auth_service.get_human_agents()
+        return {"success": True, "data": agents}
+    except Exception as e:
+        logger.error(f"Error getting human agents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/admin/human-agents")
+async def get_human_agents_admin():
+    """Get all human agents (admin alias endpoint)"""
+    return await get_human_agents()
+
+@router.post("/human-agents")
+async def add_human_agent(request_data: AdminManagementRequest, request: Request):
+    """Add a new human agent"""
+    try:
+        result = await auth_service.add_human_agent(request_data.email)
+        return {"success": True, "message": "Human agent added successfully"}
+    except Exception as e:
+        logger.error(f"Error adding human agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/human-agents/{email}")
+async def remove_human_agent(email: str, request: Request):
+    """Remove a human agent"""
+    try:
+        result = await auth_service.remove_human_agent(email, "admin@example.com")
+        return {"success": True, "message": "Human agent removed successfully"}
+    except Exception as e:
+        logger.error(f"Error removing human agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
 # CHAT LOG ENDPOINTS
@@ -343,6 +410,26 @@ async def delete_chat_log(session_id: str, request: Request):
 # =================================
 # NOTIFICATIONS ENDPOINTS
 # =================================
+
+@router.get("/notifications/settings")
+async def get_notification_settings():
+    """Get notification settings"""
+    try:
+        settings = await notifications_service.get_settings()
+        return {"success": True, "data": settings}
+    except Exception as e:
+        logger.error(f"Error getting notification settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/notifications/settings")
+async def update_notification_settings(settings: NotificationRequest, request: Request):
+    """Update notification settings"""
+    try:
+        result = await notifications_service.update_settings(settings.dict(), "admin@example.com")
+        return {"success": True, "message": "Notification settings updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating notification settings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/notifications/send")
 async def send_notification(notification: Dict[str, Any], request: Request):
@@ -620,32 +707,21 @@ async def update_session_feedback(session_id: str, request: Request):
     try:
         body = await request.json()
         feedback = body.get("feedback")  # positive or negative
+        user_type = body.get("user_type", "customer")  # customer or agent
         user_email = request.headers.get("X-User-Email", "user@example.com")
 
         if feedback not in ["positive", "negative"]:
             raise HTTPException(status_code=400, detail="Feedback must be 'positive' or 'negative'")
 
-        # Get user_role_id from user email
-        user_roles = await auth_service.get_user_role(user_email)
-        user_role_id = None
-        
-        # Find the user_role_id for the user
-        if user_roles and user_roles.get("roles"):
-            # Get the actual user_role_id from the database
-            user_role_data = await auth_service.auth_dao.get_user_roles(user_email)
-            if user_role_data:
-                # Use the first role's user_role_id (or you could make this more specific)
-                user_role_id = user_role_data[0]["user_role_id"]
-
         await chat_log_service.update_chat_session(
             session_id=session_id,
             user_email=user_email,
             feedback=feedback,
-            user_type="customer"  # keeping for backward compatibility
+            user_type=user_type
         )
 
-        # Record in chat_feedback table with user_role_id
-        await chat_log_service.record_session_feedback(session_id, feedback, user_role_id)
+        # Also record in chat_feedback table via service
+        await chat_log_service.record_session_feedback(session_id, feedback, user_type)
 
         return {
             "success": True,
@@ -677,6 +753,35 @@ async def request_human_agent(session_id: str):
         logger.error(f"Error requesting human agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/users/unique-id")
+async def create_or_get_unique_id(request: Request):
+    """Create or get unique user ID by email and role"""
+    try:
+        body = await request.json()
+        email = body.get("email")
+        role = body.get("role", "customer")
+
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+
+        result = await auth_service.get_or_create_unique_id(email, role)
+        return {"success": True, **result}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating/getting unique ID: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/users/unique-id")
+async def get_user_unique_id(email: str, role: str = "customer"):
+    """Get unique ID for a user by email and role"""
+    try:
+        result = await auth_service.get_or_create_unique_id(email, role)
+        return {"success": True, **result}
+    except Exception as e:
+        logger.error(f"Error getting user unique ID: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # =================================
 # PERFORMANCE ENDPOINTS
 # =================================
@@ -691,7 +796,15 @@ async def get_performance_metrics():
         logger.error(f"Error getting metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
+@router.get("/admin/token-usage/detailed")
+async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_call_type: str = None):
+    """Get detailed token usage"""
+    try:
+        usage = await token_usage_service.get_detailed_token_usage(limit, provider, api_call_type)
+        return {"success": True, "data": usage}
+    except Exception as e:
+        logger.error(f"Error getting detailed token usage: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
 # FEEDBACK ENDPOINTS
@@ -868,13 +981,14 @@ async def health_check():
             "service": "configuration",
             "timestamp": "2024-01-01T00:00:00Z",
             "components": {
-                "chat_agent_config_service": "healthy",
-                "widget_config_service": "healthy",
+                "config_service": "healthy",
                 "personas_service": "healthy",
                 "auth_service": "healthy",
                 "chat_log_service": "healthy",
+                "notifications_service": "healthy",
                 "performance_service": "healthy",
-                "feedback_service": "healthy"
+                "feedback_service": "healthy",
+                "token_usage_service": "healthy"
             }
         }
         return health_status
