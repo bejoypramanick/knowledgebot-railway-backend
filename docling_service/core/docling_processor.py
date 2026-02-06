@@ -64,40 +64,60 @@ except ImportError as e:
 
 class DoclingProcessor:
     """Handles document conversion to markdown using Docling with image OCR extraction."""
-
+    
     def __init__(self, model_name: str = "granite-docling-258m"):
         """Initialize the Docling processor."""
         self.model_name = model_name
         self._converter: Optional[DocumentConverter] = None
         self._ocr_reader: Optional[easyocr.Reader] = None
         self._initialized = False
+        
+        # Cache for models and OCR readers to avoid re-downloads
+        self._model_cache = {}
+        self._ocr_cache = {}
+        self._model_cache_dir = "/models/huggingface"
+        self._ocr_cache_dir = "/models/easyocr"
 
     async def initialize(self) -> bool:
         """
         Lazy initialize the DocumentConverter and OCR reader in async context.
+        Uses caching to avoid re-downloading models and OCR readers.
         Returns True if successful, False otherwise.
         """
         if self._initialized:
             return True
-
+        
         try:
-            # Run converter and OCR initialization in thread pool (it's blocking)
             loop = asyncio.get_event_loop()
 
-            # Initialize DocumentConverter
-            self._converter = await loop.run_in_executor(
-                None,
-                self._init_converter
-            )
-            logger.info(f"✅ DocumentConverter initialized with model: {self.model_name}")
-
-            # Initialize OCR Reader (supports multiple languages)
-            self._ocr_reader = await loop.run_in_executor(
-                None,
-                self._init_ocr_reader
-            )
-            logger.info("✅ OCR Reader initialized for image text extraction")
-
+            # Initialize DocumentConverter with caching
+            if self.model_name not in self._model_cache:
+                logger.info(f"📥 Downloading model: {self.model_name}")
+                from docling.document_converter import DocumentConverter
+                self._converter = await loop.run_in_executor(
+                    None,
+                    self._init_converter
+                )
+                self._model_cache[self.model_name] = self._converter
+                logger.info(f"✅ DocumentConverter initialized with model: {self.model_name}")
+            else:
+                logger.info(f"📦 Using cached model: {self.model_name}")
+                self._converter = self._model_cache[self.model_name]
+            
+            # Initialize OCR Reader with caching
+            if 'easyocr' not in self._ocr_cache:
+                logger.info(f"📥 Downloading EasyOCR")
+                from easyocr import Reader
+                self._ocr_reader = await loop.run_in_executor(
+                    None,
+                    self._init_ocr_reader
+                )
+                self._ocr_cache['easyocr'] = self._ocr_reader
+                logger.info("✅ OCR Reader initialized")
+            else:
+                logger.info("📦 Using cached OCR Reader")
+                self._ocr_reader = self._ocr_cache['easyocr']
+            
             self._initialized = True
             return True
         except Exception as e:
