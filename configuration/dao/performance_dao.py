@@ -332,7 +332,9 @@ class PerformanceDAO:
                 "interactions_over_time": interactions_over_time,
                 "user_satisfaction": round(satisfaction_score, 2),
                 "satisfaction_over_time": satisfaction_over_time,
+                "uptime": round(uptime_percentage, 2),
                 "uptime_percentage": round(uptime_percentage, 2),
+                "average_uptime_percentage": round(uptime_percentage, 2),
                 "uptime_by_service": uptime_by_service
             }
         except Exception as e:

@@ -243,39 +243,29 @@ class DoclingProcessor:
             
             # For HTML files, we need to handle them differently
             # HTML files should be processed directly by docling, not through convert_single
-            if file_ext in ['.html', '.htm']:
-                logger.info(f"🌐 Processing HTML file directly with docling")
-                # Use docling's document processing directly for HTML
-                from docling.document import load_document
-                doc = load_document(file_path)
-                conversion_result = doc.render_as_markdown()
-                
-                logger.info(f"🔍 HTML conversion completed, status: SUCCESS")
-                return conversion_result
-            else:
-                # Use convert_single() for PDF and other supported formats
-                logger.info(f"📄 Using convert_single() for file: {file_path}")
-                conversion_result = self._converter.convert_single(file_path)
-                logger.info(f"🔍 Conversion completed, status: {conversion_result.status}")
+            # Use convert_single() for all formats
+            logger.info(f"📄 Using convert_single() for file: {file_path}")
+            conversion_result = self._converter.convert_single(file_path)
+            logger.info(f"🔍 Conversion completed, status: {conversion_result.status}")
 
-                # Check if conversion was successful
-                if conversion_result.status not in _ACCEPTABLE_CONVERSION_STATUSES:
-                    # Build error message with details from conversion result
-                    error_msg = f"Conversion failed with status: {conversion_result.status}"
-                    error_details = []
+            # Check if conversion was successful
+            if conversion_result.status not in _ACCEPTABLE_CONVERSION_STATUSES:
+                # Build error message with details from conversion result
+                error_msg = f"Conversion failed with status: {conversion_result.status}"
+                error_details = []
 
-                    # Try to extract error details
-                    if hasattr(conversion_result, 'errors') and conversion_result.errors:
-                        try:
-                            error_details = [str(e) if not hasattr(e, 'error_message') else e.error_message for e in conversion_result.errors]
-                        except Exception as extract_error:
-                            logger.warning(f"Failed to extract error details: {extract_error}")
-                            error_details = [str(conversion_result.status)]
+                # Try to extract error details
+                if hasattr(conversion_result, 'errors') and conversion_result.errors:
+                    try:
+                        error_details = [str(e) if not hasattr(e, 'error_message') else e.error_message for e in conversion_result.errors]
+                    except Exception as extract_error:
+                        logger.warning(f"Failed to extract error details: {extract_error}")
+                        error_details = [str(conversion_result.status)]
 
-                    logger.error(f"🔍 {error_msg}")
-                    raise RuntimeError(f"{error_msg}. Details: {error_details}")
+                logger.error(f"🔍 {error_msg}")
+                raise RuntimeError(f"{error_msg}. Details: {error_details}")
 
-                return conversion_result
+            return conversion_result
 
         except Exception as e:
             logger.error(f"🔍 Error in _convert_document: {type(e).__name__}: {e}")

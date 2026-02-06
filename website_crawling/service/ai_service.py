@@ -47,103 +47,105 @@ async def upload_content_to_gemini(
     
     try:
         # Create a temporary file for the content
-        fd, temp_path = tempfile.mkstemp(suffix='.json')
+        fd, temp_path = tempfile.mkstemp(suffix='.md')
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                json.dump({
-                    "content": content,
-                    "url": url,
-                    "title": title,
-                    "user_email": user_email,
-                    "timestamp": datetime.now().isoformat(),
-                    "source": "website_crawling"
-                }, f, indent=2)
-                temp_filename = f"scraped_content_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                # Add title and URL at the top for better context in Gemini FileSearch
+                if title:
+                    f.write(f"# {title}\n\n")
+                if url:
+                    f.write(f"Source URL: {url}\n\n")
                 
-                # Upload to Gemini FileSearch
-                gemini_file = genai_client.upload_file(
-                    file_path=temp_path,
-                    display_name=temp_filename,
-                    mime_type="application/json"
+                f.write(content)
+                
+            # Clean URL for filename (remove protocol, slashes, special chars)
+            clean_url = url.replace('https://', '').replace('http://', '')
+            clean_url = clean_url.replace('/', '_').replace(':', '_').replace('?', '_')
+            clean_url = clean_url[:50]  # Limit length
+            temp_filename = f"scraped_{clean_url}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+            
+            # Resolve FileSearch store on-demand
+            from shared.file_search import get_file_search_store_by_display_name
+            file_search_store_name = get_file_search_store_by_display_name(
+                genai_client,
+                display_name="knowledgebot-search-store"
+            )
+
+            if file_search_store_name:
+                logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
+                operation = genai_client.file_search_stores.upload_to_file_search_store(
+                    file=temp_path,
+                    file_search_store_name=file_search_store_name,
+                    config={
+                        'display_name': temp_filename,
+                        'custom_metadata': [
+                            {'key': 'original_url', 'string_value': url},
+                            {'key': 'user_email', 'string_value': user_email or 'admin'}
+                        ]
+                    }
+                )
+
+                # Poll for operation completion
+                final_state = "PENDING"
+                gemini_processed_at = None
+                document_name = None
+
+                for i in range(15):  # Poll for up to 30 seconds
+                    current_operation = genai_client.operations.get(operation)
+
+                    if hasattr(current_operation.response, 'document_name'):
+                        final_state = "ACTIVE"
+                        document_name = current_operation.response.document_name
+                        logger.info(f"✅ [GEMINI] FileSearch upload complete - Document: {document_name}")
+                        gemini_processed_at = datetime.utcnow()
+                        break
+                    elif hasattr(current_operation.response, 'state') and hasattr(current_operation.response.state, 'name'):
+                        final_state = current_operation.response.state.name
+                        logger.info(f"🔄 [GEMINI] FileSearch operation state (Attempt {i+1}/15): {final_state}")
+                        if final_state == "ACTIVE":
+                            gemini_processed_at = datetime.utcnow()
+                            break
+                    
+                    await asyncio.sleep(2)
+
+                return {
+                    "success": final_state == "ACTIVE",
+                    "file_name": document_name or temp_filename,
+                    "state": final_state,
+                    "processed_at": gemini_processed_at.isoformat() if gemini_processed_at else None,
+                }
+            else:
+                # Fallback to general file upload
+                logger.info("📤 Using general file upload (no FileSearch store configured)")
+                gemini_file = genai_client.files.upload(
+                    file=temp_path,
+                    config=types.UploadFileConfig(
+                        display_name=temp_filename,
+                        mime_type="text/markdown"
+                    )
                 )
                 
-                # Get the file metadata
-                file_metadata = genai_client.get_file(gemini_file.name)
-                
-                if file_metadata:
-                    logger.info(f"✅ Successfully uploaded to Gemini FileSearch: {temp_filename}")
-                    logger.info(f"📄 File ID: {file_metadata.name}")
-                    logger.info(f"� File URI: {file_metadata.uri}")
-                    
-                    return {
-                        "success": True,
-                        "file_name": temp_filename,
-                        "file_uri": file_metadata.uri,
-                        "state": file_metadata.state
-                    }
-                else:
-                    logger.error(f"❌ Failed to upload to Gemini FileSearch: {temp_filename}")
-                    return {
-                        "success": False,
-                        "error": "Upload failed",
-                        "file_name": None,
-                        "state": "FAILED"
-                    }
+                return {
+                    "success": True,
+                    "file_name": gemini_file.name,
+                    "file_uri": gemini_file.uri,
+                    "state": gemini_file.state if hasattr(gemini_file, 'state') else "ACTIVE"
+                }
+
         except Exception as e:
-            logger.error(f"❌ Error uploading to Gemini FileSearch: {e}")
+            logger.error(f"❌ Error uploading to Gemini: {e}", exc_info=True)
             return {
                 "success": False,
-                "error": f"Upload error: {str(e)}",
+                "error": str(e),
                 "file_name": None,
-                "state": "ERROR"
+                "state": "FAILED"
             }
         finally:
-            # Clean up temporary file
-            try:
-                os.unlink(temp_path)
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to delete temporary file: {e}")
-        )
-
-        # Poll for operation completion
-        final_state = "PENDING"
-        gemini_processed_at = None
-        document_name = None
-
-        for i in range(15):  # Poll for up to 30 seconds
-            current_operation = genai_client.operations.get(operation)
-
-            # FileSearch upload returns document_name when done, not state
-            if hasattr(current_operation.response, 'document_name'):
-                final_state = "ACTIVE"
-                document_name = current_operation.response.document_name
-                logger.info(f"✅ [GEMINI] FileSearch upload complete - Document: {document_name}")
-                gemini_processed_at = datetime.utcnow()
-                break
-            elif hasattr(current_operation.response.state, 'name'):
-                # Fallback for other operation types that return state
-                final_state = current_operation.response.state.name
-                logger.info(f"🔄 [GEMINI] FileSearch operation state (Attempt {i+1}/15): {final_state}")
-
-                if final_state == "ACTIVE":
-                    gemini_processed_at = datetime.utcnow()
-                    logger.info("⚡ [GEMINI] FileSearch upload complete - Content is now ACTIVE")
-                    break
-                elif final_state == "FAILED":
-                    logger.error(f"❌ [GEMINI] FileSearch upload FAILED for {url}")
-                    break
-            else:
-                logger.warning(f"⚠️ [GEMINI] Unknown operation response structure (Attempt {i+1}/15)")
-
-            await asyncio.sleep(2)
-
-        return {
-            "success": final_state == "ACTIVE",
-            "file_name": document_name or (operation.response.name if hasattr(operation.response, 'name') else None),
-            "state": final_state,
-            "processed_at": gemini_processed_at.isoformat() if gemini_processed_at else None,
-            "file_search_store": file_search_store_name
-        }
+            if os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
 
     except Exception as e:
         logger.error(f"❌ Error uploading content to Gemini: {e}")
