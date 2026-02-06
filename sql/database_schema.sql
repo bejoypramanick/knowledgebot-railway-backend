@@ -1182,6 +1182,65 @@ END $$;
 
 
 -- ============================================================================
+-- INSERT DATA - Widget Configuration
+-- ============================================================================
+
+-- Initialize the default widget configuration (id must be 1 due to single_row constraint)
+INSERT INTO public.widget_configuration (
+    id,
+    display_name,
+    initial_message,
+    auto_show_duration,
+    keep_showing_suggested,
+    theme,
+    primary_color,
+    use_primary_for_header,
+    chat_bubble_color,
+    align_bubble,
+    display_chatbot,
+    profile_picture_url,
+    chat_icon_url,
+    profile_picture_filename,
+    chat_icon_filename,
+    profile_zoom,
+    chat_icon_zoom,
+    profile_position,
+    chat_icon_position,
+    hil_enabled,
+    response_policy,
+    hil_disabled_message,
+    created_at,
+    updated_at
+) VALUES (
+    1,
+    'GLOBISTAAN',
+    'Hi! What can I help you with?',
+    30,
+    false,
+    'light',
+    '#007bff',
+    true,
+    '#f8f9fa',
+    'right',
+    true,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    1.00,
+    1.00,
+    '{"x": 0, "y": 0}'::jsonb,
+    '{"x": 20, "y": 20}'::jsonb,
+    true,
+    30,
+    'Human assistance is currently offline. Please leave a message or try again later.',
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
+)
+ON CONFLICT DO NOTHING;
+
+
+-- ============================================================================
 -- Schema Setup Complete
 -- ============================================================================
 -- All tables created with integrated columns from migration files
