@@ -61,9 +61,11 @@ async def process_with_gemini(
         file_search_store_name: Optional FileSearch store name
 
     Returns:
-        Tuple of (uploaded_file, final_state, gemini_processed_at)
+        Tuple of (uploaded_file, final_state, gemini_processed_at, file_search_metadata)
     """
     genai_client = get_genai_client()
+    file_search_metadata = {}  # Track FileSearch store and document info
+
     if not genai_client:
         logger.warning("Gemini client not available - returning placeholder response")
         # Return placeholder for when Gemini is not configured
@@ -71,7 +73,7 @@ async def process_with_gemini(
             def __init__(self, name):
                 self.name = name
                 self.uri = None
-        return PlaceholderFile(f"files/{original_filename}"), "ACTIVE", datetime.utcnow()
+        return PlaceholderFile(f"files/{original_filename}"), "ACTIVE", datetime.utcnow(), file_search_metadata
 
     # Detect proper MIME type - use magic bytes from file path
     final_mime_type = detect_mime_type_from_extension(original_filename, mime_type, tmp_path)
@@ -136,6 +138,14 @@ async def process_with_gemini(
                     final_state = "ACTIVE"
                     gemini_processed_at = datetime.utcnow()
 
+                    # Store FileSearch metadata for deletion later
+                    file_search_metadata = {
+                        'type': 'file_search',
+                        'file_search_store_name': file_search_store_name,
+                        'document_name': document_name,
+                        'uploaded_at': gemini_processed_at.isoformat()
+                    }
+
                     # Create a placeholder file object with the document name
                     class FileSearchDocument:
                         def __init__(self, name):
@@ -144,6 +154,7 @@ async def process_with_gemini(
 
                     uploaded_file = FileSearchDocument(document_name)
                     logger.info(f"✅ [GEMINI] Upload complete to FileSearch store. Document: {document_name}")
+                    logger.info(f"📝 [METADATA] Stored FileSearch info: store={file_search_store_name}, document={document_name}")
                 elif hasattr(operation, 'result') and operation.result:
                     uploaded_file = operation.result
                     final_state = "ACTIVE"
@@ -174,7 +185,7 @@ async def process_with_gemini(
             final_state = "PENDING"
             if hasattr(uploaded_file, 'state'):
                 final_state = uploaded_file.state.name if hasattr(uploaded_file.state, 'name') else str(uploaded_file.state)
-            
+
             try:
                 for i in range(15):  # Poll for up to 30 seconds
                     current_file = genai_client.files.get(name=uploaded_file.name)
@@ -193,7 +204,7 @@ async def process_with_gemini(
             except Exception as e:
                 logger.warning(f"⚠️ [GEMINI] Error during polling: {e}")
 
-        return uploaded_file, final_state, gemini_processed_at
+        return uploaded_file, final_state, gemini_processed_at, file_search_metadata
 
     except Exception as e:
         logger.error(f"❌ Error processing file with Gemini: {e}")
@@ -468,7 +479,7 @@ async def process_single_file_upload(
         # ---------------------------------------------------------
         # We only reach here if processed_successfully is True or it was a skip-docling type
         logger.info(f"🚀 [GEMINI] Initiating upload for {original_filename}")
-        uploaded_file, final_state, gemini_processed_at = await process_with_gemini(
+        uploaded_file, final_state, gemini_processed_at, file_search_metadata = await process_with_gemini(
             tmp_path, file_display_name, original_filename, detected_mime_type, user_email
         )
 
@@ -492,7 +503,7 @@ async def process_single_file_upload(
                 error=f"Final state: {final_state}"
             )
 
-        # Store metadata in database
+        # Store metadata in database (including FileSearch metadata for deletion)
         try:
             file_record_id = await file_service.record_metadata(
                 user_email=email,
@@ -504,7 +515,8 @@ async def process_single_file_upload(
                 sha256_hash=sha256_hash,
                 final_state=final_state,
                 gemini_processed_at=gemini_processed_at,
-                mime_type=detected_mime_type
+                mime_type=detected_mime_type,
+                file_search_metadata=file_search_metadata
             )
         except Exception as db_error:
             logger.error(f"❌ [DB ERROR] Failed to record metadata in database for {original_filename}: {db_error}")
@@ -568,7 +580,7 @@ async def process_single_file_upload(
 
 
 async def delete_file_logic(file_id: str) -> Dict[str, Any]:
-    """Delete a file from Gemini FileSearch and database."""
+    """Delete a file from Gemini FileSearch and database with proper metadata handling."""
     genai_client = get_genai_client()
     file_service = get_file_service()
 
@@ -577,46 +589,120 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
     gemini_file_name = file_id
     table_name = "gemini_only"
     original_filename = "Gemini-only file"
+    file_search_metadata = None
 
     if not file_id.startswith("files/"):
-        # Look up in DB using service
-        record = await file_service.find_file_record(file_id)
+        # Look up in DB using service - need to get full record with metadata
+        try:
+            from shared.db import get_db_connection
 
-        if record:
-            gemini_file_name = record['gemini_file_name']
-            original_filename = record.get('original_filename', 'Unknown')
-            table_name = record['table_name']
-        else:
-            logger.error(f"❌ [DELETE] File not found in database: {file_id}")
-            raise HTTPException(status_code=404, detail="File not found")
+            # Convert file_id to integer if it's a numeric string
+            try:
+                numeric_id = int(file_id)
+            except ValueError:
+                numeric_id = file_id
+
+            async with get_db_connection() as conn:
+                # Try file_uploads table first
+                record = await conn.fetchrow(
+                    "SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = $1",
+                    numeric_id
+                )
+                if record:
+                    gemini_file_name = record['gemini_file_name']
+                    original_filename = record.get('original_filename', 'Unknown')
+                    table_name = 'file_uploads'
+                    file_search_metadata = record.get('metadata')
+                else:
+                    # Try scraped_websites table
+                    record = await conn.fetchrow(
+                        "SELECT gemini_file_name, original_url, metadata FROM scraped_websites WHERE id = $1",
+                        numeric_id
+                    )
+                    if record:
+                        gemini_file_name = record['gemini_file_name']
+                        original_filename = record.get('original_url', 'Unknown')
+                        table_name = 'scraped_websites'
+                        file_search_metadata = record.get('metadata')
+                    else:
+                        logger.error(f"❌ [DELETE] File not found in database: {file_id}")
+                        raise HTTPException(status_code=404, detail="File not found")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"❌ [DELETE] Error looking up file record: {e}")
+            raise HTTPException(status_code=500, detail=f"Error looking up file: {e}")
 
     deletion_results = {
         "gemini": {"success": False, "error": None},
+        "file_search": {"success": False, "error": None},
         "postgres": {"success": False, "error": None}
     }
 
     logger.info(f"📋 File Details:")
     logger.info(f"   ID: {file_id}")
     logger.info(f"   Name: {original_filename}")
-    logger.info(f"   Gemini ID: {gemini_file_name}")
+    logger.info(f"   Gemini File ID: {gemini_file_name}")
     logger.info(f"   Table: {table_name}")
+    if file_search_metadata:
+        logger.info(f"   FileSearch Metadata: {file_search_metadata}")
 
-    # Delete from Gemini
-    if genai_client and gemini_file_name:
+    # Delete from FileSearch store first (if file was uploaded to FileSearch)
+    if genai_client and file_search_metadata:
         try:
+            import json
+            if isinstance(file_search_metadata, str):
+                metadata = json.loads(file_search_metadata)
+            else:
+                metadata = file_search_metadata
+
+            if metadata.get('type') == 'file_search' and metadata.get('file_search_store_name') and metadata.get('document_name'):
+                store_name = metadata['file_search_store_name']
+                document_name = metadata['document_name']
+
+                logger.info(f"📤 Attempting to delete from FileSearch store: {store_name}")
+                logger.info(f"   Document: {document_name}")
+
+                try:
+                    # Delete the document from the FileSearch store
+                    # This removes the file from the store AND cleans up embeddings
+                    genai_client.file_search_stores.delete_document(
+                        file_search_store_name=store_name,
+                        document_name=document_name
+                    )
+                    deletion_results["file_search"]["success"] = True
+                    logger.info(f"✅ [FILESEARCH] Deleted document: {document_name} from store: {store_name}")
+                    logger.info(f"   All embeddings and index entries removed")
+                except Exception as fs_error:
+                    if "404" in str(fs_error) or "not found" in str(fs_error).lower():
+                        deletion_results["file_search"]["error"] = "Document not found (already deleted)"
+                        logger.warning(f"⚠️ [FILESEARCH] Document already deleted or not found: {document_name}")
+                    else:
+                        deletion_results["file_search"]["error"] = str(fs_error)
+                        logger.error(f"❌ [FILESEARCH] Error deleting document: {fs_error}")
+        except Exception as e:
+            logger.warning(f"⚠️ [FILESEARCH] Could not parse metadata for FileSearch deletion: {e}")
+
+    # Delete the raw file from Gemini (if it exists separately)
+    if genai_client and gemini_file_name and not gemini_file_name.startswith("documents/"):
+        try:
+            logger.info(f"📤 Attempting to delete raw file from Gemini: {gemini_file_name}")
             genai_client.files.delete(name=gemini_file_name)
             deletion_results["gemini"]["success"] = True
-            logger.info(f"✅ [GEMINI] Deleted: {gemini_file_name}")
+            logger.info(f"✅ [GEMINI] Deleted raw file: {gemini_file_name}")
         except Exception as e:
             if "404" in str(e) or "not found" in str(e).lower():
                 deletion_results["gemini"]["error"] = "File not found (already deleted)"
                 logger.warning(f"⚠️ [GEMINI] File already deleted or not found: {gemini_file_name}")
             else:
                 deletion_results["gemini"]["error"] = str(e)
-                logger.error(f"❌ [GEMINI] Error deleting: {e}")
+                logger.error(f"❌ [GEMINI] Error deleting raw file: {e}")
     else:
-        deletion_results["gemini"]["error"] = "Gemini client not available"
-        logger.warning(f"⚠️ [GEMINI] Client not available for deletion")
+        if gemini_file_name.startswith("documents/"):
+            logger.info(f"ℹ️ [GEMINI] File is a FileSearch document, not a standalone file - skipping raw file deletion")
+            deletion_results["gemini"]["success"] = True
+        else:
+            logger.warning(f"⚠️ [GEMINI] No gemini_file_name provided, skipping raw file deletion")
 
     # Delete from DB
     if table_name != "gemini_only":
@@ -630,29 +716,38 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
 
     # Determine success
     db_success = deletion_results["postgres"].get("success", False)
+    file_search_success = deletion_results["file_search"].get("success", False)
     gemini_success = deletion_results["gemini"].get("success", False)
 
-    if db_success and gemini_success:
-        logger.info(f"✅ [SUCCESS] File {original_filename} completely removed from Gemini and database")
+    logger.info(f"📊 Deletion Summary for {original_filename}:")
+    logger.info(f"   FileSearch Store: {file_search_success}")
+    logger.info(f"   Gemini Raw File: {gemini_success}")
+    logger.info(f"   Database: {db_success}")
+
+    # Check for complete success
+    if db_success and (file_search_success or gemini_success or deletion_results["gemini"].get("error") == "Gemini client not available"):
+        logger.info(f"✅ [SUCCESS] File {original_filename} completely removed from all locations")
         return {
             "success": True,
-            "message": "File deleted successfully from both Gemini FileSearch and database",
+            "message": "File deleted successfully from FileSearch, Gemini, and database (all embeddings removed)",
             "details": deletion_results
         }
-    elif db_success or gemini_success:
-        logger.warning(f"⚠️ [PARTIAL] File {original_filename} removed from one location only:")
+    elif db_success or file_search_success or gemini_success:
+        logger.warning(f"⚠️ [PARTIAL] File {original_filename} removed from some locations:")
+        logger.warning(f"   FileSearch: {deletion_results['file_search'].get('success', False)}")
         logger.warning(f"   Gemini: {deletion_results['gemini'].get('success', False)}")
         logger.warning(f"   Database: {deletion_results['postgres'].get('success', False)}")
         return {
             "success": True,
-            "message": "File deletion processed (removed from one location)",
+            "message": "File deletion processed (removed from some locations)",
             "details": deletion_results
         }
     else:
-        logger.error(f"❌ [FAILURE] Could not delete {original_filename} from either location!")
+        logger.error(f"❌ [FAILURE] Could not delete {original_filename} from any location!")
+        logger.error(f"   FileSearch error: {deletion_results['file_search'].get('error')}")
         logger.error(f"   Gemini error: {deletion_results['gemini'].get('error')}")
         logger.error(f"   Database error: {deletion_results['postgres'].get('error')}")
-        raise HTTPException(status_code=500, detail="Failed to delete file from both Gemini and DB")
+        raise HTTPException(status_code=500, detail="Failed to delete file from FileSearch, Gemini, and database")
 
 
 async def process_single_file_delete(file_id: str) -> BatchDeleteItem:

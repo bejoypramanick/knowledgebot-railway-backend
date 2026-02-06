@@ -170,7 +170,8 @@ class FileService:
     async def record_metadata(self, user_email: str, original_filename: str, file_display_name: str,
                              file_ext: str, uploaded_file: Any,
                              file_size: int, sha256_hash: str,
-                             final_state: str, gemini_processed_at: Any, mime_type: str, version: int = 1):
+                             final_state: str, gemini_processed_at: Any, mime_type: str, version: int = 1,
+                             file_search_metadata: Dict[str, Any] = None):
         """Persist file metadata and metrics to the PostgreSQL database.
 
         Args:
@@ -185,30 +186,36 @@ class FileService:
             gemini_processed_at: Timestamp when Gemini processed the file
             mime_type: MIME type of the file
             version: File version number (default: 1)
+            file_search_metadata: FileSearch store metadata for deletion (contains store_name, document_name)
         """
         try:
             logger.info(f"🗄️ [DB] Saving metadata for {original_filename} (version {version}) - Size: {file_size} bytes")
 
             # Use the new DatabaseManager pattern
             from shared.db import get_db_connection
+            import json
 
             # Verify user has admin role and get the user_role_id
             user_role_id = await self.get_admin_user_role_id(user_email)
 
             if user_role_id is None:
                 raise PermissionError(f"User {user_email} does not have admin privileges to upload files")
-            
+
             db_record_id = None
             try:
                 async with get_db_connection() as conn:
+                    # Prepare metadata JSON
+                    metadata = file_search_metadata or {}
+                    metadata_json = json.dumps(metadata)
+
                     db_record_id = await conn.fetchval(
-                        """INSERT INTO file_uploads (user_role_id, original_filename, display_name, file_extension, 
-                           gemini_file_name, gemini_file_uri, mime_type, file_size, sha256_hash, 
-                           gemini_state, version, created_at) 
-                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW()) RETURNING id""",
+                        """INSERT INTO file_uploads (user_role_id, original_filename, display_name, file_extension,
+                           gemini_file_name, gemini_file_uri, mime_type, file_size, sha256_hash,
+                           gemini_state, version, metadata, created_at)
+                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, NOW()) RETURNING id""",
                         user_role_id, original_filename, file_display_name, file_ext.lstrip('.'),  # Use admin user_role_id
                         uploaded_file.name, getattr(uploaded_file, 'uri', None), mime_type,
-                        file_size, sha256_hash, final_state, version
+                        file_size, sha256_hash, final_state, version, metadata_json
                     )
                     
                     logger.info(f"✅ [DB] Record created with ID: {db_record_id}, Size: {file_size} bytes")
@@ -253,7 +260,7 @@ class FileService:
             async with get_db_connection() as conn:
                 # Look up in file_uploads table
                 record = await conn.fetchrow(
-                    "SELECT gemini_file_name, original_filename FROM file_uploads WHERE id = $1",
+                    "SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = $1",
                     numeric_id
                 )
                 if record:
@@ -261,12 +268,13 @@ class FileService:
                     return {
                         'gemini_file_name': record['gemini_file_name'],
                         'original_filename': record['original_filename'],
-                        'table_name': 'file_uploads'
+                        'table_name': 'file_uploads',
+                        'metadata': record.get('metadata')
                     }
-                
+
                 # Look up in scraped_websites table
                 record = await conn.fetchrow(
-                    "SELECT gemini_file_name, original_url FROM scraped_websites WHERE id = $1",
+                    "SELECT gemini_file_name, original_url, metadata FROM scraped_websites WHERE id = $1",
                     numeric_id
                 )
                 if record:
@@ -274,9 +282,10 @@ class FileService:
                     return {
                         'gemini_file_name': record['gemini_file_name'],
                         'original_filename': record.get('original_url', 'Unknown'),
-                        'table_name': 'scraped_websites'
+                        'table_name': 'scraped_websites',
+                        'metadata': record.get('metadata')
                     }
-                
+
                 logger.warning(f"❌ No file record found for ID: {file_id}")
                 return None
         except Exception as e:
