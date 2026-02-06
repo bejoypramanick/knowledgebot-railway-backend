@@ -110,5 +110,5 @@ def get_otel_logger(name: str, service_name: str) -> OpenTelemetryLogger:
 
 def setup_otel_logging(service_name: str):
     """Initialize OpenTelemetry logging for a service"""
-    from shared.telemetry import setup_telemetry, instrument_logger
+    from shared.telemetry import setup_telemetry
     setup_telemetry(service_name)
