@@ -308,7 +308,11 @@ class PerformanceDAO:
             return default_services
 
     async def get_uptime_over_time(self, days: int = 180) -> List[Dict[str, Any]]:
-        """Get uptime history for the last N days from health monitoring."""
+        """Get uptime history for the last N days (up to 6 months) from health monitoring.
+
+        Returns data for each month that has health check records. If no data exists yet,
+        returns empty list. Displays only months with actual data (e.g., 1 month if only 1 month has data).
+        """
         try:
             import os
             import httpx
@@ -318,72 +322,64 @@ class PerformanceDAO:
                 "HEALTH_MONITORING_URL",
                 "http://health-monitoring.railway.internal:8080"
             )
-            logger.info(f"📊 Fetching uptime history from {health_monitoring_url}/api/v1/health/chart-data")
-            logger.info(f"📊 HEALTH_MONITORING_URL env var: {os.getenv('HEALTH_MONITORING_URL', 'USING DEFAULT RAILWAY INTERNAL URL')}")
+            logger.info(f"📊 Fetching {days}-day uptime history from {health_monitoring_url}/api/v1/health/chart-data")
+            logger.info(f"📊 HEALTH_MONITORING_URL: {os.getenv('HEALTH_MONITORING_URL', 'USING DEFAULT RAILWAY INTERNAL URL')}")
 
             async with httpx.AsyncClient(timeout=10) as client:
                 try:
-                    # Try to fetch data with the requested period
-                    interval = "month" if days >= 90 else "day"
-                    logger.info(f"📊 Requesting uptime data for {days} days with interval: {interval}")
+                    # Request monthly data for 180 days (6 months)
+                    logger.info(f"📊 Requesting monthly uptime data for last {days} days")
 
                     response = await client.get(
                         f"{health_monitoring_url}/api/v1/health/chart-data",
-                        params={"days": days, "interval": interval}
+                        params={"days": days, "interval": "month"}
                     )
 
                     logger.info(f"📊 Health monitoring response status: {response.status_code}")
-                    logger.info(f"📊 Health monitoring response headers: {response.headers}")
 
                     if response.status_code == 200:
                         chart_result = response.json()
-                        logger.info(f"📊 Full chart result: {chart_result}")
                         raw_data = chart_result.get("data", [])
-                        logger.info(f"📊 Raw uptime data from health monitoring: {len(raw_data)} records")
+                        logger.info(f"📊 Received {len(raw_data)} month(s) with data from health monitoring")
 
-                        # If no data with long period, try shorter period
-                        if not raw_data and days > 30:
-                            logger.info(f"📊 No data for {days} days, retrying with 30 days...")
-                            response = await client.get(
-                                f"{health_monitoring_url}/api/v1/health/chart-data",
-                                params={"days": 30, "interval": "day"}
-                            )
-                            if response.status_code == 200:
-                                chart_result = response.json()
-                                raw_data = chart_result.get("data", [])
-                                logger.info(f"📊 Retry returned {len(raw_data)} records for 30 days")
+                        if not raw_data:
+                            logger.info(f"📊 No health check data available yet (may still be collecting data)")
+                            return []
 
                         # Format for frontend: [{"month": "Jan", "uptime": 99.9}, ...]
                         formatted_history = []
                         for item in raw_data:
-                            # Handle both string and datetime objects
                             time_period = item.get('time_period')
-                            if isinstance(time_period, str):
-                                try:
+                            uptime = item.get('uptime_percentage', 0)
+
+                            # Parse time_period (could be string or datetime)
+                            month_name = 'N/A'
+                            try:
+                                if isinstance(time_period, str):
                                     from datetime import datetime
                                     date_obj = datetime.fromisoformat(time_period.replace('Z', '+00:00'))
-                                    month_name = date_obj.strftime('%b')
-                                except Exception as parse_error:
-                                    logger.warning(f"⚠️ Failed to parse date {time_period}: {parse_error}")
-                                    month_name = 'N/A'
-                            elif hasattr(time_period, 'strftime'):
-                                month_name = time_period.strftime('%b')
-                            else:
+                                    month_name = date_obj.strftime('%b %Y')
+                                elif hasattr(time_period, 'strftime'):
+                                    month_name = time_period.strftime('%b %Y')
+                            except Exception as parse_error:
+                                logger.warning(f"⚠️ Failed to parse date {time_period}: {parse_error}")
                                 month_name = 'N/A'
 
                             formatted_history.append({
                                 "month": month_name,
-                                "uptime": round(item.get('uptime_percentage', 0), 2)
+                                "uptime": round(uptime, 2)
                             })
-                        logger.info(f"✅ Formatted uptime history: {len(formatted_history)} records")
+
+                        logger.info(f"✅ Formatted {len(formatted_history)} month(s) of uptime history for chart")
                         return formatted_history
                     else:
                         logger.warning(f"⚠️ Health monitoring returned status {response.status_code}")
-                        logger.warning(f"⚠️ Response body: {response.text}")
-                    return []
+                        logger.warning(f"⚠️ Response: {response.text[:200]}")
+                        return []
+
                 except httpx.ConnectError as ce:
-                    logger.error(f"❌ Connection error to health monitoring service: {ce}")
-                    logger.error(f"❌ Make sure HEALTH_MONITORING_URL is set correctly: {os.getenv('HEALTH_MONITORING_URL', 'NOT SET')}")
+                    logger.error(f"❌ Cannot connect to health_monitoring service at {health_monitoring_url}")
+                    logger.error(f"❌ Error: {ce}")
                     return []
                 except Exception as e:
                     logger.error(f"❌ Error fetching uptime history: {e}", exc_info=True)
