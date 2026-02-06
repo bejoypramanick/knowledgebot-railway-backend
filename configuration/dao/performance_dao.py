@@ -453,17 +453,6 @@ class PerformanceDAO:
             except Exception as inner_e:
                 logger.error(f"❌ Error generating fallback empty months: {inner_e}")
                 return []
-                        if month_date.month == 1:
-                            month_date = month_date.replace(year=month_date.year - 1, month=12)
-                        else:
-                            month_date = month_date.replace(month=month_date.month - 1)
-                    empty_months.append({
-                        "month": month_date.strftime('%b %Y'),
-                        "uptime": 0
-                    })
-                return empty_months
-            except:
-                return []
 
     async def get_performance_metrics(self) -> Dict[str, Any]:
         try:
