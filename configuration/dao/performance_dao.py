@@ -9,6 +9,36 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("performance_dao", "configuration")
 
+
+def format_service_name(service_name: str) -> str:
+    """Convert snake_case service name to human-readable format.
+
+    Examples:
+        api_gateway → API Gateway
+        chatbot_orchestration → Chatbot Orchestration
+        knowledgebase_ingestion → Knowledgebase Ingestion
+        website_crawling → Website Crawling
+        docling_service → Docling Service
+        configuration → Configuration
+    """
+    # Mapping of service names to display names
+    service_display_names = {
+        'api_gateway': 'API Gateway',
+        'chatbot_orchestration': 'Chatbot Orchestration',
+        'knowledgebase_ingestion': 'Knowledgebase Ingestion',
+        'website_crawling': 'Website Crawling',
+        'docling_service': 'Docling Service',
+        'configuration': 'Configuration',
+    }
+
+    # Return mapped name if exists, otherwise convert snake_case to title case
+    if service_name in service_display_names:
+        return service_display_names[service_name]
+
+    # Fallback: convert snake_case to title case
+    return ' '.join(word.capitalize() for word in service_name.split('_'))
+
+
 class PerformanceDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
@@ -261,14 +291,14 @@ class PerformanceDAO:
             return 99.5
 
     async def get_uptime_by_service(self) -> List[Dict[str, Any]]:
-        """Get uptime percentage for each service from health monitoring."""
+        """Get uptime percentage for each service from health monitoring with human-readable names."""
         default_services = [
-            {"service": "api_gateway", "uptime": 99.9},
-            {"service": "chatbot_orchestration", "uptime": 99.8},
-            {"service": "configuration", "uptime": 99.9},
-            {"service": "docling_service", "uptime": 98.5},
-            {"service": "knowledgebase_ingestion", "uptime": 99.7},
-            {"service": "website_crawling", "uptime": 99.6}
+            {"service": format_service_name("api_gateway"), "uptime": 99.9},
+            {"service": format_service_name("chatbot_orchestration"), "uptime": 99.8},
+            {"service": format_service_name("configuration"), "uptime": 99.9},
+            {"service": format_service_name("docling_service"), "uptime": 98.5},
+            {"service": format_service_name("knowledgebase_ingestion"), "uptime": 99.7},
+            {"service": format_service_name("website_crawling"), "uptime": 99.6}
         ]
 
         try:
@@ -293,7 +323,7 @@ class PerformanceDAO:
                         if services:
                             return [
                                 {
-                                    "service": service_name,
+                                    "service": format_service_name(service_name),
                                     "uptime": round(uptime, 2)
                                 }
                                 for service_name, uptime in services.items()
