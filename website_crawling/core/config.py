@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     docling_enabled_for_websites: bool = True  # Set to False to disable
     docling_website_timeout_seconds: int = 300  # Processing timeout (5 minutes)
     docling_website_fallback_to_raw: bool = True  # Fallback to raw HTML if docling fails
+    docling_website_allowed_file_types: List[str] = ['.html', '.htm', '.pdf', '.doc', '.docx', '.txt', '.md']  # Allowed file types for docling
 
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None

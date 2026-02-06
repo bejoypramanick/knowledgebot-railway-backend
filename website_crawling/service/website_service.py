@@ -173,9 +173,13 @@ class WebsiteService:
                     f"⚠️ Docling timeout for {url} - falling back to raw HTML"
                 )
             except Exception as e:
+                # Supported file types for docling processing
+                SUPPORTED_FILE_TYPES = {
+                    ".pdf", ".docx", ".doc", ".pptx", ".ppt",
+                    ".xlsx", ".xls", ".html", ".htm"
+                }
                 logger.warning(f"⚠️ Docling processing error for {url}: {e} - falling back to raw")
 
-        # Upload to Gemini
         from website_crawling.service.ai_service import upload_content_to_gemini, record_scraped_metadata
 
         # Get domain
