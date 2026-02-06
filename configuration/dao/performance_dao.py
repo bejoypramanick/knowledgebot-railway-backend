@@ -199,7 +199,19 @@ class PerformanceDAO:
             async with get_db_connection() as conn:
                 result = await conn.fetch(query)
                 logger.log_db_query(query, None, result)
-                return [dict(row) for row in result]
+                return [
+                    {
+                        "day": row["month"],
+                        "month": row["month"],
+                        "positive": row["thumbs_up"],
+                        "thumbs_up": row["thumbs_up"],
+                        "negative": row["thumbs_down"],
+                        "thumbs_down": row["thumbs_down"],
+                        "score": round(row["satisfaction_score"] or 4.0, 2),
+                        "satisfaction_score": round(row["satisfaction_score"] or 4.0, 2)
+                    }
+                    for row in result
+                ]
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return []
@@ -325,12 +337,16 @@ class PerformanceDAO:
                 "average_engagement_minutes": round(avg_engagement or 0, 2),
                 "sessions_with_human": sessions_with_human,
                 "ai_handled_chats": ai_handled_chats,
-                "human_handoffs": human_handoffs,
+                "human_agent_handoffs": human_handoffs,
+                "human_handoffs": human_handoffs, # Keep for backward compatibility
                 "ai_handled_percentage": round(ai_handled_percentage, 2),
                 "human_handoff_percentage": round(human_handoff_percentage, 2),
+                "deflection_rate": round(ai_handled_percentage, 2), # Deflection is ai_handled%
+                "deflection_growth": 0,
                 "interactions_growth": round(interactions_growth, 2),
                 "interactions_over_time": interactions_over_time,
-                "user_satisfaction": round(satisfaction_score, 2),
+                "satisfaction_score": round(satisfaction_score, 2),
+                "user_satisfaction": round(satisfaction_score, 2), # Keep for backward compatibility
                 "satisfaction_over_time": satisfaction_over_time,
                 "uptime": round(uptime_percentage, 2),
                 "uptime_percentage": round(uptime_percentage, 2),
