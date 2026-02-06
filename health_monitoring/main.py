@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from health_monitoring.core.config import settings
 from health_monitoring.core.db import init_railway_db
 from health_monitoring.core.otel_logger import setup_otel_logging
-from health_monitoring.routers import router
+from health_monitoring.routers.router import router
 from health_monitoring.scheduler.health_checker import get_scheduler
 
 # Setup logging
