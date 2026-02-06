@@ -1,8 +1,7 @@
 [build]
-builder = "docker"
-
-[build.cmd]
+builder = "dockerfile"
 dockerfile = "./Dockerfile"
+context = "."
 
 [deploy]
 startCommand = "python -m uvicorn health_monitoring.main:app --host 0.0.0.0 --port $PORT"
