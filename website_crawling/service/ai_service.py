@@ -135,6 +135,12 @@ async def upload_content_to_gemini(
                     "file_name": document_name or temp_filename,
                     "state": final_state,
                     "processed_at": gemini_processed_at.isoformat() if gemini_processed_at else None,
+                    "file_search_metadata": {
+                        "type": "file_search",
+                        "file_search_store_name": file_search_store_name,
+                        "document_name": document_name,
+                        "uploaded_at": gemini_processed_at.isoformat() if gemini_processed_at else None
+                    } if document_name else None,
                 }
             else:
                 # Fallback to general file upload
@@ -196,11 +202,15 @@ async def record_scraped_metadata(
     gemini_state: str,
     scraped_urls: List[str],
     scraping_config: Dict[str, Any],
+    file_search_metadata: Dict[str, Any] = None,
     version: int = 1,
     user_id: str = None
 ) -> Optional[str]:
     """
     Record scraped website metadata to database.
+
+    Args:
+        file_search_metadata: FileSearch store metadata for deletion (contains store_name, document_name)
 
     Returns:
         Record ID if successful, None otherwise
@@ -226,6 +236,11 @@ async def record_scraped_metadata(
             "gemini_file_name": gemini_file_name,
             "gemini_file_uri": gemini_file_uri
         }
+
+        # Add FileSearch metadata if available
+        if file_search_metadata:
+            metadata["file_search_metadata"] = file_search_metadata
+            logger.info(f"📝 [METADATA] Storing FileSearch info: store={file_search_metadata.get('file_search_store_name')}, document={file_search_metadata.get('document_name')}")
 
         record_id = await website_service.insert_scraped_metadata(metadata)
         logger.info(f"✅ Scraped metadata recorded: {record_id}")

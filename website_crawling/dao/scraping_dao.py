@@ -51,14 +51,21 @@ class ScrapingDAO:
             raise
 
     async def record_scraped_metadata(self, metadata: Dict[str, Any]) -> str:
-        """Record scraped metadata"""
+        """Record scraped metadata including FileSearch metadata for deletion"""
+        import json
+
         query = """
             INSERT INTO scraped_websites
             (user_role_id, original_url, domain, title, description, gemini_state,
-             gemini_file_name, gemini_file_uri, pages_scraped, content_length, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())
+             gemini_file_name, gemini_file_uri, pages_scraped, content_length, metadata, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, NOW(), NOW())
             RETURNING id
         """
+
+        # Extract FileSearch metadata if available
+        file_search_metadata = metadata.get('file_search_metadata')
+        metadata_json = json.dumps(file_search_metadata) if file_search_metadata else None
+
         params = [
             metadata.get('user_role_id'),
             metadata.get('url'),
@@ -69,7 +76,8 @@ class ScrapingDAO:
             metadata.get('gemini_file_name'),
             metadata.get('gemini_file_uri'),
             metadata.get('pages_scraped', 1),
-            metadata.get('content_length', 0)
+            metadata.get('content_length', 0),
+            metadata_json
         ]
         try:
             logger.log_db_operation(query, params)

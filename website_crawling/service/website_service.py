@@ -210,7 +210,8 @@ class WebsiteService:
             scraping_config={
                 "max_pages": max_pages,
                 "max_depth": max_depth
-            }
+            },
+            file_search_metadata=gemini_result.get("file_search_metadata")
         )
 
         processing_time = time.perf_counter() - start_time
