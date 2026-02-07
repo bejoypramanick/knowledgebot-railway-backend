@@ -753,6 +753,73 @@ async def request_human_agent(session_id: str):
         logger.error(f"Error requesting human agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.delete("/admin/chat-sessions/{session_id}")
+async def delete_chat_session(session_id: str, request: Request):
+    """Delete a chat session and all associated messages"""
+    try:
+        user_email = request.headers.get("X-User-Email", "admin@example.com")
+
+        # Delete all messages for the session first
+        await chat_log_service.delete_session_messages(session_id)
+
+        # Delete the session itself
+        await chat_log_service.delete_chat_session(session_id)
+
+        logger.info(f"Deleted chat session {session_id} by {user_email}")
+
+        return {
+            "success": True,
+            "message": "Chat session deleted successfully",
+            "session_id": session_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting chat session: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/admin/chat-sessions/{session_id}/mark-read")
+async def mark_session_as_read(session_id: str, request: Request):
+    """Mark all messages in a session as read"""
+    try:
+        user_email = request.headers.get("X-User-Email", "admin@example.com")
+
+        await chat_log_service.mark_session_messages_as_read(session_id)
+
+        logger.info(f"Marked session {session_id} as read by {user_email}")
+
+        return {
+            "success": True,
+            "message": "Session marked as read",
+            "session_id": session_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking session as read: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/admin/chat-sessions/{session_id}/mark-unread")
+async def mark_session_as_unread(session_id: str, request: Request):
+    """Mark all messages in a session as unread"""
+    try:
+        user_email = request.headers.get("X-User-Email", "admin@example.com")
+
+        await chat_log_service.mark_session_messages_as_unread(session_id)
+
+        logger.info(f"Marked session {session_id} as unread by {user_email}")
+
+        return {
+            "success": True,
+            "message": "Session marked as unread",
+            "session_id": session_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking session as unread: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/users/unique-id")
 async def create_or_get_unique_id(request: Request):
     """Create or get unique user ID by email and role"""

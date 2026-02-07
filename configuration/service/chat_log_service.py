@@ -361,3 +361,63 @@ class ChatLogService:
         except Exception as e:
             logger.error(f"Error recording session feedback: {e}")
             raise
+
+    async def delete_session_messages(self, session_id: str) -> bool:
+        """Delete all messages for a chat session."""
+        try:
+            session_db_id = await self.dao.get_session_db_id(session_id)
+            if not session_db_id:
+                logger.warning(f"Session {session_id} not found")
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            await self.dao.delete_messages_for_session(session_db_id)
+            logger.info(f"Deleted all messages for session {session_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting messages for session {session_id}: {e}")
+            raise
+
+    async def delete_chat_session(self, session_id: str) -> bool:
+        """Delete a chat session and its metadata."""
+        try:
+            session_db_id = await self.dao.get_session_db_id(session_id)
+            if not session_db_id:
+                logger.warning(f"Session {session_id} not found")
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            await self.dao.delete_chat_session_by_id(session_db_id)
+            logger.info(f"Deleted chat session {session_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting chat session {session_id}: {e}")
+            raise
+
+    async def mark_session_messages_as_read(self, session_id: str) -> bool:
+        """Mark all messages in a session as read."""
+        try:
+            session_db_id = await self.dao.get_session_db_id(session_id)
+            if not session_db_id:
+                logger.warning(f"Session {session_id} not found")
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            await self.dao.update_messages_status_for_session(session_db_id, 'read')
+            logger.info(f"Marked all messages as read for session {session_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error marking messages as read for session {session_id}: {e}")
+            raise
+
+    async def mark_session_messages_as_unread(self, session_id: str) -> bool:
+        """Mark all messages in a session as unread (delivered)."""
+        try:
+            session_db_id = await self.dao.get_session_db_id(session_id)
+            if not session_db_id:
+                logger.warning(f"Session {session_id} not found")
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            await self.dao.update_messages_status_for_session(session_db_id, 'delivered')
+            logger.info(f"Marked all messages as unread for session {session_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Error marking messages as unread for session {session_id}: {e}")
+            raise

@@ -456,3 +456,45 @@ class ChatLogDAO:
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return True  # Default to enabled if query fails
+
+    async def delete_messages_for_session(self, session_db_id: int) -> bool:
+        """Delete all messages for a chat session."""
+        query = "DELETE FROM chat_messages WHERE session_id = $1"
+        try:
+            params = {"session_db_id": session_db_id}
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, session_db_id)
+                logger.log_db_query(query, params, result)
+                return True
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            raise
+
+    async def delete_chat_session_by_id(self, session_db_id: int) -> bool:
+        """Delete a chat session by its database ID."""
+        query = "DELETE FROM chat_sessions WHERE id = $1"
+        try:
+            params = {"session_db_id": session_db_id}
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, session_db_id)
+                logger.log_db_query(query, params, result)
+                return True
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            raise
+
+    async def update_messages_status_for_session(self, session_db_id: int, status: str) -> bool:
+        """Update message status for all messages in a session."""
+        query = "UPDATE chat_messages SET status = $2, updated_at = NOW() WHERE session_id = $1"
+        try:
+            params = {"session_db_id": session_db_id, "status": status}
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, session_db_id, status)
+                logger.log_db_query(query, params, result)
+                return True
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            raise
