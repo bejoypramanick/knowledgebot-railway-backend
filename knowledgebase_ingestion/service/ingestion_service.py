@@ -579,6 +579,66 @@ async def process_single_file_upload(
                 pass
 
 
+async def query_gemini_file_existence(
+    gemini_file_name: str,
+    file_search_metadata: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Query if file exists in Gemini stores before deletion.
+
+    Returns:
+        {
+            "raw_file_exists": bool,
+            "file_search_exists": bool,
+            "store_name": str or None,
+            "document_name": str or None
+        }
+    """
+    import json
+    genai_client = get_genai_client()
+    result = {
+        "raw_file_exists": False,
+        "file_search_exists": False,
+        "store_name": None,
+        "document_name": None
+    }
+
+    # Check raw file existence
+    if gemini_file_name and not gemini_file_name.startswith("documents/"):
+        try:
+            genai_client.files.get(name=gemini_file_name)
+            result["raw_file_exists"] = True
+            logger.info(f"🔍 [PRE-DELETE QUERY] Raw file exists: {gemini_file_name}")
+        except Exception:
+            logger.info(f"🔍 [PRE-DELETE QUERY] Raw file not found: {gemini_file_name}")
+
+    # Check FileSearch document existence
+    if file_search_metadata:
+        try:
+            metadata = json.loads(file_search_metadata) if isinstance(file_search_metadata, str) else file_search_metadata
+            if metadata.get('type') == 'file_search':
+                store_name = metadata.get('file_search_store_name')
+                document_name = metadata.get('document_name')
+                result["store_name"] = store_name
+                result["document_name"] = document_name
+
+                if store_name and document_name:
+                    try:
+                        # Attempt to get document info (verifies existence)
+                        genai_client.file_search_stores.get_document(
+                            file_search_store_name=store_name,
+                            document_name=document_name
+                        )
+                        result["file_search_exists"] = True
+                        logger.info(f"🔍 [PRE-DELETE QUERY] FileSearch document exists: {document_name} in {store_name}")
+                    except Exception:
+                        logger.info(f"🔍 [PRE-DELETE QUERY] FileSearch document not found: {document_name}")
+        except Exception as e:
+            logger.warning(f"⚠️ [PRE-DELETE QUERY] Error parsing metadata: {e}")
+
+    return result
+
+
 async def delete_file_logic(file_id: str) -> Dict[str, Any]:
     """Delete a file from Gemini FileSearch and database with proper metadata handling."""
     genai_client = get_genai_client()
@@ -647,6 +707,17 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
     if file_search_metadata:
         logger.info(f"   FileSearch Metadata: {file_search_metadata}")
 
+    # PRE-DELETION: Query if file exists in Gemini stores
+    logger.info(f"📋 [PRE-DELETE] Querying file existence in Gemini stores...")
+    existence_check = await query_gemini_file_existence(gemini_file_name, file_search_metadata)
+
+    logger.info(f"📊 [PRE-DELETE QUERY RESULTS]:")
+    logger.info(f"   Raw File Exists: {existence_check['raw_file_exists']}")
+    logger.info(f"   FileSearch Document Exists: {existence_check['file_search_exists']}")
+    if existence_check['store_name']:
+        logger.info(f"   FileSearch Store: {existence_check['store_name']}")
+        logger.info(f"   Document Name: {existence_check['document_name']}")
+
     # Delete from FileSearch store first (if file was uploaded to FileSearch)
     if genai_client and file_search_metadata:
         try:
@@ -673,6 +744,20 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
                     deletion_results["file_search"]["success"] = True
                     logger.info(f"✅ [FILESEARCH] Deleted document: {document_name} from store: {store_name}")
                     logger.info(f"   All embeddings and index entries removed")
+
+                    # POST-DELETION: Verify document was deleted
+                    logger.info(f"🔍 [POST-DELETE VERIFICATION] Checking if document was deleted...")
+                    try:
+                        genai_client.file_search_stores.get_document(
+                            file_search_store_name=store_name,
+                            document_name=document_name
+                        )
+                        # If we get here, document still exists - log warning
+                        logger.warning(f"⚠️ [POST-DELETE VERIFICATION] Document still exists after deletion attempt!")
+                    except Exception:
+                        # Document not found - this is expected/success
+                        logger.info(f"✅ [POST-DELETE VERIFICATION] Document successfully removed from FileSearch store")
+
                 except Exception as fs_error:
                     if "404" in str(fs_error) or "not found" in str(fs_error).lower():
                         deletion_results["file_search"]["error"] = "Document not found (already deleted)"
