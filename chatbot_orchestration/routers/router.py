@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from typing import Dict, List, Any, Optional
 import logging
 import time
+import json
 
 from ..service.chat_service import ChatService
 from ..service.agent_service import PydanticAIGatewayService
@@ -107,9 +108,28 @@ async def chat_with_agent_stream(request: Request):
         async def generate_response():
             full_response = ""
             try:
-                async for chunk in agent_service.process_message_stream(message, session_id):
-                    full_response += chunk
-                    yield f"data: {chunk}\n\n"
+                async for chunk_data in agent_service.process_message_stream(message, session_id):
+                    try:
+                        # Parse JSON chunk from agent service
+                        parsed_chunk = json.loads(chunk_data)
+
+                        # Extract content based on chunk type
+                        if parsed_chunk.get("type") == "chunk":
+                            # Regular text chunk - extract only the content
+                            content = parsed_chunk.get("content", "")
+                            full_response += content
+                            yield f"data: {content}\n\n"
+                        elif parsed_chunk.get("type") == "complete":
+                            # Complete message - yield content without metadata
+                            content = parsed_chunk.get("content", "")
+                            yield f"data: {content}\n\n"
+                        else:
+                            # Unknown chunk type - pass through as-is
+                            yield f"data: {chunk_data}\n\n"
+                    except json.JSONDecodeError:
+                        # If not JSON, treat as plain text
+                        full_response += chunk_data
+                        yield f"data: {chunk_data}\n\n"
 
                 # Save bot response to database after streaming completes
                 if session_db_id and full_response:
