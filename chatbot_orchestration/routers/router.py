@@ -12,6 +12,7 @@ import time
 from ..service.chat_service import ChatService
 from ..service.agent_service import PydanticAIGatewayService
 from ..schemas.models import ChatRequest
+from ..dao.session_persistence_dao import SessionPersistenceDAO
 
 logger = logging.getLogger(__name__)
 from ..core.utils import log_endpoint_request
@@ -21,6 +22,7 @@ router = APIRouter()
 # Initialize services
 chat_service = ChatService()
 agent_service = PydanticAIGatewayService()
+persistence_dao = SessionPersistenceDAO()
 
 # =================================
 # CHAT ENDPOINTS
@@ -28,23 +30,42 @@ agent_service = PydanticAIGatewayService()
 
 @router.post("/chat")
 async def chat_with_agent(request: Request):
-    """Chat with AI agent"""
+    """Chat with AI agent with message persistence"""
+    session_db_id = None
     try:
         body = await request.json()
-        
+
         message = body.get("message")
         session_id = body.get("session_id")
-        
+
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
-        
+
         # Create session if not provided
         if not session_id:
             session_id = f"session_{int(time.time())}"
-        
+
+        # Get or create session in database and save user message
+        try:
+            session_db_id = await persistence_dao.get_or_create_session(session_id)
+            await persistence_dao.save_user_message(session_db_id, message)
+            logger.info(f"💬 Saved user message for session {session_id}")
+        except Exception as e:
+            logger.error(f"⚠️ Failed to save user message: {e}")
+            # Continue processing even if message save fails
+
         # Process chat message
         response = await agent_service.process_message(message, session_id)
-        
+
+        # Save bot response to database
+        if session_db_id and response:
+            try:
+                await persistence_dao.save_bot_message(session_db_id, str(response), 'bot')
+                logger.info(f"🤖 Saved bot response for session {session_id}")
+            except Exception as e:
+                logger.error(f"⚠️ Failed to save bot message: {e}")
+                # Continue even if save fails
+
         return {
             "success": True,
             "response": response,

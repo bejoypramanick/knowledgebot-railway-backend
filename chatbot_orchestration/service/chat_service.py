@@ -17,6 +17,7 @@ from ..service.agent_service import pydantic_ai_service, session_state_manager
 from ..tools.general import (query_railway_postgres,
                              request_human_agent_connection)
 from ..tools.rag import search_knowledge_base
+from ..dao.session_persistence_dao import SessionPersistenceDAO
 
 logger = get_otel_logger("chat_service", "chatbot-orchestration")
 
@@ -24,9 +25,9 @@ logger = get_otel_logger("chat_service", "chatbot-orchestration")
 
 class ChatService:
     """Service layer for chat operations"""
-    
+
     def __init__(self):
-        pass  # Service manages its own dependencies
+        self.persistence_dao = SessionPersistenceDAO()
     
     async def handle_chat_stream(self, request):
         """Handle chat request with streaming response using optimized Pydantic AI Gateway Service."""
@@ -102,35 +103,61 @@ class ChatService:
         return message_history
     
     async def _generate_response_stream(self, agent, message: str, session_dep, session_id: str):
-        """Generate streaming response with retry logic"""
+        """Generate streaming response with retry logic and message persistence"""
         max_retries = 3
         retry_delay = 1.0
-        
+        session_db_id = None
+
+        try:
+            # Get or create session in database
+            session_db_id = await self.persistence_dao.get_or_create_session(session_id)
+
+            # Save user message to database
+            try:
+                await self.persistence_dao.save_user_message(session_db_id, message)
+                logger.info(f"💬 Saved user message for session {session_id}")
+            except Exception as e:
+                logger.error(f"⚠️ Failed to save user message: {e}")
+                # Continue processing even if message save fails
+
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize session persistence: {e}")
+            # Continue with streaming response even if persistence setup fails
+
         for attempt in range(max_retries):
             try:
                 if attempt == 0:
                     yield f"data: {json.dumps({'type': 'start', 'content': ''})}\n\n"
-                
+
                 result = await pydantic_ai_service.run_agent_with_fallback(
                     agent,
                     message,
                     session_dep
                 )
-                
+
                 session_state_manager.update_session_state(session_id, result)
-                
+
                 response_text = self._extract_response_text(result)
-                
+
+                # Save bot response to database
+                if session_db_id:
+                    try:
+                        await self.persistence_dao.save_bot_message(session_db_id, response_text, 'bot')
+                        logger.info(f"🤖 Saved bot response for session {session_id}")
+                    except Exception as e:
+                        logger.error(f"⚠️ Failed to save bot message: {e}")
+                        # Continue streaming even if save fails
+
                 # Stream the response
                 yield f"data: {json.dumps({'type': 'content', 'content': response_text})}\n\n"
                 yield f"data: {json.dumps({'type': 'end', 'content': ''})}\n\n"
-                
+
                 # Track token usage if available
                 if hasattr(result, 'usage') or hasattr(result, 'token_usage'):
                     await self._track_token_usage(result, session_id)
-                
+
                 break
-                
+
             except Exception as e:
                 logger.error(f"Attempt {attempt + 1} failed: {e}")
                 if attempt == max_retries - 1:
