@@ -285,3 +285,39 @@ class AuthDAO:
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return []
+
+    async def get_or_create_unique_id(self, email: str, role: str) -> Dict[str, Any]:
+        """Get or create a unique ID for a user."""
+        try:
+            # Check if user exists
+            user_query = "SELECT id FROM users WHERE email = $1"
+            logger.log_db_operation(user_query, {"email": email})
+
+            async with get_db_connection() as conn:
+                user = await conn.fetchrow(user_query, email)
+
+                # If user doesn't exist, create them
+                if not user:
+                    create_user_query = """
+                        INSERT INTO users (email, is_active, created_at, updated_at)
+                        VALUES ($1, true, NOW(), NOW())
+                        RETURNING id
+                    """
+                    logger.log_db_operation(create_user_query, {"email": email})
+                    user_id = await conn.fetchval(create_user_query, email)
+                    logger.log_db_query(create_user_query, {"email": email}, user_id)
+                else:
+                    user_id = user['id']
+
+                # Generate unique_id based on user_id and role
+                unique_id = f"{role}_{user_id}"
+
+                return {
+                    "unique_id": unique_id,
+                    "user_id": user_id,
+                    "email": email,
+                    "role": role
+                }
+        except Exception as e:
+            logger.error(f"Error in get_or_create_unique_id: {e}", exc_info=True)
+            raise

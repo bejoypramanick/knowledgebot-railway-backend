@@ -113,3 +113,12 @@ class AuthService:
             "success": success,
             "message": "Human agent removed successfully"
         }
+
+    async def get_or_create_unique_id(self, email: str, role: str) -> dict:
+        """Get or create a unique ID for a user"""
+        try:
+            result = await self.auth_dao.get_or_create_unique_id(email, role)
+            return result
+        except Exception as e:
+            logger.error(f"Error in get_or_create_unique_id: {e}", exc_info=True)
+            raise
