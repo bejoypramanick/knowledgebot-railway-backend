@@ -77,32 +77,53 @@ async def chat_with_agent(request: Request):
 
 @router.post("/chat/stream")
 async def chat_with_agent_stream(request: Request):
-    """Chat with AI agent with streaming response"""
+    """Chat with AI agent with streaming response and message persistence"""
+    session_db_id = None
     try:
         body = await request.json()
-        
+
         message = body.get("message", "")
         session_id = body.get("session_id")
-        
+
         logger.info(f"📨 Received stream request - Message: {message[:50]}..., Session: {session_id}")
-        
+
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
-        
+
         if not session_id:
             session_id = f"session_{int(time.time())}"
             logger.info(f"🆕 Generated new session ID: {session_id}")
-        
+
+        # Get or create session in database and save user message
+        try:
+            session_db_id = await persistence_dao.get_or_create_session(session_id)
+            await persistence_dao.save_user_message(session_db_id, message)
+            logger.info(f"💬 Saved user message for session {session_id}")
+        except Exception as e:
+            logger.error(f"⚠️ Failed to save user message: {e}")
+            # Continue processing even if message save fails
+
         # Stream response
         async def generate_response():
+            full_response = ""
             try:
                 async for chunk in agent_service.process_message_stream(message, session_id):
+                    full_response += chunk
                     yield f"data: {chunk}\n\n"
+
+                # Save bot response to database after streaming completes
+                if session_db_id and full_response:
+                    try:
+                        await persistence_dao.save_bot_message(session_db_id, full_response, 'bot')
+                        logger.info(f"🤖 Saved bot response for session {session_id}")
+                    except Exception as e:
+                        logger.error(f"⚠️ Failed to save bot message: {e}")
+                        # Continue even if save fails
             except Exception as e:
                 logger.error(f"Error in stream generation: {e}")
                 logger.error(f"Exception type: {type(e).__name__}")
                 yield f"data: Error: {str(e)}\n\n"
-        
+
         return StreamingResponse(generate_response(), media_type="text/plain")
     except Exception as e:
         logger.error(f"Error in chat stream endpoint: {e}")
