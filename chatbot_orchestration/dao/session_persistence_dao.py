@@ -25,9 +25,10 @@ class SessionPersistenceDAO:
             The database ID of the session
         """
         query_get = "SELECT id FROM chat_sessions WHERE session_id = $1"
+        query_count = "SELECT COUNT(*) + 1 FROM chat_sessions"
         query_create = """
-            INSERT INTO chat_sessions (session_id, is_active, archive_status, started_at, last_activity_at)
-            VALUES ($1, true, 'active', NOW(), NOW())
+            INSERT INTO chat_sessions (session_id, user_display_id, is_active, archive_status, started_at, last_activity_at)
+            VALUES ($1, $2, true, 'active', NOW(), NOW())
             RETURNING id
         """
 
@@ -39,9 +40,13 @@ class SessionPersistenceDAO:
                     logger.info(f"📋 Using existing session: {session_id} (DB ID: {result})")
                     return result
 
+                # Get next user display ID
+                user_count = await conn.fetchval(query_count)
+                user_display_id = f"User {user_count}"
+
                 # Create new session
-                session_db_id = await conn.fetchval(query_create, session_id)
-                logger.info(f"✨ Created new session: {session_id} (DB ID: {session_db_id})")
+                session_db_id = await conn.fetchval(query_create, session_id, user_display_id)
+                logger.info(f"✨ Created new session: {session_id} (DB ID: {session_db_id}, User ID: {user_display_id})")
                 return session_db_id
 
         except Exception as e:
