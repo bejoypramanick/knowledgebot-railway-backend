@@ -12,7 +12,6 @@ class ChatMessageResponse(BaseModel):
 
 class ChatSessionResponse(BaseModel):
     id: str
-    user_display_id: Optional[str] = None
     customer_name: Optional[str] = None
     customer_email: Optional[str] = None
     status: str
