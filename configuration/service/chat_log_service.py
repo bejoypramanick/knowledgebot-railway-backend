@@ -192,7 +192,8 @@ class ChatLogService:
 
             from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(
-                id=session_id,
+                id=str(session_db_id),
+                user_display_id=session_row.get('user_display_id'),
                 customer_name=metadata.get('customer_name'),
                 customer_email=metadata.get('customer_email'),
                 status=status,
