@@ -384,22 +384,32 @@ class PerformanceDAO:
                 uptime = float(row['uptime_percentage']) if row['uptime_percentage'] else 0
                 healthcheck_count = row['total_checks']
 
-                if month not in month_data_map:
-                    month_data_map[month] = {}
+                # Normalize month to start of month for consistent key matching
+                if month:
+                    if isinstance(month, str):
+                        # Parse string if needed
+                        from datetime import datetime as dt
+                        month_date = dt.fromisoformat(month.replace('Z', '+00:00')).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                    else:
+                        # Assume it's a datetime object
+                        month_date = month.replace(day=1, hour=0, minute=0, second=0, microsecond=0) if hasattr(month, 'replace') else month
+
+                if month_date not in month_data_map:
+                    month_data_map[month_date] = {}
 
                 # Format service name
                 formatted_service = format_service_name(service)
 
                 # Calculate days in month for frequency calculation
-                month_date = month
                 days_in_month = calendar.monthrange(month_date.year, month_date.month)[1]
                 healthcheck_frequency = round(healthcheck_count / days_in_month, 2)  # checks per day
 
-                month_data_map[month][formatted_service] = {
+                month_data_map[month_date][formatted_service] = {
                     "uptime": round(uptime, 2),
                     "healthcheck_count": healthcheck_count,
                     "healthcheck_frequency": healthcheck_frequency
                 }
+                logger.info(f"📊 [Healthcheck Data] {formatted_service} {month_date.strftime('%b %Y')}: {healthcheck_count} checks, {healthcheck_frequency} checks/day")
 
             # Generate all 6 months (current month + 5 previous months)
             now = datetime.utcnow()
