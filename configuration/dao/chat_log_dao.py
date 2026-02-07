@@ -215,81 +215,151 @@ class ChatLogDAO:
         user_role_id = await self.get_user_role_id(email)
         if not user_role_id:
             return []
-            
-        query = """
-            SELECT cs.*, u.email as agent_email 
-            FROM chat_sessions cs
-            LEFT JOIN session_assignments sa ON cs.id = sa.session_id
-            LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-            LEFT JOIN users u ON urm.user_id = u.id
-            WHERE sa.user_role_id = $1 AND cs.archive_status = $2
-            ORDER BY cs.last_activity_at DESC
-            LIMIT $3 OFFSET $4
-        """
-        try:
-            params = {"user_role_id": user_role_id, "archive_status": archive_status, "limit": limit, "offset": offset}
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetch(query, user_role_id, archive_status, limit, offset)
-                logger.log_db_query(query, params, result)
-                return result
-        except Exception as e:
-            logger.log_db_query(query, params, error=e)
-            return []
+
+        # Handle 'all' status - return all sessions regardless of archive status
+        if archive_status.lower() == 'all':
+            query = """
+                SELECT cs.*, u.email as agent_email
+                FROM chat_sessions cs
+                LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                LEFT JOIN users u ON urm.user_id = u.id
+                WHERE sa.user_role_id = $1
+                ORDER BY cs.last_activity_at DESC
+                LIMIT $2 OFFSET $3
+            """
+            try:
+                params = {"user_role_id": user_role_id, "limit": limit, "offset": offset}
+                logger.log_db_operation(query, params)
+                async with get_db_connection() as conn:
+                    result = await conn.fetch(query, user_role_id, limit, offset)
+                    logger.log_db_query(query, params, result)
+                    return result
+            except Exception as e:
+                logger.log_db_query(query, params, error=e)
+                return []
+        else:
+            query = """
+                SELECT cs.*, u.email as agent_email
+                FROM chat_sessions cs
+                LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                LEFT JOIN users u ON urm.user_id = u.id
+                WHERE sa.user_role_id = $1 AND cs.archive_status = $2
+                ORDER BY cs.last_activity_at DESC
+                LIMIT $3 OFFSET $4
+            """
+            try:
+                params = {"user_role_id": user_role_id, "archive_status": archive_status, "limit": limit, "offset": offset}
+                logger.log_db_operation(query, params)
+                async with get_db_connection() as conn:
+                    result = await conn.fetch(query, user_role_id, archive_status, limit, offset)
+                    logger.log_db_query(query, params, result)
+                    return result
+            except Exception as e:
+                logger.log_db_query(query, params, error=e)
+                return []
 
     async def count_sessions_for_agent(self, email: str, archive_status: str) -> int:
         user_role_id = await self.get_user_role_id(email)
         if not user_role_id:
             return 0
-            
-        query = """
-            SELECT COUNT(*) 
-            FROM chat_sessions cs
-            LEFT JOIN session_assignments sa ON cs.id = sa.session_id
-            WHERE sa.user_role_id = $1 AND cs.archive_status = $2
-        """
+
         try:
-            params = {"user_role_id": user_role_id, "archive_status": archive_status}
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query, user_role_id, archive_status)
-                logger.log_db_query(query, params, result)
-                return result
+            # Handle 'all' status - count all sessions regardless of archive status
+            if archive_status.lower() == 'all':
+                query = """
+                    SELECT COUNT(*)
+                    FROM chat_sessions cs
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                    WHERE sa.user_role_id = $1
+                """
+                params = {"user_role_id": user_role_id}
+                logger.log_db_operation(query, params)
+                async with get_db_connection() as conn:
+                    result = await conn.fetchval(query, user_role_id)
+                    logger.log_db_query(query, params, result)
+                    return result
+            else:
+                query = """
+                    SELECT COUNT(*)
+                    FROM chat_sessions cs
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                    WHERE sa.user_role_id = $1 AND cs.archive_status = $2
+                """
+                params = {"user_role_id": user_role_id, "archive_status": archive_status}
+                logger.log_db_operation(query, params)
+                async with get_db_connection() as conn:
+                    result = await conn.fetchval(query, user_role_id, archive_status)
+                    logger.log_db_query(query, params, result)
+                    return result
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return 0
 
     async def get_all_sessions(self, archive_status: str, limit: int, offset: int) -> List[Dict[str, Any]]:
-        query = """
-            SELECT cs.*, u.email as agent_email 
-            FROM chat_sessions cs
-            LEFT JOIN session_assignments sa ON cs.id = sa.session_id
-            LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-            LEFT JOIN users u ON urm.user_id = u.id
-            WHERE cs.archive_status = $1
-            ORDER BY cs.last_activity_at DESC
-            LIMIT $2 OFFSET $3
-        """
-        try:
-            params = {"archive_status": archive_status, "limit": limit, "offset": offset}
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetch(query, archive_status, limit, offset)
-                logger.log_db_query(query, params, result)
-                return result
-        except Exception as e:
-            logger.log_db_query(query, params, error=e)
-            return []
+        # Handle 'all' status - return all sessions regardless of archive status
+        if archive_status.lower() == 'all':
+            query = """
+                SELECT cs.*, u.email as agent_email
+                FROM chat_sessions cs
+                LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                LEFT JOIN users u ON urm.user_id = u.id
+                ORDER BY cs.last_activity_at DESC
+                LIMIT $1 OFFSET $2
+            """
+            try:
+                params = {"limit": limit, "offset": offset}
+                logger.log_db_operation(query, params)
+                async with get_db_connection() as conn:
+                    result = await conn.fetch(query, limit, offset)
+                    logger.log_db_query(query, params, result)
+                    return result
+            except Exception as e:
+                logger.log_db_query(query, params, error=e)
+                return []
+        else:
+            query = """
+                SELECT cs.*, u.email as agent_email
+                FROM chat_sessions cs
+                LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                LEFT JOIN users u ON urm.user_id = u.id
+                WHERE cs.archive_status = $1
+                ORDER BY cs.last_activity_at DESC
+                LIMIT $2 OFFSET $3
+            """
+            try:
+                params = {"archive_status": archive_status, "limit": limit, "offset": offset}
+                logger.log_db_operation(query, params)
+                async with get_db_connection() as conn:
+                    result = await conn.fetch(query, archive_status, limit, offset)
+                    logger.log_db_query(query, params, result)
+                    return result
+            except Exception as e:
+                logger.log_db_query(query, params, error=e)
+                return []
 
     async def count_all_sessions(self, archive_status: str) -> int:
-        query = "SELECT COUNT(*) FROM chat_sessions WHERE archive_status = $1"
         try:
-            params = {"archive_status": archive_status}
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query, archive_status)
-                logger.log_db_query(query, params, result)
-                return result
+            # Handle 'all' status - count all sessions regardless of archive status
+            if archive_status.lower() == 'all':
+                query = "SELECT COUNT(*) FROM chat_sessions"
+                params = {}
+                logger.log_db_operation(query, params)
+                async with get_db_connection() as conn:
+                    result = await conn.fetchval(query)
+                    logger.log_db_query(query, params, result)
+                    return result
+            else:
+                query = "SELECT COUNT(*) FROM chat_sessions WHERE archive_status = $1"
+                params = {"archive_status": archive_status}
+                logger.log_db_operation(query, params)
+                async with get_db_connection() as conn:
+                    result = await conn.fetchval(query, archive_status)
+                    logger.log_db_query(query, params, result)
+                    return result
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return 0
