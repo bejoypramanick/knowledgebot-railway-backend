@@ -340,11 +340,13 @@ class PerformanceDAO:
     async def get_uptime_over_time(self, days: int = 180) -> List[Dict[str, Any]]:
         """Get uptime history for the last N days (6 months) with service-wise breakdown.
 
-        Returns all 6 months with uptime data for each service. Months without health check records
-        show uptime as 0. This provides a consistent 6-month view with service-level granularity.
+        Returns all 6 months with uptime data for each service, including healthcheck count
+        and average frequency. Months without health check records show uptime as 0.
+        This provides a consistent 6-month view with service-level granularity.
         """
         try:
             from datetime import datetime, timedelta
+            import calendar
 
             logger.info(f"📊 Calculating uptime history from service_health_checks table for last {days} days")
 
@@ -374,19 +376,30 @@ class PerformanceDAO:
                 results = await conn.fetch(query % days)
                 logger.info(f"📊 Retrieved {len(results)} uptime records from database")
 
-            # Organize data by month and service
+            # Organize data by month and service, including healthcheck metadata
             month_data_map = {}
             for row in results:
                 month = row['month']
                 service = row['service_name']
                 uptime = float(row['uptime_percentage']) if row['uptime_percentage'] else 0
+                healthcheck_count = row['total_checks']
 
                 if month not in month_data_map:
                     month_data_map[month] = {}
 
                 # Format service name
                 formatted_service = format_service_name(service)
-                month_data_map[month][formatted_service] = round(uptime, 2)
+
+                # Calculate days in month for frequency calculation
+                month_date = month
+                days_in_month = calendar.monthrange(month_date.year, month_date.month)[1]
+                healthcheck_frequency = round(healthcheck_count / days_in_month, 2)  # checks per day
+
+                month_data_map[month][formatted_service] = {
+                    "uptime": round(uptime, 2),
+                    "healthcheck_count": healthcheck_count,
+                    "healthcheck_frequency": healthcheck_frequency
+                }
 
             # Generate all 6 months (current month + 5 previous months)
             now = datetime.utcnow()
@@ -413,17 +426,29 @@ class PerformanceDAO:
                 if not services_for_month:
                     all_services = ['API Gateway', 'Chatbot Orchestration', 'Configuration',
                                    'Docling Service', 'Knowledgebase Ingestion', 'Website Crawling']
-                    services_for_month = {service: 0 for service in all_services}
+                    services_for_month = {
+                        service: {
+                            "uptime": 0,
+                            "healthcheck_count": 0,
+                            "healthcheck_frequency": 0
+                        }
+                        for service in all_services
+                    }
 
                 formatted_history.append({
                     "month": month_label,
                     "services": [
-                        {"service": service, "uptime": uptime}
-                        for service, uptime in sorted(services_for_month.items())
+                        {
+                            "service": service,
+                            "uptime": data["uptime"],
+                            "healthcheck_count": data["healthcheck_count"],
+                            "healthcheck_frequency": data["healthcheck_frequency"]
+                        }
+                        for service, data in sorted(services_for_month.items())
                     ]
                 })
 
-            logger.info(f"✅ Formatted 6 months of uptime history with service breakdown")
+            logger.info(f"✅ Formatted 6 months of uptime history with service breakdown and healthcheck metadata")
             return formatted_history
 
         except Exception as e:
@@ -447,7 +472,15 @@ class PerformanceDAO:
 
                     empty_months.append({
                         "month": month_date.strftime('%b %Y'),
-                        "services": [{"service": s, "uptime": 0} for s in all_services]
+                        "services": [
+                            {
+                                "service": s,
+                                "uptime": 0,
+                                "healthcheck_count": 0,
+                                "healthcheck_frequency": 0
+                            }
+                            for s in all_services
+                        ]
                     })
                 return empty_months
             except Exception as inner_e:
