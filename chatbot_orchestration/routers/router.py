@@ -8,12 +8,10 @@ from fastapi.responses import StreamingResponse
 from typing import Dict, List, Any, Optional
 import logging
 import time
-import json
 
 from ..service.chat_service import ChatService
 from ..service.agent_service import PydanticAIGatewayService
 from ..schemas.models import ChatRequest
-from ..dao.session_persistence_dao import SessionPersistenceDAO
 
 logger = logging.getLogger(__name__)
 from ..core.utils import log_endpoint_request
@@ -23,7 +21,6 @@ router = APIRouter()
 # Initialize services
 chat_service = ChatService()
 agent_service = PydanticAIGatewayService()
-persistence_dao = SessionPersistenceDAO()
 
 # =================================
 # CHAT ENDPOINTS
@@ -31,42 +28,23 @@ persistence_dao = SessionPersistenceDAO()
 
 @router.post("/chat")
 async def chat_with_agent(request: Request):
-    """Chat with AI agent with message persistence"""
-    session_db_id = None
+    """Chat with AI agent"""
     try:
         body = await request.json()
-
+        
         message = body.get("message")
         session_id = body.get("session_id")
-
+        
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
-
+        
         # Create session if not provided
         if not session_id:
             session_id = f"session_{int(time.time())}"
-
-        # Get or create session in database and save user message
-        try:
-            session_db_id = await persistence_dao.get_or_create_session(session_id)
-            await persistence_dao.save_user_message(session_db_id, message)
-            logger.info(f"💬 Saved user message for session {session_id}")
-        except Exception as e:
-            logger.error(f"⚠️ Failed to save user message: {e}")
-            # Continue processing even if message save fails
-
+        
         # Process chat message
         response = await agent_service.process_message(message, session_id)
-
-        # Save bot response to database
-        if session_db_id and response:
-            try:
-                await persistence_dao.save_bot_message(session_db_id, str(response), 'bot')
-                logger.info(f"🤖 Saved bot response for session {session_id}")
-            except Exception as e:
-                logger.error(f"⚠️ Failed to save bot message: {e}")
-                # Continue even if save fails
-
+        
         return {
             "success": True,
             "response": response,
@@ -78,77 +56,28 @@ async def chat_with_agent(request: Request):
 
 @router.post("/chat/stream")
 async def chat_with_agent_stream(request: Request):
-    """Chat with AI agent with streaming response and message persistence"""
-    session_db_id = None
+    """Chat with AI agent with streaming response"""
     try:
         body = await request.json()
-
-        message = body.get("message", "")
+        
+        message = body.get("message")
         session_id = body.get("session_id")
-
-        logger.info(f"📨 Received stream request - Message: {message[:50]}..., Session: {session_id}")
-
+        
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
-
+        
+        # Create session if not provided
         if not session_id:
             session_id = f"session_{int(time.time())}"
-            logger.info(f"🆕 Generated new session ID: {session_id}")
-
-        # Get or create session in database and save user message
-        try:
-            session_db_id = await persistence_dao.get_or_create_session(session_id)
-            await persistence_dao.save_user_message(session_db_id, message)
-            logger.info(f"💬 Saved user message for session {session_id}")
-        except Exception as e:
-            logger.error(f"⚠️ Failed to save user message: {e}")
-            # Continue processing even if message save fails
-
+        
         # Stream response
         async def generate_response():
-            full_response = ""
-            try:
-                async for chunk_data in agent_service.process_message_stream(message, session_id):
-                    try:
-                        # Parse JSON chunk from agent service
-                        parsed_chunk = json.loads(chunk_data)
-
-                        # Extract content based on chunk type
-                        if parsed_chunk.get("type") == "chunk":
-                            # Regular text chunk - extract only the content
-                            content = parsed_chunk.get("content", "")
-                            full_response += content
-                            yield f"data: {content}\n\n"
-                        elif parsed_chunk.get("type") == "complete":
-                            # Complete message - yield content without metadata
-                            content = parsed_chunk.get("content", "")
-                            yield f"data: {content}\n\n"
-                        else:
-                            # Unknown chunk type - pass through as-is
-                            yield f"data: {chunk_data}\n\n"
-                    except json.JSONDecodeError:
-                        # If not JSON, treat as plain text
-                        full_response += chunk_data
-                        yield f"data: {chunk_data}\n\n"
-
-                # Save bot response to database after streaming completes
-                if session_db_id and full_response:
-                    try:
-                        await persistence_dao.save_bot_message(session_db_id, full_response, 'bot')
-                        logger.info(f"🤖 Saved bot response for session {session_id}")
-                    except Exception as e:
-                        logger.error(f"⚠️ Failed to save bot message: {e}")
-                        # Continue even if save fails
-            except Exception as e:
-                logger.error(f"Error in stream generation: {e}")
-                logger.error(f"Exception type: {type(e).__name__}")
-                yield f"data: Error: {str(e)}\n\n"
-
+            async for chunk in agent_service.process_message_stream(message, session_id):
+                yield f"data: {chunk}\n\n"
+        
         return StreamingResponse(generate_response(), media_type="text/plain")
     except Exception as e:
-        logger.error(f"Error in chat stream endpoint: {e}")
-        logger.error(f"Exception type: {type(e).__name__}")
-        logger.error(f"Exception details: {str(e)}")
+        logger.error(f"Error in chat stream: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/chat/history/{session_id}")

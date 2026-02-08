@@ -80,54 +80,6 @@ async def upload_file(
         logger.error(f"Error uploading file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/files/{file_id}")
-async def delete_file_by_id(file_id: str, request: Request = None):
-    """Delete a specific file by ID"""
-    try:
-        # Extract authenticated user information
-        user_email, user_id = extract_user_from_request(request)
-        
-        result = await file_service.delete_file(file_id)
-        
-        return {
-            "success": True,
-            "message": "File deleted successfully",
-            "result": result,
-            "user": {
-                "email": user_email,
-                "id": user_id
-            }
-        }
-    except Exception as e:
-        logger.error(f"Error deleting file {file_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/files/{file_id}")
-async def get_file_by_id(file_id: str, request: Request = None):
-    """Get a specific file by ID"""
-    try:
-        # Extract authenticated user information
-        user_email, user_id = extract_user_from_request(request)
-        
-        file_record = await file_service.get_file_by_id(file_id)
-        
-        if not file_record:
-            raise HTTPException(status_code=404, detail="File not found")
-        
-        return {
-            "success": True,
-            "file": file_record,
-            "user": {
-                "email": user_email,
-                "id": user_id
-            }
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting file {file_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @router.get("/files")
 async def list_files(request: Request = None):
     """List all files"""
@@ -151,10 +103,8 @@ async def list_files(request: Request = None):
 
 @router.post("/batchupload")
 async def upload_files_batch(request: Request):
-    """Upload multiple files in batch - PARALLEL processing"""
+    """Upload multiple files in batch"""
     try:
-        import asyncio
-
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
@@ -169,61 +119,48 @@ async def upload_files_batch(request: Request):
         # Get optional parameters
         replace_existing = form.get("replace_existing", "false").lower() == "true"
 
-        logger.info(f"📤 Starting PARALLEL batch upload of {len(files)} files")
+        results = []
+        successful_uploads = 0
+        failed_uploads = 0
 
-        # Create tasks for all files to be processed concurrently
-        async def process_file_wrapper(file):
-            """Wrapper to handle individual file processing with error catching"""
+        # Process each file using the service layer
+        for file in files:
             try:
+                # Use the proper service function
                 result = await process_single_file_upload(
                     file=file,
                     display_name=None,
                     user_email=user_email,
                     replace_existing=replace_existing
                 )
-                return result
+
+                # Convert BatchUploadItem to dict for response
+                file_result = {
+                    "filename": result.filename,
+                    "success": result.success,
+                    "message": result.message,
+                    "error": result.error,
+                    "file_id": result.file.name if result.file else None,
+                    "replaced_existing": result.replaced_existing
+                }
+
+                if result.success:
+                    successful_uploads += 1
+                else:
+                    failed_uploads += 1
+
+                results.append(file_result)
+
             except Exception as e:
                 logger.error(f"Error processing file {file.filename}: {e}")
-                # Return a failed BatchUploadItem
-                from knowledgebase_ingestion.schemas.models import BatchUploadItem
-                return BatchUploadItem(
-                    filename=file.filename,
-                    success=False,
-                    message="Upload failed",
-                    error=str(e)
-                )
-
-        # Process all files concurrently using asyncio.gather
-        logger.info(f"🚀 Launching {len(files)} concurrent upload tasks...")
-        upload_results = await asyncio.gather(
-            *[process_file_wrapper(file) for file in files],
-            return_exceptions=False
-        )
-
-        # Process results
-        results = []
-        successful_uploads = 0
-        failed_uploads = 0
-
-        for result in upload_results:
-            # Convert BatchUploadItem to dict for response
-            file_result = {
-                "filename": result.filename,
-                "success": result.success,
-                "message": result.message,
-                "error": result.error,
-                "file_id": result.file.name if result.file else None,
-                "replaced_existing": result.replaced_existing
-            }
-
-            if result.success:
-                successful_uploads += 1
-            else:
+                results.append({
+                    "filename": file.filename,
+                    "success": False,
+                    "message": "Upload failed",
+                    "error": str(e),
+                    "file_id": None
+                })
                 failed_uploads += 1
-
-            results.append(file_result)
-
-        logger.info(f"✅ Batch upload completed: {successful_uploads} successful, {failed_uploads} failed (total: {len(files)})")
 
         return {
             "success": True,
@@ -296,229 +233,6 @@ async def delete_file(file_id: str, request: Request = None):
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/delete/batch")
-async def delete_files_batch(request: Request):
-    """Delete multiple files in batch - PARALLEL processing"""
-    try:
-        import asyncio
-
-        # Extract authenticated user information
-        user_email, user_id = extract_user_from_request(request)
-
-        # Parse form data
-        form = await request.form()
-
-        # Get file IDs from form
-        file_ids = form.getlist("file_ids")
-        if not file_ids:
-            raise HTTPException(status_code=400, detail="No file IDs provided")
-
-        logger.info(f"🗑️  Starting PARALLEL batch delete of {len(file_ids)} files")
-
-        # Create tasks for all files to be deleted concurrently
-        async def delete_file_wrapper(file_id):
-            """Wrapper to handle individual file deletion with error catching"""
-            try:
-                result = await process_single_file_delete(file_id)
-                return result
-            except Exception as e:
-                logger.error(f"Error deleting file {file_id}: {e}")
-                # Return a failed BatchDeleteItem
-                from knowledgebase_ingestion.schemas.models import BatchDeleteItem
-                return BatchDeleteItem(
-                    file_id=file_id,
-                    filename=file_id,
-                    success=False,
-                    message="Delete failed",
-                    error=str(e)
-                )
-
-        # Process all deletions concurrently using asyncio.gather
-        logger.info(f"🚀 Launching {len(file_ids)} concurrent delete tasks...")
-        delete_results = await asyncio.gather(
-            *[delete_file_wrapper(file_id) for file_id in file_ids],
-            return_exceptions=False
-        )
-
-        # Process results
-        results = []
-        successful_deletes = 0
-        failed_deletes = 0
-
-        for result in delete_results:
-            # Convert BatchDeleteItem to dict for response
-            delete_result = {
-                "file_id": result.file_id,
-                "success": result.success,
-                "message": result.message,
-                "error": result.error,
-                "details": result.details if hasattr(result, 'details') else None
-            }
-
-            if result.success:
-                successful_deletes += 1
-            else:
-                failed_deletes += 1
-
-            results.append(delete_result)
-
-        logger.info(f"✅ Batch delete completed: {successful_deletes} successful, {failed_deletes} failed (total: {len(file_ids)})")
-
-        return {
-            "success": True,
-            "message": f"Batch delete completed: {successful_deletes} successful, {failed_deletes} failed",
-            "total_files": len(file_ids),
-            "successful_deletes": successful_deletes,
-            "failed_deletes": failed_deletes,
-            "results": results
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in batch delete: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =================================
-# CLEAR ALL ENDPOINTS (KILL SWITCH)
-# =================================
-
-@router.post("/clear-all")
-async def clear_all_knowledge_base(request: Request):
-    """
-    KILL SWITCH: Delete ALL files and websites from database and Gemini FileSearch
-    This is an admin-only, dangerous operation that clears the entire knowledge base.
-    Requires explicit confirmation via header.
-    """
-    try:
-        from shared.db import get_db_connection
-        from ..core.ai import get_genai_client
-        import json
-
-        # Get confirmation header (prevents accidental deletions)
-        confirmation = request.headers.get("X-Confirm-Clear-All", "false").lower() == "true"
-        if not confirmation:
-            logger.warning("❌ Clear-all requested without confirmation header")
-            raise HTTPException(
-                status_code=400,
-                detail="This operation requires X-Confirm-Clear-All: true header"
-            )
-
-        genai_client = get_genai_client()
-        if not genai_client:
-            raise HTTPException(status_code=500, detail="Gemini client not available")
-
-        logger.critical("🗑️🔥 [KILL SWITCH] Starting complete knowledge base clearance!")
-
-        deletion_stats = {
-            "files_from_db": 0,
-            "files_from_filesearch": 0,
-            "files_failed": 0,
-            "websites_from_db": 0,
-            "websites_from_filesearch": 0,
-            "websites_failed": 0,
-            "total_deleted": 0,
-            "errors": []
-        }
-
-        async with get_db_connection() as conn:
-            # Get all files to delete
-            files = await conn.fetch("SELECT id, gemini_file_name, metadata FROM file_uploads")
-            logger.info(f"📋 Found {len(files)} files to delete")
-
-            for file_record in files:
-                try:
-                    file_id = file_record['id']
-                    metadata = file_record['metadata']
-
-                    # Delete from FileSearch if metadata exists
-                    if metadata:
-                        try:
-                            if isinstance(metadata, str):
-                                meta = json.loads(metadata)
-                            else:
-                                meta = metadata
-
-                            if meta.get('type') == 'file_search' and meta.get('file_search_store_name') and meta.get('document_name'):
-                                store_name = meta['file_search_store_name']
-                                document_name = meta['document_name']
-                                genai_client.file_search_stores.delete_document(
-                                    file_search_store_name=store_name,
-                                    document_name=document_name
-                                )
-                                deletion_stats["files_from_filesearch"] += 1
-                                logger.info(f"✅ Deleted file document from FileSearch: {file_id}")
-                        except Exception as fs_error:
-                            logger.warning(f"⚠️ Could not delete from FileSearch: {fs_error}")
-                            deletion_stats["files_failed"] += 1
-
-                    # Delete from database
-                    await conn.execute("DELETE FROM file_uploads WHERE id = $1", file_id)
-                    deletion_stats["files_from_db"] += 1
-                    deletion_stats["total_deleted"] += 1
-                    logger.info(f"✅ Deleted file from database: {file_id}")
-
-                except Exception as e:
-                    deletion_stats["files_failed"] += 1
-                    deletion_stats["errors"].append(f"File {file_id}: {str(e)}")
-                    logger.error(f"❌ Error deleting file {file_id}: {e}")
-
-            # Get all websites to delete
-            websites = await conn.fetch("SELECT id, gemini_file_name, metadata FROM scraped_websites")
-            logger.info(f"📋 Found {len(websites)} websites to delete")
-
-            for website_record in websites:
-                try:
-                    website_id = website_record['id']
-                    metadata = website_record['metadata']
-
-                    # Delete from FileSearch if metadata exists
-                    if metadata:
-                        try:
-                            if isinstance(metadata, str):
-                                meta = json.loads(metadata)
-                            else:
-                                meta = metadata
-
-                            if meta.get('type') == 'file_search' and meta.get('file_search_store_name') and meta.get('document_name'):
-                                store_name = meta['file_search_store_name']
-                                document_name = meta['document_name']
-                                genai_client.file_search_stores.delete_document(
-                                    file_search_store_name=store_name,
-                                    document_name=document_name
-                                )
-                                deletion_stats["websites_from_filesearch"] += 1
-                                logger.info(f"✅ Deleted website document from FileSearch: {website_id}")
-                        except Exception as fs_error:
-                            logger.warning(f"⚠️ Could not delete website from FileSearch: {fs_error}")
-                            deletion_stats["websites_failed"] += 1
-
-                    # Delete from database
-                    await conn.execute("DELETE FROM scraped_websites WHERE id = $1", website_id)
-                    deletion_stats["websites_from_db"] += 1
-                    deletion_stats["total_deleted"] += 1
-                    logger.info(f"✅ Deleted website from database: {website_id}")
-
-                except Exception as e:
-                    deletion_stats["websites_failed"] += 1
-                    deletion_stats["errors"].append(f"Website {website_id}: {str(e)}")
-                    logger.error(f"❌ Error deleting website {website_id}: {e}")
-
-        logger.critical(f"🗑️🔥 [KILL SWITCH] Complete! Deleted {deletion_stats['total_deleted']} items")
-        logger.critical(f"   Files: {deletion_stats['files_from_db']} from DB, {deletion_stats['files_from_filesearch']} from FileSearch")
-        logger.critical(f"   Websites: {deletion_stats['websites_from_db']} from DB, {deletion_stats['websites_from_filesearch']} from FileSearch")
-
-        return {
-            "success": True,
-            "message": f"Knowledge base cleared! Deleted {deletion_stats['total_deleted']} items total",
-            "stats": deletion_stats
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Fatal error during knowledge base clearance: {e}")
-        raise HTTPException(status_code=500, detail=f"Error clearing knowledge base: {e}")
 
 # =================================
 # HEALTH ENDPOINTS

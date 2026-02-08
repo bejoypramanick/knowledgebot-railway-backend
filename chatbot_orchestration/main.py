@@ -11,22 +11,12 @@ from shared.telemetry import setup_telemetry, instrument_fastapi
 
 # Initialize Telemetry
 # Use default behavior (span exporter disabled by default via env var)
-# Only set up once - add a guard to prevent re-initialization
-if not hasattr(logging, '_otel_initialized_for_chatbot'):
-    setup_telemetry("chatbot-orchestration")
-    logging._otel_initialized_for_chatbot = True
-
+setup_telemetry("chatbot-orchestration")
 logger = logging.getLogger("chatbot_orchestration")
 
 from chatbot_orchestration.routers import router
 from chatbot_orchestration.service.agent_service import pydantic_ai_service
 from chatbot_orchestration.core.utils import log_endpoint_request
-from shared.file_search import get_file_search_store_by_display_name
-
-# Global variable to cache resolved FileSearch store ID
-# Only initialize if not already set (to prevent re-initialization on module reload)
-if '_resolved_store_id' not in globals():
-    _resolved_store_id = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -34,70 +24,26 @@ async def lifespan(app: FastAPI):
     Lifecycle manager for the Chatbot Orchestration Service.
     Handles startup initialization and shutdown cleanup.
     """
+    # Startup
+    logger.info("🚀 Chatbot Orchestration Service starting up...")
+    
+    # Initialize Pydantic AI Service (and DBs lazily)
+    await pydantic_ai_service.initialize()
+    logger.info("🤖 Pydantic AI Service initialized")
+    
+    # Initialize database using centralized initializer
     try:
-        logger.info("=" * 80)
-        logger.info("🚀 LIFESPAN STARTUP STARTING")
-        logger.info("=" * 80)
-
-        # Log environment variables for debugging
-        logger.info("🔧 Environment Variables Check:")
-        gemini_key_status = "✅ Set" if os.getenv('GEMINI_API_KEY') else "❌ Missing"
-        logger.info(f"   GEMINI_API_KEY: {gemini_key_status}")
-        logger.info(f"   CHATBOT_MODEL: {os.getenv('CHATBOT_MODEL', 'Not set')}")
-        logger.info(f"   GEMINI_FILE_SEARCH_STORE_NAME: {os.getenv('GEMINI_FILE_SEARCH_STORE_NAME', 'Not set')}")
-        
-        # Initialize Gemini Client (Check)
-        from chatbot_orchestration.core.ai import get_genai_client
-        if get_genai_client():
-             logger.info("✅ Gemini client initialized")
-        else:
-             logger.warning("⚠️ Gemini client failed to initialize")
-
-        # Initialize Gemini Model (Check)
-        from chatbot_orchestration.core.ai import get_gemini_model
-        if get_gemini_model():
-             logger.info("✅ Gemini model initialized")
-        else:
-             logger.warning("⚠️ Gemini model failed to initialize")
-
-        # Note: FileSearch store is created by API Gateway during startup
-        # Read display_name from environment variable and look it up
-        store_display_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
-        logger.info(f"📂 Looking for FileSearch store by display_name: {store_display_name}")
-
-        # Lookup store by display name using shared utility
-        global _resolved_store_id
-        try:
-            genai_client = get_genai_client()
-            if genai_client:
-                _resolved_store_id = get_file_search_store_by_display_name(
-                    genai_client,
-                    display_name=store_display_name
-                )
-                if _resolved_store_id:
-                    logger.info(f"✅ Resolved FileSearch store ID: {_resolved_store_id}")
-                else:
-                    logger.error(f"❌ FileSearch store not found with display_name: {store_display_name}")
-                    logger.error("   Please ensure API Gateway has initialized FileSearch stores")
-            else:
-                logger.error("❌ Gemini client not available for FileSearch lookup")
-        except Exception as lookup_error:
-            logger.error(f"❌ Error looking up FileSearch store: {lookup_error}")
-
-        logger.info("🚀 Chatbot orchestration service started successfully")
-        logger.info("=" * 80)
-        logger.info("✅ LIFESPAN STARTUP COMPLETE - YIELDING TO FASTAPI")
-        logger.info("=" * 80)
-        yield
-        logger.info("=" * 80)
-        logger.info("🛑 LIFESPAN SHUTDOWN STARTING")
-        logger.info("=" * 80)
-        logger.info("🛑 Chatbot orchestration service shutdown complete")
-        logger.info("=" * 80)
-        
+        from chatbot_orchestration.core.database_initializer import database_initializer
+        await database_initializer.initialize_database()
+        logger.info("🗄️ Database connections initialized (singleton)")
     except Exception as e:
-        logger.error(f"❌ Error in lifespan handler: {e}")
-        raise
+        logger.warning(f"⚠️ Initial database connection check failed: {e}")
+
+    logger.info("✅ Chatbot Orchestration Service fully ready")
+    yield
+    
+    logger.info("🛑 Chatbot Orchestration Service shutting down...")
+    # Add cleanup logic here if needed
 
 app = FastAPI(
     title="Chatbot Orchestration Service",

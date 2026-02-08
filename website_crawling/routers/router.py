@@ -20,7 +20,7 @@ website_service = WebsiteService()
 # WEB SCRAPING ENDPOINTS
 # =================================
 
-@router.post("")
+@router.post("/")
 async def scrape_website(request: Request):
     """Scrape a single website or crawl multiple pages"""
     try:
