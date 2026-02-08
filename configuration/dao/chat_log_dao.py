@@ -303,7 +303,7 @@ class ChatLogDAO:
             query = """
                 SELECT cs.*, u.email as agent_email
                 FROM chat_sessions cs
-                LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                LEFT JOIN session_assignments sa ON cs.id = sa.session_id AND sa.status = 'active'
                 LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                 LEFT JOIN users u ON urm.user_id = u.id
                 ORDER BY cs.last_activity_at DESC
@@ -323,7 +323,7 @@ class ChatLogDAO:
             query = """
                 SELECT cs.*, u.email as agent_email
                 FROM chat_sessions cs
-                LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                LEFT JOIN session_assignments sa ON cs.id = sa.session_id AND sa.status = 'active'
                 LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                 LEFT JOIN users u ON urm.user_id = u.id
                 WHERE cs.archive_status = $1
@@ -512,6 +512,47 @@ class ChatLogDAO:
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return {"positive_count": 0, "negative_count": 0}
+
+    async def get_batch_feedback_counts(self, session_ids: List[str]) -> Dict[str, Dict[str, int]]:
+        """Get feedback counts for multiple sessions in a single query (fixes N+1 problem)."""
+        if not session_ids:
+            return {}
+            
+        query = """
+            SELECT 
+                session_id,
+                COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
+                COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
+            FROM chat_feedback
+            WHERE session_id = ANY($1::text[])
+            GROUP BY session_id
+        """
+        params = {"session_ids": session_ids}
+
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                rows = await conn.fetch(query, session_ids)
+                logger.log_db_query(query, params, rows)
+                
+                # Build result dictionary
+                result = {}
+                for row in rows:
+                    result[row["session_id"]] = {
+                        "positive_count": row["positive_count"] or 0,
+                        "negative_count": row["negative_count"] or 0
+                    }
+                
+                # Fill in missing sessions with zero counts
+                for session_id in session_ids:
+                    if session_id not in result:
+                        result[session_id] = {"positive_count": 0, "negative_count": 0}
+                
+                return result
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            # Return empty counts for all sessions on error
+            return {sid: {"positive_count": 0, "negative_count": 0} for sid in session_ids}
 
     async def get_hil_enabled(self) -> bool:
         """Get HIL enabled status from configuration."""

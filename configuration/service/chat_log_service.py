@@ -128,6 +128,11 @@ class ChatLogService:
         session_db_ids = [s['id'] for s in sessions_data]
         messages_by_session = await self.dao.get_messages_for_sessions(session_db_ids)
 
+        # Get all session IDs for batch feedback query
+        session_ids = [s['session_id'] for s in sessions_data]
+        # OPTIMIZATION: Fetch feedback counts for all sessions in one query
+        batch_feedback_counts = await self.dao.get_batch_feedback_counts(session_ids)
+
         formatted_sessions = []
         for session_row in sessions_data:
             session_id = session_row['session_id']
@@ -183,7 +188,8 @@ class ChatLogService:
                 if is_expired and session_row['is_active']:
                     await self.dao.archive_session(session_id, 'closed') # Effectively close in DB
 
-            feedback_counts = await self.dao.get_session_feedback_counts(session_id)
+            # Use cached feedback counts
+            feedback_counts = batch_feedback_counts.get(session_id, {'positive_count': 0, 'negative_count': 0})
             session_feedback = None
             if feedback_counts['positive_count'] > 0 and feedback_counts['negative_count'] == 0:
                 session_feedback = 'positive'
