@@ -199,7 +199,7 @@ async def public_chat_stream(request: Request):
         headers.pop("authorization", None)
         
         # Make request to chatbot service
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
             response = await client.request(
                 method=request.method,
                 url=f"{chatbot_service_url}/api/v1/chatbot/chat/stream",
@@ -207,20 +207,34 @@ async def public_chat_stream(request: Request):
                 content=await request.body(),
                 params=request.query_params
             )
-            
+
             logger.info(f"✅ [{correlation_id}] Chat stream response: {response.status_code}")
-            
+
+            # Filter response headers to prevent internal URL leakage
+            response_headers = {}
+            blocked_headers = [
+                'content-length',
+                'transfer-encoding',
+                'location',
+                'content-location',
+                'host',
+                'server',
+            ]
+            for key, value in response.headers.items():
+                if key.lower() not in blocked_headers:
+                    response_headers[key] = value
+
             # Return streaming response
             from fastapi.responses import StreamingResponse
-            
+
             async def stream_response():
                 async for chunk in response.aiter_bytes():
                     yield chunk
-            
+
             return StreamingResponse(
                 stream_response(),
                 status_code=response.status_code,
-                headers=dict(response.headers)
+                headers=response_headers
             )
             
     except HTTPException:
