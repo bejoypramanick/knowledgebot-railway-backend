@@ -3,7 +3,7 @@ Consolidated Configuration Router
 All configuration endpoints in one file for easier debugging
 """
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, UploadFile, File, Form
 from typing import Dict, List, Any, Optional
 import json
 
@@ -303,9 +303,6 @@ async def generate_widget_embed_script(request: Request):
         logger.error(f"Error generating embed script: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-from fastapi import UploadFile, File, Form
-import base64
-import os
 
 @router.post("/widget/upload-image")
 async def upload_widget_image(
