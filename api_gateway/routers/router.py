@@ -392,7 +392,7 @@ async def generic_proxy_handler(request: Request, path: str):
             request_timeout = 300.0  # 5 minutes for batch operations
             logger.info(f"⏱️  Using extended timeout {request_timeout}s for batch operation")
 
-        async with httpx.AsyncClient(timeout=request_timeout) as client:
+        async with httpx.AsyncClient(timeout=request_timeout, follow_redirects=False) as client:
             logger.info(f"🔍 About to make HTTP request to: {full_url} (timeout={request_timeout}s)")
             response = await client.request(
                 method=request.method,
@@ -407,10 +407,19 @@ async def generic_proxy_handler(request: Request, path: str):
             from fastapi.responses import Response
             
             # Copy headers from httpx response to FastAPI response
+            # CRITICAL: Filter out headers that might contain internal URLs
             response_headers = {}
+            blocked_headers = [
+                'content-length',
+                'transfer-encoding',
+                'location',  # Prevent internal redirects from leaking
+                'content-location',  # Prevent internal URLs in content location
+                'host',  # Don't expose internal host
+                'server',  # Don't expose server details
+            ]
             for key, value in response.headers.items():
-                # Skip problematic headers that might cause issues
-                if key.lower() not in ['content-length', 'transfer-encoding']:
+                # Skip headers that might contain internal URLs or cause issues
+                if key.lower() not in blocked_headers:
                     response_headers[key] = value
             
             return Response(
