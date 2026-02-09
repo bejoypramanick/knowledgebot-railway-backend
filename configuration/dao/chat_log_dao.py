@@ -366,18 +366,16 @@ class ChatLogDAO:
 
     async def get_messages_for_sessions(self, session_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
         if not session_ids: return {}
-        # Generate dynamic placeholders for IN clause
-        placeholders = ','.join(f'${i+1}' for i in range(len(session_ids)))
-        query = f"""
+        query = """
             SELECT * FROM chat_messages
-            WHERE session_id IN ({placeholders})
+            WHERE session_id = ANY($1::int[])
             ORDER BY created_at ASC
         """
         try:
             params = {"session_ids": session_ids}
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                rows = await conn.fetch(query, *session_ids)
+                rows = await conn.fetch(query, session_ids)
                 logger.log_db_query(query, params, rows)
                 
                 result = {}
@@ -520,15 +518,13 @@ class ChatLogDAO:
         if not session_ids:
             return {}
 
-        # Generate dynamic placeholders for IN clause
-        placeholders = ','.join(f'${i+1}' for i in range(len(session_ids)))
-        query = f"""
+        query = """
             SELECT
                 session_id,
                 COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
                 COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
             FROM chat_feedback
-            WHERE session_id IN ({placeholders})
+            WHERE session_id = ANY($1::text[])
             GROUP BY session_id
         """
         params = {"session_ids": session_ids}
@@ -536,7 +532,7 @@ class ChatLogDAO:
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                rows = await conn.fetch(query, *session_ids)
+                rows = await conn.fetch(query, session_ids)
                 logger.log_db_query(query, params, rows)
                 
                 # Build result dictionary
