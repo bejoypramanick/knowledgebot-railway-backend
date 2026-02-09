@@ -164,11 +164,86 @@ async def get_widget_config():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/widgetConfig")
-async def update_widget_config(config: WidgetConfigRequest, request: Request):
-    """Update widget configuration"""
+async def update_widget_config(
+    request: Request,
+    config: Optional[str] = Form(None),
+    profile_image: Optional[UploadFile] = File(None),
+    chat_icon_image: Optional[UploadFile] = File(None)
+):
+    """Update widget configuration with optional image uploads"""
     try:
-        await config_service.update_widget_config(config.dict())
-        return {"success": True, "message": "Widget configuration updated successfully"}
+        # Check if this is multipart/form-data or JSON
+        content_type = request.headers.get('content-type', '')
+
+        if 'multipart/form-data' in content_type:
+            # Handle multipart form data with images
+            if not config:
+                raise HTTPException(status_code=400, detail="Config data required in multipart request")
+
+            # Parse JSON config from form
+            import json
+            config_data = json.loads(config)
+
+            # Upload images if provided
+            if profile_image and profile_image.filename:
+                logger.info(f"📤 Uploading profile image: {profile_image.filename}")
+
+                # Validate file type
+                allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"]
+                if profile_image.content_type not in allowed_types:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid profile image file type. Allowed: {', '.join(allowed_types)}"
+                    )
+
+                # Read file content
+                profile_content = await profile_image.read()
+
+                # Convert to base64 data URL
+                import base64
+                base64_content = base64.b64encode(profile_content).decode('utf-8')
+                data_url = f"data:{profile_image.content_type};base64,{base64_content}"
+
+                # Update config with new URL
+                config_data['profile_picture_url'] = data_url
+                config_data['profile_picture_filename'] = profile_image.filename
+
+            if chat_icon_image and chat_icon_image.filename:
+                logger.info(f"📤 Uploading chat icon image: {chat_icon_image.filename}")
+
+                # Validate file type
+                allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"]
+                if chat_icon_image.content_type not in allowed_types:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Invalid chat icon file type. Allowed: {', '.join(allowed_types)}"
+                    )
+
+                # Read file content
+                chat_icon_content = await chat_icon_image.read()
+
+                # Convert to base64 data URL
+                import base64
+                base64_content = base64.b64encode(chat_icon_content).decode('utf-8')
+                data_url = f"data:{chat_icon_image.content_type};base64,{base64_content}"
+
+                # Update config with new URL
+                config_data['chat_icon_url'] = data_url
+                config_data['chat_icon_filename'] = chat_icon_image.filename
+
+            # Update widget config
+            await config_service.update_widget_config(config_data)
+            return {"success": True, "message": "Widget configuration updated successfully with images"}
+
+        else:
+            # Handle JSON request (backward compatibility)
+            body = await request.json()
+            await config_service.update_widget_config(body)
+            return {"success": True, "message": "Widget configuration updated successfully"}
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Error parsing config JSON: {e}")
+        raise HTTPException(status_code=400, detail="Invalid JSON in config field")
     except Exception as e:
         logger.error(f"Error updating widget config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
