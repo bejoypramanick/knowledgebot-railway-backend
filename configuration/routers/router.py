@@ -700,9 +700,10 @@ async def get_admin_chat_sessions(
     role: str = "admin",
     status: str = "active",
     page: int = 1,
-    limit: int = 50
+    limit: int = 50,
+    include_messages: bool = True  # NEW: Include messages by default
 ):
-    """Get chat sessions for admin with real database integration"""
+    """Get chat sessions for admin with messages included for reactive UI"""
     try:
         # Get user email from request headers
         user_email = request.headers.get("X-User-Email", "admin@example.com")
@@ -717,15 +718,42 @@ async def get_admin_chat_sessions(
             agent_id=agent_id
         )
 
-        # Convert sessions to dict format for JSON response
+        # Convert sessions to dict format and include messages
         sessions_data = []
         for session in sessions:
             if hasattr(session, 'dict'):
-                sessions_data.append(session.dict())
+                session_dict = session.dict()
             elif hasattr(session, '__dict__'):
-                sessions_data.append(session.__dict__)
+                session_dict = session.__dict__
             else:
-                sessions_data.append(session)
+                session_dict = session
+
+            # Load messages for each session if requested
+            if include_messages:
+                try:
+                    session_id = session_dict.get('id')
+                    if session_id:
+                        messages = await chat_log_service.get_session_messages(session_id)
+
+                        # Format messages
+                        formatted_messages = []
+                        for msg in messages:
+                            formatted_messages.append({
+                                "id": str(msg.get("id", "")),
+                                "text": msg.get("content", ""),
+                                "sender": msg.get("role", "user"),
+                                "timestamp": msg.get("created_at").isoformat() if msg.get("created_at") else None,
+                                "session_id": session_id
+                            })
+
+                        session_dict['messages'] = formatted_messages
+                    else:
+                        session_dict['messages'] = []
+                except Exception as e:
+                    logger.warning(f"Error loading messages for session {session_dict.get('id')}: {e}")
+                    session_dict['messages'] = []
+
+            sessions_data.append(session_dict)
 
         total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
 
