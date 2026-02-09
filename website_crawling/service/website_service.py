@@ -392,10 +392,11 @@ class WebsiteService:
         urls: List[str],
         timeout: int
     ) -> Dict[str, Any]:
-        """Scrape multiple URLs from a sitemap."""
+        """Scrape multiple URLs from a sitemap in parallel."""
         all_content = []
         scraped_urls: Set[str] = set()
         title = "Sitemap Collection"
+        scraped_data = []  # Store results with order preserved
 
         headers = {
             "User-Agent": "KnowledgeBot-Crawler/1.0 (+https://globistaan.com)"
@@ -405,15 +406,18 @@ class WebsiteService:
             import httpx
             from bs4 import BeautifulSoup
 
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                for i, url in enumerate(urls):
-                    logger.info(f"📄 Scraping URL {i+1}/{len(urls)}: {url}")
+            # Limit concurrent requests to avoid overwhelming target site
+            max_concurrent = 10
+            semaphore = asyncio.Semaphore(max_concurrent)
+
+            async def scrape_single_url(url: str, index: int, client: httpx.AsyncClient):
+                """Scrape a single URL with rate limiting."""
+                async with semaphore:
+                    logger.info(f"📄 Scraping URL {index+1}/{len(urls)}: {url}")
 
                     try:
                         response = await client.get(url, headers=headers)
                         response.raise_for_status()
-
-                        scraped_urls.add(url)
 
                         # Parse HTML
                         soup = BeautifulSoup(response.text, 'lxml')
@@ -422,23 +426,64 @@ class WebsiteService:
                         for element in soup(['script', 'style', 'nav', 'footer', 'header']):
                             element.decompose()
 
-                        # Get title from first page if not set
-                        if i == 0:
+                        # Get title (will use from first page later)
+                        page_title = None
+                        if index == 0:
                             title_tag = soup.find('title')
                             if title_tag:
-                                title = title_tag.get_text(strip=True)
+                                page_title = title_tag.get_text(strip=True)
 
                         # Extract text content
                         text = soup.get_text(separator='\n', strip=True)
                         text = re.sub(r'\n{3,}', '\n\n', text)
 
-                        if text:
-                            all_content.append(f"\n\n--- Page: {url} ---\n\n{text}")
+                        return {
+                            "success": True,
+                            "url": url,
+                            "index": index,
+                            "text": text,
+                            "title": page_title
+                        }
 
                     except httpx.HTTPStatusError as e:
                         logger.warning(f"⚠️ HTTP error scraping {url}: {e.response.status_code}")
+                        return {"success": False, "url": url, "index": index, "error": str(e)}
                     except Exception as e:
                         logger.warning(f"⚠️ Error scraping {url}: {e}")
+                        return {"success": False, "url": url, "index": index, "error": str(e)}
+
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+                # Scrape all URLs in parallel with semaphore limiting concurrency
+                tasks = [scrape_single_url(url, i, client) for i, url in enumerate(urls)]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # Process results in original order
+                for result in results:
+                    if isinstance(result, Exception):
+                        logger.error(f"Exception in parallel scraping: {result}")
+                        continue
+
+                    if result.get("success"):
+                        scraped_urls.add(result["url"])
+
+                        # Get title from first successful page
+                        if result.get("title") and title == "Sitemap Collection":
+                            title = result["title"]
+
+                        # Append content in order
+                        if result.get("text"):
+                            scraped_data.append({
+                                "index": result["index"],
+                                "url": result["url"],
+                                "text": result["text"]
+                            })
+
+                # Sort by original index to maintain URL order
+                scraped_data.sort(key=lambda x: x["index"])
+
+                # Combine content
+                for item in scraped_data:
+                    all_content.append(f"\n\n--- Page: {item['url']} ---\n\n{item['text']}")
 
             combined_content = "\n".join(all_content)
 
