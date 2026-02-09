@@ -4,8 +4,11 @@ All configuration endpoints in one file for easier debugging
 """
 
 from fastapi import APIRouter, HTTPException, Request, Depends, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from typing import Dict, List, Any, Optional
 import json
+import asyncio
+from collections import defaultdict
 
 from shared.otel_logger import get_otel_logger
 from ..service.configuration_service import ConfigurationService
@@ -89,6 +92,32 @@ notifications_service = NotificationsService(notifications_dao=None)
 performance_service = PerformanceService()
 feedback_service = FeedbackService()
 token_usage_service = TokenUsageService()
+
+# =================================
+# SSE EVENT BROADCASTING SYSTEM
+# =================================
+# Global event queues for each connected agent (email -> Queue)
+agent_event_queues: Dict[str, asyncio.Queue] = {}
+agent_event_queues_lock = asyncio.Lock()
+
+async def broadcast_event_to_agent(agent_email: str, event_data: Dict[str, Any]):
+    """Broadcast an event to a specific agent's SSE connection"""
+    async with agent_event_queues_lock:
+        if agent_email in agent_event_queues:
+            try:
+                await agent_event_queues[agent_email].put(event_data)
+                logger.info(f"📤 Broadcasted event to agent {agent_email}: {event_data.get('type')}")
+            except Exception as e:
+                logger.error(f"Error broadcasting event to {agent_email}: {e}")
+
+async def broadcast_event_to_all_agents(event_data: Dict[str, Any]):
+    """Broadcast an event to all connected agents"""
+    async with agent_event_queues_lock:
+        for agent_email in list(agent_event_queues.keys()):
+            try:
+                await agent_event_queues[agent_email].put(event_data)
+            except Exception as e:
+                logger.error(f"Error broadcasting to {agent_email}: {e}")
 
 # =================================
 # CHATBOT CONFIGURATION ENDPOINTS
@@ -594,6 +623,76 @@ async def get_online_agents():
         logger.error(f"Error getting online agents: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/admin/events")
+async def agent_events_stream(request: Request, token: str = None):
+    """
+    Server-Sent Events endpoint for real-time agent updates
+    Streams events for ALL sessions assigned to the logged-in agent
+    """
+    try:
+        # Get user email from token or request headers
+        user_email = request.headers.get("X-User-Email")
+
+        if not user_email:
+            logger.error("No user email in SSE request")
+            raise HTTPException(status_code=401, detail="Unauthorized")
+
+        logger.info(f"🔌 Agent {user_email} connecting to SSE stream")
+
+        # Create event queue for this agent
+        event_queue = asyncio.Queue()
+
+        async with agent_event_queues_lock:
+            agent_event_queues[user_email] = event_queue
+
+        async def event_generator():
+            try:
+                # Send initial connection event
+                yield f"data: {json.dumps({'type': 'connected', 'agent_email': user_email})}\n\n"
+
+                # Send heartbeat every 30 seconds to keep connection alive
+                last_heartbeat = asyncio.get_event_loop().time()
+
+                while True:
+                    try:
+                        # Wait for event with timeout for heartbeat
+                        event_data = await asyncio.wait_for(event_queue.get(), timeout=30.0)
+
+                        # Send event to client
+                        yield f"data: {json.dumps(event_data)}\n\n"
+
+                    except asyncio.TimeoutError:
+                        # Send heartbeat
+                        current_time = asyncio.get_event_loop().time()
+                        if current_time - last_heartbeat >= 30:
+                            yield f"data: {json.dumps({'type': 'ping'})}\n\n"
+                            last_heartbeat = current_time
+
+            except asyncio.CancelledError:
+                logger.info(f"🔌 SSE connection cancelled for {user_email}")
+            except Exception as e:
+                logger.error(f"Error in SSE generator for {user_email}: {e}")
+            finally:
+                # Cleanup: remove queue when connection closes
+                async with agent_event_queues_lock:
+                    if user_email in agent_event_queues:
+                        del agent_event_queues[user_email]
+                logger.info(f"🔌 Agent {user_email} disconnected from SSE stream")
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # Disable nginx buffering
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error setting up SSE stream: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/admin/chat-sessions")
 async def get_admin_chat_sessions(
     request: Request,
@@ -680,6 +779,19 @@ async def send_agent_message(session_id: str, request: Request):
             raise HTTPException(status_code=400, detail="Message text is required")
 
         message_id = await chat_log_service.send_agent_message(session_id, agent_id, text)
+
+        # Broadcast event to all agents (they'll filter by session)
+        import datetime
+        event_data = {
+            "type": "agent_message",
+            "session_id": session_id,
+            "message_id": str(message_id),
+            "text": text,
+            "sender": "agent",
+            "agent_email": agent_id,
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        }
+        await broadcast_event_to_all_agents(event_data)
 
         return {
             "success": True,
