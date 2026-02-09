@@ -96,8 +96,8 @@ token_usage_service = TokenUsageService()
 # =================================
 # SSE EVENT BROADCASTING SYSTEM
 # =================================
-# Global event queues for each connected agent (email -> Queue)
-agent_event_queues: Dict[str, asyncio.Queue] = {}
+# Global event queues for each connected agent: email -> (Queue, role)
+agent_event_queues: Dict[str, tuple] = {}  # email -> (asyncio.Queue, role)
 agent_event_queues_lock = asyncio.Lock()
 
 async def broadcast_event_to_agent(agent_email: str, event_data: Dict[str, Any]):
@@ -105,7 +105,8 @@ async def broadcast_event_to_agent(agent_email: str, event_data: Dict[str, Any])
     async with agent_event_queues_lock:
         if agent_email in agent_event_queues:
             try:
-                await agent_event_queues[agent_email].put(event_data)
+                queue, role = agent_event_queues[agent_email]
+                await queue.put(event_data)
                 logger.info(f"📤 Broadcasted event to agent {agent_email}: {event_data.get('type')}")
             except Exception as e:
                 logger.error(f"Error broadcasting event to {agent_email}: {e}")
@@ -113,11 +114,61 @@ async def broadcast_event_to_agent(agent_email: str, event_data: Dict[str, Any])
 async def broadcast_event_to_all_agents(event_data: Dict[str, Any]):
     """Broadcast an event to all connected agents"""
     async with agent_event_queues_lock:
-        for agent_email in list(agent_event_queues.keys()):
+        for agent_email, (queue, role) in agent_event_queues.items():
             try:
-                await agent_event_queues[agent_email].put(event_data)
+                await queue.put(event_data)
             except Exception as e:
                 logger.error(f"Error broadcasting to {agent_email}: {e}")
+
+async def broadcast_event_for_session(session_id: str, event_data: Dict[str, Any]):
+    """
+    Broadcast event to agents who should see this session:
+    - All admins (they see all sessions)
+    - The assigned human agent (if any)
+
+    This prevents human agents from seeing other agents' conversations.
+    """
+    try:
+        # Get session details to find assigned agent
+        from shared.db import get_db_connection
+        query = """
+            SELECT assigned_agent, user_role_id
+            FROM chat_sessions
+            WHERE id = $1
+        """
+        async with get_db_connection() as conn:
+            session_data = await conn.fetchrow(query, session_id)
+
+        if not session_data:
+            logger.warning(f"Session {session_id} not found for broadcasting")
+            return
+
+        assigned_agent = session_data.get('assigned_agent')
+
+        # Broadcast to admins + assigned agent only
+        async with agent_event_queues_lock:
+            for agent_email, (queue, role) in agent_event_queues.items():
+                # Send to:
+                # 1. All admins (they see everything)
+                # 2. The assigned human agent
+                should_receive = (
+                    role == 'admin' or  # Admins see all
+                    (assigned_agent and agent_email == assigned_agent)  # Assigned agent
+                )
+
+                if should_receive:
+                    try:
+                        await queue.put(event_data)
+                        logger.info(f"📤 Sent event to {role} {agent_email}")
+                    except Exception as e:
+                        logger.error(f"Error broadcasting to {agent_email}: {e}")
+                else:
+                    logger.debug(f"Skipping {agent_email} (role={role}, not assigned)")
+
+    except Exception as e:
+        logger.error(f"Error in broadcast_event_for_session: {e}")
+        # Fallback to broadcast to all
+        await broadcast_event_to_all_agents(event_data)
 
 # =================================
 # CHATBOT CONFIGURATION ENDPOINTS
@@ -637,13 +688,15 @@ async def agent_events_stream(request: Request, token: str = None):
             logger.error("No user email in SSE request")
             raise HTTPException(status_code=401, detail="Unauthorized")
 
-        logger.info(f"🔌 Agent {user_email} connecting to SSE stream")
+        # Get user role from request headers (set by API Gateway)
+        user_role = request.headers.get("X-User-Role", "human_agent")
+        logger.info(f"🔌 Agent {user_email} (role={user_role}) connecting to SSE stream")
 
         # Create event queue for this agent
         event_queue = asyncio.Queue()
 
         async with agent_event_queues_lock:
-            agent_event_queues[user_email] = event_queue
+            agent_event_queues[user_email] = (event_queue, user_role)
 
         async def event_generator():
             try:
@@ -808,7 +861,7 @@ async def send_agent_message(session_id: str, request: Request):
 
         message_id = await chat_log_service.send_agent_message(session_id, agent_id, text)
 
-        # Broadcast event to all agents (they'll filter by session)
+        # Broadcast event to admins + assigned agent only
         import datetime
         event_data = {
             "type": "agent_message",
@@ -819,7 +872,7 @@ async def send_agent_message(session_id: str, request: Request):
             "agent_email": agent_id,
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
-        await broadcast_event_to_all_agents(event_data)
+        await broadcast_event_for_session(session_id, event_data)
 
         return {
             "success": True,
