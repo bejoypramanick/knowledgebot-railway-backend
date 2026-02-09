@@ -771,7 +771,7 @@ async def get_admin_chat_sessions(
             agent_id=agent_id
         )
 
-        # Convert sessions to dict format and include messages
+        # Convert sessions to dict format (messages already included by service)
         sessions_data = []
         for session in sessions:
             if hasattr(session, 'dict'):
@@ -781,30 +781,10 @@ async def get_admin_chat_sessions(
             else:
                 session_dict = session
 
-            # Load messages for each session if requested
-            if include_messages:
-                try:
-                    session_id = session_dict.get('id')
-                    if session_id:
-                        messages = await chat_log_service.get_session_messages(session_id)
-
-                        # Format messages
-                        formatted_messages = []
-                        for msg in messages:
-                            formatted_messages.append({
-                                "id": str(msg.get("id", "")),
-                                "text": msg.get("content", ""),
-                                "sender": msg.get("role", "user"),
-                                "timestamp": msg.get("created_at").isoformat() if msg.get("created_at") else None,
-                                "session_id": session_id
-                            })
-
-                        session_dict['messages'] = formatted_messages
-                    else:
-                        session_dict['messages'] = []
-                except Exception as e:
-                    logger.warning(f"Error loading messages for session {session_dict.get('id')}: {e}")
-                    session_dict['messages'] = []
+            # Messages are already included by get_chat_sessions service
+            # If include_messages is False, remove them
+            if not include_messages and 'messages' in session_dict:
+                session_dict['messages'] = []
 
             sessions_data.append(session_dict)
 
