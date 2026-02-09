@@ -184,7 +184,10 @@ async def update_widget_config(
             import json
             config_data = json.loads(config)
 
-            # Upload images if provided
+            # Upload images if provided using DAO with S3 storage
+            from configuration.dao.widget_config_dao import WidgetConfigDAO
+            widget_dao = WidgetConfigDAO()
+
             if profile_image and profile_image.filename:
                 logger.info(f"📤 Uploading profile image: {profile_image.filename}")
 
@@ -199,14 +202,16 @@ async def update_widget_config(
                 # Read file content
                 profile_content = await profile_image.read()
 
-                # Convert to base64 data URL
-                import base64
-                base64_content = base64.b64encode(profile_content).decode('utf-8')
-                data_url = f"data:{profile_image.content_type};base64,{base64_content}"
+                # Upload to Railway S3 storage via DAO
+                storage_url, storage_filename = await widget_dao.update_widget_image(
+                    image_type="profile",
+                    image_data=profile_content,
+                    filename=profile_image.filename
+                )
 
-                # Update config with new URL
-                config_data['profile_picture_url'] = data_url
-                config_data['profile_picture_filename'] = profile_image.filename
+                # Update config with S3 URL (DAO already updated DB, but we override in config)
+                config_data['profile_picture_url'] = storage_url
+                config_data['profile_picture_filename'] = storage_filename
 
             if chat_icon_image and chat_icon_image.filename:
                 logger.info(f"📤 Uploading chat icon image: {chat_icon_image.filename}")
@@ -222,14 +227,16 @@ async def update_widget_config(
                 # Read file content
                 chat_icon_content = await chat_icon_image.read()
 
-                # Convert to base64 data URL
-                import base64
-                base64_content = base64.b64encode(chat_icon_content).decode('utf-8')
-                data_url = f"data:{chat_icon_image.content_type};base64,{base64_content}"
+                # Upload to Railway S3 storage via DAO
+                storage_url, storage_filename = await widget_dao.update_widget_image(
+                    image_type="chatIcon",
+                    image_data=chat_icon_content,
+                    filename=chat_icon_image.filename
+                )
 
-                # Update config with new URL
-                config_data['chat_icon_url'] = data_url
-                config_data['chat_icon_filename'] = chat_icon_image.filename
+                # Update config with S3 URL (DAO already updated DB, but we override in config)
+                config_data['chat_icon_url'] = storage_url
+                config_data['chat_icon_filename'] = storage_filename
 
             # Update widget config
             await config_service.update_widget_config(config_data)
