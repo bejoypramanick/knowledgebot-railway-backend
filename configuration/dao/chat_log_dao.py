@@ -376,13 +376,15 @@ class ChatLogDAO:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 rows = await conn.fetch(query, session_ids)
+                logger.info(f"🔍 get_messages_for_sessions: query returned {len(rows)} rows for {len(session_ids)} session_ids")
                 logger.log_db_query(query, params, rows)
-                
+
                 result = {}
                 for r in rows:
                     sid = r['session_id']
                     if sid not in result: result[sid] = []
                     result[sid].append(r)
+                logger.info(f"📊 get_messages_for_sessions result: {len(result)} sessions with messages")
                 return result
         except Exception as e:
             logger.log_db_query(query, params, error=e)

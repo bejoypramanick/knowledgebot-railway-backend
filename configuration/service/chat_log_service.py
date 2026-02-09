@@ -126,7 +126,9 @@ class ChatLogService:
             return [], total_count
 
         session_db_ids = [s['id'] for s in sessions_data]
+        logger.info(f"🔍 Loading messages for {len(session_db_ids)} sessions: {session_db_ids[:5]}...")
         messages_by_session = await self.dao.get_messages_for_sessions(session_db_ids)
+        logger.info(f"📨 Loaded messages for {len(messages_by_session)} sessions, total messages: {sum(len(msgs) for msgs in messages_by_session.values())}")
 
         # Get all session IDs for batch feedback query
         session_ids = [s['session_id'] for s in sessions_data]
