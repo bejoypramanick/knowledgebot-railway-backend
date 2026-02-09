@@ -366,16 +366,18 @@ class ChatLogDAO:
 
     async def get_messages_for_sessions(self, session_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
         if not session_ids: return {}
-        query = """
-            SELECT * FROM chat_messages 
-            WHERE session_id = ANY($1::int[]) 
+        # Generate dynamic placeholders for IN clause
+        placeholders = ','.join(f'${i+1}' for i in range(len(session_ids)))
+        query = f"""
+            SELECT * FROM chat_messages
+            WHERE session_id IN ({placeholders})
             ORDER BY created_at ASC
         """
         try:
             params = {"session_ids": session_ids}
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                rows = await conn.fetch(query, session_ids)
+                rows = await conn.fetch(query, *session_ids)
                 logger.log_db_query(query, params, rows)
                 
                 result = {}
@@ -517,14 +519,16 @@ class ChatLogDAO:
         """Get feedback counts for multiple sessions in a single query (fixes N+1 problem)."""
         if not session_ids:
             return {}
-            
-        query = """
-            SELECT 
+
+        # Generate dynamic placeholders for IN clause
+        placeholders = ','.join(f'${i+1}' for i in range(len(session_ids)))
+        query = f"""
+            SELECT
                 session_id,
                 COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
                 COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
             FROM chat_feedback
-            WHERE session_id = ANY($1::text[])
+            WHERE session_id IN ({placeholders})
             GROUP BY session_id
         """
         params = {"session_ids": session_ids}
@@ -532,7 +536,7 @@ class ChatLogDAO:
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                rows = await conn.fetch(query, session_ids)
+                rows = await conn.fetch(query, *session_ids)
                 logger.log_db_query(query, params, rows)
                 
                 # Build result dictionary
