@@ -69,4 +69,4 @@ class PydanticAIGatewayService:
 
     async def get_chat_history(self, session_id: str):
         """Get chat history - delegates to SessionStateManager."""
-        return await agent_manager.session_state_manager.chat_dao.get_chat_history(session_id)
+        return await session_state_manager.get_chat_history(session_id)

@@ -72,7 +72,7 @@ class StreamingService:
             logger.info("✅ Session dependencies created")
 
             # Get chat history for context
-            chat_history = await session_state_manager.chat_dao.get_chat_history(session_id)
+            chat_history = await session_state_manager.get_chat_history(session_id)
             logger.info(f"✅ Retrieved {len(chat_history)} messages from chat history")
 
             # Convert chat history to Pydantic AI format
@@ -81,7 +81,7 @@ class StreamingService:
 
             # Save user message to database
             try:
-                await session_state_manager.chat_dao.save_message(
+                await session_state_manager.save_message(
                     session_id=session_id,
                     role="user",
                     content=message,
@@ -145,7 +145,7 @@ class StreamingService:
             # Save complete assistant response to database
             if full_response.strip():
                 try:
-                    await session_state_manager.chat_dao.save_message(
+                    await session_state_manager.save_message(
                         session_id=session_id,
                         role="assistant",
                         content=full_response,
@@ -195,7 +195,7 @@ class StreamingService:
         try:
             logger.info(f"🚀 Processing message for session: {session_id}")
             
-            # Import here to avoid circular imports
+            # Import agent_manager here to avoid circular imports
             from .agent_manager import agent_manager
             
             # Create agent
@@ -226,7 +226,7 @@ class StreamingService:
             response_text = str(result)
             
             # Save assistant response
-            await session_state_manager.chat_dao.save_message(
+            await session_state_manager.save_message(
                 session_id=session_id,
                 role="assistant",
                 content=response_text,

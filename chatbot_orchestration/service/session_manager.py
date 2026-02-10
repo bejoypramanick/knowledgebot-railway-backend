@@ -112,6 +112,14 @@ class SessionStateManager:
             }
         return self.session_states[session_id]
 
+    async def get_chat_history(self, session_id: str):
+        """Get chat history - delegates to chat_dao."""
+        return await self.chat_dao.get_chat_history(session_id)
+
+    async def save_message(self, session_id: str, role: str, content: str, metadata: Dict[str, Any] = None):
+        """Save message to database - delegates to chat_dao."""
+        return await self.chat_dao.save_message(session_id, role, content, metadata)
+
     def update_session_activity(self, session_id: str):
         """Update session activity timestamp."""
         state = self.get_session_state(session_id)
