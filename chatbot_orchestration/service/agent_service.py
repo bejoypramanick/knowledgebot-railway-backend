@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 from google.genai import types
 from pydantic_ai import Agent
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+from pydantic_ai.models.google import GoogleModel
 
 from chatbot_orchestration.dao.chat_dao import ChatDAO
 from shared.otel_logger import get_otel_logger
@@ -304,10 +304,12 @@ class PydanticAIGatewayService:
             if use_cache:
                 # Use cached content - system prompt is in the cache
                 logger.info(f"🚀 Using cached content: {cached_content_id}")
-                model_settings = GoogleModelSettings(
-                    cached_content_name=cached_content_id
+
+                # Pass cached_content directly to GoogleModel (not via model_settings)
+                google_model = GoogleModel(
+                    MODEL_NAME,
+                    cached_content=cached_content_id  # Direct parameter
                 )
-                google_model = GoogleModel(MODEL_NAME, model_settings=model_settings)
 
                 # IMPORTANT: Don't pass system_prompt when using cached content
                 # The system prompt is already in the cache
