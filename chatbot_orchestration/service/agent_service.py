@@ -48,22 +48,27 @@ class PydanticAIGatewayService:
     async def get_or_create_file_search_store(self, session_id: str) -> str:
         if not self.genai_client:
             raise ValueError("GenAI client not initialized")
-        
+
         try:
+            import os
+
+            # Get store display name from environment variable
+            store_display_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
+
             if hasattr(self.genai_client, 'stores'):
                 stores = list(self.genai_client.stores.list())
                 app_store = None
                 for store in stores:
-                    if hasattr(store, 'display_name') and 'knowledgebot_file_search' in store.display_name.lower():
+                    if hasattr(store, 'display_name') and store_display_name.lower().replace('-', '_') in store.display_name.lower().replace('-', '_'):
                         app_store = store
                         break
-                
+
                 if app_store:
                     return app_store.name
                 else:
-                    # Create new store using correct Python client API
+                    # Create new store using correct Python client API with name from env
                     new_store = self.genai_client.stores.create(
-                        displayName="KnowledgeBot FileSearch Store"
+                        displayName=store_display_name.replace('-', ' ').title()
                     )
                     logger.info(f"Created FileSearch store: {new_store.name}")
                     return new_store.name
