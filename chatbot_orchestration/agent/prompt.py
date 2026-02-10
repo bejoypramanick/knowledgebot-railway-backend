@@ -21,9 +21,10 @@ def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Opti
     # Check cache first
     cached_prompt = get_cached_system_prompt(prompt_components, MODEL_NAME)
     logger.inf("cached_prompt found")
-    if cached_prompt:
+    if cached_prompt is not None:
         return cached_prompt
     
+    logger.inf("cached_prompt not found")
     # Comprehensive system prompt designed for Gemini context caching (32,768+ tokens minimum)
     base_prompt = """Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers.
 
