@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 from google.genai import types
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.settings import ModelSettings
 
 from chatbot_orchestration.dao.chat_dao import ChatDAO
 from shared.otel_logger import get_otel_logger
@@ -314,19 +315,19 @@ class PydanticAIGatewayService:
             # File search store is managed by the search_knowledge_base tool, not the Agent
             # The tool uses environment variable GEMINI_FILE_SEARCH_STORE_NAME directly
 
-            # CACHING TEMPORARILY DISABLED: Pydantic AI v1.48.0 doesn't support google_cached_content parameter
-            # TODO: Investigate proper caching mechanism for this Pydantic AI version
-            use_cache = False  # bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
+            # CACHING RE-ENABLED: Using ModelSettings approach for Pydantic AI v1.48.0
+            use_cache = bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
 
             if use_cache:
                 # Use cached content - system prompt is in the cache
                 logger.info(f"🚀 Using cached content: {cached_content_id}")
 
-                # Pass google_cached_content directly to GoogleModel
-                # This is a provider-specific parameter for Gemini's explicit caching
+                # Pass cached_content via ModelSettings (correct for Pydantic AI v1.48.0)
                 google_model = GoogleModel(
                     MODEL_NAME,
-                    google_cached_content=cached_content_id  # Pydantic AI standard parameter
+                    model_settings=ModelSettings(
+                        cached_content=cached_content_id  # Passed via settings for v1.48.0
+                    )
                 )
 
                 # IMPORTANT: Don't pass system_prompt when using cached content
@@ -337,7 +338,7 @@ class PydanticAIGatewayService:
                     tools=tools,  # Tools can be passed separately
                     deps_type=ChatSessionDeps,
                 )
-                logger.info("✅ Agent created with CACHED system prompt (explicit caching enabled)")
+                logger.info("✅ Agent created with CACHED system prompt (context caching enabled via ModelSettings)")
             else:
                 # No cache available - use full system prompt
                 logger.info("📝 No cache available - using full system prompt")
