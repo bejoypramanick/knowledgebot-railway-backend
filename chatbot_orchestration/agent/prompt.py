@@ -19,6 +19,7 @@ def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Opti
     }
     
     # Check cache first
+    cached_prompt = None
     cached_prompt = get_cached_system_prompt(prompt_components, MODEL_NAME)
     logger.inf("cached_prompt found")
     if cached_prompt is not None:
