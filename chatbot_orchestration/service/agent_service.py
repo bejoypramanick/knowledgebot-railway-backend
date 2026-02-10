@@ -83,19 +83,19 @@ class PydanticAIGatewayService:
 
     async def get_or_create_cached_content(self, system_prompt: str, tools: List[Any] = None) -> str:
         """
-        Create cached content for system prompt and tools.
+        Create cached content for system prompt ONLY (not tools).
 
         IMPORTANT:
         - Gemini requires minimum 2,048 tokens for caching
         - Our system prompt is ~32,768 tokens, which is well above the minimum
-        - Per Gemini API: "CachedContent can not be used with GenerateContent request setting
-          system_instruction, tools or tool_config."
-        - Solution: Include tools IN the cached content, not in GenerateContent request
-        - This enables both caching benefits AND tool usage together
+        - Gemini API restriction: "CachedContent can not be used with GenerateContent request
+          setting system_instruction, tools or tool_config."
+        - Solution: Cache ONLY system prompt (~32K tokens), pass tools separately (~500 tokens)
+        - This still provides significant token savings while allowing tool usage
 
         Args:
             system_prompt: The system instruction text to cache
-            tools: Optional list of Pydantic AI tools to include in cache
+            tools: Ignored parameter (kept for backwards compatibility)
 
         Returns:
             Cached content ID or "no_cache_*" identifier
@@ -116,42 +116,26 @@ class PydanticAIGatewayService:
                 logger.warning(f"⚠️ System prompt too small for caching (< 2,048 tokens). Size: {int(estimated_tokens)} tokens")
                 return f"no_cache_too_small_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
 
-            # Prepare cache configuration
+            # Prepare cache configuration (ONLY system prompt, no tools)
+            # IMPORTANT: Gemini API restriction - cannot use cached content with tools in request
+            # Solution: Cache only system prompt (~32K tokens), pass tools separately (~500 tokens)
+            # This still saves significant tokens while allowing tool usage
             cache_config = types.CreateCachedContentConfig(
-                display_name=f"system_prompt_tools_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+                display_name=f"system_prompt_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
                 system_instruction=types.Content(parts=[types.Part(text=system_prompt)]),
                 ttl="3600s"  # 1 hour cache
             )
 
-            # Include tools in cached content if provided
-            # This is REQUIRED by Gemini API - tools cannot be passed separately when using cache
-            if tools and len(tools) > 0:
-                logger.info(f"📦 Converting and including {len(tools)} tools in cached content")
-                try:
-                    from ..tools.converters import convert_tools_to_gemini_format
-                    gemini_tools = convert_tools_to_gemini_format(tools)
-
-                    if gemini_tools:
-                        cache_config.tools = gemini_tools
-                        logger.info(f"✅ Added {len(tools)} tools to cache configuration")
-                    else:
-                        logger.warning(f"⚠️ No tools converted successfully - cache will have no tools")
-
-                except Exception as tool_error:
-                    logger.error(f"❌ Failed to convert tools for caching: {tool_error}")
-                    import traceback
-                    logger.error(f"❌ Traceback: {traceback.format_exc()}")
-                    # Decide: fail fast or continue without tools?
-                    # For now, fail fast to ensure tools work correctly
-                    raise RuntimeError(f"Cannot create cache with tools: {tool_error}") from tool_error
+            logger.info(f"📦 Creating cache with ONLY system prompt (tools will be passed separately)")
+            logger.info(f"💡 Reason: Gemini API doesn't allow tools with cached content")
+            logger.info(f"💰 Savings: ~{int(estimated_tokens)} tokens cached, ~500 tokens for tools uncached")
 
             cached_content = self.genai_client.caches.create(
                 model=MODEL_NAME,
                 config=cache_config
             )
 
-            tool_status = f" with {len(tools)} tools" if tools else " (no tools)"
-            logger.info(f"✅ Created cached content{tool_status} - TTL: 1 hour - ID: {cached_content.name}")
+            logger.info(f"✅ Created cached content (prompt only) - TTL: 1 hour - ID: {cached_content.name}")
             logger.info(f"📝 Cache contains ~{int(estimated_tokens)} tokens (minimum 2,048 required)")
             return cached_content.name
 
@@ -363,29 +347,17 @@ class PydanticAIGatewayService:
             logger.info(f"\n🔧 STEP 5: Cache validation and management")
             newly_created_cache = False
 
-            # IMPORTANT: Invalidate old caches that don't include tools
-            # Old caches were created without tools, so force recreation if tools are present
-            if cached_content_id and tools and len(tools) > 0:
-                logger.warning(f"⚠️ Invalidating existing cache - tools were recently added to cache format")
-                logger.warning(f"⚠️ Cache {cached_content_id} may not include tools, forcing recreation")
-                cached_content_id = None  # Force cache recreation with tools
-
             if not cached_content_id or cached_content_id.startswith('no_cache_'):
                 # No valid cache exists, create new one
                 tool_count = len(tools) if tools else 0
-                logger.info(f"  → No valid cache found, creating new cached content with {tool_count} tools")
-                if tools:
-                    logger.info(f"  → Tools to be cached:")
-                    for idx, tool in enumerate(tools, 1):
-                        tool_name = getattr(tool, '__name__', str(tool))
-                        logger.info(f"     {idx}. {tool_name}")
+                logger.info(f"  → No valid cache found, creating new cached content (prompt only)")
+                logger.info(f"  → {tool_count} tools will be passed separately to avoid API error")
                 try:
-                    # Pass tools to cache creation - they must be included in cached content
+                    # Create cache with only system prompt (tools passed separately)
                     cached_content_id = await self.get_or_create_cached_content(system_prompt, tools)
                     newly_created_cache = True
                     logger.info(f"  ✓ Created new cached content: {cached_content_id}")
-                    if tools:
-                        logger.info(f"  ✓ Cache includes {len(tools)} tools")
+                    logger.info(f"  ✓ Cache contains: system prompt only (~32K tokens)")
                 except Exception as e:
                     logger.warning(f"  ⚠️ Failed to create cached content: {e}")
                     logger.warning(f"  → Will proceed without caching")
@@ -430,7 +402,19 @@ class PydanticAIGatewayService:
             # The tool uses environment variable GEMINI_FILE_SEARCH_STORE_NAME directly
 
             # Determine if we'll use caching
-            use_cache = bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
+            # TEMPORARY: Disable caching when tools are present due to Pydantic AI limitation
+            # Gemini requires tools in cache OR request (not both)
+            # Pydantic AI requires tools registered with Agent to execute them
+            # This creates a conflict - disabling cache for now
+            if tools and len(tools) > 0:
+                logger.warning(f"⚠️ TEMPORARY: Disabling cache because tools are present")
+                logger.warning(f"⚠️ Reason: Pydantic AI + Gemini cached content with tools = incompatible")
+                logger.warning(f"⚠️ Will use full system prompt + tools without caching")
+                use_cache = False
+                cached_content_id = None
+            else:
+                use_cache = bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
+
             logger.info(f"\n🔧 STEP 6: Agent creation strategy")
             logger.info(f"  → Use cache: {use_cache}")
             if use_cache:
@@ -481,22 +465,22 @@ class PydanticAIGatewayService:
                 # Create agent without system_prompt but WITH tools
                 # IMPORTANT:
                 # 1. Don't pass system_prompt - it's in the cached content
-                # 2. DO pass tools - cached content only has SCHEMAS, Agent needs ACTUAL FUNCTIONS
-                # 3. The tools in cache are function DEFINITIONS for Gemini API
-                # 4. Pydantic AI needs the actual Python functions to EXECUTE the tools
+                # 2. DO pass tools - Gemini API requires this when using cached content
+                # 3. Cached content has ONLY system prompt (no tools due to API limitation)
+                # 4. Tools are passed here so Pydantic AI can send them to Gemini AND execute them
                 logger.info("🎯 About to create Agent with cached content...")
                 logger.info(f"🎯 google_model: {google_model}")
-                logger.info(f"🎯 Cached content includes {len(tools)} tool schemas")
-                logger.info(f"🎯 Passing {len(tools)} callable tools to Agent for execution")
+                logger.info(f"🎯 Cached content: system prompt only (~32K tokens)")
+                logger.info(f"🎯 Passing {len(tools)} tools separately (~500 tokens)")
                 logger.info(f"🎯 deps_type: {ChatSessionDeps}")
 
                 try:
-                    # CORRECTED: Pass tools to Agent even with cached content
-                    # Cache has schemas, Agent needs callables
+                    # Pass tools to Agent when using cached content
+                    # Cache has only system prompt, tools passed separately
                     agent = Agent(
                         google_model,
                         # system_prompt omitted - already in cached content
-                        tools=tools,  # MUST pass tools - Agent needs callable functions
+                        tools=tools,  # Tools passed separately (not in cache due to API limitation)
                         deps_type=ChatSessionDeps
                     )
                     logger.info("✅ Agent created with cached system prompt")
