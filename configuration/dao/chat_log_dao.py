@@ -156,39 +156,39 @@ class ChatLogDAO:
         if roles['is_admin']: return 'admin'
         return 'system'
 
-    async def get_session_assignment(self, session_db_id: int) -> Optional[Dict[str, Any]]:
+    async def get_session_assignment(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get assignment for a session."""
         query = "SELECT * FROM session_assignments WHERE session_id = $1"
         try:
-            params = {"session_db_id": session_db_id}
+            params = {"session_id": session_id}
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, session_db_id)
+                result = await conn.fetchrow(query, session_id)
                 logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.log_db_query(query, {"session_db_id": session_db_id}, error=e)
+            logger.log_db_query(query, {"session_id": session_id}, error=e)
             return None
 
-    async def update_session_assignment(self, session_db_id: int, email: str, type: str, status: str):
+    async def update_session_assignment(self, session_id: str, email: str, type: str, status: str):
         """Update session assignment."""
         user_role_id = await self.get_user_role_id(email)
         if not user_role_id:
             raise ValueError(f"User role not found for email: {email}")
-            
+
         query = """
-            UPDATE session_assignments 
+            UPDATE session_assignments
             SET user_role_id = $2, status = $3, assigned_at = NOW(), updated_at = NOW()
             WHERE session_id = $1
         """
         try:
-            params = {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}
+            params = {"session_id": session_id, "user_role_id": user_role_id, "status": status}
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                result = await conn.execute(query, session_db_id, user_role_id, status)
+                result = await conn.execute(query, session_id, user_role_id, status)
                 logger.log_db_query(query, params, result)
         except Exception as e:
-            logger.log_db_query(query, {"session_db_id": session_db_id, "user_role_id": user_role_id, "status": status}, error=e)
+            logger.log_db_query(query, {"session_id": session_id, "user_role_id": user_role_id, "status": status}, error=e)
             raise
 
     async def create_session_assignment(self, session_db_id: int, email: str, type: str, status: str):
