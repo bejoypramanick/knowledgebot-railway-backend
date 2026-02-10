@@ -98,41 +98,30 @@ class StreamingService:
             chunk_count = 0
 
             try:
-                # Run agent with message history (use context manager for streaming)
+                # Run agent with message history and stream text deltas
                 async with agent.run_stream(
                     message,
                     message_history=pydantic_messages,
                     deps=session_deps
                 ) as result:
-                    # Stream the response chunks
-                    async for chunk in result.stream():
+                    # Stream text with delta=True for incremental chunks
+                    async for delta_text in result.stream_text(delta=True):
                         chunk_count += 1
+                        full_response += delta_text
 
-                        # Get the delta text from the chunk
-                        if hasattr(chunk, 'delta'):
-                            delta_text = chunk.delta
-                        elif hasattr(chunk, 'text'):
-                            delta_text = chunk.text
-                        else:
-                            # Try to extract text from chunk
-                            delta_text = str(chunk)
+                        # Format the response chunk for frontend
+                        response_data = {
+                            "type": "chunk",
+                            "content": delta_text,
+                            "session_id": session_id,
+                            "chunk_index": chunk_count
+                        }
 
-                        if delta_text:
-                            full_response += delta_text
+                        # Convert to JSON and format for SSE
+                        json_response = json.dumps(response_data, ensure_ascii=False)
+                        yield f"data: {json_response}\n\n"
 
-                            # Format the response chunk for frontend
-                            response_data = {
-                                "type": "chunk",
-                                "content": delta_text,
-                                "session_id": session_id,
-                                "chunk_index": chunk_count
-                            }
-
-                            # Convert to JSON and format for SSE
-                            json_response = json.dumps(response_data, ensure_ascii=False)
-                            yield f"data: {json_response}\n\n"
-
-                            logger.debug(f"📦 Sent chunk {chunk_count}: {delta_text[:50]}...")
+                        logger.debug(f"📦 Sent chunk {chunk_count}: {delta_text[:50]}...")
 
             except Exception as stream_error:
                 logger.error(f"❌ Error during agent streaming: {stream_error}")
