@@ -244,7 +244,7 @@ class PydanticAIGatewayService:
 
         return system_prompt
 
-    async def create_agent(self, session_id: str, tools: List[Any], user_email: str = None) -> Agent:
+    async def create_agent(self, session_id: str, system_prompt: str = "", tools: List[Any] = None, user_email: str = "anonymous@example.com") -> Agent:
         """Create an agent instance with proper Pydantic AI settings, dynamic persona, and caching."""
         logger.info(f"Creating agent for session {session_id}")
 
@@ -368,7 +368,7 @@ class PydanticAIGatewayService:
             logger.info(f"📝 Message: {message[:100]}...")
 
             # Create agent with dynamic persona and tools (caching configured at initialization)
-            agent = await self.create_agent(session_id, tools)
+            agent = await self.create_agent(session_id, "", tools)
 
             # Create session dependencies
             session_deps = ChatSessionDeps(session_id=session_id)
