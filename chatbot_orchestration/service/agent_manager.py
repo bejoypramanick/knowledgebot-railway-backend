@@ -186,14 +186,16 @@ class AgentManager:
                 raise
 
             try:
+                # IMPORTANT: When using cached content, do NOT pass tools or system_prompt
+                # They are already in the cache and passing them causes 400 error
                 agent = Agent(
                     google_model,
-                    tools=tool_functions,
                     deps_type=ChatSessionDeps
-                    # Note: system_prompt + tool schemas are in the cached content
+                    # Note: system_prompt + tools are in cached content - do NOT pass here!
                 )
-                logger.info("✅ Agent created with cached system prompt + tool schemas")
+                logger.info("✅ Agent created with cached content (system prompt + tool schemas)")
                 logger.info("💰 Token savings: ~90% (cached prompt + tool schemas)")
+                logger.info("⚠️ Tools NOT passed to Agent - they're in the cache!")
             except Exception as agent_error:
                 logger.error(f"❌ Failed to create Agent: {agent_error}")
                 raise

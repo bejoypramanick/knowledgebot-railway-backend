@@ -150,7 +150,8 @@ class SessionStateManager:
                 'cache_expires_at': (datetime.utcnow() + timedelta(hours=1)).isoformat()
             }
             
-            await self.chat_dao.update_session_metadata(session_id, metadata)
+            # Update session with cache info (use update_session_cache_info from chat_dao)
+            await self.chat_dao.update_session_cache_info(session_id, cached_content_id)
             logger.info(f"✅ Saved cache ID to session: {session_id}")
             
         except Exception as e:
