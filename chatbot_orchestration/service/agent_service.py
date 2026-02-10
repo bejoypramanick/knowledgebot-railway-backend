@@ -343,10 +343,7 @@ class PydanticAIGatewayService:
 
             if use_cache:
                 logger.info(f"🚀 Initializing GoogleModel with cached content: {cached_content_id}")
-                # Create GoogleModel without cached content
-                google_model = GoogleModel(MODEL_NAME)
-                logger.info("✅ GoogleModel created without cached content")
-
+                
                 # Create GoogleModelSettings with correct parameter name
                 from pydantic_ai.models.google import GoogleModelSettings
                 logger.info(f"🎯 Creating GoogleModelSettings with google_cached_content: {cached_content_id}")
@@ -354,16 +351,19 @@ class PydanticAIGatewayService:
                 logger.info(f"✅ GoogleModelSettings created: {settings}")
                 logger.info(f"🎯 Settings type: {type(settings)}")
 
-                # Create agent with cached content in model_settings
-                logger.info("🎯 About to create Agent with cached content in model_settings...")
+                # Pass GoogleModelSettings to GoogleModel constructor
+                logger.info("🎯 Creating GoogleModel with cached content settings...")
+                google_model = GoogleModel(MODEL_NAME, model_settings=settings)
+                logger.info("✅ GoogleModel created with cached content")
+
+                # Create agent without system_prompt (already in cached content)
+                logger.info("🎯 About to create Agent with cached content...")
                 logger.info(f"🎯 google_model: {google_model}")
                 logger.info(f"🎯 tools: {tools}")
-                logger.info(f"🎯 settings: {settings}")
                 agent = Agent(
                     google_model,
                     system_prompt=None,  # Already in cached content
                     tools=tools if tools else [],  # Ensure it's always a list, never None
-                    model_settings=settings,  # Pass GoogleModelSettings object to Agent
                     deps_type=ChatSessionDeps
                 )
                 logger.info("✅ Agent created with cached system prompt")
