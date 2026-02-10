@@ -285,10 +285,19 @@ class PydanticAIGatewayService:
                 google_model = GoogleModel(MODEL_NAME)
                 logger.warning("Falling back to GoogleModel without settings")
 
+            # CRITICAL: When using cached content, don't pass system_prompt to avoid conflict
+            # The system_instruction is already in the cached content
+            agent_system_prompt = "" if (cached_content_id and not cached_content_id.startswith('no_cache_')) else system_prompt
+
+            if cached_content_id and not cached_content_id.startswith('no_cache_'):
+                logger.info("ℹ️ Using cached content - system_prompt from cache (not passing to Agent)")
+            else:
+                logger.info("ℹ️ No cache - passing full system_prompt to Agent")
+
             # Create agent with proper Pydantic AI initialization
             agent = Agent(
                 google_model,
-                system_prompt=system_prompt,
+                system_prompt=agent_system_prompt,
                 tools=tools,
                 deps_type=ChatSessionDeps,
             )
