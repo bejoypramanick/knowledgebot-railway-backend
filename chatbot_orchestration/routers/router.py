@@ -56,26 +56,33 @@ async def chat_with_agent(request: Request):
 
 @router.post("/chat/stream")
 async def chat_with_agent_stream(request: Request):
-    """Chat with AI agent with streaming response"""
+    """Chat with AI agent with streaming response using Pydantic AI"""
     try:
         body = await request.json()
-        
+
         message = body.get("message")
         session_id = body.get("session_id")
-        
+
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
-        
+
         # Create session if not provided
         if not session_id:
             session_id = f"session_{int(time.time())}"
-        
-        # Stream response
+
+        # Import tools for agent
+        from ..tools.rag import search_knowledge_base
+        from ..tools.general import request_human_agent_connection, query_railway_postgres
+
+        # Prepare tools list
+        tools = [search_knowledge_base, request_human_agent_connection, query_railway_postgres]
+
+        # Stream response using new agent-based approach
         async def generate_response():
-            async for chunk in agent_service.process_message_stream(message, session_id):
-                yield f"data: {chunk}\n\n"
-        
-        return StreamingResponse(generate_response(), media_type="text/plain")
+            async for chunk in agent_service.stream_agent_response(message, session_id, tools):
+                yield f"data: {chunk}"
+
+        return StreamingResponse(generate_response(), media_type="text/event-stream")
     except Exception as e:
         logger.error(f"Error in chat stream: {e}")
         raise HTTPException(status_code=500, detail=str(e))

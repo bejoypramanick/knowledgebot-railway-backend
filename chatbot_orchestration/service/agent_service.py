@@ -134,14 +134,109 @@ class PydanticAIGatewayService:
                 # Non-cache related error, re-raise
                 raise e
 
-    async def create_agent(self, session_id: str, system_prompt: str, tools: List[Any], user_email: str) -> Agent:
-        """Create an agent instance with proper Pydantic AI settings and caching."""
-        logger.info(f"Creating agent for session {session_id} for user {user_email}")
-        
+    async def _fetch_persona_config(self) -> Dict[str, Any]:
+        """Fetch active persona and response policy from configuration service."""
         try:
+            import os
+            import httpx
+
+            config_url = os.getenv("CONFIGURATION_SERVICE_URL", "https://api-gateway-common.up.railway.app/api/v1/gateway/configuration/chatAgentConfig")
+
+            headers = {}
+            api_key = os.getenv("INTERNAL_API_KEY")
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+
+            async with httpx.AsyncClient(timeout=10.0, headers=headers) as http_client:
+                response = await http_client.get(config_url)
+                if response.status_code == 200:
+                    config_data = response.json()
+                    persona_data = config_data.get("persona", {})
+                    security_data = config_data.get("security", {})
+
+                    return {
+                        "persona_prompt": persona_data.get("system_prompt", ""),
+                        "persona_name": persona_data.get("selected_persona", "KnowledgeBot"),
+                        "response_policy": config_data.get("response_policy", ""),
+                        "response_timeout": security_data.get("response_timeout", 30)
+                    }
+                else:
+                    logger.warning(f"⚠️ Failed to fetch persona config: {response.status_code}")
+                    return self._get_default_persona_config()
+        except Exception as e:
+            logger.error(f"❌ Error fetching persona config: {e}")
+            return self._get_default_persona_config()
+
+    def _get_default_persona_config(self) -> Dict[str, Any]:
+        """Return default persona configuration."""
+        return {
+            "persona_prompt": "",
+            "persona_name": "KnowledgeBot",
+            "response_policy": "Be helpful, accurate, and concise in your responses.",
+            "response_timeout": 30
+        }
+
+    async def _build_system_prompt(self, persona_config: Dict[str, Any]) -> str:
+        """Build comprehensive system prompt using the long detailed prompt with persona and response policy."""
+        from ..agent.prompt import get_system_prompt
+
+        persona_name = persona_config.get("persona_name", "KnowledgeBot")
+        persona_prompt = persona_config.get("persona_prompt", "")
+        response_policy_text = persona_config.get("response_policy", "")
+
+        # Build custom prompt section with persona information
+        custom_prompt = f"""## ACTIVE PERSONA: {persona_name}
+
+{persona_prompt if persona_prompt else "You are a helpful AI assistant with expertise in information retrieval and data analysis."}
+
+## ACTIVE RESPONSE POLICY:
+{response_policy_text if response_policy_text else "Be helpful, accurate, and concise in your responses."}
+
+## PERSONA-SPECIFIC INSTRUCTIONS:
+- Maintain the personality and tone of {persona_name}
+- Follow the response policy strictly
+- Use the persona's knowledge domain and expertise
+- Adapt communication style to match the persona's characteristics
+"""
+
+        # Convert response_policy_text to numeric value for get_system_prompt
+        # Balanced policy (50) as default, can be adjusted based on response_policy_text content
+        response_policy_value = 50  # Balanced by default
+
+        if response_policy_text:
+            lower_policy = response_policy_text.lower()
+            if any(word in lower_policy for word in ['strict', 'only', 'must', 'always']):
+                response_policy_value = 80  # Strict
+            elif any(word in lower_policy for word in ['flexible', 'creative', 'may']):
+                response_policy_value = 30  # Flexible
+
+        # Get the comprehensive system prompt with persona integration
+        system_prompt = get_system_prompt(
+            custom_prompt=custom_prompt,
+            response_policy=response_policy_value
+        )
+
+        logger.info(f"📝 Built comprehensive system prompt with persona: {persona_name}")
+        logger.info(f"📊 Response policy value: {response_policy_value}")
+
+        return system_prompt
+
+    async def create_agent(self, session_id: str, tools: List[Any], user_email: str = None) -> Agent:
+        """Create an agent instance with proper Pydantic AI settings, dynamic persona, and caching."""
+        logger.info(f"Creating agent for session {session_id}")
+
+        try:
+            # Fetch persona configuration dynamically
+            persona_config = await self._fetch_persona_config()
+            logger.info(f"🎭 Using persona: {persona_config['persona_name']}")
+
+            # Build system prompt with persona and response policy
+            system_prompt = await self._build_system_prompt(persona_config)
+            logger.info(f"📝 System prompt: {len(system_prompt)} characters")
+
             # Get or create file search store for this session
             file_search_store_id = await self.get_or_create_file_search_store(session_id)
-            
+
             # Get cached content ID from session metadata
             cached_content_id = await self.get_cached_content_id(session_id)
             if not cached_content_id:
@@ -150,13 +245,13 @@ class PydanticAIGatewayService:
                 except Exception as e:
                     logger.warning(f"Failed to create cached content: {e}")
                     cached_content_id = None
-            
+
             # Prepare model settings following Pydantic AI best practices
             model_settings = None
             if cached_content_id and not cached_content_id.startswith('no_cache_'):
                 model_settings = GoogleModelSettings(google_cached_content=cached_content_id)
                 logger.info(f"Using cached content ID: {cached_content_id}")
-            
+
             # Initialize model with proper settings handling
             try:
                 google_model = GoogleModel(MODEL_NAME, settings=model_settings)
@@ -166,32 +261,132 @@ class PydanticAIGatewayService:
                 # Fallback to model without settings
                 google_model = GoogleModel(MODEL_NAME)
                 logger.warning("Falling back to GoogleModel without settings")
-        
+
             # Create agent with proper Pydantic AI initialization
-            try:
-                agent = Agent(
-                    google_model,
-                    system_prompt=system_prompt,
-                    tools=tools,
-                    deps_type=ChatSessionDeps,
-                )
-                logger.info("Agent created successfully with proper settings")
-            except Exception as e:
-                logger.error(f"Failed to create agent: {e}")
-                raise e
-            
-            # Update session metadata asynchronously if DB is available
-            if self.db:
-                try:
-                    await self.update_session_metadata(session_id, file_search_store_id, cached_content_id)
-                except Exception as e:
-                    logger.warning(f"Failed to update session metadata: {e}")
-            
+            agent = Agent(
+                google_model,
+                system_prompt=system_prompt,
+                tools=tools,
+                deps_type=ChatSessionDeps,
+            )
+            logger.info("✅ Agent created successfully with dynamic persona and tools")
+
             return agent
-            
+
         except Exception as e:
             logger.error(f"Error creating agent: {e}")
             raise e
+
+    async def stream_agent_response(self, message: str, session_id: str, tools: List[Any]):
+        """Stream agent response using Pydantic AI with RAG, token tracking, and proper error handling."""
+        try:
+            logger.info(f"🚀 Starting agent stream for session: {session_id}")
+            logger.info(f"📝 Message: {message[:100]}...")
+
+            # Create agent with dynamic persona and tools
+            agent = await self.create_agent(session_id, tools)
+
+            # Create session dependencies
+            session_deps = ChatSessionDeps(session_id=session_id)
+
+            # Get chat history for context
+            chat_history = await self.get_chat_history(session_id)
+            history_count = len(chat_history.get('messages', []))
+            logger.info(f"📚 Retrieved {history_count} messages from chat history")
+
+            # Format chat history context if available
+            history_context = ""
+            if chat_history and chat_history.get("messages"):
+                history_context = "\n\nRECENT CONVERSATION HISTORY:\n"
+                for msg in chat_history["messages"][-3:]:  # Last 3 messages for context
+                    if msg.get("sender") == "user":
+                        history_context += f"User: {msg.get('message', '')}\n"
+                    elif msg.get("sender") in ["agent", "bot"]:
+                        history_context += f"Assistant: {msg.get('message', '')}\n"
+
+            # Construct user message with history context
+            user_message_with_context = f"{message}{history_context}"
+
+            logger.info(f"🤖 Running agent stream...")
+
+            # Use Pydantic AI's run_stream for streaming responses
+            full_response_text = ""
+            async with agent.run_stream(user_message_with_context, deps=session_deps) as result:
+                # Stream chunks as they arrive
+                async for chunk in result.stream_text(delta=True):
+                    full_response_text += chunk
+                    # Format as JSON for frontend compatibility
+                    chunk_data = {
+                        "type": "chunk",
+                        "content": chunk
+                    }
+                    yield f"{json.dumps(chunk_data)}\n\n"
+
+                logger.info(f"✅ Stream completed - Total response: {len(full_response_text)} chars")
+
+                # Track token usage after stream completes
+                try:
+                    # Access the underlying response for token tracking
+                    if hasattr(result, 'usage'):
+                        await self._track_token_usage_from_result(result, session_id)
+                    else:
+                        logger.warning("⚠️ No usage data available from agent result")
+                except Exception as token_error:
+                    logger.error(f"❌ Error tracking tokens: {token_error}")
+
+                # Send completion signal
+                complete_data = {
+                    "type": "complete",
+                    "content": full_response_text,
+                    "sources": []
+                }
+                yield f"{json.dumps(complete_data)}\n\n"
+
+        except Exception as e:
+            logger.error(f"❌ Error in agent stream: {e}", exc_info=True)
+            error_data = {
+                "type": "error",
+                "content": f"I encountered an error while processing your message: {str(e)}"
+            }
+            yield f"{json.dumps(error_data)}\n\n"
+
+    async def _track_token_usage_from_result(self, result: Any, session_id: str):
+        """Track token usage from Pydantic AI result."""
+        try:
+            from ..dao.token_dao import TokenDAO
+            import uuid
+            import os
+
+            token_dao = TokenDAO()
+            message_id = str(uuid.uuid4())
+
+            # Extract token counts from Pydantic AI result
+            usage = result.usage() if callable(result.usage) else result.usage
+
+            prompt_tokens = getattr(usage, 'request_tokens', 0) or getattr(usage, 'prompt_tokens', 0)
+            completion_tokens = getattr(usage, 'response_tokens', 0) or getattr(usage, 'completion_tokens', 0)
+            total_tokens = getattr(usage, 'total_tokens', 0) or (prompt_tokens + completion_tokens)
+
+            model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash-lite")
+
+            success = await token_dao.save_token_usage(
+                session_id=session_id,
+                message_id=message_id,
+                provider='gemini',
+                model=model_name,
+                prompt_tokens=int(prompt_tokens),
+                completion_tokens=int(completion_tokens),
+                total_tokens=int(total_tokens),
+                api_call_type='agent_stream'
+            )
+
+            if success:
+                logger.info(f"✅ Tracked {total_tokens} tokens for session {session_id}")
+            else:
+                logger.error(f"❌ Failed to track token usage")
+
+        except Exception as e:
+            logger.error(f"Error tracking token usage from result: {e}")
 
     async def update_session_metadata(self, session_id: str, file_search_store_id: str = None, cached_content_id: str = None):
          if not self.db: return
@@ -217,349 +412,6 @@ class PydanticAIGatewayService:
             logger.error(f"❌ Error getting chat history: {e}")
             return {"messages": []}
 
-    async def process_message_stream(self, message: str, session_id: str):
-        """Process a chat message with RAG-enhanced streaming response"""
-        try:
-            # Import AI service
-            from ..core.ai import get_genai_client, get_gemini_model
-            
-            logger.info(f"Processing message: {message[:50]}... for session: {session_id}")
-            
-            # Get Gemini model
-            model = get_gemini_model()
-            if not model:
-                logger.error("Gemini model is not available")
-                yield "AI service is currently unavailable. Please try again later."
-                return
-            
-            # Get Gemini client for RAG search
-            client = get_genai_client()
-            if not client:
-                logger.error("Gemini client is not available")
-                yield "AI service is currently unavailable. Please try again later."
-                return
-            
-            # Step 1: RAG Search - Use Gemini File Search tool
-            logger.info("🔍 Performing RAG search in knowledge base...")
-            rag_context = ""
-            file_search_tool = None
-            try:
-                # Import types at the top to avoid UnboundLocalError
-                from google.genai import types
-
-                # Resolve FileSearch store on-demand (not relying on module-level variable which may not be shared across workers)
-                from shared.file_search import get_file_search_store_by_display_name
-
-                resolved_store_id = get_file_search_store_by_display_name(
-                    client,
-                    display_name="knowledgebot-search-store"
-                )
-
-                if not resolved_store_id:
-                    logger.error("❌ FileSearch store could not be resolved - RAG search cannot proceed")
-                    rag_context = "FileSearch store not found. Please check API Gateway has created the store."
-                    raise ValueError("FileSearch store not resolved")
-
-                logger.info(f"📂 Using FileSearch store: {resolved_store_id}")
-
-                # DEBUG: List all files in the FileSearch store before searching
-                logger.info("📋 Files currently in FileSearch store:")
-                try:
-                    documents = list(client.file_search_stores.list_files(name=resolved_store_id))
-                    logger.info(f"   Total documents: {len(documents)}")
-                    for idx, doc in enumerate(documents[:20]):  # Show first 20
-                        doc_name = getattr(doc, 'name', 'N/A')
-                        doc_display = getattr(doc, 'display_name', 'N/A')
-                        doc_size = getattr(doc, 'size_bytes', 'N/A')
-                        logger.info(f"   [{idx+1}] ID: {doc_name}")
-                        logger.info(f"       Display: {doc_display}")
-                        logger.info(f"       Size: {doc_size}")
-                except Exception as e:
-                    logger.warning(f"   ⚠️ Could not list files: {e}")
-
-                # Configure the File Search tool
-                file_search_tool = types.Tool(
-                    file_search=types.FileSearch(
-                        file_search_store_names=[resolved_store_id]
-                    )
-                )
-
-                # Perform RAG search - USING THE WORKING APPROACH
-                logger.info(f"🔎 Searching FileSearch store for: {message[:100]}...")
-
-                # Use explicit search prompt with low temperature (this was working before)
-                # Force tool use with explicit prompt
-                config_kwargs = {
-                    'tools': [file_search_tool],
-                    'temperature': 0.1,  # Low temperature for factual, deterministic responses
-                }
-
-                # Try to add tool_choice if supported (Gemini 2.5+)
-                try:
-                    if hasattr(types, 'ToolChoice'):
-                        config_kwargs['tool_choice'] = types.ToolChoice(
-                            mode=types.ToolChoiceMode.ANY if hasattr(types, 'ToolChoiceMode') else 'ANY'
-                        )
-                        logger.info("✅ Using tool_choice to force FileSearch invocation")
-                except Exception as e:
-                    logger.warning(f"⚠️ tool_choice not supported: {e}, continuing without it")
-
-                search_response = client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=f"""Use the FileSearch tool to search for information related to: {message}
-
-IMPORTANT: You MUST use the FileSearch tool to search the documents. Return the exact information found in the documents.""",
-                    config=types.GenerateContentConfig(**config_kwargs)
-                )
-
-                rag_context = ""
-                if search_response and search_response.text:
-                    rag_context = search_response.text.strip()
-                    logger.info(f"📚 RAG search response: {len(rag_context)} characters")
-                    logger.info(f"📄 Preview: {rag_context[:250]}")
-
-                    if len(rag_context) > 30:
-                        logger.info(f"✅ RAG search successful - found relevant content")
-                    else:
-                        logger.warning(f"⚠️ RAG returned minimal content")
-                else:
-                    logger.warning("⚠️ RAG search returned empty response")
-                    rag_context = "No relevant documents found in the knowledge base."
-
-                # Log response attributes and grounding metadata
-                logger.info("📊 Response attributes:")
-                logger.info(f"   - text: {len(search_response.text) if search_response.text else 0} chars")
-                logger.info(f"   - has grounding_metadata: {hasattr(search_response, 'grounding_metadata')}")
-                if hasattr(search_response, 'candidates') and search_response.candidates:
-                    logger.info(f"   - candidates: {len(search_response.candidates)}")
-                    for idx, candidate in enumerate(search_response.candidates):
-                        logger.info(f"     [{idx}] content: {len(candidate.content.parts)} parts")
-
-                # Check for grounding metadata in multiple places
-                grounding_found = False
-                if hasattr(search_response, 'grounding_metadata') and search_response.grounding_metadata:
-                    logger.info(f"✅ Found grounding_metadata on response: {search_response.grounding_metadata}")
-                    grounding_found = True
-
-                # Check in candidates
-                if hasattr(search_response, 'candidates') and search_response.candidates:
-                    for idx, candidate in enumerate(search_response.candidates):
-                        if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata:
-                            logger.info(f"✅ Found grounding_metadata in candidate {idx}: {candidate.grounding_metadata}")
-                            grounding_found = True
-
-                if not grounding_found:
-                    logger.warning("⚠️ No grounding metadata found in response or candidates")
-
-            except Exception as e:
-                logger.error(f"❌ RAG search failed: {e}", exc_info=True)
-                rag_context = f"Unable to search knowledge base: {str(e)}"
-            
-            # Step 2: Get chat history for context
-            chat_history = await self.get_chat_history(session_id)
-            logger.info(f"Retrieved chat history: {len(chat_history.get('messages', []))} messages")
-            
-            # Format chat history for Gemini
-            history_text = ""
-            if chat_history and chat_history.get("messages"):
-                for msg in chat_history["messages"][-3:]:  # Last 3 messages for context
-                    if msg.get("sender") == "user":
-                        history_text += f"User: {msg.get('message', '')}\n"
-                    elif msg.get("sender") in ["agent", "bot"]:
-                        history_text += f"Assistant: {msg.get('message', '')}\n"
-            
-            logger.info(f"History text length: {len(history_text)} characters")
-            
-            # Step 3: Fetch active persona and response policy, create conversational system prompt
-            persona_prompt = ""
-            persona_name = "KnowledgeBot"
-            response_policy = ""
-            response_timeout = 30  # Default timeout
-            
-            try:
-                # Import here to avoid circular imports
-                import os
-                import httpx
-                
-                # Get chat agent config from configuration service
-                config_url = os.getenv("CONFIGURATION_SERVICE_URL", "https://api-gateway-common.up.railway.app/api/v1/gateway/configuration/chatAgentConfig")
-                
-                # Add authentication headers if available
-                headers = {}
-                # Try to get API key from environment for internal service communication
-                api_key = os.getenv("INTERNAL_API_KEY")
-                if api_key:
-                    headers["Authorization"] = f"Bearer {api_key}"
-                
-                async with httpx.AsyncClient(timeout=10.0, headers=headers) as http_client:
-                    response = await http_client.get(config_url)
-                    if response.status_code == 200:
-                        config_data = response.json()
-                        persona_data = config_data.get("persona", {})
-                        persona_prompt = persona_data.get("system_prompt", "")
-                        persona_name = persona_data.get("selected_persona", "KnowledgeBot")
-                        
-                        # Get response policy
-                        response_policy = config_data.get("response_policy", "")
-                        if response_policy:
-                            logger.info(f"📋 Using response policy: {response_policy}")
-                        
-                        # Get response timeout from security settings
-                        security_data = config_data.get("security", {})
-                        response_timeout = security_data.get("response_timeout", 30)
-                        logger.info(f"⏱️ Response timeout: {response_timeout} seconds")
-                        
-                        logger.info(f"🎭 Using active persona: {persona_name}")
-                    else:
-                        logger.warning(f"⚠️ Failed to fetch persona config: {response.status_code}")
-                        # Log response body for debugging
-                        if response.status_code == 401:
-                            logger.warning("🔐 Authentication failed - check INTERNAL_API_KEY environment variable")
-            except Exception as e:
-                logger.error(f"❌ Error fetching persona config: {e}")
-                logger.info("🎭 Using default KnowledgeBot persona")
-            
-            # Create conversational system prompt with persona and response policy integration
-            system_prompt = f"""You are {persona_name}, a helpful AI assistant that answers questions based ONLY on the provided knowledge base context.
-
-{persona_prompt}
-
-RESPONSE POLICY:
-{response_policy if response_policy else "Be helpful, accurate, and concise in your responses."}
-
-CRITICAL INSTRUCTIONS:
-1. You have access to a knowledge base (Knowledge Base Context below)
-2. ALWAYS use ONLY the knowledge base context to answer questions
-3. If the answer is NOT found in the Knowledge Base Context, you MUST respond: "I'm sorry, but this information is not available in my knowledge base."
-4. Do NOT use any external knowledge, training data, or make up information
-5. Be friendly and natural in your tone while staying within the knowledge base constraints
-6. If the Knowledge Base Context is empty or says "No relevant documents found", tell the user you don't have information on that topic
-
-Knowledge Base Context (REQUIRED FOR ANSWERS):
-{rag_context if rag_context and rag_context != "No relevant documents found in the knowledge base." else "⚠️ No relevant documents found in the knowledge base for this query."}
-
-Conversation History (for context only):
-{history_text if history_text else "[No conversation history]"}"""
-
-            # User message separate for better caching
-            user_message = f"User Question: {message}\n\nAnswer ONLY using the Knowledge Base Context provided above. Do not use external knowledge."
-
-            logger.info(f"🤖 Using cached Gemini model with structured prompt")
-            logger.info(f"   System prompt: {len(system_prompt)} chars")
-            logger.info(f"   User message: {len(user_message)} chars")
-            logger.info(f"   RAG context: {len(rag_context)} chars")
-
-            # Step 4: Generate response using Gemini with File Search tool as fallback
-            logger.info("🧠 Generating content with Gemini using RAG context...")
-
-            # Build the full prompt with system instructions and RAG context
-            full_prompt = f"{system_prompt}\n\n{user_message}"
-
-            # Use the Gemini client directly
-            # Note: FileSearch tool is included as a backup/validation mechanism
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=full_prompt,
-                config=types.GenerateContentConfig(
-                    tools=[file_search_tool] if file_search_tool else None,
-                    temperature=0.1,  # Low temperature for factual, consistent responses
-                    max_output_tokens=1024
-                )
-            )
-            
-            # Stream the response
-            if response and response.text:
-                response_text = response.text
-                logger.info(f"✅ Generated response length: {len(response_text)} characters")
-                logger.info(f"💬 Response text: {response_text[:200]}{'...' if len(response_text) > 200 else ''}")
-
-                # Debug: Log response metadata
-                if hasattr(response, 'usage_metadata'):
-                    logger.info(f"📊 Token usage - Prompt: {response.usage_metadata.prompt_token_count}, "
-                              f"Completion: {response.usage_metadata.candidates_token_count}, "
-                              f"Total: {response.usage_metadata.total_token_count}")
-
-                # Track token usage from the RAG response
-                await self._track_token_usage(response, session_id)
-                
-                # Stream the response in chunks of ~10 characters with proper JSON format
-                chunk_size = 10
-                for i in range(0, len(response_text), chunk_size):
-                    chunk = response_text[i:i + chunk_size]
-                    # Format as JSON for frontend compatibility (FastAPI will add data: prefix)
-                    chunk_data = {
-                        "type": "chunk",
-                        "content": chunk
-                    }
-                    yield f"{json.dumps(chunk_data)}\n\n"
-                
-                # Send completion signal
-                complete_data = {
-                    "type": "complete", 
-                    "content": response_text,
-                    "sources": []
-                }
-                yield f"{json.dumps(complete_data)}\n\n"
-            else:
-                logger.error("❌ No response received from Gemini")
-                error_data = {
-                    "type": "error",
-                    "content": "I'm sorry, but I couldn't generate a response. Please try again."
-                }
-                yield f"{json.dumps(error_data)}\n\n"
-            
-        except Exception as e:
-            logger.error(f"Error processing message stream with RAG: {e}")
-            logger.error(f"Exception type: {type(e).__name__}")
-            logger.error(f"Exception details: {str(e)}")
-            yield "I encountered an error while processing your message. Please try again."
-
-    async def _track_token_usage(self, response, session_id: str):
-        """Track token usage from Gemini response"""
-        try:
-            # Extract token usage from Gemini response
-            usage_data = None
-            if hasattr(response, 'usage_metadata'):
-                usage_data = response.usage_metadata
-            elif hasattr(response, 'usage'):
-                usage_data = response.usage
-
-            if usage_data:
-                # Use TokenDAO for tracking
-                from ..dao.token_dao import TokenDAO
-                token_dao = TokenDAO()
-
-                # Generate a message ID
-                import uuid
-                message_id = str(uuid.uuid4())
-
-                # Extract token counts from Gemini usage data
-                prompt_tokens = getattr(usage_data, 'prompt_token_count', 0) or getattr(usage_data, 'promptTokenCount', 0) or getattr(usage_data, 'prompt_tokens', 0)
-                completion_tokens = getattr(usage_data, 'candidates_token_count', 0) or getattr(usage_data, 'candidatesTokenCount', 0) or getattr(usage_data, 'completion_tokens', 0)
-                total_tokens = getattr(usage_data, 'total_token_count', 0) or getattr(usage_data, 'totalTokenCount', 0) or getattr(usage_data, 'total_tokens', 0)
-
-                # Save to database using DAO
-                import os
-                model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash-lite")
-
-                success = await token_dao.save_token_usage(
-                    session_id=session_id,
-                    message_id=message_id,
-                    provider='gemini',
-                    model=model_name,
-                    prompt_tokens=int(prompt_tokens),
-                    completion_tokens=int(completion_tokens),
-                    total_tokens=int(total_tokens),
-                    api_call_type='rag'
-                )
-
-                if success:
-                    logger.info(f"✅ Tracked token usage: {total_tokens} tokens for session {session_id}")
-                else:
-                    logger.error(f"❌ Failed to track token usage for session {session_id}")
-
-        except Exception as e:
-            logger.error(f"Error tracking token usage: {e}")
 
     async def get_available_agents(self) -> list:
         """Get list of available agents"""
