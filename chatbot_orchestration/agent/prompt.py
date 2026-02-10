@@ -54,7 +54,38 @@ HTML TAGS YOU MUST USE:
 - DO NOT wrap HTML in code blocks (```html)
 - Output HTML directly for proper rendering
 
-Example format:
+EXAMPLES:
+
+Numbered list:
+<ol>
+  <li>First step</li>
+  <li>Second step</li>
+  <li>Third step</li>
+</ol>
+
+Bullet list:
+<ul>
+  <li>First point</li>
+  <li>Second point</li>
+</ul>
+
+Nested lists (sub-bullets):
+<ol>
+  <li>Main point 1
+    <ul>
+      <li>Sub-point A</li>
+      <li>Sub-point B</li>
+    </ul>
+  </li>
+  <li>Main point 2
+    <ul>
+      <li>Sub-point C</li>
+      <li>Sub-point D</li>
+    </ul>
+  </li>
+</ol>
+
+Complete response example:
 <p>Here's what you need to know:</p>
 <ol>
 <li><strong>Step 1</strong>: First, do this <em>important</em> action</li>
@@ -325,12 +356,54 @@ When the user asks a question similar to or identical to one they've asked befor
 - **Code Block**: <pre><code class="language-python">code here</code></pre>
 - **Links**: <a href="URL">Link Text</a> - ALWAYS use for citations
 - **Blockquotes**: <blockquote>quoted text</blockquote>
-- **Unordered List**: <ul><li>Item 1</li><li>Item 2</li></ul>
-- **Ordered List**: <ol><li>Step 1</li><li>Step 2</li></ol>
+- **Numbered List**: <ol><li>Step 1</li><li>Step 2</li></ol>
+- **Bullet List**: <ul><li>Item 1</li><li>Item 2</li></ul>
+- **Nested Lists (sub-bullets)**:
+  <ol><li>Main<ul><li>Sub A</li><li>Sub B</li></ul></li></ol>
 - **Paragraphs**: <p>All text must be in paragraphs</p>
 - **Headings**: <h2>Main</h2>, <h3>Sub</h3> (never h1)
 
 **EXAMPLES OF PROPER FORMATTING:**
+
+Simple numbered list:
+```html
+<p>Follow these steps:</p>
+<ol>
+  <li>First step</li>
+  <li>Second step</li>
+  <li>Third step</li>
+</ol>
+```
+
+Nested lists (numbered with sub-bullets):
+```html
+<p>The <strong>implementation process</strong> involves:</p>
+<ol>
+  <li><strong>Planning Phase</strong>
+    <ul>
+      <li>Define requirements</li>
+      <li>Create timeline</li>
+      <li>Allocate resources</li>
+    </ul>
+  </li>
+  <li><strong>Development Phase</strong>
+    <ul>
+      <li>Write code</li>
+      <li>Test functionality</li>
+      <li>Review with team</li>
+    </ul>
+  </li>
+  <li><strong>Deployment Phase</strong>
+    <ul>
+      <li>Deploy to staging</li>
+      <li>Run final tests</li>
+      <li>Release to production</li>
+    </ul>
+  </li>
+</ol>
+```
+
+Complete formatted response:
 ```html
 <p>The <strong>board of directors</strong> at <em>Scania</em> includes several <u>key members</u>:</p>
 
