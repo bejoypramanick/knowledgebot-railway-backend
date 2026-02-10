@@ -303,36 +303,30 @@ class PydanticAIGatewayService:
 
             if use_cache:
                 # Use cached content - system prompt is in the cache
-                # Following explicit caching pattern: pass cache name directly to GoogleModel
                 logger.info(f"🚀 Using cached content: {cached_content_id}")
-
-                google_model = GoogleModel(
-                    MODEL_NAME,
-                    client=self.genai_client,
-                    google_cached_content=cached_content_id  # Explicit cache parameter
+                model_settings = GoogleModelSettings(
+                    cached_content_name=cached_content_id
                 )
+                google_model = GoogleModel(MODEL_NAME, model_settings=model_settings)
 
                 # IMPORTANT: Don't pass system_prompt when using cached content
-                # The system prompt is already in the cache (static-first strategy)
+                # The system prompt is already in the cache
                 agent = Agent(
                     google_model,
                     system_prompt=None,  # Already in cached content
-                    tools=tools,  # Tools sent fresh (dynamic-last strategy)
+                    tools=tools,
                     deps_type=ChatSessionDeps,
                 )
-                logger.info("✅ Agent created with CACHED system prompt (explicit caching enabled)")
+                logger.info("✅ Agent created with CACHED system prompt (context caching enabled)")
             else:
                 # No cache available - use full system prompt
                 logger.info("📝 No cache available - using full system prompt")
-                google_model = GoogleModel(
-                    MODEL_NAME,
-                    client=self.genai_client
-                )
+                google_model = GoogleModel(MODEL_NAME)
 
                 agent = Agent(
                     google_model,
-                    system_prompt=system_prompt,  # Full prompt sent (static-first, but no cache yet)
-                    tools=tools,  # Tools sent fresh (dynamic-last)
+                    system_prompt=system_prompt,
+                    tools=tools,
                     deps_type=ChatSessionDeps,
                 )
                 logger.info("✅ Agent created with full system prompt (caching disabled for this session)")
