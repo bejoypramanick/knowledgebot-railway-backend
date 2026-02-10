@@ -114,11 +114,33 @@ class SessionStateManager:
 
     async def get_chat_history(self, session_id: str):
         """Get chat history - delegates to chat_dao."""
-        return await self.chat_dao.get_chat_history(session_id)
+        result = await self.chat_dao.get_chat_history(session_id)
+        return result.get("messages", []) if result else []
 
     async def save_message(self, session_id: str, role: str, content: str, metadata: Dict[str, Any] = None):
         """Save message to database - delegates to chat_dao."""
-        return await self.chat_dao.save_message(session_id, role, content, metadata)
+        # ChatDAO doesn't have save_message, so we need to implement it here
+        query = """
+            INSERT INTO chat_messages (session_id, role, content, metadata, created_at)
+            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+            RETURNING id, session_id, role, content, metadata, created_at
+        """
+        params = {"session_id": session_id, "role": role, "content": content, "metadata": metadata}
+        try:
+            from shared.db import get_db_connection
+            async with get_db_connection() as conn:
+                record = await conn.fetchrow(query, session_id, role, content, metadata)
+                return {
+                    "id": record["id"],
+                    "session_id": record["session_id"],
+                    "role": record["role"],
+                    "content": record["content"],
+                    "metadata": record["metadata"],
+                    "created_at": record["created_at"].isoformat() if record["created_at"] else None
+                }
+        except Exception as e:
+            logger.error(f"Error saving message: {e}")
+            return None
 
     def update_session_activity(self, session_id: str):
         """Update session activity timestamp."""

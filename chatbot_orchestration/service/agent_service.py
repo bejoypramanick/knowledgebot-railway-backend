@@ -34,22 +34,26 @@ class PydanticAIGatewayService:
         await streaming_service.initialize() if hasattr(streaming_service, 'initialize') else None
         logger.info("✅ PydanticAIGatewayService initialized")
 
-    async def create_agent(self, session_id: str, system_prompt: str = "", tools: list = None, user_email: str = "anonymous@example.com"):
+    async def create_agent(self, session_id: str, system_prompt: str = "", tools: List[Any] = None, user_email: str = "anonymous@example.com"):
         """Create an agent instance - delegates to AgentManager."""
         logger.info(f"🤖 Creating agent for session: {session_id}")
-        return await agent_manager.create_agent(session_id, system_prompt, user_email)
+        return await agent_manager.create_agent(session_id, system_prompt, tools, user_email)
 
     async def stream_agent_response(
         self, 
         message: str, 
         session_id: str, 
-        tools: list = None, 
+        tools: List[Any] = None,
         user_email: str = "anonymous@example.com"
     ) -> AsyncGenerator[str, None]:
         """Stream agent response - delegates to StreamingService."""
         logger.info(f"🌊 Starting stream for session: {session_id}")
+        
+        # Create agent first
+        agent = await agent_manager.create_agent(session_id, "", tools, user_email)
+        
         async for chunk in streaming_service.stream_agent_response(
-            message, session_id, user_email
+            agent, message, session_id, user_email
         ):
             yield chunk
 
