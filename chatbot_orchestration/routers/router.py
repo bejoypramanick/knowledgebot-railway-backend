@@ -23,36 +23,8 @@ chat_service = ChatService()
 agent_service = PydanticAIGatewayService()
 
 # =================================
-# CHAT ENDPOINTS
+# CHAT ENDPOINTS (STREAMING ONLY)
 # =================================
-
-@router.post("/chat")
-async def chat_with_agent(request: Request):
-    """Chat with AI agent"""
-    try:
-        body = await request.json()
-        
-        message = body.get("message")
-        session_id = body.get("session_id")
-        
-        if not message:
-            raise HTTPException(status_code=400, detail="Message is required")
-        
-        # Create session if not provided
-        if not session_id:
-            session_id = f"session_{int(time.time())}"
-        
-        # Process chat message
-        response = await agent_service.process_message(message, session_id)
-        
-        return {
-            "success": True,
-            "response": response,
-            "session_id": session_id
-        }
-    except Exception as e:
-        logger.error(f"Error in chat: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/chat/stream")
 async def chat_with_agent_stream(request: Request):
@@ -70,15 +42,10 @@ async def chat_with_agent_stream(request: Request):
         if not session_id:
             session_id = f"session_{int(time.time())}"
 
-        # Import tools for agent
-        from ..tools.knowledge_tools import search_knowledge_base, query_railway_postgres, request_human_agent_connection
-        tools = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
-
-        # Stream response using new agent-based approach
+        # Stream response (tools are configured internally in agent_manager)
         async def generate_response():
-            async for chunk in agent_service.stream_agent_response(message, session_id, tools):
-                # chunk already contains the formatted JSON with \n\n
-                yield f"data: {chunk}"
+            async for chunk in agent_service.stream_agent_response(message, session_id):
+                yield chunk
 
         return StreamingResponse(
             generate_response(),
@@ -152,43 +119,6 @@ async def get_user_sessions():
         }
     except Exception as e:
         logger.error(f"Error getting sessions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# =================================
-# AGENT ENDPOINTS
-# =================================
-
-@router.get("/agents")
-async def get_available_agents():
-    """Get list of available agents"""
-    try:
-        agents = await agent_service.get_available_agents()
-        
-        return {
-            "success": True,
-            "agents": agents
-        }
-    except Exception as e:
-        logger.error(f"Error getting agents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/agents/{agent_id}")
-async def get_agent_info(agent_id: str):
-    """Get information about a specific agent"""
-    try:
-        agent_info = await agent_service.get_agent_info(agent_id)
-        
-        if not agent_info:
-            raise HTTPException(status_code=404, detail="Agent not found")
-        
-        return {
-            "success": True,
-            "agent": agent_info
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting agent info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
