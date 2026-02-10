@@ -90,7 +90,7 @@ class PydanticAIGatewayService:
                 model=MODEL_NAME,
                 config=types.CreateCachedContentConfig(
                     display_name=f"system_prompt_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
-                    contents=[types.Content(parts=[types.Part(text=system_prompt)])],
+                    contents=[types.Content(role="user", parts=[types.Part(text=system_prompt)])],
                     ttl="3600s"
                 )
             )
