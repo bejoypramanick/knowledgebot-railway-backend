@@ -382,10 +382,10 @@ class PydanticAIGatewayService:
             history_context = ""
             if chat_history and chat_history.get("messages"):
                 history_context = "\n\nRECENT CONVERSATION HISTORY:\n"
-                for msg in chat_history["messages"][-3:]:  # Last 3 messages for context
+                for msg in chat_history["messages"][1:]:   #Skip first greetings message
                     if msg.get("sender") == "user":
                         history_context += f"User: {msg.get('message', '')}\n"
-                    elif msg.get("sender") in ["agent", "bot"]:
+                    elif msg.get("sender") in ["agent", "bot","admin"]:
                         history_context += f"Assistant: {msg.get('message', '')}\n"
 
             # Construct user message with history context
