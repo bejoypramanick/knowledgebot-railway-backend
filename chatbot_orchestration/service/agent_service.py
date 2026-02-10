@@ -257,12 +257,15 @@ class PydanticAIGatewayService:
 
             # Get cached content ID from session metadata (skip if client not available)
             cached_content_id = None
+            newly_created_cache = False
             if self.genai_client:
                 try:
                     cached_content_id = await self.get_cached_content_id(session_id)
                     if not cached_content_id:
                         try:
                             cached_content_id = await self.get_or_create_cached_content(system_prompt)
+                            newly_created_cache = True
+                            logger.info(f"📝 Created new cached content: {cached_content_id}")
                         except Exception as e:
                             logger.warning(f"Failed to create cached content: {e}")
                             cached_content_id = None
@@ -302,6 +305,16 @@ class PydanticAIGatewayService:
                 deps_type=ChatSessionDeps,
             )
             logger.info("✅ Agent created successfully with dynamic persona and tools")
+
+            # Update session metadata with new cached_content_id if we created one
+            if newly_created_cache and cached_content_id:
+                try:
+                    await self.update_session_metadata(
+                        session_id=session_id,
+                        cached_content_id=cached_content_id
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to save cached_content_id to session: {e}")
 
             return agent
 
@@ -421,8 +434,20 @@ class PydanticAIGatewayService:
             logger.error(f"Error tracking token usage from result: {e}")
 
     async def update_session_metadata(self, session_id: str, file_search_store_id: str = None, cached_content_id: str = None):
-         if not self.db: return
-         await self.db.update_session_metadata(session_id, file_search_store_id, cached_content_id)
+        """Update session metadata in database with file_search_store_id and cached_content_id"""
+        try:
+            if not self.chat_dao:
+                logger.warning("⚠️ ChatDAO not available, skipping session metadata update")
+                return
+
+            # Use chat_dao to update session metadata
+            await self.chat_dao.update_session_cache_info(
+                session_id=session_id,
+                cached_content_id=cached_content_id
+            )
+            logger.info(f"✅ Updated session {session_id} with cached_content_id: {cached_content_id}")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to update session metadata: {e}")
 
     async def process_message(self, message: str, session_id: str) -> str:
         """Process a chat message and return response"""

@@ -97,6 +97,25 @@ class ChatDAO:
             logger.log_db_query(query, params, error=e)
             return None
 
+    async def update_session_cache_info(self, session_id: str, cached_content_id: str) -> bool:
+        """Update session with cached_content_id"""
+        query = """
+            UPDATE chat_sessions
+            SET cached_content_id = $2,
+                last_activity_at = CURRENT_TIMESTAMP
+            WHERE session_id = $1
+        """
+        params = {"session_id": session_id, "cached_content_id": cached_content_id}
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, session_id, cached_content_id)
+                logger.log_db_query(query, params, result)
+                return True
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return False
+
     async def get_chat_history(self, session_id: str) -> Dict[str, Any]:
         """Get chat history for a session"""
         session_query = """
