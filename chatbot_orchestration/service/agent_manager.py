@@ -51,15 +51,20 @@ class AgentManager:
     async def _build_system_prompt(self, persona_config: Dict[str, Any]) -> str:
         """Build system prompt from persona configuration."""
         try:
-            # Import the system prompt builder
-            from ..agent.prompt import build_system_prompt
-            return build_system_prompt(persona_config)
+            # Import the system prompt generator
+            from ..agent.prompt import get_system_prompt
+
+            # Extract custom prompt from persona config if available
+            custom_prompt = persona_config.get('system_instructions', None)
+
+            # Get the comprehensive system prompt
+            return get_system_prompt(custom_prompt=custom_prompt, response_policy=None)
         except Exception as e:
             logger.error(f"❌ Failed to build system prompt: {e}")
             # Return fallback system prompt
-            return f"""You are {persona_config.get('persona_name', 'Assistant')}. 
+            return f"""You are {persona_config.get('persona_name', 'Assistant')}.
             {persona_config.get('persona_description', 'You are a helpful AI assistant.')}
-            
+
             Always provide helpful, accurate responses using proper HTML formatting."""
 
     async def create_agent(self, session_id: str, user_email: str = "anonymous@example.com") -> Agent:
