@@ -37,7 +37,7 @@ def get_cached_system_prompt(prompt_components: Dict[str, Any], model_name: str)
         cached_data = context_cache[cache_key]
         current_time = time.time()
         cache_age = current_time - cached_data['timestamp']
-        
+        logger.info("cache_age: {cache_age}")
         logger.info(f"📦 Cache entry found:")
         logger.info(f"  - Cache age: {cache_age:.1f}s ({cache_age/60:.1f}m)")
         logger.info(f"  - TTL: {CACHE_TTL_SECONDS}s ({CACHE_TTL_SECONDS/60:.1f}m)")
