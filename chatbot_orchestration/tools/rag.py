@@ -65,8 +65,34 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         
         # Extract metadata from Gemini response
         metadata = {}
+        source_urls = []  # Collect source URLs for the chatbot to reference
+
         if hasattr(response, 'candidates'):
             metadata['candidates_count'] = len(response.candidates)
+
+            # Extract source URLs from grounding metadata
+            for candidate in response.candidates:
+                if hasattr(candidate, 'grounding_metadata'):
+                    grounding = candidate.grounding_metadata
+
+                    # Check for grounding_chunks which contain source information
+                    if hasattr(grounding, 'grounding_chunks'):
+                        for chunk in grounding.grounding_chunks:
+                            # Extract web URL if present
+                            if hasattr(chunk, 'web') and hasattr(chunk.web, 'uri'):
+                                url = chunk.web.uri
+                                if url and url not in source_urls:
+                                    source_urls.append(url)
+                                    logger.info(f"📎 Found source URL: {url}")
+
+                    # Check for web_search_queries
+                    if hasattr(grounding, 'web_search_queries'):
+                        logger.info(f"🔍 Web search queries used: {grounding.web_search_queries}")
+
+                    # Check for search_entry_point
+                    if hasattr(grounding, 'search_entry_point') and hasattr(grounding.search_entry_point, 'rendered_content'):
+                        logger.info(f"🌐 Search entry point available")
+
         if hasattr(response, 'prompt_feedback'):
             metadata['prompt_feedback'] = response.prompt_feedback
         if hasattr(response, 'usage_metadata'):
@@ -75,13 +101,18 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
             metadata['finish_reason'] = response.finish_reason
         if hasattr(response, 'safety_ratings'):
             metadata['safety_ratings'] = [rating._asdict() if hasattr(rating, '_asdict') else str(rating) for rating in response.safety_ratings]
-        
-        # Add citation metadata if available
+
+        # Add source URLs to metadata for the chatbot to reference
+        if source_urls:
+            metadata['source_urls'] = source_urls
+            logger.info(f"✅ Extracted {len(source_urls)} source URL(s) from grounding metadata")
+
+        # Add grounding metadata if available
         if hasattr(response, 'grounding_metadata'):
             metadata['grounding_metadata'] = response.grounding_metadata
-        
+
         metadata['api_method'] = 'FileSearch tool (correct implementation)'
-        
+
         return [SearchResult(
             file_name="RAG_Response",
             content=response_text,
