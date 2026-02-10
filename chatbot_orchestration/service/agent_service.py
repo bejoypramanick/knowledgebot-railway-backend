@@ -363,15 +363,29 @@ class PydanticAIGatewayService:
             logger.info(f"\n🔧 STEP 5: Cache validation and management")
             newly_created_cache = False
 
+            # IMPORTANT: Invalidate old caches that don't include tools
+            # Old caches were created without tools, so force recreation if tools are present
+            if cached_content_id and tools and len(tools) > 0:
+                logger.warning(f"⚠️ Invalidating existing cache - tools were recently added to cache format")
+                logger.warning(f"⚠️ Cache {cached_content_id} may not include tools, forcing recreation")
+                cached_content_id = None  # Force cache recreation with tools
+
             if not cached_content_id or cached_content_id.startswith('no_cache_'):
                 # No valid cache exists, create new one
                 tool_count = len(tools) if tools else 0
                 logger.info(f"  → No valid cache found, creating new cached content with {tool_count} tools")
+                if tools:
+                    logger.info(f"  → Tools to be cached:")
+                    for idx, tool in enumerate(tools, 1):
+                        tool_name = getattr(tool, '__name__', str(tool))
+                        logger.info(f"     {idx}. {tool_name}")
                 try:
                     # Pass tools to cache creation - they must be included in cached content
                     cached_content_id = await self.get_or_create_cached_content(system_prompt, tools)
                     newly_created_cache = True
                     logger.info(f"  ✓ Created new cached content: {cached_content_id}")
+                    if tools:
+                        logger.info(f"  ✓ Cache includes {len(tools)} tools")
                 except Exception as e:
                     logger.warning(f"  ⚠️ Failed to create cached content: {e}")
                     logger.warning(f"  → Will proceed without caching")
