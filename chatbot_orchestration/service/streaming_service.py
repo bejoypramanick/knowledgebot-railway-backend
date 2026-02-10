@@ -100,14 +100,14 @@ class StreamingService:
 
             try:
                 # Run agent with message history and stream text deltas
-                # Enable caching via model_settings (PydanticAI's recommended approach)
+                # TEMPORARILY DISABLED caching to test if it's causing formatting issues
                 async with agent.run_stream(
                     message,
                     message_history=pydantic_messages,
-                    deps=session_deps,
-                    model_settings={'cache_system_prompt': True}  # Enable caching here!
+                    deps=session_deps
+                    # model_settings={'cache_system_prompt': True}  # DISABLED for testing
                 ) as result:
-                    logger.info("✅ Agent streaming with cache_system_prompt=True")
+                    logger.info("⚠️ Agent streaming WITHOUT caching (testing formatting fix)")
                     # Stream text with delta=True for incremental chunks
                     async for delta_text in result.stream_text(delta=True):
                         chunk_count += 1

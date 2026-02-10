@@ -132,6 +132,9 @@ class AgentManager:
                 deps_type=ChatSessionDeps
             )
             logger.info("✅ Agent created successfully")
+            logger.info(f"📝 System prompt: {len(system_prompt)} chars")
+            logger.info(f"📝 System prompt preview: {system_prompt[:200]}...")
+            logger.info(f"📝 Has HTML formatting instructions: {'MANDATORY HTML FORMATTING' in system_prompt}")
             logger.info("ℹ️ Caching will be enabled via model_settings in run_stream()")
             logger.info("💰 Token savings: ~85-90% when cache_system_prompt=True is used")
 
