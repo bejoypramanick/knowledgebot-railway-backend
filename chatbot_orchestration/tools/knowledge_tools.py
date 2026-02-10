@@ -75,6 +75,20 @@ async def search_knowledge_base(query: str) -> str:
         logger.info(response_text)
         logger.info("=" * 80)
 
+        # DEBUG: Log response structure to understand what's available
+        logger.info("🔍 DEBUG: Response object structure:")
+        logger.info(f"  - Has 'candidates': {hasattr(response, 'candidates')}")
+        if hasattr(response, 'candidates'):
+            logger.info(f"  - Number of candidates: {len(response.candidates)}")
+            for i, candidate in enumerate(response.candidates):
+                logger.info(f"  - Candidate {i} attributes: {dir(candidate)}")
+                logger.info(f"  - Candidate {i} has 'grounding_metadata': {hasattr(candidate, 'grounding_metadata')}")
+                if hasattr(candidate, 'grounding_metadata'):
+                    gm = candidate.grounding_metadata
+                    logger.info(f"  - Grounding metadata attributes: {dir(gm)}")
+                    logger.info(f"  - Grounding metadata: {gm}")
+        logger.info("=" * 80)
+
         # Extract source URLs from grounding metadata
         source_urls = []
         if hasattr(response, 'candidates'):
