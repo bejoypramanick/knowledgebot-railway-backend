@@ -185,51 +185,132 @@ class WebsiteService:
 
         from website_crawling.service.ai_service import upload_content_to_gemini, record_scraped_metadata
 
-        # Get domain
-        domain = urlparse(url).netloc.replace('www.', '')
-        title = result.get("title") or ""  # Empty string if no title found (URL is already shown)
+        # Check if this is a sitemap with individual pages to upload
+        scraped_data = result.get("scraped_data", [])
 
-        gemini_result = await upload_content_to_gemini(
-            content=content_for_upload,
-            url=url,
-            title=title,
-            user_email=options.get("user_email")
-        )
+        if scraped_data:
+            # Sitemap: Upload each page separately with its own URL
+            logger.info(f"📋 Sitemap detected: uploading {len(scraped_data)} pages individually")
 
-        # Record metadata to database
-        record_id = await record_scraped_metadata(
-            url=url,
-            domain=domain,
-            title=title,
-            content_length=len(result["content"]),
-            pages_scraped=result.get("pages_scraped", 1),
-            gemini_file_name=gemini_result.get("file_name"),
-            gemini_file_uri=gemini_result.get("file_uri"),
-            gemini_state=gemini_result.get("state", "UNKNOWN"),
-            scraped_urls=result.get("scraped_urls", [url]),
-            scraping_config={
-                "max_pages": max_pages,
-                "max_depth": max_depth
-            },
-            file_search_metadata=gemini_result.get("file_search_metadata")
-        )
+            uploaded_files = []
+            record_ids = []
 
-        processing_time = time.perf_counter() - start_time
+            for page_data in scraped_data:
+                page_url = page_data["url"]
+                page_text = page_data["text"]
+                page_domain = urlparse(page_url).netloc.replace('www.', '')
 
-        return {
-            "success": True,
-            "job_id": f"job_{int(time.time())}",
-            "url": url,
-            "status": "completed",
-            "pages_scraped": result.get("pages_scraped", 1),
-            "content_length": len(result["content"]),
-            "title": result.get("title"),
-            "gemini_file": gemini_result.get("file_name"),
-            "gemini_state": gemini_result.get("state"),
-            "record_id": record_id,
-            "processing_time_seconds": round(processing_time, 2),
-            "scraped_urls": result.get("scraped_urls", [url])
-        }
+                # Extract page title from first line or use domain
+                page_title = ""
+                if page_text:
+                    first_line = page_text.split('\n')[0][:100]
+                    page_title = first_line if first_line else page_domain
+
+                logger.info(f"📄 Uploading page: {page_url}")
+
+                try:
+                    # Upload individual page
+                    gemini_result = await upload_content_to_gemini(
+                        content=page_text,
+                        url=page_url,  # Use child page URL, not sitemap URL
+                        title=page_title,
+                        user_email=options.get("user_email")
+                    )
+
+                    # Record metadata for individual page
+                    record_id = await record_scraped_metadata(
+                        url=page_url,  # Use child page URL
+                        domain=page_domain,
+                        title=page_title,
+                        content_length=len(page_text),
+                        pages_scraped=1,
+                        gemini_file_name=gemini_result.get("file_name"),
+                        gemini_file_uri=gemini_result.get("file_uri"),
+                        gemini_state=gemini_result.get("state", "UNKNOWN"),
+                        scraped_urls=[page_url],
+                        scraping_config={
+                            "max_pages": max_pages,
+                            "max_depth": max_depth,
+                            "source": "sitemap",
+                            "sitemap_url": url  # Store original sitemap URL
+                        },
+                        file_search_metadata=gemini_result.get("file_search_metadata")
+                    )
+
+                    uploaded_files.append({
+                        "url": page_url,
+                        "file_name": gemini_result.get("file_name"),
+                        "record_id": record_id
+                    })
+                    record_ids.append(record_id)
+
+                except Exception as e:
+                    logger.error(f"❌ Failed to upload page {page_url}: {e}")
+
+            processing_time = time.perf_counter() - start_time
+
+            logger.info(f"✅ Uploaded {len(uploaded_files)}/{len(scraped_data)} pages from sitemap")
+
+            return {
+                "success": True,
+                "job_id": f"job_{int(time.time())}",
+                "url": url,
+                "status": "completed",
+                "pages_scraped": len(uploaded_files),
+                "content_length": len(result["content"]),
+                "title": result.get("title"),
+                "uploaded_files": uploaded_files,
+                "record_ids": record_ids,
+                "processing_time_seconds": round(processing_time, 2),
+                "scraped_urls": result.get("scraped_urls", [url])
+            }
+
+        else:
+            # Single page: Upload normally
+            domain = urlparse(url).netloc.replace('www.', '')
+            title = result.get("title") or ""  # Empty string if no title found (URL is already shown)
+
+            gemini_result = await upload_content_to_gemini(
+                content=content_for_upload,
+                url=url,
+                title=title,
+                user_email=options.get("user_email")
+            )
+
+            # Record metadata to database
+            record_id = await record_scraped_metadata(
+                url=url,
+                domain=domain,
+                title=title,
+                content_length=len(result["content"]),
+                pages_scraped=result.get("pages_scraped", 1),
+                gemini_file_name=gemini_result.get("file_name"),
+                gemini_file_uri=gemini_result.get("file_uri"),
+                gemini_state=gemini_result.get("state", "UNKNOWN"),
+                scraped_urls=result.get("scraped_urls", [url]),
+                scraping_config={
+                    "max_pages": max_pages,
+                    "max_depth": max_depth
+                },
+                file_search_metadata=gemini_result.get("file_search_metadata")
+            )
+
+            processing_time = time.perf_counter() - start_time
+
+            return {
+                "success": True,
+                "job_id": f"job_{int(time.time())}",
+                "url": url,
+                "status": "completed",
+                "pages_scraped": result.get("pages_scraped", 1),
+                "content_length": len(result["content"]),
+                "title": result.get("title"),
+                "gemini_file": gemini_result.get("file_name"),
+                "gemini_state": gemini_result.get("state"),
+                "record_id": record_id,
+                "processing_time_seconds": round(processing_time, 2),
+                "scraped_urls": result.get("scraped_urls", [url])
+            }
 
     async def _scrape_with_crawl4ai(
         self,
@@ -492,7 +573,8 @@ class WebsiteService:
                 "content": combined_content,
                 "title": title,
                 "pages_scraped": len(scraped_urls),
-                "scraped_urls": list(scraped_urls)
+                "scraped_urls": list(scraped_urls),
+                "scraped_data": scraped_data  # Include individual page data for separate uploads
             }
 
         except Exception as e:
