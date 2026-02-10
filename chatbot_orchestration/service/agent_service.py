@@ -1,5 +1,6 @@
 import time
 import json
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
@@ -231,90 +232,68 @@ class PydanticAIGatewayService:
         logger.info(f"Creating agent for session {session_id}")
 
         try:
-            # Initialize GenAI client if not already initialized
-            try:
-                await self.initialize()
-                if not self.genai_client:
-                    logger.warning("⚠️ GenAI client not available after initialization")
-            except Exception as init_error:
-                logger.warning(f"⚠️ GenAI client initialization failed: {init_error}")
+            # FIX #2: Initialize GenAI client - FAIL FAST if critical
+            await self.initialize()
+            if not self.genai_client:
+                raise RuntimeError("GenAI client failed to initialize - cannot create agent")
 
-            # Fetch persona configuration dynamically
-            persona_config = await self._fetch_persona_config()
+            # FIX #1: Run independent operations in parallel
+            logger.info("🔄 Fetching persona config and session metadata in parallel...")
+            persona_config, cached_content_id = await asyncio.gather(
+                self._fetch_persona_config(),
+                self.get_cached_content_id(session_id),
+                return_exceptions=False  # Fail fast if any critical operation fails
+            )
+
             logger.info(f"🎭 Using persona: {persona_config['persona_name']}")
 
-            # Build system prompt with persona and response policy
+            # Build system prompt (depends on persona_config, so must be sequential)
             system_prompt = await self._build_system_prompt(persona_config)
             logger.info(f"📝 System prompt: {len(system_prompt)} characters")
 
-            # Get or create file search store for this session (skip if client not available)
-            file_search_store_id = None
-            if self.genai_client:
-                try:
-                    file_search_store_id = await self.get_or_create_file_search_store(session_id)
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to get file search store: {e}")
-
-            # Get cached content ID from session metadata (skip if client not available)
-            cached_content_id = None
+            # FIX #4: Better cache validation - check for valid cache ID
             newly_created_cache = False
-            if self.genai_client:
+            if not cached_content_id or cached_content_id.startswith('no_cache_'):
+                # No valid cache exists, create new one
                 try:
-                    cached_content_id = await self.get_cached_content_id(session_id)
-                    if not cached_content_id:
-                        try:
-                            cached_content_id = await self.get_or_create_cached_content(system_prompt)
-                            newly_created_cache = True
-                            logger.info(f"📝 Created new cached content: {cached_content_id}")
-                        except Exception as e:
-                            logger.warning(f"Failed to create cached content: {e}")
-                            cached_content_id = None
+                    logger.info("📝 Creating new cached content...")
+                    cached_content_id = await self.get_or_create_cached_content(system_prompt)
+                    newly_created_cache = True
+                    logger.info(f"✅ Created new cached content: {cached_content_id}")
                 except Exception as e:
-                    logger.warning(f"⚠️ Failed to get cached content: {e}")
-
-            # Prepare model settings following Pydantic AI best practices
-            model_settings = None
-            if cached_content_id and not cached_content_id.startswith('no_cache_'):
-                model_settings = GoogleModelSettings(google_cached_content=cached_content_id)
-                logger.info(f"Using cached content ID: {cached_content_id}")
-
-            # Initialize model with proper settings handling
-            try:
-                google_model = GoogleModel(MODEL_NAME, settings=model_settings)
-                logger.info("GoogleModel initialized with settings")
-            except Exception as e:
-                logger.error(f"Failed to initialize GoogleModel with settings: {e}")
-                # Fallback to model without settings
-                google_model = GoogleModel(MODEL_NAME)
-                logger.warning("Falling back to GoogleModel without settings")
-
-            # CRITICAL: When using cached content, don't pass system_prompt to avoid conflict
-            # The system_instruction is already in the cached content
-            agent_system_prompt = "" if (cached_content_id and not cached_content_id.startswith('no_cache_')) else system_prompt
-
-            if cached_content_id and not cached_content_id.startswith('no_cache_'):
-                logger.info("ℹ️ Using cached content - system_prompt from cache (not passing to Agent)")
+                    logger.warning(f"⚠️ Failed to create cached content: {e}")
+                    cached_content_id = None
             else:
-                logger.info("ℹ️ No cache - passing full system_prompt to Agent")
+                logger.info(f"♻️ Reusing existing cached content: {cached_content_id}")
 
-            # Create agent with proper Pydantic AI initialization
+            # FIX #3: Removed file_search_store_id fetching
+            # File search store is managed by the search_knowledge_base tool, not the Agent
+            # The tool uses environment variable GEMINI_FILE_SEARCH_STORE_NAME directly
+
+            # Prepare model settings (DISABLED for now due to Pydantic AI conflict)
+            # TODO: Re-enable caching with proper architecture
+            model_settings = None
+            use_cache = False  # Temporarily disabled
+
+            # Initialize model without cache settings to avoid API conflict
+            google_model = GoogleModel(MODEL_NAME)
+            logger.info("GoogleModel initialized (caching disabled)")
+
+            # Create agent with full system_prompt (no cache conflict)
             agent = Agent(
                 google_model,
-                system_prompt=agent_system_prompt,
+                system_prompt=system_prompt,
                 tools=tools,
                 deps_type=ChatSessionDeps,
             )
             logger.info("✅ Agent created successfully with dynamic persona and tools")
 
-            # Update session metadata with new cached_content_id if we created one
+            # Save cached_content_id to DB if we created one (for future use when caching is re-enabled)
             if newly_created_cache and cached_content_id:
-                try:
-                    await self.update_session_metadata(
-                        session_id=session_id,
-                        cached_content_id=cached_content_id
-                    )
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to save cached_content_id to session: {e}")
+                # Run DB update in background - don't block agent creation
+                asyncio.create_task(
+                    self._save_cache_to_session_background(session_id, cached_content_id)
+                )
 
             return agent
 
@@ -432,6 +411,17 @@ class PydanticAIGatewayService:
 
         except Exception as e:
             logger.error(f"Error tracking token usage from result: {e}")
+
+    async def _save_cache_to_session_background(self, session_id: str, cached_content_id: str):
+        """Background task to save cached_content_id to database"""
+        try:
+            await self.chat_dao.update_session_cache_info(
+                session_id=session_id,
+                cached_content_id=cached_content_id
+            )
+            logger.info(f"✅ Background: Saved cached_content_id to session {session_id}")
+        except Exception as e:
+            logger.warning(f"⚠️ Background: Failed to save cached_content_id: {e}")
 
     async def update_session_metadata(self, session_id: str, file_search_store_id: str = None, cached_content_id: str = None):
         """Update session metadata in database with file_search_store_id and cached_content_id"""
