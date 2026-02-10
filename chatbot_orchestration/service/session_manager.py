@@ -1,0 +1,141 @@
+"""
+Session State Management for Chatbot Orchestration
+Handles session state, caching, and metadata management
+"""
+
+import time
+import asyncio
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+
+from shared.otel_logger import get_otel_logger
+
+from ..core.ai import get_genai_client
+from ..dao.chat_dao import ChatDAO
+
+logger = get_otel_logger("session_manager", "chatbot-orchestration")
+
+class SessionStateManager:
+    """Manages session state, caching, and metadata for chat sessions."""
+
+    def __init__(self):
+        self.genai_client = None
+        self.chat_dao = ChatDAO()
+        self.session_states: Dict[str, Dict[str, Any]] = {}
+
+    async def initialize(self):
+        """Initialize the session manager with required clients."""
+        if not self.genai_client:
+            self.genai_client = get_genai_client()
+
+    async def get_session_metadata(self, session_id: str) -> Dict[str, Any]:
+        """Retrieve session metadata from database."""
+        logger.info(f"🔍 Retrieving session metadata for session: {session_id}")
+
+        try:
+            metadata = await self.chat_dao.get_session_metadata(session_id)
+            if metadata:
+                logger.info(f"✅ Retrieved session metadata: {metadata}")
+                return metadata
+            else:
+                logger.warning(f"⚠️ No metadata found for session: {session_id}")
+                return {}
+        except Exception as e:
+            logger.error(f"❌ Error retrieving session metadata: {e}")
+            return {}
+
+    async def get_cached_content_id(self, session_id: str) -> Optional[str]:
+        """Get cached content ID for a session."""
+        try:
+            metadata = await self.get_session_metadata(session_id)
+            cached_content_id = metadata.get('cached_content_id')
+            
+            if cached_content_id:
+                logger.info(f"✅ Found cached content ID: {cached_content_id}")
+                return cached_content_id
+            else:
+                logger.info(f"ℹ️ No cached content ID found for session: {session_id}")
+                return None
+        except Exception as e:
+            logger.error(f"❌ Error getting cached content ID: {e}")
+            return None
+
+    async def get_or_create_cached_content(self, system_prompt: str, tools: list = None) -> str:
+        """Get or create cached content for system prompt."""
+        logger.info("🚀 Creating cached content for system prompt")
+        
+        await self.initialize()
+        if not self.genai_client:
+            raise RuntimeError("GenAI client not initialized")
+
+        try:
+            # Create cache with system prompt only (tools cause API errors)
+            cache = self.genai_client.caches.create(
+                model='models/gemini-2.5-flash',
+                contents=system_prompt,
+                ttl=3600  # 1 hour
+            )
+            
+            cached_content_id = cache.name
+            logger.info(f"✅ Created cached content: {cached_content_id}")
+            return cached_content_id
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to create cached content: {e}")
+            raise
+
+    async def _save_cache_to_session_background(self, session_id: str, cached_content_id: str):
+        """Save cache ID to session in background."""
+        try:
+            await asyncio.sleep(0.1)  # Small delay to ensure cache is created
+            
+            metadata = {
+                'cached_content_id': cached_content_id,
+                'cache_created_at': datetime.utcnow().isoformat(),
+                'cache_expires_at': (datetime.utcnow() + timedelta(hours=1)).isoformat()
+            }
+            
+            await self.chat_dao.update_session_metadata(session_id, metadata)
+            logger.info(f"✅ Saved cache ID to session: {session_id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to save cache to session: {e}")
+
+    def get_session_state(self, session_id: str) -> Dict[str, Any]:
+        """Get or create session state."""
+        if session_id not in self.session_states:
+            self.session_states[session_id] = {
+                'created_at': time.time(),
+                'last_activity': time.time(),
+                'message_count': 0,
+                'is_streaming': False
+            }
+        return self.session_states[session_id]
+
+    def update_session_activity(self, session_id: str):
+        """Update session activity timestamp."""
+        state = self.get_session_state(session_id)
+        state['last_activity'] = time.time()
+        state['message_count'] += 1
+
+    def set_streaming_state(self, session_id: str, is_streaming: bool):
+        """Set streaming state for a session."""
+        state = self.get_session_state(session_id)
+        state['is_streaming'] = is_streaming
+
+    def cleanup_expired_sessions(self, max_age_hours: int = 24):
+        """Clean up expired sessions."""
+        current_time = time.time()
+        expired_sessions = []
+        
+        for session_id, state in self.session_states.items():
+            age_hours = (current_time - state['last_activity']) / 3600
+            if age_hours > max_age_hours:
+                expired_sessions.append(session_id)
+        
+        for session_id in expired_sessions:
+            del self.session_states[session_id]
+            logger.info(f"🗑️ Cleaned up expired session: {session_id}")
+
+# Global session manager instance
+session_state_manager = SessionStateManager()

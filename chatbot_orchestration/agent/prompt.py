@@ -111,15 +111,7 @@ AVAILABLE DATA SOURCES AND WHEN TO USE THEM:
    - Use for questions about the knowledge base system itself
    - NEVER expose PII (personally identifiable information) - only return aggregated/anonymized data
 
-3. <strong>query_neon_db</strong> (Neon DB - Business Database):
-   - Use for questions about products, product catalog, pricing
-   - Use for questions about orders, transactions, sales
-   - Use for questions about inventory, stock levels, warehouse data
-   - Use for sales analytics, revenue trends, business metrics
-   - NEVER expose PII - only return business data and anonymized statistics
-
-
-4. <strong>request_human_agent_connection</strong> (Human Agent Support):
+3. <strong>request_human_agent_connection</strong> (Human Agent Support):
    - Use when the user explicitly asks to speak with a human, real person, or agent
    - Use when the user requests human support or assistance
    - Use when the user is frustrated and needs human help
