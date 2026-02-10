@@ -64,6 +64,9 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         logger.info(f"✅ Generated response: {len(response_text)} characters")
 
         # Extract metadata from Gemini response
+        logger.info("="*80)
+        logger.info("🔍 STARTING CITATION EXTRACTION")
+        logger.info("="*80)
         metadata = {}
         source_urls = []  # Collect source URLs for the chatbot to reference
         document_source_urls = []  # URLs from scraped documents
@@ -135,12 +138,21 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         all_source_urls = source_urls + document_source_urls
 
         # Add source URLs to metadata for the chatbot to reference
+        logger.info("="*80)
+        logger.info("📊 CITATION EXTRACTION SUMMARY")
+        logger.info("="*80)
         if all_source_urls:
             metadata['source_urls'] = all_source_urls
             logger.info(f"✅ Extracted {len(source_urls)} web search URL(s) and {len(document_source_urls)} document source URL(s)")
             logger.info(f"📚 Total sources: {len(all_source_urls)}")
             for i, url in enumerate(all_source_urls, 1):
-                logger.info(f"   Source {i}: {url}")
+                logger.info(f"   [{i}] {url}")
+        else:
+            logger.warning(f"❌ NO CITATIONS FOUND")
+            logger.warning(f"   - Web search URLs: {len(source_urls)}")
+            logger.warning(f"   - Document source URLs: {len(document_source_urls)}")
+            logger.warning(f"   - Check if documents contain 'Source URL:' metadata")
+        logger.info("="*80)
 
         # Add grounding metadata if available
         if hasattr(response, 'grounding_metadata'):
@@ -152,11 +164,20 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         # Format them clearly so the model sees them
         enhanced_content = response_text
         if all_source_urls:
-            enhanced_content += "\n\n[CITATION_SOURCES]"
+            citation_section = "\n\n[CITATION_SOURCES]"
             for url in all_source_urls:
-                enhanced_content += f"\n- {url}"
-            enhanced_content += "\n[/CITATION_SOURCES]"
+                citation_section += f"\n- {url}"
+            citation_section += "\n[/CITATION_SOURCES]"
+
+            enhanced_content += citation_section
+
             logger.info(f"📎 Appended {len(all_source_urls)} source URL(s) to content for citation")
+            logger.info(f"📋 Citation section added to response:")
+            logger.info(f"{citation_section}")
+            logger.info(f"📄 Full enhanced content length: {len(enhanced_content)} characters")
+        else:
+            logger.warning(f"⚠️ No source URLs found - citations will NOT be available")
+            logger.warning(f"⚠️ Response text length: {len(response_text)} characters")
 
         return [SearchResult(
             file_name="RAG_Response",
