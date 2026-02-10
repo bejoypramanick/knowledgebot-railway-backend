@@ -11,6 +11,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, Te
 from shared.otel_logger import get_otel_logger
 
 from ..core.dependencies import ChatSessionDeps
+from .session_manager import session_state_manager
 
 logger = get_otel_logger("streaming_service", "chatbot-orchestration")
 
