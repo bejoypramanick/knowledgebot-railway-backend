@@ -100,11 +100,14 @@ class StreamingService:
 
             try:
                 # Run agent with message history and stream text deltas
+                # Enable caching via model_settings (PydanticAI's recommended approach)
                 async with agent.run_stream(
                     message,
                     message_history=pydantic_messages,
-                    deps=session_deps
+                    deps=session_deps,
+                    model_settings={'cache_system_prompt': True}  # Enable caching here!
                 ) as result:
+                    logger.info("✅ Agent streaming with cache_system_prompt=True")
                     # Stream text with delta=True for incremental chunks
                     async for delta_text in result.stream_text(delta=True):
                         chunk_count += 1

@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic_ai import Agent
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+from pydantic_ai.models.google import GoogleModel
 from shared.otel_logger import get_otel_logger
 
 from ..core.ai import MODEL_NAME, get_genai_client
@@ -117,18 +117,12 @@ class AgentManager:
         tool_functions = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
         logger.info(f"📋 Registering {len(tool_functions)} tools with agent")
 
-        # Create agent with PydanticAI's built-in caching
-        logger.info("🚀 Creating agent with built-in PydanticAI caching")
+        # Create agent (caching will be enabled at runtime via model_settings)
+        logger.info("🚀 Creating agent for session")
         try:
-            # Create model with built-in cache settings
-            google_model = GoogleModel(
-                MODEL_NAME,
-                model_settings=GoogleModelSettings(
-                    cache_system_prompt=True,  # Enable built-in caching for system prompt + tools
-                    cached_content_ttl='900s'  # 15 minutes TTL
-                )
-            )
-            logger.info("✅ GoogleModel created with cache_system_prompt=True")
+            # Create model (no settings here - they go to run_stream instead)
+            google_model = GoogleModel(MODEL_NAME)
+            logger.info("✅ GoogleModel created")
 
             # Create agent with system prompt and tools
             agent = Agent(
@@ -138,8 +132,8 @@ class AgentManager:
                 deps_type=ChatSessionDeps
             )
             logger.info("✅ Agent created successfully")
-            logger.info("💰 PydanticAI will auto-cache system prompt + tools on first use")
-            logger.info("💰 Token savings: ~85-90% on subsequent requests")
+            logger.info("ℹ️ Caching will be enabled via model_settings in run_stream()")
+            logger.info("💰 Token savings: ~85-90% when cache_system_prompt=True is used")
 
         except Exception as agent_error:
             logger.error(f"❌ Failed to create Agent: {agent_error}")
