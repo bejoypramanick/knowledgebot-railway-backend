@@ -321,16 +321,17 @@ class PydanticAIGatewayService:
                 logger.info(f"🚀 Initializing GoogleModel with cached content: {cached_content_id}")
                 # Initialize GoogleModel with GoogleModelSettings for caching (pydantic-ai v1.32+)
                 google_model = GoogleModel(
-                    MODEL_NAME,
-                    model_settings=GoogleModelSettings(
-                        cached_content=cached_content_id
+                    MODEL_NAME
                     )
-                )
+
+                from pydantic_ai.models.google import GoogleModelSettings
+                settings = GoogleModelSettings(google_cached_content=cached_content_id)
                 # Create agent without system_prompt (already in cached content)
                 agent = Agent(
                     google_model,
                     system_prompt=None,  # Already in cached content
                     tools=tools,
+                    model_settings = settings
                     deps_type=ChatSessionDeps,
                 )
                 logger.info("✅ Agent created with cached system prompt")
