@@ -151,12 +151,12 @@ class StreamingService:
                 except Exception as db_error:
                     logger.error(f"❌ Failed to save assistant response: {db_error}")
 
-            # Send completion signal
+            # Send completion signal (without content to avoid duplication)
             completion_data = {
                 "type": "complete",
-                "content": full_response,
                 "session_id": session_id,
-                "total_chunks": chunk_count
+                "total_chunks": chunk_count,
+                "total_length": len(full_response)
             }
             json_response = json.dumps(completion_data, ensure_ascii=False)
             yield f"data: {json_response}\n\n"
