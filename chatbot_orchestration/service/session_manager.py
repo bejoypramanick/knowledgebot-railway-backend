@@ -74,7 +74,7 @@ class SessionStateManager:
             # Build cache config with system prompt
             cache_config = {
                 'model': 'models/gemini-2.5-flash',
-                'system_instruction': system_prompt,
+                'contents': system_prompt,  # Correct parameter name for Gemini caching API
                 'ttl': 3600  # 1 hour
             }
 
