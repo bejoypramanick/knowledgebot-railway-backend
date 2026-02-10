@@ -624,7 +624,7 @@ class PydanticAIGatewayService:
                 # Stream chunks as they arrive
                 logger.info("🎯 About to iterate over result.stream()...")
                 chunk_count = 0
-                for chunk in result.stream():
+                async for chunk in result.stream():  # FIX: Must use 'async for' with async generator
                     chunk_count += 1
                     logger.info(f"🎯 Chunk {chunk_count}: {repr(chunk[:100])}...")  # Log first 100 chars with repr to see exact content
 
