@@ -343,28 +343,23 @@ class PydanticAIGatewayService:
 
             if use_cache:
                 logger.info(f"🚀 Initializing GoogleModel with cached content: {cached_content_id}")
-                # Initialize GoogleModel with GoogleModelSettings for caching (pydantic-ai v1.32+)
+                # Try passing cached_content directly as model_settings dict
+                model_settings = {"cached_content": cached_content_id}
                 google_model = GoogleModel(
-                    MODEL_NAME
-                    )
-                logger.info("✅ GoogleModel created without settings")
+                    MODEL_NAME,
+                    model_settings=model_settings
+                )
+                logger.info("✅ GoogleModel created with cached content")
 
-                from pydantic_ai.models.google import GoogleModelSettings
-                logger.info(f"🎯 Creating GoogleModelSettings with cached_content_id: {cached_content_id}")
-                settings = GoogleModelSettings(cached_content=cached_content_id)
-                logger.info(f"✅ GoogleModelSettings created: {settings}")
-                logger.info(f"🎯 Settings type: {type(settings)}")
-                
                 # Create agent without system_prompt (already in cached content)
                 logger.info("🎯 About to create Agent with cached content...")
                 logger.info(f"🎯 google_model: {google_model}")
                 logger.info(f"🎯 tools: {tools}")
-                logger.info(f"🎯 settings object: {settings}")
+                logger.info(f"🎯 model_settings: {model_settings}")
                 agent = Agent(
                     google_model,
                     system_prompt=None,  # Already in cached content
                     tools=tools if tools else [],  # Ensure it's always a list, never None
-                    model_settings=settings,  # Pass the object directly
                     deps_type=ChatSessionDeps
                 )
                 logger.info("✅ Agent created with cached system prompt")
