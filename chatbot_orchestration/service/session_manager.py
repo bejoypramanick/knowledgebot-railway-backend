@@ -71,11 +71,10 @@ class SessionStateManager:
         try:
             from google.genai import types
 
-            # Build cache config with system prompt
-            cache_config = {
-                'model': 'models/gemini-2.5-flash',
-                'contents': system_prompt,  # Correct parameter name for Gemini caching API
-                'ttl': 3600  # 1 hour
+            # Prepare cache config components
+            config_params = {
+                'system_instruction': system_prompt,
+                'ttl': '900s'  # 15 minutes (format: "Ns" for seconds)
             }
 
             # Add tool schemas if provided (for additional token savings)
@@ -122,11 +121,14 @@ class SessionStateManager:
                         )
                     )
 
-                cache_config['tools'] = [types.Tool(function_declarations=tool_declarations)]
+                config_params['tools'] = [types.Tool(function_declarations=tool_declarations)]
                 logger.info(f"✅ Including {len(tool_declarations)} tool schemas in cache")
 
-            # Create cache
-            cache = self.genai_client.caches.create(**cache_config)
+            # Create cache with proper API format
+            cache = self.genai_client.caches.create(
+                model='models/gemini-2.5-flash',
+                config=types.CreateCachedContentConfig(**config_params)
+            )
 
             cached_content_id = cache.name
             logger.info(f"✅ Created cached content: {cached_content_id}")
