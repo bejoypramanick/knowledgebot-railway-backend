@@ -255,20 +255,35 @@ class PydanticAIGatewayService:
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to get file search store: {e}")
 
-            # DISABLED: Cached content conflicts with Pydantic AI Agent's system_prompt
-            # Gemini API error: "CachedContent cannot be used with GenerateContent request
-            # setting system_instruction, tools or tool_config"
-            #
-            # Pydantic AI Agent requires system_prompt in constructor, which conflicts
-            # with cached content that already contains system_instruction.
-            #
-            # TODO: Implement custom caching strategy compatible with Pydantic AI
+            # Get cached content ID from session metadata (skip if client not available)
             cached_content_id = None
-            logger.info("ℹ️ Caching disabled - conflicts with Pydantic AI system_prompt")
+            if self.genai_client:
+                try:
+                    cached_content_id = await self.get_cached_content_id(session_id)
+                    if not cached_content_id:
+                        try:
+                            cached_content_id = await self.get_or_create_cached_content(system_prompt)
+                        except Exception as e:
+                            logger.warning(f"Failed to create cached content: {e}")
+                            cached_content_id = None
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get cached content: {e}")
 
-            # Initialize model without caching (caching conflicts with Pydantic AI)
-            google_model = GoogleModel(MODEL_NAME)
-            logger.info("GoogleModel initialized without caching")
+            # Prepare model settings following Pydantic AI best practices
+            model_settings = None
+            if cached_content_id and not cached_content_id.startswith('no_cache_'):
+                model_settings = GoogleModelSettings(google_cached_content=cached_content_id)
+                logger.info(f"Using cached content ID: {cached_content_id}")
+
+            # Initialize model with proper settings handling
+            try:
+                google_model = GoogleModel(MODEL_NAME, settings=model_settings)
+                logger.info("GoogleModel initialized with settings")
+            except Exception as e:
+                logger.error(f"Failed to initialize GoogleModel with settings: {e}")
+                # Fallback to model without settings
+                google_model = GoogleModel(MODEL_NAME)
+                logger.warning("Falling back to GoogleModel without settings")
 
             # Create agent with proper Pydantic AI initialization
             agent = Agent(
