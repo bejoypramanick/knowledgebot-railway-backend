@@ -247,7 +247,11 @@ class PydanticAIGatewayService:
     async def create_agent(self, session_id: str, system_prompt: str = "", tools: List[Any] = None, user_email: str = "anonymous@example.com") -> Agent:
         """Create an agent instance with proper Pydantic AI settings, dynamic persona, and caching."""
         logger.info(f"Creating agent for session {session_id}")
-
+        
+        # FIX: Ensure tools is always a list to prevent 'NoneType object is not iterable' errors
+        if tools is None:
+            tools = []
+        
         try:
             # FIX #2: Initialize GenAI client - FAIL FAST if critical
             await self.initialize()
@@ -330,7 +334,7 @@ class PydanticAIGatewayService:
                 agent = Agent(
                     google_model,
                     system_prompt=None,  # Already in cached content
-                    tools=tools if tools is not None else [],  # Safety check for None tools
+                    tools=tools,  # Now guaranteed to be a list
                     model_settings=settings,
                     deps_type=ChatSessionDeps
                 )
@@ -343,7 +347,7 @@ class PydanticAIGatewayService:
                 agent = Agent(
                     google_model,
                     system_prompt=system_prompt,
-                    tools=tools if tools is not None else [],  # Safety check for None tools
+                    tools=tools,  # Now guaranteed to be a list
                     deps_type=ChatSessionDeps
                 )
                 logger.info("✅ Agent created with full system prompt (no caching)")
