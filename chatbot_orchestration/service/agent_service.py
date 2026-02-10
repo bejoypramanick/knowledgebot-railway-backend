@@ -3,7 +3,7 @@ Main Agent Service - Simplified after refactoring
 This is the main entry point for agent operations
 """
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, List, Any
 
 from shared.otel_logger import get_otel_logger
 
