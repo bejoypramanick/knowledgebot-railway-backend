@@ -6,8 +6,7 @@ from typing import Any, Dict, List
 
 from google.genai import types
 from pydantic_ai import Agent
-from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.settings import ModelSettings
+from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 
 from chatbot_orchestration.dao.chat_dao import ChatDAO
 from shared.otel_logger import get_otel_logger
@@ -315,44 +314,40 @@ class PydanticAIGatewayService:
             # File search store is managed by the search_knowledge_base tool, not the Agent
             # The tool uses environment variable GEMINI_FILE_SEARCH_STORE_NAME directly
 
-            # CACHING RE-ENABLED: Using ModelSettings approach for Pydantic AI v1.48.0
+            # Determine if we'll use caching
             use_cache = bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
 
             if use_cache:
-                # Use cached content - system prompt is in the cache
-                logger.info(f"🚀 Using cached content: {cached_content_id}")
-
-                # Pass cached_content via ModelSettings (correct for Pydantic AI v1.48.0)
+                logger.info(f"🚀 Initializing GoogleModel with cached content: {cached_content_id}")
+                # Initialize GoogleModel with GoogleModelSettings for caching (pydantic-ai v1.32+)
                 google_model = GoogleModel(
                     MODEL_NAME,
-                    model_settings=ModelSettings(
-                        cached_content=cached_content_id  # Passed via settings for v1.48.0
+                    model_settings=GoogleModelSettings(
+                        cached_content=cached_content_id
                     )
                 )
-
-                # IMPORTANT: Don't pass system_prompt when using cached content
-                # The cache is an immutable prefix - system prompt is already in the cache
+                # Create agent without system_prompt (already in cached content)
                 agent = Agent(
                     google_model,
-                    system_prompt=None,  # Already in cached content (immutable prefix)
-                    tools=tools,  # Tools can be passed separately
+                    system_prompt=None,  # Already in cached content
+                    tools=tools,
                     deps_type=ChatSessionDeps,
                 )
-                logger.info("✅ Agent created with CACHED system prompt (context caching enabled via ModelSettings)")
+                logger.info("✅ Agent created with cached system prompt")
             else:
-                # No cache available - use full system prompt
                 logger.info("📝 No cache available - using full system prompt")
+                # Initialize GoogleModel without caching
                 google_model = GoogleModel(MODEL_NAME)
-
+                # Create agent with full system prompt
                 agent = Agent(
                     google_model,
                     system_prompt=system_prompt,
                     tools=tools,
                     deps_type=ChatSessionDeps,
                 )
-                logger.info("✅ Agent created with full system prompt (caching disabled for this session)")
+                logger.info("✅ Agent created with full system prompt (no caching)")
 
-            # Save cached_content_id to DB if we created one (for future use when caching is re-enabled)
+            # Save cached_content_id to DB if we created one
             if newly_created_cache and cached_content_id:
                 # Run DB update in background - don't block agent creation
                 asyncio.create_task(
@@ -371,7 +366,7 @@ class PydanticAIGatewayService:
             logger.info(f"🚀 Starting agent stream for session: {session_id}")
             logger.info(f"📝 Message: {message[:100]}...")
 
-            # Create agent with dynamic persona and tools
+            # Create agent with dynamic persona and tools (caching configured at initialization)
             agent = await self.create_agent(session_id, tools)
 
             # Create session dependencies
@@ -398,6 +393,7 @@ class PydanticAIGatewayService:
             logger.info(f"🤖 Running agent stream...")
 
             # Use Pydantic AI's run_stream for streaming responses
+            # Caching is already configured in GoogleModel via GoogleModelSettings
             full_response_text = ""
             async with agent.run_stream(user_message_with_context, deps=session_deps) as result:
                 # Stream chunks as they arrive
