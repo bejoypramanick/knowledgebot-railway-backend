@@ -95,14 +95,21 @@ class AgentManager:
             logger.error(f"❌ Failed to build system prompt: {prompt_error}")
             raise
 
+        # Define tools (fixed set - perfect for caching)
+        tool_functions = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
+        logger.info(f"📋 Using {len(tool_functions)} tools for agent")
+
         # Cache validation and management
         newly_created_cache = False
         use_cache = False
 
         if not cached_content_id or cached_content_id.startswith('no_cache_'):
-            logger.info("→ No valid cache found, creating new cached content (prompt only)")
+            logger.info("→ No valid cache found, creating new cached content (prompt + tool schemas)")
             try:
-                cached_content_id = await session_state_manager.get_or_create_cached_content(system_prompt)
+                cached_content_id = await session_state_manager.get_or_create_cached_content(
+                    system_prompt,
+                    tool_functions=tool_functions
+                )
                 newly_created_cache = True
                 logger.info(f"✅ Created new cached content: {cached_content_id}")
             except Exception as e:
@@ -120,7 +127,10 @@ class AgentManager:
                         expire_time = parser.parse(expire_time)
                     if expire_time < datetime.now(expire_time.tzinfo):
                         logger.warning(f"⚠️ Cache expired at {expire_time}, creating new cache")
-                        cached_content_id = await session_state_manager.get_or_create_cached_content(system_prompt)
+                        cached_content_id = await session_state_manager.get_or_create_cached_content(
+                            system_prompt,
+                            tool_functions=tool_functions
+                        )
                         newly_created_cache = True
                         logger.info(f"✅ Created replacement cache: {cached_content_id}")
                     else:
@@ -130,7 +140,10 @@ class AgentManager:
             except Exception as e:
                 logger.warning(f"⚠️ Cache validation failed: {e}")
                 try:
-                    cached_content_id = await session_state_manager.get_or_create_cached_content(system_prompt)
+                    cached_content_id = await session_state_manager.get_or_create_cached_content(
+                        system_prompt,
+                        tool_functions=tool_functions
+                    )
                     newly_created_cache = True
                     logger.info(f"✅ Created new cache: {cached_content_id}")
                 except Exception as create_error:
@@ -168,15 +181,14 @@ class AgentManager:
                 raise
 
             try:
-                tools = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
                 agent = Agent(
                     google_model,
-                    tools=tools,
+                    tools=tool_functions,
                     deps_type=ChatSessionDeps
-                    # Note: system_prompt is in the cached content, not passed here
+                    # Note: system_prompt + tool schemas are in the cached content
                 )
-                logger.info("✅ Agent created with cached system prompt + tools")
-                logger.info("💰 Token savings: ~90% (only cache tokens charged)")
+                logger.info("✅ Agent created with cached system prompt + tool schemas")
+                logger.info("💰 Token savings: ~90% (cached prompt + tool schemas)")
             except Exception as agent_error:
                 logger.error(f"❌ Failed to create Agent: {agent_error}")
                 raise
@@ -193,14 +205,13 @@ class AgentManager:
                 raise
 
             try:
-                tools = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
                 agent = Agent(
                     google_model,
                     system_prompt=system_prompt,
-                    tools=tools,
+                    tools=tool_functions,
                     deps_type=ChatSessionDeps
                 )
-                logger.info("✅ Agent created with full system prompt (no caching)")
+                logger.info("✅ Agent created with full system prompt + tools (no caching)")
             except Exception as agent_error:
                 logger.error(f"❌ Failed to create Agent: {agent_error}")
                 raise
