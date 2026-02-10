@@ -61,8 +61,8 @@ class SessionStateManager:
             return None
 
     async def get_or_create_cached_content(self, system_prompt: str, tool_functions: list = None) -> str:
-        """Get or create cached content for system prompt ONLY (not tools)."""
-        logger.info("🚀 Creating cached content for system prompt only")
+        """Get or create cached content for system prompt + tool schemas."""
+        logger.info("🚀 Creating cached content for system prompt + tool schemas")
 
         await self.initialize()
         if not self.genai_client:

@@ -5,7 +5,7 @@ Handles agent creation, caching, and configuration
 
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
@@ -19,10 +19,11 @@ from .session_manager import session_state_manager
 logger = get_otel_logger("agent_manager", "chatbot-orchestration")
 
 class AgentManager:
-    """Manages Pydantic AI agent creation and configuration."""
+    """Manages Pydantic AI agent creation and configuration with instance caching."""
 
     def __init__(self):
         self.genai_client = None
+        self.agent_cache: Dict[str, Agent] = {}  # Cache agents by session_id
 
     async def initialize(self):
         """Initialize the agent manager."""
@@ -67,28 +68,40 @@ class AgentManager:
 
             Always provide helpful, accurate responses using proper HTML formatting."""
 
-    async def create_agent(self, session_id: str, user_email: str = "anonymous@example.com") -> Agent:
-        """Create an agent instance with proper Pydantic AI settings and caching."""
+    def get_cached_agent(self, session_id: str) -> Optional[Agent]:
+        """Get cached agent for a session if it exists."""
+        return self.agent_cache.get(session_id)
+
+    def clear_agent_cache(self, session_id: str):
+        """Clear cached agent for a session."""
+        if session_id in self.agent_cache:
+            del self.agent_cache[session_id]
+            logger.info(f"🗑️ Cleared cached agent for session: {session_id}")
+
+    async def create_agent(self, session_id: str, user_email: str = "anonymous@example.com", force_new: bool = False) -> Agent:
+        """Create or retrieve cached agent instance with PydanticAI's built-in caching."""
         logger.info("="*80)
-        logger.info(f"🚀 CREATE_AGENT STARTED - Session: {session_id}")
+        logger.info(f"🚀 CREATE_AGENT - Session: {session_id}")
         logger.info("="*80)
+
+        # Check if we already have a cached agent for this session
+        if not force_new and session_id in self.agent_cache:
+            logger.info(f"✅ Reusing cached agent for session: {session_id}")
+            logger.info("💰 No agent creation overhead - instant response!")
+            logger.info("="*80)
+            return self.agent_cache[session_id]
 
         await self.initialize()
         if not self.genai_client:
             logger.error("❌ GenAI client initialization failed!")
             raise RuntimeError("GenAI client failed to initialize - cannot create agent")
 
-        # Fetch persona config and cached content ID
+        # Fetch persona config
         try:
-            persona_config, cached_content_id = await asyncio.gather(
-                self._fetch_persona_config(),
-                session_state_manager.get_cached_content_id(session_id),
-                return_exceptions=False
-            )
+            persona_config = await self._fetch_persona_config()
             logger.info(f"✅ Persona config retrieved: {persona_config['persona_name']}")
-            logger.info(f"✅ Cached content ID: {cached_content_id if cached_content_id else 'None (will create new)'}")
         except Exception as fetch_error:
-            logger.error(f"❌ Failed to fetch persona/cache: {fetch_error}")
+            logger.error(f"❌ Failed to fetch persona config: {fetch_error}")
             raise
 
         # Build system prompt
@@ -100,144 +113,46 @@ class AgentManager:
             logger.error(f"❌ Failed to build system prompt: {prompt_error}")
             raise
 
-        # Define tools (fixed set - perfect for caching)
+        # Define tools (fixed set)
         tool_functions = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
-        logger.info(f"📋 Using {len(tool_functions)} tools for agent")
+        logger.info(f"📋 Registering {len(tool_functions)} tools with agent")
 
-        # Cache validation and management
-        newly_created_cache = False
-        use_cache = False
-
-        if not cached_content_id or cached_content_id.startswith('no_cache_'):
-            logger.info("→ No valid cache found, creating new cached content (system prompt only)")
-            try:
-                cached_content_id = await session_state_manager.get_or_create_cached_content(
-                    system_prompt,
-                    tool_functions=None  # Don't cache tools, pass to Agent instead
+        # Create agent with PydanticAI's built-in caching
+        logger.info("🚀 Creating agent with built-in PydanticAI caching")
+        try:
+            # Create model with built-in cache settings
+            google_model = GoogleModel(
+                MODEL_NAME,
+                model_settings=GoogleModelSettings(
+                    cache_system_prompt=True,  # Enable built-in caching for system prompt + tools
+                    cached_content_ttl='900s'  # 15 minutes TTL
                 )
-                newly_created_cache = True
-                logger.info(f"✅ Created new cached content: {cached_content_id}")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to create cached content: {e}")
-                cached_content_id = None
-        else:
-            logger.info(f"→ Validating existing cache: {cached_content_id}")
-            try:
-                cache_info = self.genai_client.caches.get(name=cached_content_id)
-                logger.info("✅ Cache found, checking expiration")
-                if hasattr(cache_info, 'expire_time'):
-                    expire_time = cache_info.expire_time
-                    if isinstance(expire_time, str):
-                        from dateutil import parser
-                        expire_time = parser.parse(expire_time)
-                    if expire_time < datetime.now(expire_time.tzinfo):
-                        logger.warning(f"⚠️ Cache expired at {expire_time}, creating new cache")
-                        cached_content_id = await session_state_manager.get_or_create_cached_content(
-                            system_prompt,
-                            tool_functions=None  # Don't cache tools
-                        )
-                        newly_created_cache = True
-                        logger.info(f"✅ Created replacement cache: {cached_content_id}")
-                    else:
-                        logger.info(f"✅ Cache is valid until {expire_time}")
-                else:
-                    logger.info("✅ Cache is valid (no expiration info)")
-            except Exception as e:
-                logger.warning(f"⚠️ Cache validation failed: {e}")
-                try:
-                    cached_content_id = await session_state_manager.get_or_create_cached_content(
-                        system_prompt,
-                        tool_functions=None  # Don't cache tools
-                    )
-                    newly_created_cache = True
-                    logger.info(f"✅ Created new cache: {cached_content_id}")
-                except Exception as create_error:
-                    logger.error(f"❌ Failed to create new cache: {create_error}")
-                    cached_content_id = None
-
-        # Determine cache usage - enable caching for 85-90% token cost reduction
-        use_cache = bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
-
-        if use_cache:
-            logger.info("✅ Cache available - using cached system prompt for 85-90% cost reduction")
-            logger.info(f"✅ Cache ID: {cached_content_id}")
-            logger.info("ℹ️ Tools NOT in cache - will be passed separately to avoid conflicts")
-        else:
-            logger.info("ℹ️ No cache available - will use full system prompt + tools")
-
-        # Create agent
-        logger.info(f"\n🔧 STEP 6: Agent creation strategy")
-        logger.info(f"  → Use cache: {use_cache}")
-
-        if use_cache:
-            # Create agent with cached content
-            logger.info("🚀 Initializing GoogleModel with cached content")
-            try:
-                settings = GoogleModelSettings(google_cached_content=cached_content_id)
-                logger.info("✅ GoogleModelSettings created successfully")
-            except Exception as settings_error:
-                logger.error(f"❌ Failed to create GoogleModelSettings: {settings_error}")
-                raise
-
-            try:
-                google_model = GoogleModel(MODEL_NAME, settings=settings)
-                logger.info("✅ GoogleModel created with cached content")
-            except Exception as model_error:
-                logger.error(f"❌ Failed to create GoogleModel: {model_error}")
-                raise
-
-            try:
-                # IMPORTANT: Only system_prompt is in cache, tools are passed separately
-                # - Cached content: system prompt (~32K tokens saved)
-                # - Tools: passed to Agent (so they can be executed by Pydantic AI)
-                # - This avoids 400 error: "CachedContent cannot be used with tools"
-                agent = Agent(
-                    google_model,
-                    tools=tool_functions,  # Tools NOT in cache, passed here
-                    deps_type=ChatSessionDeps
-                    # Note: system_prompt is in cached content - do NOT pass here!
-                )
-                logger.info("✅ Agent created with cached content (system prompt only)")
-                logger.info("✅ Tool functions passed separately to Agent")
-                logger.info("💰 Token savings: ~85-90% (cached system prompt)")
-            except Exception as agent_error:
-                logger.error(f"❌ Failed to create Agent: {agent_error}")
-                raise
-        else:
-            # Create agent with full system prompt
-            logger.info("📝 No cache available - using full system prompt")
-            logger.info(f"🎯 System prompt length: {len(system_prompt)} characters")
-            
-            try:
-                google_model = GoogleModel(MODEL_NAME)
-                logger.info("✅ GoogleModel created without cached content")
-            except Exception as model_error:
-                logger.error(f"❌ Failed to create GoogleModel: {model_error}")
-                raise
-
-            try:
-                agent = Agent(
-                    google_model,
-                    system_prompt=system_prompt,
-                    tools=tool_functions,
-                    deps_type=ChatSessionDeps
-                )
-                logger.info("✅ Agent created with full system prompt + tools (no caching)")
-            except Exception as agent_error:
-                logger.error(f"❌ Failed to create Agent: {agent_error}")
-                raise
-
-        # Save cache to database if newly created
-        if newly_created_cache and cached_content_id:
-            logger.info(f"\n🔧 STEP 7: Saving cache to database")
-            asyncio.create_task(
-                session_state_manager._save_cache_to_session_background(session_id, cached_content_id)
             )
+            logger.info("✅ GoogleModel created with cache_system_prompt=True")
+
+            # Create agent with system prompt and tools
+            agent = Agent(
+                google_model,
+                system_prompt=system_prompt,
+                tools=tool_functions,
+                deps_type=ChatSessionDeps
+            )
+            logger.info("✅ Agent created successfully")
+            logger.info("💰 PydanticAI will auto-cache system prompt + tools on first use")
+            logger.info("💰 Token savings: ~85-90% on subsequent requests")
+
+        except Exception as agent_error:
+            logger.error(f"❌ Failed to create Agent: {agent_error}")
+            raise
+
+        # Cache the agent instance for this session
+        self.agent_cache[session_id] = agent
+        logger.info(f"✅ Agent cached for session: {session_id}")
 
         logger.info("="*80)
-        logger.info(f"✅ CREATE_AGENT COMPLETED SUCCESSFULLY - Session: {session_id}")
+        logger.info(f"✅ CREATE_AGENT COMPLETED - Session: {session_id}")
         logger.info(f"   - Agent type: {type(agent).__name__}")
-        logger.info(f"   - Used cache: {use_cache}")
+        logger.info(f"   - Cached for reuse: Yes")
         logger.info("="*80)
 
         return agent
