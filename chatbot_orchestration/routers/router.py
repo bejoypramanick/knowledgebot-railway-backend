@@ -80,9 +80,17 @@ async def chat_with_agent_stream(request: Request):
         # Stream response using new agent-based approach
         async def generate_response():
             async for chunk in agent_service.stream_agent_response(message, session_id, tools):
+                # chunk already contains the formatted JSON with \n\n
                 yield f"data: {chunk}"
 
-        return StreamingResponse(generate_response(), media_type="text/event-stream")
+        return StreamingResponse(
+            generate_response(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no"
+            }
+        )
     except Exception as e:
         logger.error(f"Error in chat stream: {e}")
         raise HTTPException(status_code=500, detail=str(e))
