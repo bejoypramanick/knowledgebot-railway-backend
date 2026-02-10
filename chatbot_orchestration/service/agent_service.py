@@ -246,69 +246,96 @@ class PydanticAIGatewayService:
 
     async def create_agent(self, session_id: str, system_prompt: str = "", tools: List[Any] = None, user_email: str = "anonymous@example.com") -> Agent:
         """Create an agent instance with proper Pydantic AI settings, dynamic persona, and caching."""
-        logger.info(f"Creating agent for session {session_id}")
-        logger.info(f"🔧 Input tools parameter: {tools}")
-        logger.info(f"🔧 Tools type: {type(tools)}")
+        logger.info("="*80)
+        logger.info(f"🚀 CREATE_AGENT STARTED - Session: {session_id}")
+        logger.info("="*80)
+
+        logger.info(f"📋 Input Parameters:")
+        logger.info(f"  - session_id: {session_id}")
+        logger.info(f"  - user_email: {user_email}")
+        logger.info(f"  - system_prompt length: {len(system_prompt) if system_prompt else 0}")
+        logger.info(f"  - tools parameter type: {type(tools)}")
+
         if tools is not None:
-            logger.info(f"🔧 Tools length: {len(tools)}")
+            logger.info(f"  - tools count: {len(tools)}")
             for i, tool in enumerate(tools):
-                logger.info(f"🔧 Tool {i}: {tool} (type: {type(tool)})")
-        
+                tool_name = getattr(tool, '__name__', str(tool))
+                logger.info(f"    Tool [{i}]: {tool_name} (type: {type(tool).__name__})")
+        else:
+            logger.info(f"  - tools: None")
+
         # FIX: Ensure tools is a valid list without None values to prevent 'NoneType object is not iterable' errors
+        logger.info(f"\n🔧 STEP 1: Validating and processing tools list")
         if tools is None:
             tools = []
-            logger.info("🔧 Tools was None, set to empty list")
+            logger.info("  ✓ Tools was None, initialized to empty list")
         else:
             # Filter out any None values from the tools list
             original_count = len(tools)
             tools = [tool for tool in tools if tool is not None]
             filtered_count = len(tools)
             if original_count != filtered_count:
-                logger.warning(f"⚠️ Filtered out {original_count - filtered_count} None tools from tools list")
-                logger.info(f"🔧 Final tools count: {filtered_count} valid tools")
+                logger.warning(f"  ⚠️ Filtered out {original_count - filtered_count} None tools from tools list")
+                logger.info(f"  ✓ Final tools count: {filtered_count} valid tools")
             else:
-                logger.info(f"🔧 No None tools found, all {filtered_count} tools are valid")
-        
-        logger.info(f"🔧 Final processed tools: {tools}")
-        logger.info(f"🔧 Final tools length: {len(tools)}")
-        
+                logger.info(f"  ✓ All {filtered_count} tools are valid (no None values)")
+
+        logger.info(f"  ✓ Final tools: {[getattr(t, '__name__', str(t)) for t in tools]}")
+
         try:
             # FIX #2: Initialize GenAI client - FAIL FAST if critical
+            logger.info(f"\n🔧 STEP 2: Initializing GenAI client")
             await self.initialize()
             if not self.genai_client:
+                logger.error("  ❌ GenAI client initialization failed!")
                 raise RuntimeError("GenAI client failed to initialize - cannot create agent")
+            logger.info("  ✓ GenAI client initialized successfully")
 
             # FIX #1: Run independent operations in parallel
-            logger.info("🔄 Fetching persona config and session metadata in parallel...")
-            persona_config, cached_content_id = await asyncio.gather(
-                self._fetch_persona_config(),
-                self.get_cached_content_id(session_id),
-                return_exceptions=False  # Fail fast if any critical operation fails
-            )
-
-            logger.info(f"🎭 Using persona: {persona_config['persona_name']}")
+            logger.info(f"\n🔧 STEP 3: Fetching persona config and cached content ID")
+            try:
+                persona_config, cached_content_id = await asyncio.gather(
+                    self._fetch_persona_config(),
+                    self.get_cached_content_id(session_id),
+                    return_exceptions=False  # Fail fast if any critical operation fails
+                )
+                logger.info(f"  ✓ Persona config retrieved: {persona_config['persona_name']}")
+                logger.info(f"  ✓ Cached content ID: {cached_content_id if cached_content_id else 'None (will create new)'}")
+            except Exception as fetch_error:
+                logger.error(f"  ❌ Failed to fetch persona/cache: {fetch_error}")
+                raise
 
             # Build system prompt (depends on persona_config, so must be sequential)
-            system_prompt = await self._build_system_prompt(persona_config)
-            logger.info(f"📝 System prompt: {len(system_prompt)} characters")
+            logger.info(f"\n🔧 STEP 4: Building system prompt")
+            try:
+                system_prompt = await self._build_system_prompt(persona_config)
+                logger.info(f"  ✓ System prompt built: {len(system_prompt)} characters")
+                logger.info(f"  ✓ Estimated tokens: ~{int(len(system_prompt) / 4)}")
+            except Exception as prompt_error:
+                logger.error(f"  ❌ Failed to build system prompt: {prompt_error}")
+                raise
 
             # FIX #4: Better cache validation - check for valid cache ID and verify it exists
+            logger.info(f"\n🔧 STEP 5: Cache validation and management")
             newly_created_cache = False
+
             if not cached_content_id or cached_content_id.startswith('no_cache_'):
                 # No valid cache exists, create new one
+                logger.info(f"  → No valid cache found, creating new cached content")
                 try:
-                    logger.info("📝 Creating new cached content...")
                     cached_content_id = await self.get_or_create_cached_content(system_prompt)
                     newly_created_cache = True
-                    logger.info(f"✅ Created new cached content: {cached_content_id}")
+                    logger.info(f"  ✓ Created new cached content: {cached_content_id}")
                 except Exception as e:
-                    logger.warning(f"⚠️ Failed to create cached content: {e}")
+                    logger.warning(f"  ⚠️ Failed to create cached content: {e}")
+                    logger.warning(f"  → Will proceed without caching")
                     cached_content_id = None
             else:
                 # Validate existing cache - check if it's still valid (not expired)
+                logger.info(f"  → Validating existing cache: {cached_content_id}")
                 try:
-                    logger.info(f"♻️ Validating existing cached content: {cached_content_id}")
                     cache_info = self.genai_client.caches.get(cached_content_id)
+                    logger.info(f"  ✓ Cache found, checking expiration")
 
                     if hasattr(cache_info, 'expire_time'):
                         expire_time = cache_info.expire_time
@@ -317,21 +344,25 @@ class PydanticAIGatewayService:
                             expire_time = parser.parse(expire_time)
 
                         if expire_time < datetime.now(expire_time.tzinfo):
-                            logger.warning(f"⚠️ Cached content expired, creating new cache")
+                            logger.warning(f"  ⚠️ Cache expired at {expire_time}, creating new cache")
                             cached_content_id = await self.get_or_create_cached_content(system_prompt)
                             newly_created_cache = True
+                            logger.info(f"  ✓ Created replacement cache: {cached_content_id}")
                         else:
-                            logger.info(f"✅ Cache is valid, expires at: {expire_time}")
+                            logger.info(f"  ✓ Cache is valid until {expire_time}")
                     else:
-                        logger.info(f"✅ Reusing existing cached content: {cached_content_id}")
+                        logger.info(f"  ✓ Cache is valid (no expiration info)")
 
                 except Exception as e:
-                    logger.warning(f"⚠️ Failed to validate cache (might be expired), creating new one: {e}")
+                    logger.warning(f"  ⚠️ Cache validation failed: {e}")
+                    logger.info(f"  → Attempting to create new cache")
                     try:
                         cached_content_id = await self.get_or_create_cached_content(system_prompt)
                         newly_created_cache = True
+                        logger.info(f"  ✓ Created new cache: {cached_content_id}")
                     except Exception as create_error:
-                        logger.error(f"❌ Failed to create new cache: {create_error}")
+                        logger.error(f"  ❌ Failed to create new cache: {create_error}")
+                        logger.warning(f"  → Will proceed without caching")
                         cached_content_id = None
 
             # FIX #3: Removed file_search_store_id fetching
@@ -340,58 +371,141 @@ class PydanticAIGatewayService:
 
             # Determine if we'll use caching
             use_cache = bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
+            logger.info(f"\n🔧 STEP 6: Agent creation strategy")
+            logger.info(f"  → Use cache: {use_cache}")
+            if use_cache:
+                logger.info(f"  → Cache ID: {cached_content_id}")
+            else:
+                logger.info(f"  → Will use full system prompt (no caching)")
 
             if use_cache:
                 logger.info(f"🚀 Initializing GoogleModel with cached content: {cached_content_id}")
-                
+
                 # Create GoogleModelSettings with correct parameter name
                 from pydantic_ai.models.google import GoogleModelSettings
                 logger.info(f"🎯 Creating GoogleModelSettings with google_cached_content: {cached_content_id}")
-                settings = GoogleModelSettings(google_cached_content=cached_content_id)
-                logger.info(f"✅ GoogleModelSettings created: {settings}")
-                logger.info(f"🎯 Settings type: {type(settings)}")
+
+                try:
+                    settings = GoogleModelSettings(google_cached_content=cached_content_id)
+                    logger.info(f"✅ GoogleModelSettings created successfully")
+                    logger.info(f"🎯 Settings type: {type(settings)}")
+                    logger.info(f"🎯 Settings dict: {settings}")
+                except Exception as settings_error:
+                    logger.error(f"❌ Failed to create GoogleModelSettings: {settings_error}")
+                    logger.error(f"❌ Error type: {type(settings_error)}")
+                    logger.error(f"❌ Cached content ID: {cached_content_id}")
+                    raise
 
                 # Pass GoogleModelSettings to GoogleModel constructor
                 logger.info("🎯 Creating GoogleModel with cached content settings...")
-                google_model = GoogleModel(MODEL_NAME, model_settings=settings)
-                logger.info("✅ GoogleModel created with cached content")
+                logger.info(f"🎯 MODEL_NAME: {MODEL_NAME}")
+                logger.info(f"🎯 model_settings type: {type(settings)}")
+
+                try:
+                    google_model = GoogleModel(MODEL_NAME, model_settings=settings)
+                    logger.info("✅ GoogleModel created with cached content")
+                    logger.info(f"🎯 GoogleModel type: {type(google_model)}")
+                    logger.info(f"🎯 GoogleModel repr: {repr(google_model)}")
+                except Exception as model_error:
+                    logger.error(f"❌ Failed to create GoogleModel: {model_error}")
+                    logger.error(f"❌ Error type: {type(model_error)}")
+                    raise
 
                 # Create agent without system_prompt (already in cached content)
+                # IMPORTANT: Don't pass system_prompt=None - Pydantic AI expects a string or sequence
+                # The default is an empty tuple, so we just omit it entirely
                 logger.info("🎯 About to create Agent with cached content...")
                 logger.info(f"🎯 google_model: {google_model}")
-                logger.info(f"🎯 tools: {tools}")
-                agent = Agent(
-                    google_model,
-                    system_prompt=None,  # Already in cached content
-                    tools=tools if tools else [],  # Ensure it's always a list, never None
-                    deps_type=ChatSessionDeps
-                )
-                logger.info("✅ Agent created with cached system prompt")
+                logger.info(f"🎯 tools count: {len(tools)}")
+                logger.info(f"🎯 tools list: {tools}")
+                logger.info(f"🎯 deps_type: {ChatSessionDeps}")
+
+                try:
+                    # FIX: Omit system_prompt entirely instead of passing None
+                    # Pydantic AI's Agent expects system_prompt to be a string or sequence, not None
+                    # When omitted, it defaults to empty tuple () which is correct
+                    agent = Agent(
+                        google_model,
+                        # system_prompt omitted - already in cached content
+                        tools=tools if tools else [],  # Ensure it's always a list, never None
+                        deps_type=ChatSessionDeps
+                    )
+                    logger.info("✅ Agent created with cached system prompt")
+                    logger.info(f"🎯 Agent type: {type(agent)}")
+                    logger.info(f"🎯 Agent has system_prompt: {hasattr(agent, 'system_prompt')}")
+                    if hasattr(agent, 'system_prompt'):
+                        logger.info(f"🎯 Agent system_prompt type: {type(agent.system_prompt)}")
+                except Exception as agent_error:
+                    logger.error(f"❌ Failed to create Agent: {agent_error}")
+                    logger.error(f"❌ Error type: {type(agent_error)}")
+                    logger.error(f"❌ Error args: {agent_error.args}")
+                    import traceback
+                    logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+                    raise
             else:
                 logger.info("📝 No cache available - using full system prompt")
+                logger.info(f"🎯 System prompt length: {len(system_prompt)} characters")
+
                 # Initialize GoogleModel without caching
-                google_model = GoogleModel(MODEL_NAME)
+                logger.info(f"🎯 Creating GoogleModel without cache (MODEL_NAME: {MODEL_NAME})")
+                try:
+                    google_model = GoogleModel(MODEL_NAME)
+                    logger.info("✅ GoogleModel created without cached content")
+                    logger.info(f"🎯 GoogleModel type: {type(google_model)}")
+                except Exception as model_error:
+                    logger.error(f"❌ Failed to create GoogleModel: {model_error}")
+                    raise
+
                 # Create agent with full system prompt
-                agent = Agent(
-                    google_model,
-                    system_prompt=system_prompt,
-                    tools=tools,  # Now guaranteed to be a list
-                    deps_type=ChatSessionDeps
-                )
-                logger.info("✅ Agent created with full system prompt (no caching)")
+                logger.info("🎯 About to create Agent with full system prompt...")
+                logger.info(f"🎯 google_model: {google_model}")
+                logger.info(f"🎯 tools count: {len(tools)}")
+                logger.info(f"🎯 system_prompt preview: {system_prompt[:200]}...")
+
+                try:
+                    agent = Agent(
+                        google_model,
+                        system_prompt=system_prompt,
+                        tools=tools,  # Now guaranteed to be a list
+                        deps_type=ChatSessionDeps
+                    )
+                    logger.info("✅ Agent created with full system prompt (no caching)")
+                    logger.info(f"🎯 Agent type: {type(agent)}")
+                except Exception as agent_error:
+                    logger.error(f"❌ Failed to create Agent: {agent_error}")
+                    logger.error(f"❌ Error type: {type(agent_error)}")
+                    import traceback
+                    logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+                    raise
 
             # Save cached_content_id to DB if we created one
             if newly_created_cache and cached_content_id:
+                logger.info(f"\n🔧 STEP 7: Saving cache to database")
+                logger.info(f"  → Starting background task to save cache ID")
                 # Run DB update in background - don't block agent creation
                 asyncio.create_task(
                     self._save_cache_to_session_background(session_id, cached_content_id)
                 )
 
+            logger.info("="*80)
+            logger.info(f"✅ CREATE_AGENT COMPLETED SUCCESSFULLY - Session: {session_id}")
+            logger.info(f"   - Agent type: {type(agent).__name__}")
+            logger.info(f"   - Tools count: {len(tools)}")
+            logger.info(f"   - Used cache: {use_cache}")
+            logger.info("="*80)
+
             return agent
 
         except Exception as e:
-            logger.error(f"Error creating agent: {e}")
-            raise e
+            import traceback
+            logger.error(f"❌ Error creating agent: {e}")
+            logger.error(f"❌ Error type: {type(e)}")
+            logger.error(f"❌ Error args: {e.args}")
+            logger.error(f"❌ Full traceback:\n{traceback.format_exc()}")
+            logger.error(f"❌ Session ID: {session_id}")
+            logger.error(f"❌ Tools count: {len(tools) if tools else 0}")
+            logger.error(f"❌ System prompt length: {len(system_prompt) if system_prompt else 0}")
+            raise
 
     async def stream_agent_response(self, message: str, session_id: str, tools: List[Any]):
         """Stream agent response using Pydantic AI with RAG, token tracking, and proper error handling."""
@@ -481,7 +595,14 @@ class PydanticAIGatewayService:
                 yield f"{json.dumps(complete_data)}\n\n"
 
         except Exception as e:
+            import traceback
             logger.error(f"❌ Error in agent stream: {e}")
+            logger.error(f"❌ Error type: {type(e)}")
+            logger.error(f"❌ Error args: {e.args}")
+            logger.error(f"❌ Full traceback:\n{traceback.format_exc()}")
+            logger.error(f"❌ Session ID: {session_id}")
+            logger.error(f"❌ Message preview: {message[:100]}...")
+
             error_data = {
                 "type": "error",
                 "content": f"I encountered an error while processing your message: {str(e)}"
