@@ -134,62 +134,50 @@ async def query_railway_postgres(query: str) -> str:
     """
     logger.info(f"🗄️ Tool called: query_railway_postgres with query: {query[:100]}...")
     try:
-        from ..service.file_service import FileService
-        file_service = FileService()
+        # Direct database query using shared db connection
+        from shared.db import get_db_connection
 
         # Parse the query and construct appropriate response
         query_lower = query.lower()
 
-        # File-related queries
-        if any(word in query_lower for word in ['file', 'upload', 'document', 'document']):
-            if 'count' in query_lower or 'total' in query_lower or 'number' in query_lower:
-                count = await file_service.get_active_files_count()
-                result = f"Total active files in system: {count}"
-                logger.info(f"✅ Tool completed: query_railway_postgres (file count)")
-                return result
-            elif 'recent' in query_lower or 'latest' in query_lower:
-                files = await file_service.get_recent_files(5)
-                if files:
-                    result = "Recent uploaded files:\n"
-                    for f in files:
-                        result += f"- {f['display_name']} ({f['mime_type']}, {f['size_bytes']} bytes, uploaded {f['uploaded_at']})\n"
-                    logger.info(f"✅ Tool completed: query_railway_postgres (recent files: {len(files)})")
+        async with get_db_connection() as conn:
+            # File count queries
+            if any(word in query_lower for word in ['count', 'total', 'number', 'how many']):
+                if any(word in query_lower for word in ['file', 'document', 'upload']):
+                    count = await conn.fetchval("SELECT COUNT(*) FROM uploaded_files WHERE is_active = true")
+                    result = f"Total active files in system: {count}"
+                    logger.info(f"✅ Tool completed: query_railway_postgres (file count: {count})")
                     return result
-                logger.info(f"✅ Tool completed: query_railway_postgres (no recent files)")
-                return "No recent files found."
-            else:
-                # General file info
-                files = await file_service.get_recent_files(10)
-                if files:
-                    result = f"Found {len(files)} active files:\n"
-                    for f in files:
-                        result += f"- {f['display_name']} ({f['mime_type']})\n"
-                    logger.info(f"✅ Tool completed: query_railway_postgres (file list: {len(files)})")
+                elif any(word in query_lower for word in ['session', 'chat', 'conversation']):
+                    count = await conn.fetchval("SELECT COUNT(*) FROM chat_sessions WHERE is_active = true")
+                    result = f"Total active chat sessions: {count}"
+                    logger.info(f"✅ Tool completed: query_railway_postgres (session count: {count})")
                     return result
-                logger.info(f"✅ Tool completed: query_railway_postgres (no files)")
-                return "No files found in the database."
 
-        # Metrics queries
-        elif any(word in query_lower for word in ['metric', 'statistic', 'analytics', 'usage']):
-            metrics = await file_service.get_recent_metrics(10)
-            if metrics:
-                result = "Recent metrics (last 7 days):\n"
-                for m in metrics:
-                    result += f"- {m['metric_name']}: {m['total_value']} {m['unit'] or ''}\n"
-                logger.info(f"✅ Tool completed: query_railway_postgres (metrics: {len(metrics)})")
-                return result
-            logger.info(f"✅ Tool completed: query_railway_postgres (no metrics)")
-            return "No metrics found."
+            # Recent files query
+            elif any(word in query_lower for word in ['recent', 'latest', 'last']):
+                if any(word in query_lower for word in ['file', 'document', 'upload']):
+                    rows = await conn.fetch(
+                        "SELECT display_name, mime_type, size_bytes, uploaded_at FROM uploaded_files WHERE is_active = true ORDER BY uploaded_at DESC LIMIT 5"
+                    )
+                    if rows:
+                        result = "Recent uploaded files:\n"
+                        for row in rows:
+                            result += f"- {row['display_name']} ({row['mime_type']}, {row['size_bytes']} bytes)\n"
+                        logger.info(f"✅ Tool completed: query_railway_postgres (recent files: {len(rows)})")
+                        return result
+                    return "No recent files found."
 
-        # Default: return file count
-        count = await file_service.get_active_files_count()
-        result = f"Database contains {count} active files. Please be more specific about what information you need."
-        logger.info(f"✅ Tool completed: query_railway_postgres")
-        return result
+            # Default: provide general info
+            file_count = await conn.fetchval("SELECT COUNT(*) FROM uploaded_files WHERE is_active = true")
+            session_count = await conn.fetchval("SELECT COUNT(*) FROM chat_sessions WHERE is_active = true")
+            result = f"Database Summary:\n- Active files: {file_count}\n- Active sessions: {session_count}\n\nPlease ask a more specific question about the data you need."
+            logger.info(f"✅ Tool completed: query_railway_postgres (summary)")
+            return result
 
     except Exception as e:
         logger.error(f"❌ Tool failed: query_railway_postgres - {e}")
-        return f"Error querying database: {str(e)}"
+        return f"I encountered an error querying the database. The database query functionality may need to be configured properly."
 
 async def request_human_agent_connection(reason: str) -> str:
     """
