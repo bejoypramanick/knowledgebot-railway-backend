@@ -381,11 +381,14 @@ class PydanticAIGatewayService:
             if use_cache:
                 logger.info(f"🚀 Initializing GoogleModel with cached content: {cached_content_id}")
 
-                # Create GoogleModelSettings with correct parameter name
+                # Create GoogleModelSettings and pass to GoogleModel
+                # API: GoogleModel(model_name, settings=GoogleModelSettings(...))
+                # Reference: https://ai.pydantic.dev/api/models/google/
                 from pydantic_ai.models.google import GoogleModelSettings
                 logger.info(f"🎯 Creating GoogleModelSettings with google_cached_content: {cached_content_id}")
 
                 try:
+                    # GoogleModelSettings is a TypedDict, create it and pass to GoogleModel
                     settings = GoogleModelSettings(google_cached_content=cached_content_id)
                     logger.info(f"✅ GoogleModelSettings created successfully")
                     logger.info(f"🎯 Settings type: {type(settings)}")
@@ -396,19 +399,23 @@ class PydanticAIGatewayService:
                     logger.error(f"❌ Cached content ID: {cached_content_id}")
                     raise
 
-                # Pass GoogleModelSettings to GoogleModel constructor
+                # Pass settings to GoogleModel constructor (parameter name is 'settings', not 'model_settings')
                 logger.info("🎯 Creating GoogleModel with cached content settings...")
                 logger.info(f"🎯 MODEL_NAME: {MODEL_NAME}")
-                logger.info(f"🎯 model_settings type: {type(settings)}")
+                logger.info(f"🎯 settings type: {type(settings)}")
+                logger.info(f"🎯 settings content: {settings}")
 
                 try:
-                    google_model = GoogleModel(MODEL_NAME, model_settings=settings)
+                    # FIX: Parameter name is 'settings', not 'model_settings'
+                    google_model = GoogleModel(MODEL_NAME, settings=settings)
                     logger.info("✅ GoogleModel created with cached content")
                     logger.info(f"🎯 GoogleModel type: {type(google_model)}")
                     logger.info(f"🎯 GoogleModel repr: {repr(google_model)}")
                 except Exception as model_error:
                     logger.error(f"❌ Failed to create GoogleModel: {model_error}")
                     logger.error(f"❌ Error type: {type(model_error)}")
+                    import traceback
+                    logger.error(f"❌ Full traceback:\n{traceback.format_exc()}")
                     raise
 
                 # Create agent without system_prompt (already in cached content)
