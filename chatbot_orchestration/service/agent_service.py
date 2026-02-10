@@ -80,22 +80,38 @@ class PydanticAIGatewayService:
             return f"knowledgebot_store_{session_id[:8]}"
 
     async def get_or_create_cached_content(self, system_prompt: str) -> str:
+        """
+        Create cached content for system prompt.
+
+        IMPORTANT: Gemini requires minimum 2,048 tokens for caching.
+        Our system prompt is ~32,768 tokens, which is well above the minimum.
+        """
         if not self.genai_client:
             raise ValueError("GenAI client not initialized")
 
         try:
             if not hasattr(self.genai_client, 'caches'):
+                logger.warning("⚠️ Gemini caches API not available")
                 return f"no_cache_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+
+            # Estimate token count (rough approximation: ~4 chars per token)
+            estimated_tokens = len(system_prompt) / 4
+            logger.info(f"📊 System prompt size: {len(system_prompt)} chars (~{int(estimated_tokens)} tokens)")
+
+            if estimated_tokens < 2048:
+                logger.warning(f"⚠️ System prompt too small for caching (< 2,048 tokens). Size: {int(estimated_tokens)} tokens")
+                return f"no_cache_too_small_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
 
             cached_content = self.genai_client.caches.create(
                 model=MODEL_NAME,
                 config=types.CreateCachedContentConfig(
                     display_name=f"system_prompt_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
                     system_instruction=types.Content(parts=[types.Part(text=system_prompt)]),
-                    ttl="3600s"  # 1 hour cache (previously 15 minutes)
+                    ttl="3600s"  # 1 hour cache
                 )
             )
             logger.info(f"✅ Created cached content with 1 hour TTL: {cached_content.name}")
+            logger.info(f"📝 Cache contains ~{int(estimated_tokens)} tokens (minimum 2,048 required)")
             return cached_content.name
         except Exception as e:
             logger.error(f"❌ Error creating cached content: {e}")
@@ -305,21 +321,22 @@ class PydanticAIGatewayService:
                 # Use cached content - system prompt is in the cache
                 logger.info(f"🚀 Using cached content: {cached_content_id}")
 
-                # Pass cached_content directly to GoogleModel (not via model_settings)
+                # Pass google_cached_content directly to GoogleModel
+                # This is a provider-specific parameter for Gemini's explicit caching
                 google_model = GoogleModel(
                     MODEL_NAME,
-                    cached_content=cached_content_id  # Direct parameter
+                    google_cached_content=cached_content_id  # Pydantic AI standard parameter
                 )
 
                 # IMPORTANT: Don't pass system_prompt when using cached content
-                # The system prompt is already in the cache
+                # The cache is an immutable prefix - system prompt is already in the cache
                 agent = Agent(
                     google_model,
-                    system_prompt=None,  # Already in cached content
-                    tools=tools,
+                    system_prompt=None,  # Already in cached content (immutable prefix)
+                    tools=tools,  # Tools can be passed separately
                     deps_type=ChatSessionDeps,
                 )
-                logger.info("✅ Agent created with CACHED system prompt (context caching enabled)")
+                logger.info("✅ Agent created with CACHED system prompt (explicit caching enabled)")
             else:
                 # No cache available - use full system prompt
                 logger.info("📝 No cache available - using full system prompt")
