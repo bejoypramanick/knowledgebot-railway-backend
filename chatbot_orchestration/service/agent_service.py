@@ -314,8 +314,9 @@ class PydanticAIGatewayService:
             # File search store is managed by the search_knowledge_base tool, not the Agent
             # The tool uses environment variable GEMINI_FILE_SEARCH_STORE_NAME directly
 
-            # CACHING RE-ENABLED: Use cached content if available
-            use_cache = bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
+            # CACHING TEMPORARILY DISABLED: Pydantic AI v1.48.0 doesn't support google_cached_content parameter
+            # TODO: Investigate proper caching mechanism for this Pydantic AI version
+            use_cache = False  # bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
 
             if use_cache:
                 # Use cached content - system prompt is in the cache
