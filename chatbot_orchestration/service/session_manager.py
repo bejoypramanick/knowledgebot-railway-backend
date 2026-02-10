@@ -118,24 +118,40 @@ class SessionStateManager:
         return result.get("messages", []) if result else []
 
     async def save_message(self, session_id: str, role: str, content: str, metadata: Dict[str, Any] = None):
-        """Save message to database - delegates to chat_dao."""
-        # ChatDAO doesn't have save_message, so we need to implement it here
-        query = """
-            INSERT INTO chat_messages (session_id, role, content, metadata, created_at)
-            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-            RETURNING id, session_id, role, content, metadata, created_at
-        """
-        params = {"session_id": session_id, "role": role, "content": content, "metadata": metadata}
+        """Save message to database."""
         try:
             from shared.db import get_db_connection
             async with get_db_connection() as conn:
-                record = await conn.fetchrow(query, session_id, role, content, metadata)
+                # First, get or create the session integer ID
+                session_query = """
+                    SELECT id FROM chat_sessions WHERE session_id = $1
+                """
+                session_record = await conn.fetchrow(session_query, session_id)
+
+                if not session_record:
+                    # Create session if it doesn't exist
+                    create_session_query = """
+                        INSERT INTO chat_sessions (session_id, started_at, last_activity_at, is_active, message_count)
+                        VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
+                        RETURNING id
+                    """
+                    session_record = await conn.fetchrow(create_session_query, session_id)
+
+                integer_session_id = session_record["id"]
+
+                # Insert message with integer session_id
+                insert_query = """
+                    INSERT INTO chat_messages (session_id, role, content, created_at)
+                    VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                    RETURNING id, session_id, role, content, created_at
+                """
+                record = await conn.fetchrow(insert_query, integer_session_id, role, content)
+
                 return {
                     "id": record["id"],
                     "session_id": record["session_id"],
                     "role": record["role"],
                     "content": record["content"],
-                    "metadata": record["metadata"],
                     "created_at": record["created_at"].isoformat() if record["created_at"] else None
                 }
         except Exception as e:

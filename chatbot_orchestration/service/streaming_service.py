@@ -98,16 +98,15 @@ class StreamingService:
             chunk_count = 0
 
             try:
-                # Run agent with message history and delta streaming
+                # Run agent with message history (streaming returns delta chunks by default)
                 async for chunk in agent.run_stream(
                     message,
                     message_history=pydantic_messages,
-                    deps=session_deps,
-                    stream_delta=True  # Enable delta streaming for incremental text
+                    deps=session_deps
                 ):
                     chunk_count += 1
 
-                    # Get the delta text from the chunk (delta=True ensures incremental text)
+                    # Get the delta text from the chunk (run_stream returns deltas by default)
                     if hasattr(chunk, 'delta'):
                         delta_text = chunk.delta
                     elif hasattr(chunk, 'text'):
