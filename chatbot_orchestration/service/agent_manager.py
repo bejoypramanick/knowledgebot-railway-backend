@@ -13,7 +13,7 @@ from shared.otel_logger import get_otel_logger
 
 from ..core.ai import MODEL_NAME, get_genai_client
 from ..core.dependencies import ChatSessionDeps
-from ..tools.knowledge_tools import KnowledgeTools
+from ..tools.knowledge_tools import search_knowledge_base, query_railway_postgres, request_human_agent_connection
 from .session_manager import session_state_manager
 
 logger = get_otel_logger("agent_manager", "chatbot-orchestration")
@@ -169,10 +169,10 @@ class AgentManager:
                 raise
 
             try:
-                tools_instance = KnowledgeTools()
+                tools = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
                 agent = Agent(
-                    tools_instance,
-                    model=google_model,
+                    google_model,
+                    tools=tools,
                     deps_type=ChatSessionDeps
                 )
                 logger.info("✅ Agent created with cached system prompt")
@@ -192,11 +192,11 @@ class AgentManager:
                 raise
 
             try:
-                tools_instance = KnowledgeTools()
+                tools = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
                 agent = Agent(
-                    tools_instance,
-                    model=google_model,
+                    google_model,
                     system_prompt=system_prompt,
+                    tools=tools,
                     deps_type=ChatSessionDeps
                 )
                 logger.info("✅ Agent created with full system prompt (no caching)")

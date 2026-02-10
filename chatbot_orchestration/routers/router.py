@@ -70,10 +70,13 @@ async def chat_with_agent_stream(request: Request):
         if not session_id:
             session_id = f"session_{int(time.time())}"
 
+        # Import tools for agent
+        from ..tools.knowledge_tools import search_knowledge_base, query_railway_postgres, request_human_agent_connection
+        tools = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
+
         # Stream response using new agent-based approach
-        # Tools are now handled by KnowledgeTools class, so pass empty list
         async def generate_response():
-            async for chunk in agent_service.stream_agent_response(message, session_id, []):
+            async for chunk in agent_service.stream_agent_response(message, session_id, tools):
                 # chunk already contains the formatted JSON with \n\n
                 yield f"data: {chunk}"
 
