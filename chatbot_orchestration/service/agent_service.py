@@ -7,6 +7,8 @@ from typing import Any, Dict, List
 from google.genai import types
 from pydantic_ai import Agent
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
+from pydantic_ai.usage import Usage
 
 from chatbot_orchestration.dao.chat_dao import ChatDAO
 from shared.otel_logger import get_otel_logger
@@ -559,6 +561,40 @@ class PydanticAIGatewayService:
             logger.error(f"❌ System prompt length: {len(system_prompt) if system_prompt else 0}")
             raise
 
+    def _convert_db_messages_to_pydantic_ai(self, db_messages: List[Dict[str, Any]]) -> List[Any]:
+        """
+        Convert database messages to Pydantic AI message format.
+
+        Args:
+            db_messages: List of messages from database with 'role' and 'content' fields
+
+        Returns:
+            List of ModelRequest and ModelResponse objects for message_history
+        """
+        pydantic_messages = []
+
+        for msg in db_messages:
+            role = msg.get('role', 'user')
+            content = msg.get('message', msg.get('content', ''))
+
+            if role == 'user':
+                # Create ModelRequest for user messages
+                user_part = UserPromptPart(content=content)
+                pydantic_messages.append(ModelRequest(parts=[user_part]))
+            elif role in ['assistant', 'agent', 'bot', 'admin']:
+                # Create ModelResponse for assistant messages
+                text_part = TextPart(content=content)
+                model_response = ModelResponse(
+                    parts=[text_part],
+                    model_name=MODEL_NAME,
+                    # Usage is required but we don't have historical data, use zeros
+                    usage=Usage(request_tokens=0, response_tokens=0, total_tokens=0)
+                )
+                pydantic_messages.append(model_response)
+
+        logger.info(f"📝 Converted {len(db_messages)} DB messages to {len(pydantic_messages)} Pydantic AI messages")
+        return pydantic_messages
+
     async def stream_agent_response(self, message: str, session_id: str, tools: List[Any]):
         """Stream agent response using Pydantic AI with RAG, token tracking, and proper error handling."""
         try:
@@ -587,43 +623,40 @@ class PydanticAIGatewayService:
             history_count = len(chat_history.get('messages', []))
             logger.info(f"📚 Retrieved {history_count} messages from chat history")
 
-            # Format chat history context if available
-            history_context = ""
+            # Convert database messages to Pydantic AI message format
+            message_history = []
             if chat_history and chat_history.get("messages"):
-                logger.info(f"📚 Processing {len(chat_history['messages'])} history messages")
-                history_context = "\n\nRECENT CONVERSATION HISTORY:\n"
-                for idx, msg in enumerate(chat_history["messages"][1:], 1):   #Skip first greetings message
-                    if msg.get("sender") == "user":
-                        user_msg = msg.get('message', '')
-                        logger.info(f"  History[{idx}] User: {user_msg[:50]}...")
-                        history_context += f"User: {user_msg}\n"
-                    elif msg.get("sender") in ["agent", "bot","admin"]:
-                        agent_msg = msg.get('message', '')
-                        logger.info(f"  History[{idx}] Agent: {agent_msg[:50]}...")
-                        history_context += f"Assistant: {agent_msg}\n"
+                db_messages = chat_history["messages"]
+                logger.info(f"📚 Converting {len(db_messages)} history messages to Pydantic AI format")
 
-            logger.info(f"📝 History context length: {len(history_context)}")
-            if history_context:
-                logger.info(f"📝 History preview: {history_context[:200]}...")
+                # Skip the first greeting message if it exists
+                messages_to_convert = db_messages[1:] if len(db_messages) > 1 else db_messages
 
-            # Construct user message with history context
-            # Add explicit instruction when there's history to prevent greeting on every message
-            if history_context:
-                conversation_note = "\n\n[IMPORTANT: This is a FOLLOW-UP message in an existing conversation. DO NOT greet the user again. DO NOT say 'Hello' or introduce yourself. Provide a direct answer to their question.]\n"
-                user_message_with_context = f"{message}{conversation_note}{history_context}"
-            else:
-                user_message_with_context = message
+                message_history = self._convert_db_messages_to_pydantic_ai(messages_to_convert)
+                logger.info(f"✅ Converted to {len(message_history)} Pydantic AI messages")
 
-            logger.info(f"📝 Final message length: {len(user_message_with_context)}")
-            logger.info(f"📝 Has history: {bool(history_context)}")
+                # Log preview of history
+                for idx, msg in enumerate(messages_to_convert[:5], 1):  # Show first 5
+                    sender = msg.get('sender', 'unknown')
+                    content = msg.get('message', '')[:50]
+                    logger.info(f"  History[{idx}] {sender}: {content}...")
+
+            logger.info(f"📝 Message history count: {len(message_history)}")
 
             logger.info(f"🤖 Running agent stream...")
 
-            # Use Pydantic AI's run_stream for streaming responses
+            # Use Pydantic AI's run_stream for streaming responses with proper message history
             # Caching is already configured in GoogleModel via GoogleModelSettings
+            # Pass message_history to maintain conversation context (prevents greeting on every message)
             full_response_text = ""
             logger.info("🎯 About to call agent.run_stream...")
-            async with agent.run_stream(user_message_with_context, deps=session_deps) as result:
+            logger.info(f"🎯 Passing {len(message_history)} messages as message_history")
+
+            async with agent.run_stream(
+                message,  # Just the current message, not with history appended
+                deps=session_deps,
+                message_history=message_history if message_history else None
+            ) as result:
                 logger.info("✅ agent.run_stream context entered")
                 logger.info(f"🎯 Result object: {result}")
                 logger.info(f"🎯 Result type: {type(result)}")
