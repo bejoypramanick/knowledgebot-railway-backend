@@ -70,12 +70,25 @@ async def chat_with_agent_stream(request: Request):
         if not session_id:
             session_id = f"session_{int(time.time())}"
 
-        # Import tools for agent
-        from ..tools.rag import search_knowledge_base
-        from ..tools.general import request_human_agent_connection, query_railway_postgres
+        # Prepare tools list safely to avoid None values
+        tools = []
+        try:
+            from ..tools.rag import search_knowledge_base
+            if search_knowledge_base is not None:
+                tools.append(search_knowledge_base)
+        except ImportError as e:
+            logger.warning(f"Failed to import search_knowledge_base: {e}")
 
-        # Prepare tools list
-        tools = [search_knowledge_base, request_human_agent_connection, query_railway_postgres]
+        try:
+            from ..tools.general import request_human_agent_connection, query_railway_postgres
+            if request_human_agent_connection is not None:
+                tools.append(request_human_agent_connection)
+            if query_railway_postgres is not None:
+                tools.append(query_railway_postgres)
+        except ImportError as e:
+            logger.warning(f"Failed to import general tools: {e}")
+
+        logger.info(f"🔧 Loaded {len(tools)} tools for agent")
 
         # Stream response using new agent-based approach
         async def generate_response():

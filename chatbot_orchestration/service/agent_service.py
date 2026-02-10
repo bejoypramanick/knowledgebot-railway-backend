@@ -248,9 +248,17 @@ class PydanticAIGatewayService:
         """Create an agent instance with proper Pydantic AI settings, dynamic persona, and caching."""
         logger.info(f"Creating agent for session {session_id}")
         
-        # FIX: Ensure tools is always a list to prevent 'NoneType object is not iterable' errors
+        # FIX: Ensure tools is a valid list without None values to prevent 'NoneType object is not iterable' errors
         if tools is None:
             tools = []
+        else:
+            # Filter out any None values from the tools list
+            original_count = len(tools)
+            tools = [tool for tool in tools if tool is not None]
+            filtered_count = len(tools)
+            if original_count != filtered_count:
+                logger.warning(f"⚠️ Filtered out {original_count - filtered_count} None tools from tools list")
+                logger.info(f"🔧 Final tools count: {filtered_count} valid tools")
         
         try:
             # FIX #2: Initialize GenAI client - FAIL FAST if critical
