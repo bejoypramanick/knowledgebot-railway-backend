@@ -478,24 +478,25 @@ class PydanticAIGatewayService:
                     logger.error(f"❌ Full traceback:\n{traceback.format_exc()}")
                     raise
 
-                # Create agent without system_prompt AND without tools (both in cached content)
+                # Create agent without system_prompt but WITH tools
                 # IMPORTANT:
                 # 1. Don't pass system_prompt - it's in the cached content
-                # 2. Don't pass tools - they're ALSO in the cached content
-                # 3. Gemini API error: "CachedContent can not be used with GenerateContent
-                #    request setting system_instruction, tools or tool_config"
+                # 2. DO pass tools - cached content only has SCHEMAS, Agent needs ACTUAL FUNCTIONS
+                # 3. The tools in cache are function DEFINITIONS for Gemini API
+                # 4. Pydantic AI needs the actual Python functions to EXECUTE the tools
                 logger.info("🎯 About to create Agent with cached content...")
                 logger.info(f"🎯 google_model: {google_model}")
-                logger.info(f"🎯 Cached content includes {len(tools)} tools - NOT passing to Agent")
+                logger.info(f"🎯 Cached content includes {len(tools)} tool schemas")
+                logger.info(f"🎯 Passing {len(tools)} callable tools to Agent for execution")
                 logger.info(f"🎯 deps_type: {ChatSessionDeps}")
 
                 try:
-                    # FIX: Omit both system_prompt AND tools when using cached content
-                    # Both are already in the cache, passing them causes Gemini API error
+                    # CORRECTED: Pass tools to Agent even with cached content
+                    # Cache has schemas, Agent needs callables
                     agent = Agent(
                         google_model,
                         # system_prompt omitted - already in cached content
-                        # tools omitted - ALSO in cached content (Gemini requirement)
+                        tools=tools,  # MUST pass tools - Agent needs callable functions
                         deps_type=ChatSessionDeps
                     )
                     logger.info("✅ Agent created with cached system prompt")
