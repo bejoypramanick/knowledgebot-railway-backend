@@ -148,9 +148,19 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 
         metadata['api_method'] = 'FileSearch tool (correct implementation)'
 
+        # Append source URLs to content so model can easily cite them
+        # Format them clearly so the model sees them
+        enhanced_content = response_text
+        if all_source_urls:
+            enhanced_content += "\n\n[CITATION_SOURCES]"
+            for url in all_source_urls:
+                enhanced_content += f"\n- {url}"
+            enhanced_content += "\n[/CITATION_SOURCES]"
+            logger.info(f"📎 Appended {len(all_source_urls)} source URL(s) to content for citation")
+
         return [SearchResult(
             file_name="RAG_Response",
-            content=response_text,
+            content=enhanced_content,
             metadata=metadata
         )]
         
