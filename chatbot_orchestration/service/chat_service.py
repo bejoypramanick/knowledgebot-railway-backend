@@ -16,6 +16,7 @@ from ..core.dependencies import ChatSessionDeps
 from ..service.agent_service import PydanticAIGatewayService
 from ..service.session_manager import session_state_manager
 from ..dao.session_persistence_dao import SessionPersistenceDAO
+from ..tools.knowledge_tools import search_knowledge_base, request_human_agent_connection, query_railway_postgres
 
 logger = get_otel_logger("chat_service", "chatbot-orchestration")
 

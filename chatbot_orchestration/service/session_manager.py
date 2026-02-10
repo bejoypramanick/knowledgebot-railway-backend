@@ -157,15 +157,38 @@ class SessionStateManager:
         """Clean up expired sessions."""
         current_time = time.time()
         expired_sessions = []
-        
+
         for session_id, state in self.session_states.items():
             age_hours = (current_time - state['last_activity']) / 3600
             if age_hours > max_age_hours:
                 expired_sessions.append(session_id)
-        
+
         for session_id in expired_sessions:
             del self.session_states[session_id]
             logger.info(f"🗑️ Cleaned up expired session: {session_id}")
+
+    def get_turn_count(self, session_id: str) -> int:
+        """Get the turn count for a session."""
+        state = self.get_session_state(session_id)
+        return state.get('message_count', 0)
+
+    def is_new_session(self, session_id: str) -> bool:
+        """Check if this is a new session."""
+        state = self.get_session_state(session_id)
+        return state.get('message_count', 0) == 0
+
+    def get_message_history(self, session_id: str) -> list:
+        """Get message history for a session (synchronous version)."""
+        # This is a synchronous wrapper - returns empty list
+        # For actual history, use async get_chat_history
+        return []
+
+    def update_session_state(self, session_id: str, result: Any) -> Dict[str, Any]:
+        """Update session state with result from agent."""
+        state = self.get_session_state(session_id)
+        state['last_result'] = result
+        state['last_activity'] = time.time()
+        return state
 
 # Global session manager instance
 session_state_manager = SessionStateManager()
