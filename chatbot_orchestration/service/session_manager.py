@@ -10,7 +10,7 @@ from typing import Dict, Any, Optional
 
 from shared.otel_logger import get_otel_logger
 
-from ..core.ai import get_genai_client
+from ..core.ai import get_genai_client, MODEL_NAME
 from ..dao.chat_dao import ChatDAO
 
 logger = get_otel_logger("session_manager", "chatbot-orchestration")
@@ -124,9 +124,10 @@ class SessionStateManager:
                 config_params['tools'] = [types.Tool(function_declarations=tool_declarations)]
                 logger.info(f"✅ Including {len(tool_declarations)} tool schemas in cache")
 
-            # Create cache with proper API format
+            # Create cache with proper API format - use same model as agent
+            logger.info(f"🔧 Creating cache for model: models/{MODEL_NAME}")
             cache = self.genai_client.caches.create(
-                model='models/gemini-2.5-flash',
+                model=f'models/{MODEL_NAME}',
                 config=types.CreateCachedContentConfig(**config_params)
             )
 
