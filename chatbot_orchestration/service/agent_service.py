@@ -590,14 +590,21 @@ class PydanticAIGatewayService:
             # Format chat history context if available
             history_context = ""
             if chat_history and chat_history.get("messages"):
+                logger.info(f"📚 Processing {len(chat_history['messages'])} history messages")
                 history_context = "\n\nRECENT CONVERSATION HISTORY:\n"
-                for msg in chat_history["messages"][1:]:   #Skip first greetings message
+                for idx, msg in enumerate(chat_history["messages"][1:], 1):   #Skip first greetings message
                     if msg.get("sender") == "user":
-                        history_context += f"User: {msg.get('message', '')}\n"
+                        user_msg = msg.get('message', '')
+                        logger.info(f"  History[{idx}] User: {user_msg[:50]}...")
+                        history_context += f"User: {user_msg}\n"
                     elif msg.get("sender") in ["agent", "bot","admin"]:
-                        history_context += f"Assistant: {msg.get('message', '')}\n"
-            
+                        agent_msg = msg.get('message', '')
+                        logger.info(f"  History[{idx}] Agent: {agent_msg[:50]}...")
+                        history_context += f"Assistant: {agent_msg}\n"
+
             logger.info(f"📝 History context length: {len(history_context)}")
+            if history_context:
+                logger.info(f"📝 History preview: {history_context[:200]}...")
 
             # Construct user message with history context
             user_message_with_context = f"{message}{history_context}"
@@ -616,9 +623,13 @@ class PydanticAIGatewayService:
                 
                 # Stream chunks as they arrive
                 logger.info("🎯 About to iterate over result.stream()...")
-                async for chunk in result.stream():
-                    logger.info(f"🎯 Got chunk: {chunk[:50]}...")  # Log first 50 chars of chunk
+                chunk_count = 0
+                for chunk in result.stream():
+                    chunk_count += 1
+                    logger.info(f"🎯 Chunk {chunk_count}: {repr(chunk[:100])}...")  # Log first 100 chars with repr to see exact content
+
                     full_response_text += chunk
+
                     # Format as JSON for frontend compatibility
                     chunk_data = {
                         "type": "chunk",
@@ -626,7 +637,17 @@ class PydanticAIGatewayService:
                     }
                     yield f"{json.dumps(chunk_data)}\n\n"
 
-                logger.info(f"✅ Stream completed - Total response: {len(full_response_text)} chars")
+                logger.info(f"✅ Stream completed - Total chunks: {chunk_count}")
+                logger.info(f"✅ Total response length: {len(full_response_text)} chars")
+                logger.info(f"✅ Full response preview: {repr(full_response_text[:200])}...")
+
+                # Check for obvious duplications
+                if full_response_text:
+                    words = full_response_text.split()[:20]  # First 20 words
+                    first_phrase = ' '.join(words)
+                    if full_response_text.count(first_phrase) > 1:
+                        logger.warning(f"⚠️ DUPLICATE DETECTED: First phrase appears {full_response_text.count(first_phrase)} times!")
+                        logger.warning(f"⚠️ First phrase: {first_phrase}")
 
                 # Track token usage after stream completes
                 try:
