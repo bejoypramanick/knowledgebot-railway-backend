@@ -226,6 +226,14 @@ class PydanticAIGatewayService:
         logger.info(f"Creating agent for session {session_id}")
 
         try:
+            # Initialize GenAI client if not already initialized
+            try:
+                await self.initialize()
+                if not self.genai_client:
+                    logger.warning("⚠️ GenAI client not available after initialization")
+            except Exception as init_error:
+                logger.warning(f"⚠️ GenAI client initialization failed: {init_error}")
+
             # Fetch persona configuration dynamically
             persona_config = await self._fetch_persona_config()
             logger.info(f"🎭 Using persona: {persona_config['persona_name']}")
@@ -234,17 +242,27 @@ class PydanticAIGatewayService:
             system_prompt = await self._build_system_prompt(persona_config)
             logger.info(f"📝 System prompt: {len(system_prompt)} characters")
 
-            # Get or create file search store for this session
-            file_search_store_id = await self.get_or_create_file_search_store(session_id)
-
-            # Get cached content ID from session metadata
-            cached_content_id = await self.get_cached_content_id(session_id)
-            if not cached_content_id:
+            # Get or create file search store for this session (skip if client not available)
+            file_search_store_id = None
+            if self.genai_client:
                 try:
-                    cached_content_id = await self.get_or_create_cached_content(system_prompt)
+                    file_search_store_id = await self.get_or_create_file_search_store(session_id)
                 except Exception as e:
-                    logger.warning(f"Failed to create cached content: {e}")
-                    cached_content_id = None
+                    logger.warning(f"⚠️ Failed to get file search store: {e}")
+
+            # Get cached content ID from session metadata (skip if client not available)
+            cached_content_id = None
+            if self.genai_client:
+                try:
+                    cached_content_id = await self.get_cached_content_id(session_id)
+                    if not cached_content_id:
+                        try:
+                            cached_content_id = await self.get_or_create_cached_content(system_prompt)
+                        except Exception as e:
+                            logger.warning(f"Failed to create cached content: {e}")
+                            cached_content_id = None
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get cached content: {e}")
 
             # Prepare model settings following Pydantic AI best practices
             model_settings = None
@@ -343,7 +361,7 @@ class PydanticAIGatewayService:
                 yield f"{json.dumps(complete_data)}\n\n"
 
         except Exception as e:
-            logger.error(f"❌ Error in agent stream: {e}", exc_info=True)
+            logger.error(f"❌ Error in agent stream: {e}")
             error_data = {
                 "type": "error",
                 "content": f"I encountered an error while processing your message: {str(e)}"
