@@ -398,25 +398,12 @@ class PydanticAIGatewayService:
             full_response_text = ""
             async with agent.run_stream(user_message_with_context, deps=session_deps) as result:
                 # Stream chunks as they arrive
-                stream_text = result.stream_text(delta=True)
-                if stream_text is not None:
-                    async for chunk in stream_text:
-                        full_response_text += chunk
-                        # Format as JSON for frontend compatibility
-                        chunk_data = {
-                            "type": "chunk",
-                            "content": chunk
-                        }
-                        yield f"{json.dumps(chunk_data)}\n\n"
-                else:
-                    logger.warning("⚠️ Stream text returned None, falling back to non-streaming")
-                    # Fallback to non-streaming if streaming fails
-                    result_data = await agent.run(user_message_with_context, deps=session_deps)
-                    response_text = self._extract_response_text(result_data)
-                    full_response_text = response_text
+                async for chunk in result.stream():
+                    full_response_text += chunk
+                    # Format as JSON for frontend compatibility
                     chunk_data = {
                         "type": "chunk",
-                        "content": response_text
+                        "content": chunk
                     }
                     yield f"{json.dumps(chunk_data)}\n\n"
 
