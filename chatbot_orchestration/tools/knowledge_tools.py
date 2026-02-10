@@ -104,32 +104,60 @@ async def search_knowledge_base(query: str) -> str:
                                     source_urls.append(url)
                                     logger.info(f"📎 Found web search URL: {url}")
 
-                            # Extract FileSearch document information
+                            # Extract FileSearch document information (web-crawled URLs only)
                             if hasattr(chunk, 'retrieved_context'):
                                 context = chunk.retrieved_context
+                                url_found = False
 
-                                # Get document title (filename)
+                                # Get document title for logging
                                 doc_title = getattr(context, 'title', None)
                                 if doc_title:
                                     logger.info(f"📄 Found document title: {doc_title}")
 
-                                # Get document text snippet
-                                content_text = getattr(context, 'text', None)
-                                if content_text:
-                                    logger.info(f"📄 Document snippet: {content_text[:100]}...")
+                                # Strategy 1: Check if context has URI field (like web search)
+                                if hasattr(context, 'uri'):
+                                    doc_url = context.uri
+                                    if doc_url and doc_url not in source_urls:
+                                        source_urls.append(doc_url)
+                                        logger.info(f"📎 Extracted URL from context.uri: {doc_url}")
+                                        url_found = True
 
-                                    # Try to extract URL from document content (if embedded)
-                                    url_match = re.search(r'(?:Source URL|URL|Link):\s*(https?://[^\s\n]+)', content_text, re.IGNORECASE)
-                                    if url_match:
-                                        doc_url = url_match.group(1)
-                                        if doc_url and doc_url not in source_urls:
-                                            source_urls.append(doc_url)
-                                            logger.info(f"📎 Extracted URL from document: {doc_url}")
-                                    else:
-                                        # If no URL found in content, use title as reference
-                                        if doc_title and doc_title not in source_urls:
-                                            source_urls.append(f"Document: {doc_title}")
-                                            logger.info(f"📄 Added document title as source: {doc_title}")
+                                # Strategy 2: Check custom_metadata for original_url (web-crawled content)
+                                if not url_found and hasattr(chunk, 'custom_metadata'):
+                                    metadata = chunk.custom_metadata
+                                    logger.info(f"🔍 Found custom_metadata: {metadata}")
+                                    for meta_item in metadata:
+                                        if hasattr(meta_item, 'key') and meta_item.key == 'original_url':
+                                            doc_url = getattr(meta_item, 'string_value', None)
+                                            if doc_url and doc_url not in source_urls:
+                                                source_urls.append(doc_url)
+                                                logger.info(f"📎 Extracted URL from custom_metadata: {doc_url}")
+                                                url_found = True
+                                                break
+
+                                # Strategy 3: Extract URL from document text content (embedded "Source URL:")
+                                if not url_found:
+                                    content_text = getattr(context, 'text', None)
+                                    if content_text:
+                                        logger.info(f"📄 Document snippet: {content_text[:200]}...")
+
+                                        # Try to extract URL from document content
+                                        # Pattern to match "Source URL: https://..."
+                                        url_pattern = r'Source URL:\s*(https?://[^\s\n\)]+)'
+                                        url_matches = re.findall(url_pattern, content_text, re.IGNORECASE)
+
+                                        for doc_url in url_matches:
+                                            # Clean up URL (remove trailing punctuation)
+                                            doc_url = doc_url.rstrip('.,;:)')
+                                            if doc_url and doc_url not in source_urls:
+                                                source_urls.append(doc_url)
+                                                logger.info(f"📎 Extracted URL from embedded 'Source URL:': {doc_url}")
+                                                url_found = True
+                                                break
+
+                                # Note: No fallback to document title - only show URLs for web-crawled content
+                                if not url_found:
+                                    logger.info(f"ℹ️ No URL found for document '{doc_title}' - skipping citation (uploaded file)")
 
         # Fallback: Parse response text for source URLs
         if not source_urls and response_text:
