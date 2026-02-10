@@ -72,22 +72,37 @@ async def chat_with_agent_stream(request: Request):
 
         # Prepare tools list safely to avoid None values
         tools = []
+        logger.info("🔧 Starting tool imports...")
+        
         try:
             from ..tools.rag import search_knowledge_base
+            logger.info(f"🔧 search_knowledge_base imported: {search_knowledge_base}")
             if search_knowledge_base is not None:
                 tools.append(search_knowledge_base)
+                logger.info("✅ Added search_knowledge_base to tools")
+            else:
+                logger.warning("⚠️ search_knowledge_base is None, skipping")
         except ImportError as e:
             logger.warning(f"Failed to import search_knowledge_base: {e}")
 
         try:
             from ..tools.general import request_human_agent_connection, query_railway_postgres
+            logger.info(f"🔧 request_human_agent_connection imported: {request_human_agent_connection}")
+            logger.info(f"🔧 query_railway_postgres imported: {query_railway_postgres}")
             if request_human_agent_connection is not None:
                 tools.append(request_human_agent_connection)
+                logger.info("✅ Added request_human_agent_connection to tools")
+            else:
+                logger.warning("⚠️ request_human_agent_connection is None, skipping")
             if query_railway_postgres is not None:
                 tools.append(query_railway_postgres)
+                logger.info("✅ Added query_railway_postgres to tools")
+            else:
+                logger.warning("⚠️ query_railway_postgres is None, skipping")
         except ImportError as e:
             logger.warning(f"Failed to import general tools: {e}")
 
+        logger.info(f"🔧 Final tools list: {tools}")
         logger.info(f"🔧 Loaded {len(tools)} tools for agent")
 
         # Stream response using new agent-based approach

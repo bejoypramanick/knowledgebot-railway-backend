@@ -247,10 +247,17 @@ class PydanticAIGatewayService:
     async def create_agent(self, session_id: str, system_prompt: str = "", tools: List[Any] = None, user_email: str = "anonymous@example.com") -> Agent:
         """Create an agent instance with proper Pydantic AI settings, dynamic persona, and caching."""
         logger.info(f"Creating agent for session {session_id}")
+        logger.info(f"🔧 Input tools parameter: {tools}")
+        logger.info(f"🔧 Tools type: {type(tools)}")
+        if tools is not None:
+            logger.info(f"🔧 Tools length: {len(tools)}")
+            for i, tool in enumerate(tools):
+                logger.info(f"🔧 Tool {i}: {tool} (type: {type(tool)})")
         
         # FIX: Ensure tools is a valid list without None values to prevent 'NoneType object is not iterable' errors
         if tools is None:
             tools = []
+            logger.info("🔧 Tools was None, set to empty list")
         else:
             # Filter out any None values from the tools list
             original_count = len(tools)
@@ -259,6 +266,11 @@ class PydanticAIGatewayService:
             if original_count != filtered_count:
                 logger.warning(f"⚠️ Filtered out {original_count - filtered_count} None tools from tools list")
                 logger.info(f"🔧 Final tools count: {filtered_count} valid tools")
+            else:
+                logger.info(f"🔧 No None tools found, all {filtered_count} tools are valid")
+        
+        logger.info(f"🔧 Final processed tools: {tools}")
+        logger.info(f"🔧 Final tools length: {len(tools)}")
         
         try:
             # FIX #2: Initialize GenAI client - FAIL FAST if critical
@@ -378,12 +390,23 @@ class PydanticAIGatewayService:
         try:
             logger.info(f"🚀 Starting agent stream for session: {session_id}")
             logger.info(f"📝 Message: {message[:100]}...")
+            logger.info(f"🔧 Tools received in stream_agent_response: {tools}")
+            logger.info(f"🔧 Tools type: {type(tools)}")
+            if tools is not None:
+                logger.info(f"🔧 Tools length: {len(tools)}")
+                for i, tool in enumerate(tools):
+                    logger.info(f"🔧 Tool {i} in stream: {tool} (type: {type(tool)})")
 
             # Create agent with dynamic persona and tools (caching configured at initialization)
+            logger.info("🤖 Calling create_agent from stream_agent_response...")
             agent = await self.create_agent(session_id, "", tools)
+            logger.info("✅ Agent created successfully")
+            logger.info(f"🤖 Agent object: {agent}")
+            logger.info(f"🤖 Agent type: {type(agent)}")
 
             # Create session dependencies
             session_deps = ChatSessionDeps(session_id=session_id)
+            logger.info("✅ Session dependencies created")
 
             # Get chat history for context
             chat_history = await self.get_chat_history(session_id)
@@ -399,18 +422,28 @@ class PydanticAIGatewayService:
                         history_context += f"User: {msg.get('message', '')}\n"
                     elif msg.get("sender") in ["agent", "bot","admin"]:
                         history_context += f"Assistant: {msg.get('message', '')}\n"
+            
+            logger.info(f"📝 History context length: {len(history_context)}")
 
             # Construct user message with history context
             user_message_with_context = f"{message}{history_context}"
+            logger.info(f"📝 Final message length: {len(user_message_with_context)}")
 
             logger.info(f"🤖 Running agent stream...")
 
             # Use Pydantic AI's run_stream for streaming responses
             # Caching is already configured in GoogleModel via GoogleModelSettings
             full_response_text = ""
+            logger.info("🎯 About to call agent.run_stream...")
             async with agent.run_stream(user_message_with_context, deps=session_deps) as result:
+                logger.info("✅ agent.run_stream context entered")
+                logger.info(f"🎯 Result object: {result}")
+                logger.info(f"🎯 Result type: {type(result)}")
+                
                 # Stream chunks as they arrive
+                logger.info("🎯 About to iterate over result.stream()...")
                 async for chunk in result.stream():
+                    logger.info(f"🎯 Got chunk: {chunk[:50]}...")  # Log first 50 chars of chunk
                     full_response_text += chunk
                     # Format as JSON for frontend compatibility
                     chunk_data = {
