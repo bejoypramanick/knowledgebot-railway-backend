@@ -62,10 +62,11 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         
         response_text = response.text if hasattr(response, 'text') else str(response)
         logger.info(f"✅ Generated response: {len(response_text)} characters")
-        
+
         # Extract metadata from Gemini response
         metadata = {}
         source_urls = []  # Collect source URLs for the chatbot to reference
+        document_source_urls = []  # URLs from scraped documents
 
         if hasattr(response, 'candidates'):
             metadata['candidates_count'] = len(response.candidates)
@@ -78,12 +79,29 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                     # Check for grounding_chunks which contain source information
                     if hasattr(grounding, 'grounding_chunks'):
                         for chunk in grounding.grounding_chunks:
-                            # Extract web URL if present
+                            # Extract web search result URLs (from Google Search)
                             if hasattr(chunk, 'web') and hasattr(chunk.web, 'uri'):
                                 url = chunk.web.uri
                                 if url and url not in source_urls:
                                     source_urls.append(url)
-                                    logger.info(f"📎 Found source URL: {url}")
+                                    logger.info(f"📎 Found web search URL: {url}")
+
+                            # Extract URLs from scraped documents in FileSearch
+                            # Check if chunk has retrieved_context (FileSearch document content)
+                            if hasattr(chunk, 'retrieved_context'):
+                                context = chunk.retrieved_context
+                                # Try to extract "Source URL: ..." from document content
+                                if hasattr(context, 'text') or hasattr(context, 'content'):
+                                    content_text = getattr(context, 'text', None) or getattr(context, 'content', None)
+                                    if content_text:
+                                        import re
+                                        # Match "Source URL: http(s)://..."
+                                        url_match = re.search(r'Source URL:\s*(https?://[^\s\n]+)', content_text)
+                                        if url_match:
+                                            doc_url = url_match.group(1)
+                                            if doc_url and doc_url not in document_source_urls:
+                                                document_source_urls.append(doc_url)
+                                                logger.info(f"📄 Found document source URL: {doc_url}")
 
                     # Check for web_search_queries
                     if hasattr(grounding, 'web_search_queries'):
@@ -102,10 +120,27 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         if hasattr(response, 'safety_ratings'):
             metadata['safety_ratings'] = [rating._asdict() if hasattr(rating, '_asdict') else str(rating) for rating in response.safety_ratings]
 
+        # Fallback: Parse response text for "Source URL: ..." if not found in grounding chunks
+        # This catches cases where FileSearch doesn't expose document content in grounding
+        if not document_source_urls and response_text:
+            import re
+            url_matches = re.findall(r'Source URL:\s*(https?://[^\s\n]+)', response_text)
+            if url_matches:
+                for url in url_matches:
+                    if url not in document_source_urls and url not in source_urls:
+                        document_source_urls.append(url)
+                        logger.info(f"📄 Found document URL in response text: {url}")
+
+        # Combine all source URLs (web search + document sources)
+        all_source_urls = source_urls + document_source_urls
+
         # Add source URLs to metadata for the chatbot to reference
-        if source_urls:
-            metadata['source_urls'] = source_urls
-            logger.info(f"✅ Extracted {len(source_urls)} source URL(s) from grounding metadata")
+        if all_source_urls:
+            metadata['source_urls'] = all_source_urls
+            logger.info(f"✅ Extracted {len(source_urls)} web search URL(s) and {len(document_source_urls)} document source URL(s)")
+            logger.info(f"📚 Total sources: {len(all_source_urls)}")
+            for i, url in enumerate(all_source_urls, 1):
+                logger.info(f"   Source {i}: {url}")
 
         # Add grounding metadata if available
         if hasattr(response, 'grounding_metadata'):
