@@ -70,6 +70,10 @@ async def search_knowledge_base(query: str) -> str:
 
         response_text = response.text if hasattr(response, 'text') else str(response)
         logger.info(f"✅ Generated response: {len(response_text)} characters")
+        logger.info("=" * 80)
+        logger.info("📄 RAG RESPONSE (raw from Gemini FileSearch):")
+        logger.info(response_text)
+        logger.info("=" * 80)
 
         # Extract source URLs from grounding metadata
         source_urls = []
@@ -114,8 +118,20 @@ async def search_knowledge_base(query: str) -> str:
             citation_section += "\n[/CITATION_SOURCES]"
             enhanced_content += citation_section
             logger.info(f"📎 Appended {len(source_urls)} source URL(s) to content")
+            logger.info("=" * 80)
+            logger.info("📎 CITATIONS ADDED:")
+            for i, url in enumerate(source_urls, 1):
+                logger.info(f"  {i}. {url}")
+            logger.info("=" * 80)
+        else:
+            logger.warning("⚠️ No source URLs found - no citations appended!")
+            logger.warning("⚠️ Response will have no [CITATION_SOURCES] section")
 
         logger.info(f"✅ Tool completed: search_knowledge_base (returned {len(enhanced_content)} chars)")
+        logger.info("=" * 80)
+        logger.info("📦 FINAL ENHANCED CONTENT (with citations):")
+        logger.info(enhanced_content)
+        logger.info("=" * 80)
         return enhanced_content
 
     except Exception as e:

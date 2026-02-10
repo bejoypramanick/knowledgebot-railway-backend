@@ -166,6 +166,12 @@ class StreamingService:
 
             # Save complete assistant response to database
             if full_response.strip():
+                # Log the full response to see formatting and citations
+                logger.info("=" * 80)
+                logger.info("📝 FULL AGENT RESPONSE (final output to user):")
+                logger.info(full_response)
+                logger.info("=" * 80)
+
                 try:
                     await session_state_manager.save_message(
                         session_id=session_id,
