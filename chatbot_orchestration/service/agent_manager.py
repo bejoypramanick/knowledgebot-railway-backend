@@ -109,11 +109,11 @@ class AgentManager:
         use_cache = False
 
         if not cached_content_id or cached_content_id.startswith('no_cache_'):
-            logger.info("→ No valid cache found, creating new cached content (prompt + tool schemas)")
+            logger.info("→ No valid cache found, creating new cached content (system prompt only)")
             try:
                 cached_content_id = await session_state_manager.get_or_create_cached_content(
                     system_prompt,
-                    tool_functions=tool_functions
+                    tool_functions=None  # Don't cache tools, pass to Agent instead
                 )
                 newly_created_cache = True
                 logger.info(f"✅ Created new cached content: {cached_content_id}")
@@ -134,7 +134,7 @@ class AgentManager:
                         logger.warning(f"⚠️ Cache expired at {expire_time}, creating new cache")
                         cached_content_id = await session_state_manager.get_or_create_cached_content(
                             system_prompt,
-                            tool_functions=tool_functions
+                            tool_functions=None  # Don't cache tools
                         )
                         newly_created_cache = True
                         logger.info(f"✅ Created replacement cache: {cached_content_id}")
@@ -147,7 +147,7 @@ class AgentManager:
                 try:
                     cached_content_id = await session_state_manager.get_or_create_cached_content(
                         system_prompt,
-                        tool_functions=tool_functions
+                        tool_functions=None  # Don't cache tools
                     )
                     newly_created_cache = True
                     logger.info(f"✅ Created new cache: {cached_content_id}")
@@ -155,14 +155,15 @@ class AgentManager:
                     logger.error(f"❌ Failed to create new cache: {create_error}")
                     cached_content_id = None
 
-        # Determine cache usage - enable caching for 90% token cost reduction
+        # Determine cache usage - enable caching for 85-90% token cost reduction
         use_cache = bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
 
         if use_cache:
-            logger.info("✅ Cache available - using cached system prompt for 90% cost reduction")
+            logger.info("✅ Cache available - using cached system prompt for 85-90% cost reduction")
             logger.info(f"✅ Cache ID: {cached_content_id}")
+            logger.info("ℹ️ Tools NOT in cache - will be passed separately to avoid conflicts")
         else:
-            logger.info("ℹ️ No cache available - will use full system prompt")
+            logger.info("ℹ️ No cache available - will use full system prompt + tools")
 
         # Create agent
         logger.info(f"\n🔧 STEP 6: Agent creation strategy")
@@ -186,19 +187,19 @@ class AgentManager:
                 raise
 
             try:
-                # IMPORTANT: Pass tools to Agent even with cached content
-                # - Cached content contains tool SCHEMAS (for Gemini API)
-                # - Agent needs tool FUNCTIONS (for Python execution)
-                # - These are different: schemas = contract, functions = implementation
+                # IMPORTANT: Only system_prompt is in cache, tools are passed separately
+                # - Cached content: system prompt (~32K tokens saved)
+                # - Tools: passed to Agent (so they can be executed by Pydantic AI)
+                # - This avoids 400 error: "CachedContent cannot be used with tools"
                 agent = Agent(
                     google_model,
-                    tools=tool_functions,  # Pass functions so Pydantic AI can execute them
+                    tools=tool_functions,  # Tools NOT in cache, passed here
                     deps_type=ChatSessionDeps
                     # Note: system_prompt is in cached content - do NOT pass here!
                 )
-                logger.info("✅ Agent created with cached content (system prompt + tool schemas)")
-                logger.info("✅ Tool functions registered with Agent for execution")
-                logger.info("💰 Token savings: ~90% (cached prompt + tool schemas)")
+                logger.info("✅ Agent created with cached content (system prompt only)")
+                logger.info("✅ Tool functions passed separately to Agent")
+                logger.info("💰 Token savings: ~85-90% (cached system prompt)")
             except Exception as agent_error:
                 logger.error(f"❌ Failed to create Agent: {agent_error}")
                 raise

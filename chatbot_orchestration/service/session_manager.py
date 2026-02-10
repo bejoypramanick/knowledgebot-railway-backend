@@ -61,8 +61,8 @@ class SessionStateManager:
             return None
 
     async def get_or_create_cached_content(self, system_prompt: str, tool_functions: list = None) -> str:
-        """Get or create cached content for system prompt and tool schemas."""
-        logger.info("🚀 Creating cached content for system prompt + tool schemas")
+        """Get or create cached content for system prompt ONLY (not tools)."""
+        logger.info("🚀 Creating cached content for system prompt only")
 
         await self.initialize()
         if not self.genai_client:
@@ -71,58 +71,12 @@ class SessionStateManager:
         try:
             from google.genai import types
 
-            # Prepare cache config components
+            # Cache ONLY the system prompt (not tools)
+            # Tools will be passed to Agent separately to avoid 400 error
             config_params = {
                 'system_instruction': system_prompt,
                 'ttl': '900s'  # 15 minutes (format: "Ns" for seconds)
             }
-
-            # Add tool schemas if provided (for additional token savings)
-            if tool_functions:
-                # Convert Pydantic AI tool functions to Gemini tool declarations
-                tool_declarations = []
-                for func in tool_functions:
-                    # Extract function metadata from Pydantic AI tool
-                    func_name = func.__name__
-                    func_doc = func.__doc__ or "No description"
-
-                    # Get function signature for parameters
-                    import inspect
-                    sig = inspect.signature(func)
-                    parameters = {}
-                    required = []
-
-                    for param_name, param in sig.parameters.items():
-                        if param_name in ['self', 'ctx', 'deps']:
-                            continue
-
-                        param_type = "string"  # Default
-                        if param.annotation != inspect.Parameter.empty:
-                            if param.annotation == str:
-                                param_type = "string"
-                            elif param.annotation == int:
-                                param_type = "integer"
-                            elif param.annotation == bool:
-                                param_type = "boolean"
-
-                        parameters[param_name] = {"type": param_type}
-                        if param.default == inspect.Parameter.empty:
-                            required.append(param_name)
-
-                    tool_declarations.append(
-                        types.FunctionDeclaration(
-                            name=func_name,
-                            description=func_doc.strip(),
-                            parameters={
-                                "type": "object",
-                                "properties": parameters,
-                                "required": required
-                            }
-                        )
-                    )
-
-                config_params['tools'] = [types.Tool(function_declarations=tool_declarations)]
-                logger.info(f"✅ Including {len(tool_declarations)} tool schemas in cache")
 
             # Create cache with proper API format - use same model as agent
             logger.info(f"🔧 Creating cache for model: models/{MODEL_NAME}")
@@ -133,7 +87,8 @@ class SessionStateManager:
 
             cached_content_id = cache.name
             logger.info(f"✅ Created cached content: {cached_content_id}")
-            logger.info(f"💰 Cached: system prompt + {len(tool_functions) if tool_functions else 0} tool schemas")
+            logger.info(f"💰 Cached: system prompt only (~32K tokens)")
+            logger.info(f"ℹ️ Tools NOT cached - will be passed to Agent separately")
             return cached_content_id
 
         except Exception as e:
