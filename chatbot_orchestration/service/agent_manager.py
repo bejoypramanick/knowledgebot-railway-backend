@@ -186,16 +186,19 @@ class AgentManager:
                 raise
 
             try:
-                # IMPORTANT: When using cached content, do NOT pass tools or system_prompt
-                # They are already in the cache and passing them causes 400 error
+                # IMPORTANT: Pass tools to Agent even with cached content
+                # - Cached content contains tool SCHEMAS (for Gemini API)
+                # - Agent needs tool FUNCTIONS (for Python execution)
+                # - These are different: schemas = contract, functions = implementation
                 agent = Agent(
                     google_model,
+                    tools=tool_functions,  # Pass functions so Pydantic AI can execute them
                     deps_type=ChatSessionDeps
-                    # Note: system_prompt + tools are in cached content - do NOT pass here!
+                    # Note: system_prompt is in cached content - do NOT pass here!
                 )
                 logger.info("✅ Agent created with cached content (system prompt + tool schemas)")
+                logger.info("✅ Tool functions registered with Agent for execution")
                 logger.info("💰 Token savings: ~90% (cached prompt + tool schemas)")
-                logger.info("⚠️ Tools NOT passed to Agent - they're in the cache!")
             except Exception as agent_error:
                 logger.error(f"❌ Failed to create Agent: {agent_error}")
                 raise
