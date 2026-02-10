@@ -622,30 +622,16 @@ class PydanticAIGatewayService:
                 logger.info(f"🎯 Result type: {type(result)}")
                 
                 # Stream chunks as they arrive
-                logger.info("🎯 About to iterate over result.stream()...")
+                # FIX: Use stream_text(delta=True) instead of stream()
+                # - stream() is deprecated and returns structured output
+                # - stream_text(delta=True) returns incremental text deltas (only new text)
+                # - This prevents duplicates and gives proper streaming behavior
+                logger.info("🎯 About to iterate over result.stream_text(delta=True)...")
                 chunk_count = 0
-                previous_chunk = None
-                seen_full_messages = set()  # Track complete messages we've already sent
 
-                async for chunk in result.stream():  # FIX: Must use 'async for' with async generator
+                async for chunk in result.stream_text(delta=True):
                     chunk_count += 1
-                    logger.info(f"🎯 Chunk {chunk_count}: {repr(chunk[:100])}...")  # Log first 100 chars with repr to see exact content
-
-                    # DEDUPLICATION: Skip if this is an exact duplicate of previous chunk
-                    if chunk == previous_chunk:
-                        logger.warning(f"⚠️ Skipping duplicate chunk {chunk_count} (same as previous)")
-                        continue
-
-                    # DEDUPLICATION: Skip if this complete message was already sent
-                    # (Handles case where streaming sends full message multiple times)
-                    if len(chunk) > 50 and chunk in seen_full_messages:
-                        logger.warning(f"⚠️ Skipping duplicate complete message in chunk {chunk_count}")
-                        continue
-
-                    # Track this chunk
-                    if len(chunk) > 50:  # Only track longer chunks (likely complete messages)
-                        seen_full_messages.add(chunk)
-                    previous_chunk = chunk
+                    logger.info(f"🎯 Chunk {chunk_count}: {repr(chunk[:100])}...")  # Log first 100 chars
 
                     full_response_text += chunk
 
@@ -656,22 +642,22 @@ class PydanticAIGatewayService:
                     }
                     yield f"{json.dumps(chunk_data)}\n\n"
 
-                logger.info(f"✅ Stream completed - Total chunks received: {chunk_count}")
+                logger.info(f"✅ Stream completed - Total chunks: {chunk_count}")
                 logger.info(f"✅ Total response length: {len(full_response_text)} chars")
                 logger.info(f"✅ Full response preview: {repr(full_response_text[:200])}...")
-                logger.info(f"✅ Deduplicated {len(seen_full_messages)} unique complete messages")
 
-                # Check for remaining duplications (shouldn't happen after dedup)
+                # Check for duplications (shouldn't happen with stream_text(delta=True))
                 if full_response_text:
                     words = full_response_text.split()[:20]  # First 20 words
                     if len(words) > 0:
                         first_phrase = ' '.join(words)
                         occurrences = full_response_text.count(first_phrase)
                         if occurrences > 1:
-                            logger.warning(f"⚠️ RESIDUAL DUPLICATE: First phrase appears {occurrences} times after dedup!")
+                            logger.warning(f"⚠️ DUPLICATE DETECTED: First phrase appears {occurrences} times!")
+                            logger.warning(f"⚠️ This shouldn't happen with stream_text(delta=True)")
                             logger.warning(f"⚠️ First phrase: {first_phrase}")
                         else:
-                            logger.info(f"✅ No duplicates detected after deduplication")
+                            logger.info(f"✅ No duplicates detected - stream_text(delta=True) working correctly")
 
                 # Track token usage after stream completes
                 try:
