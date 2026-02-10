@@ -63,6 +63,16 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         response_text = response.text if hasattr(response, 'text') else str(response)
         logger.info(f"✅ Generated response: {len(response_text)} characters")
 
+        # Log response text preview to check for Source URL
+        logger.info(f"📄 Response text preview (first 500 chars):")
+        logger.info(f"{response_text[:500]}")
+
+        # Check if response contains "Source URL:"
+        if "Source URL:" in response_text:
+            logger.info(f"✅ Response text CONTAINS 'Source URL:' - will extract")
+        else:
+            logger.warning(f"⚠️ Response text DOES NOT contain 'Source URL:' - no citations to extract")
+
         # Extract metadata from Gemini response
         logger.info("="*80)
         logger.info("🔍 STARTING CITATION EXTRACTION")
@@ -81,7 +91,9 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 
                     # Check for grounding_chunks which contain source information
                     if hasattr(grounding, 'grounding_chunks'):
-                        for chunk in grounding.grounding_chunks:
+                        logger.info(f"🔍 Found {len(grounding.grounding_chunks)} grounding chunks")
+                        for idx, chunk in enumerate(grounding.grounding_chunks):
+                            logger.info(f"   Chunk [{idx+1}] type: {type(chunk).__name__}")
                             # Extract web search result URLs (from Google Search)
                             if hasattr(chunk, 'web') and hasattr(chunk.web, 'uri'):
                                 url = chunk.web.uri
@@ -93,10 +105,13 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                             # Check if chunk has retrieved_context (FileSearch document content)
                             if hasattr(chunk, 'retrieved_context'):
                                 context = chunk.retrieved_context
+                                logger.info(f"   ✓ Chunk has retrieved_context")
                                 # Try to extract "Source URL: ..." from document content
                                 if hasattr(context, 'text') or hasattr(context, 'content'):
                                     content_text = getattr(context, 'text', None) or getattr(context, 'content', None)
                                     if content_text:
+                                        logger.info(f"   ✓ Context has content: {len(content_text)} chars")
+                                        logger.info(f"   📄 Context preview (first 200 chars): {content_text[:200]}")
                                         import re
                                         # Match "Source URL: http(s)://..."
                                         url_match = re.search(r'Source URL:\s*(https?://[^\s\n]+)', content_text)
@@ -104,7 +119,15 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
                                             doc_url = url_match.group(1)
                                             if doc_url and doc_url not in document_source_urls:
                                                 document_source_urls.append(doc_url)
-                                                logger.info(f"📄 Found document source URL: {doc_url}")
+                                                logger.info(f"📄 ✅ Found document source URL: {doc_url}")
+                                        else:
+                                            logger.warning(f"   ⚠️ No 'Source URL:' pattern found in context")
+                                    else:
+                                        logger.warning(f"   ⚠️ Context text/content is empty")
+                                else:
+                                    logger.warning(f"   ⚠️ Context has no text or content attribute")
+                            else:
+                                logger.warning(f"   ⚠️ Chunk has no retrieved_context")
 
                     # Check for web_search_queries
                     if hasattr(grounding, 'web_search_queries'):
@@ -125,14 +148,21 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 
         # Fallback: Parse response text for "Source URL: ..." if not found in grounding chunks
         # This catches cases where FileSearch doesn't expose document content in grounding
+        logger.info(f"🔍 Checking response text for 'Source URL:' pattern (fallback)")
         if not document_source_urls and response_text:
             import re
             url_matches = re.findall(r'Source URL:\s*(https?://[^\s\n]+)', response_text)
             if url_matches:
+                logger.info(f"✅ Found {len(url_matches)} URL(s) in response text")
                 for url in url_matches:
                     if url not in document_source_urls and url not in source_urls:
                         document_source_urls.append(url)
-                        logger.info(f"📄 Found document URL in response text: {url}")
+                        logger.info(f"📄 ✅ Extracted document URL from response text: {url}")
+            else:
+                logger.warning(f"⚠️ No 'Source URL:' pattern found in response text")
+                logger.warning(f"⚠️ This means the FileSearch documents don't have source URLs")
+        elif document_source_urls:
+            logger.info(f"✅ Already found {len(document_source_urls)} URLs in grounding chunks, skipping response text parsing")
 
         # Combine all source URLs (web search + document sources)
         all_source_urls = source_urls + document_source_urls
