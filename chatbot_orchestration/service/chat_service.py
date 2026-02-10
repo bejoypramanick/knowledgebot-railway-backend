@@ -13,15 +13,14 @@ from chatbot_orchestration.core.token_tracker import track_gemini_usage_from_res
 
 from ..agent.prompt import get_system_prompt
 from ..core.dependencies import ChatSessionDeps
-from ..service.agent_service import pydantic_ai_service, session_state_manager
-from ..tools.general import (query_railway_postgres,
-                             request_human_agent_connection)
-from ..tools.rag import search_knowledge_base
+from ..service.agent_service import PydanticAIGatewayService
+from ..service.session_manager import session_state_manager
 from ..dao.session_persistence_dao import SessionPersistenceDAO
 
 logger = get_otel_logger("chat_service", "chatbot-orchestration")
 
-# Pydantic AI imports for processing messages
+# Pydantic AI Gateway Service instance
+pydantic_ai_service = PydanticAIGatewayService()
 
 class ChatService:
     """Service layer for chat operations"""
