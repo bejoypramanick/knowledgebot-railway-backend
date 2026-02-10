@@ -137,15 +137,14 @@ class AgentManager:
                     logger.error(f"❌ Failed to create new cache: {create_error}")
                     cached_content_id = None
 
-        # Determine cache usage (TEMPORARY: disable cache with tools)
+        # Determine cache usage - enable caching for 90% token cost reduction
         use_cache = bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
-        
+
         if use_cache:
-            logger.warning("⚠️ TEMPORARY: Disabling cache because tools are present")
-            logger.warning("⚠️ Reason: Pydantic AI + Gemini cached content with tools = incompatible")
-            logger.warning("⚠️ Will use full system prompt + tools without caching")
-            use_cache = False
-            cached_content_id = None
+            logger.info("✅ Cache available - using cached system prompt for 90% cost reduction")
+            logger.info(f"✅ Cache ID: {cached_content_id}")
+        else:
+            logger.info("ℹ️ No cache available - will use full system prompt")
 
         # Create agent
         logger.info(f"\n🔧 STEP 6: Agent creation strategy")
@@ -174,8 +173,10 @@ class AgentManager:
                     google_model,
                     tools=tools,
                     deps_type=ChatSessionDeps
+                    # Note: system_prompt is in the cached content, not passed here
                 )
-                logger.info("✅ Agent created with cached system prompt")
+                logger.info("✅ Agent created with cached system prompt + tools")
+                logger.info("💰 Token savings: ~90% (only cache tokens charged)")
             except Exception as agent_error:
                 logger.error(f"❌ Failed to create Agent: {agent_error}")
                 raise
