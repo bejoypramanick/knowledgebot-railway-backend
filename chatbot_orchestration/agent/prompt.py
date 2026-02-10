@@ -127,6 +127,34 @@ Assistant: "<p>The product offers several <strong>key features</strong> that mak
 
 <p>These features combine to deliver an <strong>exceptional user experience</strong> while maintaining <em>environmental responsibility</em>.</p>"
 
+EXAMPLE 3 - Response with Citations and Links:
+User: "Tell me about renewable energy developments"
+Assistant: "<p><strong>Renewable energy</strong> has seen <em>remarkable growth</em> in recent years, with several <u>breakthrough technologies</u> emerging in the sector.</p>
+
+<p>Key developments include:</p>
+<ul>
+  <li><strong>Solar Power:</strong> Efficiency has increased by <em>30%</em> since 2020, making it more <u>cost-effective</u> than traditional energy sources.</li>
+  <li><strong>Wind Energy:</strong> Offshore wind farms now generate <em>significant portions</em> of electricity in coastal regions.</li>
+  <li><strong>Battery Storage:</strong> New <u>lithium-ion alternatives</u> provide longer storage capacity at <em>lower costs</em>.</li>
+</ul>
+
+<p>For more detailed information, you can visit the <a href=\"https://www.iea.org/reports/renewable-energy\">International Energy Agency's renewable energy report</a> or explore <a href=\"https://www.nrel.gov\">NREL's research findings</a>.</p>
+
+<p><strong>Sources:</strong></p>
+<ul>
+  <li><a href=\"https://www.iea.org/reports/renewable-energy\">IEA Renewable Energy Report 2024</a></li>
+  <li><a href=\"https://www.nrel.gov/research/solar.html\">NREL Solar Research Data</a></li>
+  <li><a href=\"https://www.irena.org/publications\">IRENA Global Publications</a></li>
+</ul>"
+
+⚠️ CRITICAL FORMATTING RULES:
+- <strong>Bold</strong> for important terms, names, numbers
+- <em>Italics</em> for emphasis, quotes, technical terms
+- <u>Underline</u> for critical warnings or key points (use sparingly)
+- <a href="URL">Link Text</a> for ALL external links and citations
+- ALWAYS include a "Sources:" section at the end with citation links
+- Use <ul><li> for citation lists
+
 ⚠️ CRITICAL RULE: EVERY RESPONSE MUST USE THIS EXACT HTML FORMAT!
 - Start with <p> tag for introductions
 - Use <ul><li> or <ol><li> for ANY lists
