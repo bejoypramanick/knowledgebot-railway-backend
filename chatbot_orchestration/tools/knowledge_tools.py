@@ -97,23 +97,39 @@ async def search_knowledge_base(query: str) -> str:
                     grounding = candidate.grounding_metadata
                     if hasattr(grounding, 'grounding_chunks'):
                         for chunk in grounding.grounding_chunks:
-                            # Extract web search result URLs
+                            # Extract web search result URLs (for Google Search grounding)
                             if hasattr(chunk, 'web') and hasattr(chunk.web, 'uri'):
                                 url = chunk.web.uri
                                 if url and url not in source_urls:
                                     source_urls.append(url)
                                     logger.info(f"📎 Found web search URL: {url}")
-                            # Extract URLs from scraped documents
+
+                            # Extract FileSearch document information
                             if hasattr(chunk, 'retrieved_context'):
                                 context = chunk.retrieved_context
-                                content_text = getattr(context, 'text', None) or getattr(context, 'content', None)
+
+                                # Get document title (filename)
+                                doc_title = getattr(context, 'title', None)
+                                if doc_title:
+                                    logger.info(f"📄 Found document title: {doc_title}")
+
+                                # Get document text snippet
+                                content_text = getattr(context, 'text', None)
                                 if content_text:
-                                    url_match = re.search(r'Source URL:\s*(https?://[^\s\n]+)', content_text)
+                                    logger.info(f"📄 Document snippet: {content_text[:100]}...")
+
+                                    # Try to extract URL from document content (if embedded)
+                                    url_match = re.search(r'(?:Source URL|URL|Link):\s*(https?://[^\s\n]+)', content_text, re.IGNORECASE)
                                     if url_match:
                                         doc_url = url_match.group(1)
                                         if doc_url and doc_url not in source_urls:
                                             source_urls.append(doc_url)
-                                            logger.info(f"📄 Found document URL: {doc_url}")
+                                            logger.info(f"📎 Extracted URL from document: {doc_url}")
+                                    else:
+                                        # If no URL found in content, use title as reference
+                                        if doc_title and doc_title not in source_urls:
+                                            source_urls.append(f"Document: {doc_title}")
+                                            logger.info(f"📄 Added document title as source: {doc_title}")
 
         # Fallback: Parse response text for source URLs
         if not source_urls and response_text:
