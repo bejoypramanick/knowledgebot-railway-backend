@@ -15,7 +15,10 @@ setup_telemetry("chatbot-orchestration")
 logger = logging.getLogger("chatbot_orchestration")
 
 from chatbot_orchestration.routers import router
-from chatbot_orchestration.service.agent_service import pydantic_ai_service
+from chatbot_orchestration.service.agent_service import PydanticAIGatewayService
+
+# Create service instance
+pydantic_ai_service = PydanticAIGatewayService()
 from chatbot_orchestration.core.utils import log_endpoint_request
 
 @asynccontextmanager
