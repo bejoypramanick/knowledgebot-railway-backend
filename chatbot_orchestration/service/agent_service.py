@@ -85,6 +85,11 @@ class PydanticAIGatewayService:
 
         IMPORTANT: Gemini requires minimum 2,048 tokens for caching.
         Our system prompt is ~32,768 tokens, which is well above the minimum.
+
+        NOTE: Currently caching system prompt only (no tools).
+        Per Gemini API: "CachedContent can not be used with GenerateContent request setting
+        system_instruction, tools or tool_config." Tools must be in cache OR passed separately,
+        not both. For now, we pass tools separately (no caching) to maintain flexibility.
         """
         if not self.genai_client:
             raise ValueError("GenAI client not initialized")
@@ -318,6 +323,15 @@ class PydanticAIGatewayService:
             # FIX #4: Better cache validation - check for valid cache ID and verify it exists
             logger.info(f"\n🔧 STEP 5: Cache validation and management")
             newly_created_cache = False
+
+            # IMPORTANT: Gemini API restriction - cannot use cached content with tools
+            # Per error: "CachedContent can not be used with GenerateContent request setting tools"
+            # Solution: Disable caching when tools are present
+            if tools and len(tools) > 0:
+                logger.warning(f"⚠️ Tools present ({len(tools)} tools) - disabling cache")
+                logger.warning(f"⚠️ Gemini API does not support cached content with tools in GenerateContent")
+                logger.info(f"  → Will use full system prompt without caching")
+                cached_content_id = None  # Force no cache
 
             if not cached_content_id or cached_content_id.startswith('no_cache_'):
                 # No valid cache exists, create new one
