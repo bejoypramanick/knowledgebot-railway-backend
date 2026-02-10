@@ -191,55 +191,5 @@ class StreamingService:
             session_state_manager.set_streaming_state(session_id, False)
             logger.info(f"🔄 Streaming state reset for session: {session_id}")
 
-    async def process_message(self, message: str, session_id: str, user_email: str = "anonymous@example.com") -> str:
-        """Process a message without streaming (for non-streaming endpoints)."""
-        try:
-            logger.info(f"🚀 Processing message for session: {session_id}")
-            
-            # Import agent_manager here to avoid circular imports
-            from .agent_manager import agent_manager
-            
-            # Create agent
-            agent = await agent_manager.create_agent(session_id, "", user_email)
-            
-            # Create session dependencies
-            session_deps = ChatSessionDeps(session_id=session_id)
-            
-            # Get chat history
-            chat_history = await session_state_manager.chat_dao.get_chat_history(session_id)
-            pydantic_messages = self._convert_db_messages_to_pydantic_ai(chat_history)
-            
-            # Save user message
-            await session_state_manager.chat_dao.save_message(
-                session_id=session_id,
-                role="user",
-                content=message,
-                metadata={"user_email": user_email}
-            )
-            
-            # Run agent (non-streaming)
-            result = await agent.run(
-                message,
-                message_history=pydantic_messages,
-                deps=session_deps
-            )
-            
-            response_text = str(result)
-            
-            # Save assistant response
-            await session_state_manager.save_message(
-                session_id=session_id,
-                role="assistant",
-                content=response_text,
-                metadata={"user_email": user_email}
-            )
-            
-            logger.info(f"✅ Message processed successfully for session: {session_id}")
-            return response_text
-            
-        except Exception as e:
-            logger.error(f"❌ Error processing message: {e}", exc_info=True)
-            return f"I apologize, but I encountered an error: {str(e)}"
-
 # Global streaming service instance
 streaming_service = StreamingService()

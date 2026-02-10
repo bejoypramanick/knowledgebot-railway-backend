@@ -57,11 +57,6 @@ class PydanticAIGatewayService:
         ):
             yield chunk
 
-    async def process_message(self, message: str, session_id: str, user_email: str = "anonymous@example.com") -> str:
-        """Process a message without streaming - delegates to StreamingService."""
-        logger.info(f"📝 Processing message for session: {session_id}")
-        return await streaming_service.process_message(message, session_id, user_email)
-
     # Legacy methods for backward compatibility
     async def get_session_metadata(self, session_id: str):
         """Get session metadata - delegates to SessionStateManager."""
