@@ -62,7 +62,7 @@ class AgentManager:
             
             Always provide helpful, accurate responses using proper HTML formatting."""
 
-    async def create_agent(self, session_id: str, system_prompt: str = "", user_email: str = "anonymous@example.com") -> Agent:
+    async def create_agent(self, session_id: str, user_email: str = "anonymous@example.com") -> Agent:
         """Create an agent instance with proper Pydantic AI settings and caching."""
         logger.info("="*80)
         logger.info(f"🚀 CREATE_AGENT STARTED - Session: {session_id}")

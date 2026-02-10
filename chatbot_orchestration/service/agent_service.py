@@ -46,8 +46,8 @@ class PydanticAIGatewayService:
         """Stream agent response (ONLY streaming is supported)."""
         logger.info(f"🌊 Starting stream for session: {session_id}")
 
-        # Create agent (tools are configured internally)
-        agent = await agent_manager.create_agent(session_id, "", user_email)
+        # Create agent (system prompt built from persona config, tools configured internally)
+        agent = await agent_manager.create_agent(session_id, user_email)
 
         # Stream response
         async for chunk in streaming_service.stream_agent_response(
