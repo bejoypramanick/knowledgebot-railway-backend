@@ -330,8 +330,8 @@ class PydanticAIGatewayService:
                 agent = Agent(
                     google_model,
                     system_prompt=None,  # Already in cached content
-                    tools=tools,
-                    model_settings = settings,
+                    tools=tools if tools is not None else [],  # Safety check for None tools
+                    model_settings=settings,
                     deps_type=ChatSessionDeps
                 )
                 logger.info("✅ Agent created with cached system prompt")
@@ -343,7 +343,7 @@ class PydanticAIGatewayService:
                 agent = Agent(
                     google_model,
                     system_prompt=system_prompt,
-                    tools=tools,
+                    tools=tools if tools is not None else [],  # Safety check for None tools
                     deps_type=ChatSessionDeps
                 )
                 logger.info("✅ Agent created with full system prompt (no caching)")
