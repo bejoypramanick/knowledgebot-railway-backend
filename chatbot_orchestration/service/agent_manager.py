@@ -123,7 +123,7 @@ class AgentManager:
         else:
             logger.info(f"→ Validating existing cache: {cached_content_id}")
             try:
-                cache_info = self.genai_client.caches.get(cached_content_id)
+                cache_info = self.genai_client.caches.get(name=cached_content_id)
                 logger.info("✅ Cache found, checking expiration")
                 if hasattr(cache_info, 'expire_time'):
                     expire_time = cache_info.expire_time
