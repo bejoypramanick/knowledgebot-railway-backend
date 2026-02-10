@@ -115,10 +115,11 @@ async def search_knowledge_base(query: str) -> str:
             enhanced_content += citation_section
             logger.info(f"📎 Appended {len(source_urls)} source URL(s) to content")
 
+        logger.info(f"✅ Tool completed: search_knowledge_base (returned {len(enhanced_content)} chars)")
         return enhanced_content
 
     except Exception as e:
-        logger.error(f"Error searching knowledge base: {e}", exc_info=True)
+        logger.error(f"❌ Tool failed: search_knowledge_base - {e}", exc_info=True)
         return f"Error performing FileSearch: {str(e)}"
 
 async def query_railway_postgres(query: str) -> str:
@@ -131,6 +132,7 @@ async def query_railway_postgres(query: str) -> str:
     - System metrics and analytics
     - File upload history
     """
+    logger.info(f"🗄️ Tool called: query_railway_postgres with query: {query[:100]}...")
     try:
         from ..service.file_service import FileService
         file_service = FileService()
@@ -141,15 +143,19 @@ async def query_railway_postgres(query: str) -> str:
         # File-related queries
         if any(word in query_lower for word in ['file', 'upload', 'document', 'document']):
             if 'count' in query_lower or 'total' in query_lower or 'number' in query_lower:
-                result = await file_service.get_active_files_count()
-                return f"Total active files in system: {result}"
+                count = await file_service.get_active_files_count()
+                result = f"Total active files in system: {count}"
+                logger.info(f"✅ Tool completed: query_railway_postgres (file count)")
+                return result
             elif 'recent' in query_lower or 'latest' in query_lower:
                 files = await file_service.get_recent_files(5)
                 if files:
                     result = "Recent uploaded files:\n"
                     for f in files:
                         result += f"- {f['display_name']} ({f['mime_type']}, {f['size_bytes']} bytes, uploaded {f['uploaded_at']})\n"
+                    logger.info(f"✅ Tool completed: query_railway_postgres (recent files: {len(files)})")
                     return result
+                logger.info(f"✅ Tool completed: query_railway_postgres (no recent files)")
                 return "No recent files found."
             else:
                 # General file info
@@ -158,7 +164,9 @@ async def query_railway_postgres(query: str) -> str:
                     result = f"Found {len(files)} active files:\n"
                     for f in files:
                         result += f"- {f['display_name']} ({f['mime_type']})\n"
+                    logger.info(f"✅ Tool completed: query_railway_postgres (file list: {len(files)})")
                     return result
+                logger.info(f"✅ Tool completed: query_railway_postgres (no files)")
                 return "No files found in the database."
 
         # Metrics queries
@@ -168,15 +176,19 @@ async def query_railway_postgres(query: str) -> str:
                 result = "Recent metrics (last 7 days):\n"
                 for m in metrics:
                     result += f"- {m['metric_name']}: {m['total_value']} {m['unit'] or ''}\n"
+                logger.info(f"✅ Tool completed: query_railway_postgres (metrics: {len(metrics)})")
                 return result
+            logger.info(f"✅ Tool completed: query_railway_postgres (no metrics)")
             return "No metrics found."
 
         # Default: return file count
         count = await file_service.get_active_files_count()
-        return f"Database contains {count} active files. Please be more specific about what information you need."
+        result = f"Database contains {count} active files. Please be more specific about what information you need."
+        logger.info(f"✅ Tool completed: query_railway_postgres")
+        return result
 
     except Exception as e:
-        logger.error(f"Error querying Railway PostgreSQL: {e}")
+        logger.error(f"❌ Tool failed: query_railway_postgres - {e}")
         return f"Error querying database: {str(e)}"
 
 async def request_human_agent_connection(reason: str) -> str:
@@ -205,9 +217,11 @@ async def request_human_agent_connection(reason: str) -> str:
         # Note: We don't have access to session_id in this context
         # For now, return a message indicating human agent request
         # In a real implementation, we'd need to pass session_id through deps
-        
-        return f"I've noted your request to connect with a human agent for: {reason}. A human agent will join the conversation shortly. The chat has been opened in their chat log."
+
+        result = f"I've noted your request to connect with a human agent for: {reason}. A human agent will join the conversation shortly. The chat has been opened in their chat log."
+        logger.info(f"✅ Tool completed: request_human_agent_connection")
+        return result
 
     except Exception as e:
-        logger.error(f"Error requesting human agent connection: {e}")
+        logger.error(f"❌ Tool failed: request_human_agent_connection - {e}")
         return f"Error requesting human agent: {str(e)}"

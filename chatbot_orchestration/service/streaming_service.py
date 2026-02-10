@@ -96,6 +96,7 @@ class StreamingService:
             logger.info("🌊 Starting agent stream...")
             full_response = ""
             chunk_count = 0
+            tool_call_count = 0
 
             try:
                 # Run agent with message history and stream text deltas
@@ -122,6 +123,32 @@ class StreamingService:
                         yield f"data: {json_response}\n\n"
 
                         logger.debug(f"📦 Sent chunk {chunk_count}: {delta_text[:50]}...")
+
+                    # After streaming, check for tool calls in the conversation
+                    logger.info("🔍 Checking for tool invocations...")
+                    try:
+                        # Access all messages to see tool calls
+                        all_messages = result.all_messages()
+                        for msg in all_messages:
+                            # Check if message contains tool calls
+                            if hasattr(msg, 'parts'):
+                                for part in msg.parts:
+                                    if hasattr(part, 'tool_name'):
+                                        tool_call_count += 1
+                                        tool_name = getattr(part, 'tool_name', 'unknown')
+                                        tool_args = getattr(part, 'args', {})
+                                        logger.info(f"🔧 Tool Call #{tool_call_count}: {tool_name}")
+                                        logger.info(f"   Args: {tool_args}")
+                                    elif hasattr(part, 'content') and 'tool_name' in str(type(part)):
+                                        tool_call_count += 1
+                                        logger.info(f"🔧 Tool Call #{tool_call_count}: {type(part).__name__}")
+
+                        if tool_call_count > 0:
+                            logger.info(f"✅ Total tool calls made: {tool_call_count}")
+                        else:
+                            logger.info("ℹ️ No tool calls were made in this response")
+                    except Exception as tool_check_error:
+                        logger.warning(f"⚠️ Could not check tool calls: {tool_check_error}")
 
             except Exception as stream_error:
                 logger.error(f"❌ Error during agent streaming: {stream_error}")
