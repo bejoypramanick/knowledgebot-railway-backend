@@ -28,17 +28,17 @@ class PydanticAIGatewayService:
     
     async def get_session_metadata(self, session_id: str) -> Dict[str, Any]:
         logger.info(f"🔍 Retrieving session metadata for session: {session_id}")
-        
+
         try:
             session_data = await self.chat_dao.get_session_metadata(session_id)
-            
+
             if not session_data:
                 return {'session_id': session_id, 'is_new_session': True}
-            
+
             return {
                 'session_id': session_id,
-                'file_search_store_id': session_data['file_search_store_id'],
-                'cached_content_id': session_data['cached_content_id'],
+                'file_search_store_id': session_data.get('file_search_store_id'),
+                'cached_content_id': session_data.get('cached_content_id'),
                 'is_new_session': False
             }
         except Exception as e:
@@ -76,16 +76,16 @@ class PydanticAIGatewayService:
     async def get_or_create_cached_content(self, system_prompt: str) -> str:
         if not self.genai_client:
             raise ValueError("GenAI client not initialized")
-        
+
         try:
             if not hasattr(self.genai_client, 'caches'):
                 return f"no_cache_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
-            
+
             cached_content = self.genai_client.caches.create(
                 model=MODEL_NAME,
                 config=types.CreateCachedContentConfig(
                     display_name=f"system_prompt_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
-                    contents=[types.Part.from_text(system_prompt)],
+                    contents=[types.Content(parts=[types.Part(text=system_prompt)])],
                     ttl="3600s"
                 )
             )

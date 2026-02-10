@@ -26,17 +26,25 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 
     try:
         # Get the file search store from environment
-        file_search_store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME")
-        
+        file_search_store_display_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
+
+        # Resolve display name to full resource name
+        from shared.file_search import get_file_search_store_by_display_name
+
+        file_search_store_name = get_file_search_store_by_display_name(
+            genai_client,
+            display_name=file_search_store_display_name
+        )
+
         if not file_search_store_name:
-            logger.warning("⚠️ No File Search store configured")
+            logger.warning(f"⚠️ FileSearch store '{file_search_store_display_name}' not found")
             return [SearchResult(
                 file_name="RAG_Response",
-                content="File Search store not configured. Please set GEMINI_FILE_SEARCH_STORE_NAME environment variable."
+                content=f"File Search store '{file_search_store_display_name}' not found. Please check configuration."
             )]
-        
+
         logger.info(f"🔍 Using File Search store: {file_search_store_name}")
-        
+
         # Generate response using FileSearch tool (CORRECT WAY)
         response = genai_client.models.generate_content(
             model="gemini-2.5-flash",
