@@ -92,9 +92,10 @@ class PydanticAIGatewayService:
                 config=types.CreateCachedContentConfig(
                     display_name=f"system_prompt_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
                     system_instruction=types.Content(parts=[types.Part(text=system_prompt)]),
-                    ttl="900s"
+                    ttl="3600s"  # 1 hour cache (previously 15 minutes)
                 )
             )
+            logger.info(f"✅ Created cached content with 1 hour TTL: {cached_content.name}")
             return cached_content.name
         except Exception as e:
             logger.error(f"❌ Error creating cached content: {e}")
@@ -251,7 +252,7 @@ class PydanticAIGatewayService:
             system_prompt = await self._build_system_prompt(persona_config)
             logger.info(f"📝 System prompt: {len(system_prompt)} characters")
 
-            # FIX #4: Better cache validation - check for valid cache ID
+            # FIX #4: Better cache validation - check for valid cache ID and verify it exists
             newly_created_cache = False
             if not cached_content_id or cached_content_id.startswith('no_cache_'):
                 # No valid cache exists, create new one
@@ -264,29 +265,71 @@ class PydanticAIGatewayService:
                     logger.warning(f"⚠️ Failed to create cached content: {e}")
                     cached_content_id = None
             else:
-                logger.info(f"♻️ Reusing existing cached content: {cached_content_id}")
+                # Validate existing cache - check if it's still valid (not expired)
+                try:
+                    logger.info(f"♻️ Validating existing cached content: {cached_content_id}")
+                    cache_info = self.genai_client.caches.get(cached_content_id)
+
+                    if hasattr(cache_info, 'expire_time'):
+                        expire_time = cache_info.expire_time
+                        if isinstance(expire_time, str):
+                            from dateutil import parser
+                            expire_time = parser.parse(expire_time)
+
+                        if expire_time < datetime.now(expire_time.tzinfo):
+                            logger.warning(f"⚠️ Cached content expired, creating new cache")
+                            cached_content_id = await self.get_or_create_cached_content(system_prompt)
+                            newly_created_cache = True
+                        else:
+                            logger.info(f"✅ Cache is valid, expires at: {expire_time}")
+                    else:
+                        logger.info(f"✅ Reusing existing cached content: {cached_content_id}")
+
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to validate cache (might be expired), creating new one: {e}")
+                    try:
+                        cached_content_id = await self.get_or_create_cached_content(system_prompt)
+                        newly_created_cache = True
+                    except Exception as create_error:
+                        logger.error(f"❌ Failed to create new cache: {create_error}")
+                        cached_content_id = None
 
             # FIX #3: Removed file_search_store_id fetching
             # File search store is managed by the search_knowledge_base tool, not the Agent
             # The tool uses environment variable GEMINI_FILE_SEARCH_STORE_NAME directly
 
-            # Prepare model settings (DISABLED for now due to Pydantic AI conflict)
-            # TODO: Re-enable caching with proper architecture
-            model_settings = None
-            use_cache = False  # Temporarily disabled
+            # CACHING RE-ENABLED: Use cached content if available
+            use_cache = bool(cached_content_id and not cached_content_id.startswith('no_cache_'))
 
-            # Initialize model without cache settings to avoid API conflict
-            google_model = GoogleModel(MODEL_NAME)
-            logger.info("GoogleModel initialized (caching disabled)")
+            if use_cache:
+                # Use cached content - system prompt is in the cache
+                logger.info(f"🚀 Using cached content: {cached_content_id}")
+                model_settings = GoogleModelSettings(
+                    cached_content_name=cached_content_id
+                )
+                google_model = GoogleModel(MODEL_NAME, model_settings=model_settings)
 
-            # Create agent with full system_prompt (no cache conflict)
-            agent = Agent(
-                google_model,
-                system_prompt=system_prompt,
-                tools=tools,
-                deps_type=ChatSessionDeps,
-            )
-            logger.info("✅ Agent created successfully with dynamic persona and tools")
+                # IMPORTANT: Don't pass system_prompt when using cached content
+                # The system prompt is already in the cache
+                agent = Agent(
+                    google_model,
+                    system_prompt=None,  # Already in cached content
+                    tools=tools,
+                    deps_type=ChatSessionDeps,
+                )
+                logger.info("✅ Agent created with CACHED system prompt (context caching enabled)")
+            else:
+                # No cache available - use full system prompt
+                logger.info("📝 No cache available - using full system prompt")
+                google_model = GoogleModel(MODEL_NAME)
+
+                agent = Agent(
+                    google_model,
+                    system_prompt=system_prompt,
+                    tools=tools,
+                    deps_type=ChatSessionDeps,
+                )
+                logger.info("✅ Agent created with full system prompt (caching disabled for this session)")
 
             # Save cached_content_id to DB if we created one (for future use when caching is re-enabled)
             if newly_created_cache and cached_content_id:
