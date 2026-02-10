@@ -607,8 +607,15 @@ class PydanticAIGatewayService:
                 logger.info(f"📝 History preview: {history_context[:200]}...")
 
             # Construct user message with history context
-            user_message_with_context = f"{message}{history_context}"
+            # Add explicit instruction when there's history to prevent greeting on every message
+            if history_context:
+                conversation_note = "\n\n[IMPORTANT: This is a FOLLOW-UP message in an existing conversation. DO NOT greet the user again. DO NOT say 'Hello' or introduce yourself. Provide a direct answer to their question.]\n"
+                user_message_with_context = f"{message}{conversation_note}{history_context}"
+            else:
+                user_message_with_context = message
+
             logger.info(f"📝 Final message length: {len(user_message_with_context)}")
+            logger.info(f"📝 Has history: {bool(history_context)}")
 
             logger.info(f"🤖 Running agent stream...")
 
