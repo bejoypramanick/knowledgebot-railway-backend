@@ -354,17 +354,18 @@ class PydanticAIGatewayService:
                 settings = GoogleModelSettings(cached_content=cached_content_id)
                 logger.info(f"✅ GoogleModelSettings created: {settings}")
                 logger.info(f"🎯 Settings type: {type(settings)}")
+                logger.info(f"🎯 Settings is GoogleModelSettings: {isinstance(settings, GoogleModelSettings)}")
                 
                 # Create agent without system_prompt (already in cached content)
                 logger.info("🎯 About to create Agent with cached content...")
                 logger.info(f"🎯 google_model: {google_model}")
                 logger.info(f"🎯 tools: {tools}")
-                logger.info(f"🎯 settings: {settings}")
+                logger.info(f"🎯 settings object: {settings}")
                 agent = Agent(
                     google_model,
                     system_prompt=None,  # Already in cached content
-                    tools=tools,  # Now guaranteed to be a list
-                    model_settings=settings,
+                    tools=tools if tools else [],  # Ensure it's always a list, never None
+                    model_settings=settings,  # Pass the object directly
                     deps_type=ChatSessionDeps
                 )
                 logger.info("✅ Agent created with cached system prompt")
