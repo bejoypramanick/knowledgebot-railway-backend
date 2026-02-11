@@ -131,11 +131,14 @@ class AgentManager:
             logger.info("✅ GoogleModel created")
 
             # Create agent with system prompt and tools
+            # Use end_strategy='exhaustive' to ensure ALL tools execute, not just first output
+            # This fixes issue where Gemini returns text instead of calling tools
             agent = Agent(
                 google_model,
                 system_prompt=system_prompt,
                 tools=tool_functions,
-                deps_type=ChatSessionDeps
+                deps_type=ChatSessionDeps,
+                end_strategy='exhaustive'  # Ensure tools execute even after initial output
             )
             logger.info("✅ Agent created successfully")
             logger.info(f"📝 System prompt: {len(system_prompt)} chars")
