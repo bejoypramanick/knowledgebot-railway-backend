@@ -101,13 +101,26 @@ class StreamingService:
 
             try:
                 # Use agent.iter() for proper streaming + tool execution
-                # Rely on system prompt to intelligently call search_knowledge_base
-                logger.info("🔧 Using agent.iter() with INTELLIGENT tool calling (system prompt driven)")
+                # With tool_config to FORCE search_knowledge_base call (prevents tool not being called)
+                from pydantic_ai.settings import ModelSettings
+
+                logger.info("🔧 Using agent.iter() with FORCED tool calling (prevents model ignoring tools)")
+
+                # Force at least one tool call to ensure KB is always searched
+                forced_settings = ModelSettings(
+                    tool_config={
+                        'function_calling_config': {
+                            'mode': 'ANY',  # Force at least one tool call
+                            'allowed_function_names': ['search_knowledge_base']  # Only KB tool
+                        }
+                    }
+                )
 
                 async with agent.iter(
                     message,
                     message_history=pydantic_messages,
-                    deps=session_deps
+                    deps=session_deps,
+                    model_settings=forced_settings
                 ) as run:
                     logger.info("🚀 Starting agent iteration (streaming + intelligent tools)")
 

@@ -27,6 +27,11 @@ async def search_knowledge_base(query: str) -> str:
     - Company policies and procedures
     - Any content that should be retrieved from stored documents
     """
+    # Reject empty queries to prevent duplicate tool call attempts
+    if not query or not query.strip():
+        logger.warning("❌ search_knowledge_base called with EMPTY query - rejecting to prevent infinite loops")
+        return "TOOL_CALL_REJECTED: Empty query provided. Please ensure a valid search query is passed to the tool."
+
     logger.info(f"🔍 Tool called: search_knowledge_base with query: {query[:100]}...")
 
     genai_client = get_genai_client()
