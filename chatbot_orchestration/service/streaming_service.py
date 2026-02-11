@@ -99,24 +99,46 @@ class StreamingService:
             chunk_count = 0
             tool_call_count = 0
 
-            # WORKAROUND: Since the model refuses to call search_knowledge_base despite system prompt,
-            # call it manually first and inject the results as context
+            # HYBRID APPROACH: Manually call search_knowledge_base to ensure it happens,
+            # but allow other tools to be called if needed. Prevent duplicate calls.
             try:
                 from ..tools.knowledge_tools import search_knowledge_base
-                logger.info("🔍 Manually calling search_knowledge_base as workaround...")
+                logger.info("🔍 Manually calling search_knowledge_base to ensure KB search happens...")
                 kb_results = await search_knowledge_base(message)
                 logger.info(f"✅ KB Search completed: {len(kb_results)} chars returned")
 
-                # Inject KB results into message for agent to use
-                enriched_message = f"USER QUERY: {message}\n\nKNOWLEDGE BASE SEARCH RESULTS:\n{kb_results}\n\nPlease answer the user's question using the knowledge base search results above."
+                # Inject KB results into message AND tell agent NOT to call KB again
+                # This prevents redundant calls while still allowing other tools if needed
+                enriched_message = f"""USER QUERY: {message}
+
+KNOWLEDGE BASE ALREADY SEARCHED: The knowledge base search was already performed for you.
+
+KNOWLEDGE BASE SEARCH RESULTS:
+{kb_results}
+
+INSTRUCTIONS:
+1. Use the knowledge base search results above to answer the user's question
+2. DO NOT call search_knowledge_base again - the results are already provided above
+3. If you need additional information, you may call other tools (database, human agent)
+4. Format your response using HTML tags as instructed
+5. Include the citation sources from the KB results above"""
+
                 logger.info(f"📝 Enriched message with KB results: {len(enriched_message)} chars")
             except Exception as kb_error:
                 logger.warning(f"⚠️ Manual KB search failed: {kb_error}")
-                enriched_message = message
+                # Even if KB search fails, tell agent it was already attempted
+                enriched_message = f"""USER QUERY: {message}
+
+KNOWLEDGE BASE ALREADY SEARCHED: Knowledge base search was attempted but failed.
+
+INSTRUCTIONS:
+1. Inform the user that knowledge base search failed
+2. Offer to connect them to a human agent or try alternative queries
+3. Format your response using HTML tags as instructed"""
 
             try:
                 # Use agent.iter() for proper streaming + tool execution
-                logger.info("🔧 Using agent.iter() with knowledge base results injected")
+                logger.info("🔧 Using agent.iter() with pre-searched KB results and duplicate prevention")
 
                 async with agent.iter(
                     enriched_message,
