@@ -108,30 +108,35 @@ class StreamingService:
                 logger.info(f"✅ KB Search completed: {len(kb_results)} chars returned")
 
                 # Inject KB results into message AND tell agent NOT to call KB again
-                # This prevents redundant calls while still allowing other tools if needed
+                # IMPORTANT: Tell agent to PRESERVE the KB content exactly, only add HTML wrapping
+                # This prevents the model from rephrasing/changing the KB response
                 enriched_message = f"""USER QUERY: {message}
 
 KNOWLEDGE BASE ALREADY SEARCHED: The knowledge base search was already performed for you.
 
-RAW KNOWLEDGE BASE SEARCH RESULTS:
+KNOWLEDGE BASE SEARCH RESULTS (USE EXACTLY AS PROVIDED - DO NOT REPHRASE):
 {kb_results}
 
-🔴 CRITICAL FORMATTING INSTRUCTIONS (MANDATORY - NON-NEGOTIABLE):
-1. You MUST reformat the knowledge base results above into PROPER HTML
-2. You CANNOT output plain text - EVERY response must use HTML tags
-3. You MUST wrap paragraphs in <p></p> tags
-4. You MUST wrap important terms/names in <strong></strong> tags
-5. You MUST wrap emphasized text in <em></em> tags
-6. You MUST use <ul><li> for lists or facts
-7. You MUST include citations in proper HTML format
-8. You MUST NOT use plain text, markdown, or line breaks without HTML tags
-9. Format example: <p>Here's <strong>important info</strong> with <em>emphasis</em>.</p>
+🔴 CRITICAL INSTRUCTIONS (MANDATORY):
+1. Use the knowledge base results EXACTLY AS PROVIDED ABOVE - DO NOT rephrase, reword, or improvise
+2. Preserve all original content, details, and wording from KB results
+3. Only add HTML formatting - do NOT change the meaning or content
+4. Wrap the KB response in proper HTML tags while keeping the text identical:
+   - Wrap paragraphs in <p></p> tags
+   - Wrap important terms in <strong></strong> tags
+   - Keep all citations and source URLs exactly as they appear
+5. Add proper HTML citations at the end: <a href="URL" target="_blank">Source Name</a>
+6. Do NOT use plain text outside of HTML tags
+
+EXAMPLE OF CORRECT APPROACH:
+KB Result: "John was born in 1990"
+Wrong: <p>John, who was born in 1990, is a person</p> (rephrased, added content)
+Correct: <p><strong>John</strong> was born in <strong>1990</strong></p> (exact text, just added tags)
 
 OTHER INSTRUCTIONS:
-- Do NOT call search_knowledge_base again - results already provided above
-- If you need additional data, you may call other tools (database, human agent)
-- Answer the user's question using the KB results above
-- Always include citations with source URLs using <a href="URL" target="_blank">text</a>"""
+- Do NOT call search_knowledge_base again - results already provided
+- If you need additional data, you may call other tools
+- Your role is HTML formatting wrapper, not content editor"""
 
                 logger.info(f"📝 Enriched message with KB results: {len(enriched_message)} chars")
             except Exception as kb_error:
@@ -139,19 +144,17 @@ OTHER INSTRUCTIONS:
                 # Even if KB search fails, tell agent it was already attempted
                 enriched_message = f"""USER QUERY: {message}
 
-KNOWLEDGE BASE ALREADY SEARCHED: Knowledge base search was attempted but failed.
+KNOWLEDGE BASE SEARCH RESULT: Knowledge base search was attempted but encountered an error.
 
-🔴 CRITICAL FORMATTING INSTRUCTIONS (MANDATORY - NON-NEGOTIABLE):
-1. You MUST respond in PROPER HTML format
-2. You CANNOT output plain text - EVERY response must use HTML tags
-3. You MUST wrap paragraphs in <p></p> tags
-4. You MUST wrap important information in <strong></strong> tags
-5. Format example: <p><strong>Important:</strong> The knowledge base search failed.</p>
+🔴 CRITICAL INSTRUCTIONS:
+1. Respond in PROPER HTML format - wrap every element in HTML tags
+2. Use <p> for paragraphs, <strong> for important terms, <em> for emphasis
+3. Example: <p>The <strong>knowledge base</strong> search <em>encountered an error</em>.</p>
 
-INSTRUCTIONS:
-1. Inform the user that knowledge base search encountered an error
-2. Offer to connect them to a human agent or try alternative queries
-3. Use HTML formatting for EVERY part of your response - no plain text"""
+YOUR RESPONSE SHOULD:
+1. Inform the user that knowledge base search encountered a technical error
+2. Suggest alternatives: try rephrasing the query, or connect to human agent
+3. Format EVERY part with HTML tags - no plain text outside tags"""
 
             try:
                 # Use agent.iter() for proper streaming + tool execution
