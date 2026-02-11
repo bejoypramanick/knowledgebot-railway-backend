@@ -100,75 +100,82 @@ class StreamingService:
             tool_call_count = 0
 
             try:
-                # Run agent with message history and stream text deltas
-                # ALWAYS search knowledge base first, then tell user if no results found
-                # Note: tool_config doesn't work with run_stream(), so we use regular run() with forced tool calling
-                logger.info("🔧 Calling agent with FORCED tool calling (run method, not run_stream)")
+                # Strategy: Guarantee KB search + true streaming
+                # 1. Pre-call search_knowledge_base to ensure KB is searched
+                # 2. Use run_stream() for true streaming response
+                logger.info("🔧 Pre-calling search_knowledge_base to guarantee KB search")
 
-                # Use run() method with tool_config (run_stream doesn't support it)
-                # Then convert the output to streaming format for consistency
-                result = await agent.run(
-                    message,
+                from ..tools.knowledge_tools import search_knowledge_base
+
+                # Pre-search knowledge base with user message
+                kb_results = await search_knowledge_base(message)
+                logger.info(f"📚 KB search complete: {len(kb_results)} chars returned")
+
+                # Check if KB found relevant information
+                has_kb_results = "[CITATION_SOURCES]" in kb_results and len(kb_results) > 100
+                if has_kb_results:
+                    logger.info("✅ KB found relevant information")
+                else:
+                    logger.info("⚠️ KB search returned no relevant results")
+
+                # Add KB results as context to the user message
+                message_with_context = f"User query: {message}\n\nKnowledge Base Search Results:\n{kb_results}"
+
+                # Now use run_stream() for true streaming (tools optional now since we pre-searched)
+                logger.info("🌊 Starting true streaming with run_stream()")
+                async with agent.run_stream(
+                    message_with_context,
                     message_history=pydantic_messages,
                     deps=session_deps,
                     model_settings={
-                        'tool_config': {
-                            'function_calling_config': {
-                                'mode': 'ANY',  # Force at least one tool call
-                                'allowed_function_names': ['search_knowledge_base']
-                            }
+                        'cache_system_prompt': True  # Enable caching for performance
+                    }
+                ) as result:
+                    logger.info("🔧 Agent streaming with true streaming (run_stream mode)")
+                    # Stream text with delta=True for incremental chunks
+                    async for delta_text in result.stream_text(delta=True):
+                        chunk_count += 1
+                        full_response += delta_text
+
+                        # Format the response chunk for frontend
+                        response_data = {
+                            "type": "chunk",
+                            "content": delta_text,
+                            "session_id": session_id,
+                            "chunk_index": chunk_count
                         }
-                    }
-                )
 
-                # Convert non-streaming result to streaming chunks for frontend
-                logger.info("🌊 Converting run() result to stream format")
-                full_response = result.data if hasattr(result, 'data') else str(result)
+                        # Convert to JSON and format for SSE
+                        json_response = json.dumps(response_data, ensure_ascii=False)
+                        yield f"data: {json_response}\n\n"
 
-                # Split into chunks and stream to frontend (50 chars per chunk for smooth effect)
-                chunk_size = 50
-                for i in range(0, len(full_response), chunk_size):
-                    chunk_text = full_response[i:i + chunk_size]
-                    chunk_count += 1
+                        logger.debug(f"📦 Sent chunk {chunk_count}: {delta_text[:50]}...")
 
-                    # Format the response chunk for frontend
-                    response_data = {
-                        "type": "chunk",
-                        "content": chunk_text,
-                        "session_id": session_id,
-                        "chunk_index": chunk_count
-                    }
+                    # After streaming, check for tool calls (though we pre-searched KB)
+                    logger.info("🔍 Checking for additional tool invocations...")
+                    try:
+                        # Access all messages to see tool calls
+                        all_messages = result.all_messages()
+                        for msg in all_messages:
+                            # Check if message contains tool calls
+                            if hasattr(msg, 'parts'):
+                                for part in msg.parts:
+                                    if hasattr(part, 'tool_name'):
+                                        tool_call_count += 1
+                                        tool_name = getattr(part, 'tool_name', 'unknown')
+                                        tool_args = getattr(part, 'args', {})
+                                        logger.info(f"🔧 Tool Call #{tool_call_count}: {tool_name}")
+                                        logger.info(f"   Args: {tool_args}")
+                                    elif hasattr(part, 'content') and 'tool_name' in str(type(part)):
+                                        tool_call_count += 1
+                                        logger.info(f"🔧 Tool Call #{tool_call_count}: {type(part).__name__}")
 
-                    # Convert to JSON and format for SSE
-                    json_response = json.dumps(response_data, ensure_ascii=False)
-                    yield f"data: {json_response}\n\n"
-                    logger.debug(f"📦 Sent chunk {chunk_count}: {chunk_text[:50]}...")
-
-                # Check for tool invocations in the conversation
-                logger.info("🔍 Checking for tool invocations...")
-                try:
-                    # Access all messages to see tool calls
-                    all_messages = result.all_messages()
-                    for msg in all_messages:
-                        # Check if message contains tool calls
-                        if hasattr(msg, 'parts'):
-                            for part in msg.parts:
-                                if hasattr(part, 'tool_name'):
-                                    tool_call_count += 1
-                                    tool_name = getattr(part, 'tool_name', 'unknown')
-                                    tool_args = getattr(part, 'args', {})
-                                    logger.info(f"🔧 Tool Call #{tool_call_count}: {tool_name}")
-                                    logger.info(f"   Args: {tool_args}")
-                                elif hasattr(part, 'content') and 'tool_name' in str(type(part)):
-                                    tool_call_count += 1
-                                    logger.info(f"🔧 Tool Call #{tool_call_count}: {type(part).__name__}")
-
-                    if tool_call_count > 0:
-                        logger.info(f"✅ Total tool calls made: {tool_call_count}")
-                    else:
-                        logger.info("ℹ️ No tool calls were made in this response")
-                except Exception as tool_check_error:
-                    logger.warning(f"⚠️ Could not check tool calls: {tool_check_error}")
+                        if tool_call_count > 0:
+                            logger.info(f"✅ Total additional tool calls made: {tool_call_count}")
+                        else:
+                            logger.info("ℹ️ No additional tool calls made (KB was pre-searched)")
+                    except Exception as tool_check_error:
+                        logger.warning(f"⚠️ Could not check tool calls: {tool_check_error}")
 
             except Exception as stream_error:
                 logger.error(f"❌ Error during agent streaming: {stream_error}")
