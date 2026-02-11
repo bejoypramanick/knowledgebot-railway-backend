@@ -84,13 +84,18 @@ class AgentManager:
         logger.info(f"🚀 CREATE_AGENT - Session: {session_id}")
         logger.info("="*80)
 
-    
         # Check if we already have a cached agent for this session
-        if session_id in self.agent_cache:
+        # Force new agent if tools are needed to ensure fresh tool state
+        if session_id in self.agent_cache and not force_new:
             logger.info(f"✅ Reusing cached agent for session: {session_id}")
             logger.info("💰 No agent creation overhead - instant response!")
             logger.info("="*80)
             return self.agent_cache[session_id]
+        
+        # Clear existing cache if forcing new agent
+        if force_new and session_id in self.agent_cache:
+            del self.agent_cache[session_id]
+            logger.info(f"🗑️ Cleared cached agent for session: {session_id} (force_new=True)")
 
         await self.initialize()
         if not self.genai_client:

@@ -12,6 +12,7 @@ from shared.otel_logger import get_otel_logger
 
 from ..core.dependencies import ChatSessionDeps
 from .session_manager import session_state_manager
+from .agent_manager import agent_manager
 
 logger = get_otel_logger("streaming_service", "chatbot-orchestration")
 
@@ -151,6 +152,9 @@ class StreamingService:
 
                         if tool_call_count > 0:
                             logger.info(f"✅ Total tool calls made: {tool_call_count}")
+                            # Force fresh agent creation next time to ensure tools work properly
+                            agent_manager.clear_agent_cache(session_id)
+                            logger.info(f"🔄 Cleared agent cache for session {session_id} to ensure fresh tool state")
                         else:
                             logger.info("ℹ️ No tool calls were made in this response")
                     except Exception as tool_check_error:
