@@ -102,16 +102,22 @@ class StreamingService:
             try:
                 # Run agent with message history and stream text deltas
                 # Force tool calling: search_knowledge_base ALWAYS, others optional
+                from google.genai import types
+
                 async with agent.run_stream(
                     message,
                     message_history=pydantic_messages,
                     deps=session_deps,
                     model_settings={
-                        'tool_choice': 'any',  # Force at least one tool call (search_knowledge_base MANDATORY)
+                        'tool_choice': types.ToolChoice(
+                            function_calling=types.FunctionCallingConfig(
+                                mode=types.FunctionCallingMode.ANY
+                            )
+                        ),
                         'cache_system_prompt': True  # Enable prompt caching for performance
                     }
                 ) as result:
-                    logger.info("🔧 Agent streaming with FORCED TOOL CALLING (tool_choice='any')")
+                    logger.info("🔧 Agent streaming with FORCED TOOL CALLING (FunctionCallingMode.ANY)")
                     # Stream text with delta=True for incremental chunks
                     async for delta_text in result.stream_text(delta=True):
                         chunk_count += 1
