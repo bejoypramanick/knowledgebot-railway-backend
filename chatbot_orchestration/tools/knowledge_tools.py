@@ -155,7 +155,35 @@ async def search_knowledge_base(query: str) -> str:
                                                 url_found = True
                                                 break
 
-                                # Note: No fallback to document title - only show URLs for web-crawled content
+                                # Strategy 4: Parse URL from filename (for scraped files)
+                                # Filename format: scraped_{url_encoded}_YYYYMMDD_HHMMSS.md
+                                # Example: scraped_en.wikipedia.org_wiki_Sachin_Tendulkar_20260210_223347.md
+                                # → URL: https://en.wikipedia.org/wiki/Sachin_Tendulkar
+                                if not url_found and doc_title and doc_title.startswith('scraped_'):
+                                    try:
+                                        logger.info(f"🔍 Attempting to reconstruct URL from filename: {doc_title}")
+
+                                        # Remove 'scraped_' prefix and '.md' extension
+                                        url_part = doc_title[8:]  # Remove 'scraped_'
+                                        url_part = url_part[:-3]  # Remove '.md'
+
+                                        # Remove timestamp (YYYYMMDD_HHMMSS pattern at end)
+                                        timestamp_pattern = r'_\d{8}_\d{6}$'
+                                        url_part = re.sub(timestamp_pattern, '', url_part)
+
+                                        logger.info(f"🔍 After removing timestamp: {url_part}")
+
+                                        # Replace underscores with slashes to reconstruct URL path
+                                        reconstructed_url = f"https://{url_part.replace('_', '/')}"
+
+                                        if reconstructed_url not in source_urls:
+                                            source_urls.append(reconstructed_url)
+                                            logger.info(f"✅ Reconstructed actual webpage URL: {reconstructed_url}")
+                                            url_found = True
+                                    except Exception as parse_error:
+                                        logger.warning(f"⚠️ Failed to parse URL from filename '{doc_title}': {parse_error}")
+
+                                # Note: Only show URLs for web-crawled content (uploaded files have no URL)
                                 if not url_found:
                                     logger.info(f"ℹ️ No URL found for document '{doc_title}' - skipping citation (uploaded file)")
 
