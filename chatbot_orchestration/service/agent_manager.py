@@ -84,14 +84,9 @@ class AgentManager:
         logger.info(f"🚀 CREATE_AGENT - Session: {session_id}")
         logger.info("="*80)
 
-        # TEMPORARY: Clear cache for debugging
-        if session_id in self.agent_cache:
-            logger.warning("🗑️ DEBUGGING: Clearing cached agent to test new changes")
-            del self.agent_cache[session_id]
-            force_new = True
-
+    
         # Check if we already have a cached agent for this session
-        if not force_new and session_id in self.agent_cache:
+        if session_id in self.agent_cache:
             logger.info(f"✅ Reusing cached agent for session: {session_id}")
             logger.info("💰 No agent creation overhead - instant response!")
             logger.info("="*80)
