@@ -101,17 +101,25 @@ class StreamingService:
 
             try:
                 # Run agent with message history and stream text deltas
-                # Use default AUTO mode - let model intelligently decide when to use tools
-                # Model will call search_knowledge_base when relevant, allow chit-chat otherwise
+                # ALWAYS search knowledge base first, then tell user if no results found
+                from pydantic_ai.settings import ModelSettings
+
+                forced_tool_settings = ModelSettings(
+                    tool_config={
+                        "function_calling_config": {
+                            "mode": "ANY",  # Force at least one tool call
+                            "allowed_function_names": ["search_knowledge_base"]  # Only KB tool
+                        }
+                    }
+                )
+
                 async with agent.run_stream(
                     message,
                     message_history=pydantic_messages,
                     deps=session_deps,
-                    model_settings={
-                        'cache_system_prompt': True  # Enable prompt caching for performance
-                    }
+                    model_settings=forced_tool_settings
                 ) as result:
-                    logger.info("🔧 Agent streaming (AUTO tool mode - model decides when to use tools)")
+                    logger.info("🔧 Agent streaming (FORCED knowledge base search - tell user if no results)")
                     # Stream text with delta=True for incremental chunks
                     async for delta_text in result.stream_text(delta=True):
                         chunk_count += 1
