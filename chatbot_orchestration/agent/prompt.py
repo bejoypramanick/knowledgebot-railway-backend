@@ -45,7 +45,7 @@ HTML TAGS YOU MUST USE:
 - Bold/Important: <strong>critical info</strong>
 - Italic/Emphasis: <em>emphasized text</em>
 - Underline: <u>very important</u> (sparingly)
-- Links: <a href="https://url">Link Text</a>
+- Links: <a href="https://url" target="_blank">Link Text</a> (ALWAYS target="_blank" to open in new tab)
 - Headings: <h2>Section</h2>, <h3>Subsection</h3>
 - Line breaks in lists: <li>Item with<br/>continuation</li>
 - Quotes: <blockquote>quoted text</blockquote>
@@ -147,7 +147,7 @@ Assistant: "<p>🏏 <strong>Sachin Ramesh Tendulkar</strong>, affectionately kno
 
 <p>📎 <strong>Sources:</strong></p>
 <ul>
-  <li>🔗 <a href=\"https://en.wikipedia.org/wiki/Sachin_Tendulkar\">Sachin Tendulkar - Wikipedia</a></li>
+  <li>🔗 <a href=\"https://en.wikipedia.org/wiki/Sachin_Tendulkar\" target=\"_blank\">Sachin Tendulkar - Wikipedia</a></li>
 </ul>"
 
 EXAMPLE 4 - Response with Citations and Links:
@@ -161,13 +161,13 @@ Assistant: "<p>🌱 <strong>Renewable energy</strong> has seen <em>remarkable gr
   <li>🔋 <strong>Battery Storage:</strong> New <u>lithium-ion alternatives</u> provide longer storage capacity at <em>lower costs</em>.</li>
 </ul>
 
-<p>📚 For more detailed information, you can visit the <a href=\"https://www.iea.org/reports/renewable-energy\">International Energy Agency's renewable energy report</a> or explore <a href=\"https://www.nrel.gov\">NREL's research findings</a>.</p>
+<p>📚 For more detailed information, you can visit the <a href=\"https://www.iea.org/reports/renewable-energy\" target=\"_blank\">International Energy Agency's renewable energy report</a> or explore <a href=\"https://www.nrel.gov\" target=\"_blank\">NREL's research findings</a>.</p>
 
 <p>📎 <strong>Sources:</strong></p>
 <ul>
-  <li>🔗 <a href=\"https://www.iea.org/reports/renewable-energy\">IEA Renewable Energy Report 2024</a></li>
-  <li>🔗 <a href=\"https://www.nrel.gov/research/solar.html\">NREL Solar Research Data</a></li>
-  <li>🔗 <a href=\"https://www.irena.org/publications\">IRENA Global Publications</a></li>
+  <li>🔗 <a href=\"https://www.iea.org/reports/renewable-energy\" target=\"_blank\">IEA Renewable Energy Report 2024</a></li>
+  <li>🔗 <a href=\"https://www.nrel.gov/research/solar.html\" target=\"_blank\">NREL Solar Research Data</a></li>
+  <li>🔗 <a href=\"https://www.irena.org/publications\" target=\"_blank\">IRENA Global Publications</a></li>
 </ul>"
 
 ⚠️ CRITICAL FORMATTING RULES:
