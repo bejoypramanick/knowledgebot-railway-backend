@@ -211,7 +211,19 @@ async def search_knowledge_base(query: str) -> str:
             logger.info("=" * 80)
         else:
             logger.warning("⚠️ No source URLs found - no citations appended!")
-            logger.warning("⚠️ Response will have no [CITATION_SOURCES] section")
+            # Still include the response text even without citations
+
+        # Check if response is meaningful or empty
+        if not response_text or len(response_text.strip()) < 50:
+            logger.warning("⚠️ Knowledge base returned no relevant results")
+            # Return explicit "no results" message to prevent infinite tool loops
+            no_results_msg = "No relevant information found in knowledge base for this query."
+            logger.info(f"✅ Tool completed: search_knowledge_base (no results)")
+            logger.info("=" * 80)
+            logger.info("📦 KB SEARCH RESULT:")
+            logger.info(no_results_msg)
+            logger.info("=" * 80)
+            return no_results_msg
 
         logger.info(f"✅ Tool completed: search_knowledge_base (returned {len(enhanced_content)} chars)")
         logger.info("=" * 80)

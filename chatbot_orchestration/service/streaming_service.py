@@ -102,40 +102,48 @@ class StreamingService:
             try:
                 # Use agent.iter() for proper streaming + tool execution
                 # With tool_config to FORCE search_knowledge_base call
-                logger.info("🔧 Using agent.iter() with FORCED tool calling (tool_config)")
+                from pydantic_ai.settings import ModelSettings
+
+                logger.info("🔧 Using agent.iter() with FORCED tool calling (ModelSettings)")
+
+                # Use ModelSettings object (safer than dict) for tool forcing
+                forced_settings = ModelSettings(
+                    tool_config={
+                        'function_calling_config': {
+                            'mode': 'ANY',  # Force at least one tool call
+                            'allowed_function_names': ['search_knowledge_base']  # Only KB tool
+                        }
+                    }
+                )
 
                 async with agent.iter(
                     message,
                     message_history=pydantic_messages,
                     deps=session_deps,
-                    model_settings={
-                        'tool_config': {
-                            'function_calling_config': {
-                                'mode': 'ANY',  # Force at least one tool call
-                                'allowed_function_names': ['search_knowledge_base']  # Only KB tool
-                            }
-                        }
-                    }
+                    model_settings=forced_settings
                 ) as run:
                     logger.info("🚀 Starting agent iteration (streaming + tools)")
 
+                    from pydantic_ai.messages import TextPart
+
                     # Iterate through agent nodes
                     async for node in run:
-                        # Stream from model request nodes
-                        if node.is_model_request_node():
-                            logger.info("📝 Model request node - starting stream")
+                        logger.debug(f"📌 Processing node: {type(node).__name__}")
 
-                            # Stream the model response
-                            async with node.stream(run.ctx) as stream_result:
-                                async for text_delta in stream_result:
-                                    if text_delta:
+                        # Check if node has parts (responses with text)
+                        if hasattr(node, 'parts'):
+                            for part in node.parts:
+                                # Stream text parts to frontend
+                                if isinstance(part, TextPart):
+                                    text_content = part.content
+                                    if text_content:
                                         chunk_count += 1
-                                        full_response += text_delta
+                                        full_response += text_content
 
                                         # Format the response chunk for frontend
                                         response_data = {
                                             "type": "chunk",
-                                            "content": text_delta,
+                                            "content": text_content,
                                             "session_id": session_id,
                                             "chunk_index": chunk_count
                                         }
@@ -144,15 +152,36 @@ class StreamingService:
                                         json_response = json.dumps(response_data, ensure_ascii=False)
                                         yield f"data: {json_response}\n\n"
 
-                                        logger.debug(f"📦 Sent chunk {chunk_count}: {text_delta[:50]}...")
+                                        logger.debug(f"📦 Sent chunk {chunk_count}: {text_content[:50]}...")
 
-                        # Tool calls are executed automatically by agent.iter()
-                        elif node.is_call_tools_node():
-                            logger.info("🔧 Tool call node detected - tools will execute automatically")
-                            tool_call_count += 1
+                                # Track tool calls
+                                elif hasattr(part, 'tool_name'):
+                                    tool_call_count += 1
+                                    tool_name = getattr(part, 'tool_name', 'unknown')
+                                    logger.info(f"🔧 Tool call detected: {tool_name}")
 
-                        elif hasattr(node, 'node_type'):
-                            logger.debug(f"📌 Agent node: {node.node_type}")
+                        # Also check for model request nodes that can be streamed
+                        if hasattr(node, 'stream') and callable(node.stream):
+                            try:
+                                async with node.stream(run.ctx) as stream_result:
+                                    async for text_delta in stream_result:
+                                        if text_delta:
+                                            chunk_count += 1
+                                            full_response += text_delta
+
+                                            response_data = {
+                                                "type": "chunk",
+                                                "content": text_delta,
+                                                "session_id": session_id,
+                                                "chunk_index": chunk_count
+                                            }
+
+                                            json_response = json.dumps(response_data, ensure_ascii=False)
+                                            yield f"data: {json_response}\n\n"
+
+                                            logger.debug(f"📦 Sent stream chunk {chunk_count}: {text_delta[:50]}...")
+                            except Exception as stream_error:
+                                logger.debug(f"⚠️ Could not stream from node: {stream_error}")
 
                     # After iteration completes, get final result
                     logger.info("🔍 Agent iteration completed, checking results...")
