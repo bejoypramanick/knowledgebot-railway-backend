@@ -100,82 +100,69 @@ class StreamingService:
             tool_call_count = 0
 
             try:
-                # Strategy: Guarantee KB search + true streaming
-                # 1. Pre-call search_knowledge_base to ensure KB is searched
-                # 2. Use run_stream() for true streaming response
-                logger.info("🔧 Pre-calling search_knowledge_base to guarantee KB search")
+                # Use agent.iter() for proper streaming + tool execution
+                # This is the recommended PydanticAI approach for streaming with tools
+                logger.info("🔧 Using agent.iter() for streaming with full tool support")
 
-                from ..tools.knowledge_tools import search_knowledge_base
-
-                # Pre-search knowledge base with user message
-                kb_results = await search_knowledge_base(message)
-                logger.info(f"📚 KB search complete: {len(kb_results)} chars returned")
-
-                # Check if KB found relevant information
-                has_kb_results = "[CITATION_SOURCES]" in kb_results and len(kb_results) > 100
-                if has_kb_results:
-                    logger.info("✅ KB found relevant information")
-                else:
-                    logger.info("⚠️ KB search returned no relevant results")
-
-                # Add KB results as context to the user message
-                message_with_context = f"User query: {message}\n\nKnowledge Base Search Results:\n{kb_results}"
-
-                # Now use run_stream() for true streaming (tools optional now since we pre-searched)
-                logger.info("🌊 Starting true streaming with run_stream()")
-                async with agent.run_stream(
-                    message_with_context,
+                async with agent.iter(
+                    message,
                     message_history=pydantic_messages,
-                    deps=session_deps,
-                    model_settings={
-                        'cache_system_prompt': True  # Enable caching for performance
-                    }
-                ) as result:
-                    logger.info("🔧 Agent streaming with true streaming (run_stream mode)")
-                    # Stream text with delta=True for incremental chunks
-                    async for delta_text in result.stream_text(delta=True):
-                        chunk_count += 1
-                        full_response += delta_text
+                    deps=session_deps
+                ) as run:
+                    logger.info("🚀 Starting agent iteration (streaming + tools)")
 
-                        # Format the response chunk for frontend
-                        response_data = {
-                            "type": "chunk",
-                            "content": delta_text,
-                            "session_id": session_id,
-                            "chunk_index": chunk_count
-                        }
+                    # Iterate through agent nodes
+                    async for node in run:
+                        # Stream from model request nodes
+                        if node.is_model_request_node():
+                            logger.info("📝 Model request node - starting stream")
 
-                        # Convert to JSON and format for SSE
-                        json_response = json.dumps(response_data, ensure_ascii=False)
-                        yield f"data: {json_response}\n\n"
+                            # Stream the model response
+                            async with node.stream(run.ctx) as stream_result:
+                                async for text_delta in stream_result:
+                                    if text_delta:
+                                        chunk_count += 1
+                                        full_response += text_delta
 
-                        logger.debug(f"📦 Sent chunk {chunk_count}: {delta_text[:50]}...")
+                                        # Format the response chunk for frontend
+                                        response_data = {
+                                            "type": "chunk",
+                                            "content": text_delta,
+                                            "session_id": session_id,
+                                            "chunk_index": chunk_count
+                                        }
 
-                    # After streaming, check for tool calls (though we pre-searched KB)
-                    logger.info("🔍 Checking for additional tool invocations...")
+                                        # Convert to JSON and format for SSE
+                                        json_response = json.dumps(response_data, ensure_ascii=False)
+                                        yield f"data: {json_response}\n\n"
+
+                                        logger.debug(f"📦 Sent chunk {chunk_count}: {text_delta[:50]}...")
+
+                        # Tool calls are executed automatically by agent.iter()
+                        elif node.is_call_tools_node():
+                            logger.info("🔧 Tool call node detected - tools will execute automatically")
+                            tool_call_count += 1
+
+                        elif hasattr(node, 'node_type'):
+                            logger.debug(f"📌 Agent node: {node.node_type}")
+
+                    # After iteration completes, get final result
+                    logger.info("🔍 Agent iteration completed, checking results...")
                     try:
-                        # Access all messages to see tool calls
-                        all_messages = result.all_messages()
+                        # Access all messages to verify tool calls were made
+                        all_messages = run.all_messages()
                         for msg in all_messages:
-                            # Check if message contains tool calls
                             if hasattr(msg, 'parts'):
                                 for part in msg.parts:
                                     if hasattr(part, 'tool_name'):
-                                        tool_call_count += 1
                                         tool_name = getattr(part, 'tool_name', 'unknown')
                                         tool_args = getattr(part, 'args', {})
-                                        logger.info(f"🔧 Tool Call #{tool_call_count}: {tool_name}")
+                                        logger.info(f"✅ Tool executed: {tool_name}")
                                         logger.info(f"   Args: {tool_args}")
-                                    elif hasattr(part, 'content') and 'tool_name' in str(type(part)):
-                                        tool_call_count += 1
-                                        logger.info(f"🔧 Tool Call #{tool_call_count}: {type(part).__name__}")
 
-                        if tool_call_count > 0:
-                            logger.info(f"✅ Total additional tool calls made: {tool_call_count}")
-                        else:
-                            logger.info("ℹ️ No additional tool calls made (KB was pre-searched)")
-                    except Exception as tool_check_error:
-                        logger.warning(f"⚠️ Could not check tool calls: {tool_check_error}")
+                        logger.info(f"✅ Agent completed with {tool_call_count} tool calls")
+                    except Exception as result_error:
+                        logger.warning(f"⚠️ Could not verify results: {result_error}")
 
             except Exception as stream_error:
                 logger.error(f"❌ Error during agent streaming: {stream_error}")
