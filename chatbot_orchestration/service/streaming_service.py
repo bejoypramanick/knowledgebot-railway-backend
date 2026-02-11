@@ -127,110 +127,61 @@ class StreamingService:
                     # Import correct message types from pydantic_ai.messages
                     from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 
-                    # Iterate through agent events/responses
+                    # Iterate through agent events/responses (these are Node objects, not ModelResponse)
                     async for event in run:
                         event_type = type(event).__name__
                         logger.info(f"📌 Processing event: {event_type}")
-
-                        # Check if event is a ModelResponse (contains text/tools)
-                        if isinstance(event, ModelResponse):
-                            logger.info(f"📝 ModelResponse with {len(event.parts)} parts")
-
-                            # Iterate through parts in the response
-                            for i, part in enumerate(event.parts):
-                                part_type = type(part).__name__
-                                logger.info(f"  Part {i}: {part_type}")
-
-                                # Stream text parts to frontend
-                                if isinstance(part, TextPart):
-                                    text_content = part.content
-                                    logger.info(f"    TextPart content length: {len(text_content) if text_content else 0}")
-                                    if text_content:
-                                        chunk_count += 1
-                                        full_response += text_content
-
-                                        # Format the response chunk for frontend
-                                        response_data = {
-                                            "type": "chunk",
-                                            "content": text_content,
-                                            "session_id": session_id,
-                                            "chunk_index": chunk_count
-                                        }
-
-                                        # Convert to JSON and format for SSE
-                                        json_response = json.dumps(response_data, ensure_ascii=False)
-                                        yield f"data: {json_response}\n\n"
-
-                                        logger.info(f"📦 Sent chunk {chunk_count}: {len(text_content)} chars")
-
-                                # Track tool calls
-                                elif isinstance(part, ToolCallPart):
-                                    tool_call_count += 1
-                                    tool_name = getattr(part, 'tool_name', 'unknown')
-                                    logger.info(f"    🔧 Tool call: {tool_name}")
-                                else:
-                                    logger.info(f"    Other part type: {part_type}")
-
-                        else:
-                            logger.info(f"📌 Other event type: {event_type}")
+                        # Events are Node types (UserPromptNode, ModelRequestNode, CallToolsNode, End)
+                        # We don't stream from these directly - we get response after iteration via run.all_messages()
 
                     # After iteration completes, get final result
-                    logger.info("🔍 Agent iteration completed, checking results...")
+                    logger.info("🔍 Agent iteration completed, extracting response from all_messages()...")
                     try:
-                        # Get the final output from the run result
-                        logger.info(f"🔍 Checking for final_output attribute...")
-                        if hasattr(run, 'final_output'):
-                            try:
-                                final_output = run.final_output()
-                                logger.info(f"📦 Final output exists: True")
-                                logger.info(f"📦 Final output type: {type(final_output).__name__}")
-                                logger.info(f"📦 Final output value: {final_output}")
-                                logger.info(f"📦 Final output bool: {bool(final_output)}")
-                                logger.info(f"📦 Full response so far: {len(full_response)} chars")
-
-                                # If we didn't stream anything but have final output, stream it now
-                                if full_response == "" and final_output:
-                                    final_text = str(final_output)
-                                    logger.info(f"📦 Converting final_output to string: {len(final_text)} chars")
-                                    if final_text and final_text.strip():
-                                        chunk_count += 1
-                                        full_response = final_text
-
-                                        # Stream final output
-                                        response_data = {
-                                            "type": "chunk",
-                                            "content": final_text,
-                                            "session_id": session_id,
-                                            "chunk_index": chunk_count
-                                        }
-
-                                        json_response = json.dumps(response_data, ensure_ascii=False)
-                                        yield f"data: {json_response}\n\n"
-                                        logger.info(f"✅ Streamed final output: {len(final_text)} chars")
-                                    else:
-                                        logger.warning(f"⚠️ Final text is empty after conversion")
-                                else:
-                                    logger.info(f"⚠️ Skipping final_output: full_response={len(full_response)} chars, final_output={bool(final_output)}")
-                            except Exception as final_error:
-                                logger.error(f"❌ Error calling final_output(): {final_error}")
-                                raise
-                        else:
-                            logger.warning("⚠️ run object does not have final_output method")
-
-                        # Access all messages to verify tool calls were made
+                        # Get all messages from the run (this is the correct API for agent.iter())
                         all_messages = run.all_messages()
-                        for msg in all_messages:
+                        logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
+
+                        # Extract assistant response and tool calls
+                        for i, msg in enumerate(all_messages):
+                            msg_type = type(msg).__name__
+                            logger.info(f"📌 Message {i}: {msg_type}")
+
                             if hasattr(msg, 'parts'):
-                                for part in msg.parts:
-                                    if hasattr(part, 'tool_name'):
+                                logger.info(f"   Has {len(msg.parts)} parts")
+                                for j, part in enumerate(msg.parts):
+                                    part_type = type(part).__name__
+                                    logger.info(f"     Part {j}: {part_type}")
+
+                                    # Extract text from TextPart
+                                    if isinstance(part, TextPart):
+                                        text_content = getattr(part, 'content', '')
+                                        if text_content and full_response == "":
+                                            logger.info(f"     ✅ Found TextPart with {len(text_content)} chars")
+                                            chunk_count += 1
+                                            full_response = text_content
+
+                                            # Stream the response
+                                            response_data = {
+                                                "type": "chunk",
+                                                "content": text_content,
+                                                "session_id": session_id,
+                                                "chunk_index": chunk_count
+                                            }
+                                            json_response = json.dumps(response_data, ensure_ascii=False)
+                                            yield f"data: {json_response}\n\n"
+                                            logger.info(f"📦 Streamed text from assistant message: {len(text_content)} chars")
+
+                                    # Track tool calls
+                                    elif hasattr(part, 'tool_name'):
                                         tool_name = getattr(part, 'tool_name', 'unknown')
                                         tool_args = getattr(part, 'args', {})
+                                        tool_call_count += 1
                                         logger.info(f"✅ Tool executed: {tool_name}")
                                         logger.info(f"   Args: {tool_args}")
 
                         logger.info(f"✅ Agent completed with {tool_call_count} tool calls")
                     except Exception as result_error:
-                        logger.warning(f"⚠️ Could not verify results: {result_error}")
+                        logger.error(f"❌ Error extracting results: {result_error}", exc_info=True)
                         logger.warning(f"⚠️ Error type: {type(result_error).__name__}")
 
             except Exception as stream_error:
