@@ -107,11 +107,11 @@ class StreamingService:
                 logger.info("🔧 Using agent.iter() with FORCED tool calling (prevents model ignoring tools)")
 
                 # Force at least one tool call to ensure KB is always searched
+                # Remove allowed_function_names to avoid restricting tool selection
                 forced_settings = ModelSettings(
                     tool_config={
                         'function_calling_config': {
-                            'mode': 'ANY',  # Force at least one tool call
-                            'allowed_function_names': ['search_knowledge_base']  # Only KB tool
+                            'mode': 'ANY'  # Force at least one tool call - let model choose which tool
                         }
                     }
                 )
