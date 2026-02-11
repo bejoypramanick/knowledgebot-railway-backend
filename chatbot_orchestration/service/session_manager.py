@@ -60,41 +60,7 @@ class SessionStateManager:
             logger.error(f"❌ Error getting cached content ID: {e}")
             return None
 
-    async def get_or_create_cached_content(self, system_prompt: str, tool_functions: list = None) -> str:
-        """Get or create cached content for system prompt + tool schemas."""
-        logger.info("🚀 Creating cached content for system prompt + tool schemas")
-
-        await self.initialize()
-        if not self.genai_client:
-            raise RuntimeError("GenAI client not initialized")
-
-        try:
-            from google.genai import types
-
-            # Cache ONLY the system prompt (not tools)
-            # Tools will be passed to Agent separately to avoid 400 error
-            config_params = {
-                'system_instruction': system_prompt,
-                'ttl': '900s'  # 15 minutes (format: "Ns" for seconds)
-            }
-
-            # Create cache with proper API format - use same model as agent
-            logger.info(f"🔧 Creating cache for model: models/{MODEL_NAME}")
-            cache = self.genai_client.caches.create(
-                model=f'models/{MODEL_NAME}',
-                config=types.CreateCachedContentConfig(**config_params)
-            )
-
-            cached_content_id = cache.name
-            logger.info(f"✅ Created cached content: {cached_content_id}")
-            logger.info(f"💰 Cached: system prompt only (~32K tokens)")
-            logger.info(f"ℹ️ Tools NOT cached - will be passed to Agent separately")
-            return cached_content_id
-
-        except Exception as e:
-            logger.error(f"❌ Failed to create cached content: {e}")
-            raise
-
+    
     async def _save_cache_to_session_background(self, session_id: str, cached_content_id: str):
         """Save cache ID to session in background."""
         try:
