@@ -8,7 +8,6 @@ import asyncio
 from typing import Any, Dict, List, AsyncGenerator
 
 from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
-from pydantic_ai.settings import ModelSettings
 from shared.otel_logger import get_otel_logger
 
 from ..core.dependencies import ChatSessionDeps
@@ -102,24 +101,17 @@ class StreamingService:
 
             try:
                 # Run agent with message history and stream text deltas
-                # Force tool calling using PydanticAI's ModelSettings with tool_config
-                # Mode: ANY = Forces model to predict at least one function call
-                forced_tool_settings = ModelSettings(
-                    tool_config={
-                        "function_calling_config": {
-                            "mode": "ANY",  # Force at least one tool call
-                            "allowed_function_names": ["search_knowledge_base"]  # Only allow knowledge base tool
-                        }
-                    }
-                )
-
+                # Use default AUTO mode - let model intelligently decide when to use tools
+                # Model will call search_knowledge_base when relevant, allow chit-chat otherwise
                 async with agent.run_stream(
                     message,
                     message_history=pydantic_messages,
                     deps=session_deps,
-                    model_settings=forced_tool_settings
+                    model_settings={
+                        'cache_system_prompt': True  # Enable prompt caching for performance
+                    }
                 ) as result:
-                    logger.info("🔧 Agent streaming with FORCED TOOL CALLING (mode='ANY', tool=search_knowledge_base)")
+                    logger.info("🔧 Agent streaming (AUTO tool mode - model decides when to use tools)")
                     # Stream text with delta=True for incremental chunks
                     async for delta_text in result.stream_text(delta=True):
                         chunk_count += 1
