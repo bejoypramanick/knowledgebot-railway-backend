@@ -170,6 +170,31 @@ class StreamingService:
                     # After iteration completes, get final result
                     logger.info("🔍 Agent iteration completed, checking results...")
                     try:
+                        # Get the final output from the run result
+                        if hasattr(run, 'final_output'):
+                            final_output = run.final_output()
+                            logger.info(f"📦 Final output type: {type(final_output).__name__}")
+                            logger.info(f"📦 Final output: {final_output}")
+
+                            # If we didn't stream anything but have final output, stream it now
+                            if full_response == "" and final_output:
+                                final_text = str(final_output)
+                                if final_text:
+                                    chunk_count += 1
+                                    full_response = final_text
+
+                                    # Stream final output
+                                    response_data = {
+                                        "type": "chunk",
+                                        "content": final_text,
+                                        "session_id": session_id,
+                                        "chunk_index": chunk_count
+                                    }
+
+                                    json_response = json.dumps(response_data, ensure_ascii=False)
+                                    yield f"data: {json_response}\n\n"
+                                    logger.info(f"📦 Streamed final output: {len(final_text)} chars")
+
                         # Access all messages to verify tool calls were made
                         all_messages = run.all_messages()
                         for msg in all_messages:
@@ -184,6 +209,7 @@ class StreamingService:
                         logger.info(f"✅ Agent completed with {tool_call_count} tool calls")
                     except Exception as result_error:
                         logger.warning(f"⚠️ Could not verify results: {result_error}")
+                        logger.warning(f"⚠️ Error type: {type(result_error).__name__}")
 
             except Exception as stream_error:
                 logger.error(f"❌ Error during agent streaming: {stream_error}")
