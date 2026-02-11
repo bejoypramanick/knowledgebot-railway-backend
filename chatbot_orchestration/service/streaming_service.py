@@ -124,64 +124,48 @@ class StreamingService:
                 ) as run:
                     logger.info("🚀 Starting agent iteration (streaming + tools)")
 
-                    # Import proper node types for isinstance checking
-                    from pydantic_ai.nodes import ModelResponseNode, ToolCallNode, UserPromptNode
-                    from pydantic_ai.messages import TextPart
+                    # Import correct message types from pydantic_ai.messages
+                    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 
-                    # Iterate through agent nodes
-                    async for node in run:
-                        logger.debug(f"📌 Processing node: {type(node).__name__}")
+                    # Iterate through agent events/responses
+                    async for event in run:
+                        logger.debug(f"📌 Processing event: {type(event).__name__}")
 
-                        # 1. Skip UserPromptNode (your initial input)
-                        if isinstance(node, UserPromptNode):
-                            logger.debug("⏭️ Skipping UserPromptNode (input)")
-                            continue
+                        # Check if event is a ModelResponse (contains text/tools)
+                        if isinstance(event, ModelResponse):
+                            logger.info("📝 ModelResponse - streaming parts")
 
-                        # 2. Handle ModelResponseNode (where text/tools are generated)
-                        elif isinstance(node, ModelResponseNode):
-                            logger.info("📝 ModelResponseNode - streaming response")
+                            # Iterate through parts in the response
+                            for part in event.parts:
+                                # Stream text parts to frontend
+                                if isinstance(part, TextPart):
+                                    text_content = part.content
+                                    if text_content:
+                                        chunk_count += 1
+                                        full_response += text_content
 
-                            # Access model_response and iterate through parts
-                            if hasattr(node, 'model_response') and hasattr(node.model_response, 'parts'):
-                                for part in node.model_response.parts:
-                                    # Stream text parts to frontend
-                                    if isinstance(part, TextPart):
-                                        text_content = part.content
-                                        if text_content:
-                                            chunk_count += 1
-                                            full_response += text_content
+                                        # Format the response chunk for frontend
+                                        response_data = {
+                                            "type": "chunk",
+                                            "content": text_content,
+                                            "session_id": session_id,
+                                            "chunk_index": chunk_count
+                                        }
 
-                                            # Format the response chunk for frontend
-                                            response_data = {
-                                                "type": "chunk",
-                                                "content": text_content,
-                                                "session_id": session_id,
-                                                "chunk_index": chunk_count
-                                            }
+                                        # Convert to JSON and format for SSE
+                                        json_response = json.dumps(response_data, ensure_ascii=False)
+                                        yield f"data: {json_response}\n\n"
 
-                                            # Convert to JSON and format for SSE
-                                            json_response = json.dumps(response_data, ensure_ascii=False)
-                                            yield f"data: {json_response}\n\n"
+                                        logger.debug(f"📦 Sent chunk {chunk_count}: {text_content[:50]}...")
 
-                                            logger.debug(f"📦 Sent chunk {chunk_count}: {text_content[:50]}...")
-
-                                    # Track tool calls in response
-                                    elif hasattr(part, 'tool_name'):
-                                        tool_call_count += 1
-                                        tool_name = getattr(part, 'tool_name', 'unknown')
-                                        logger.info(f"🔧 Tool call in response: {tool_name}")
-
-                        # 3. Handle ToolCallNode (tools being executed)
-                        elif isinstance(node, ToolCallNode):
-                            logger.info(f"🔧 ToolCallNode - executing tools")
-                            if hasattr(node, 'tool_calls'):
-                                for tool_call in node.tool_calls:
+                                # Track tool calls
+                                elif isinstance(part, ToolCallPart):
                                     tool_call_count += 1
-                                    tool_name = getattr(tool_call, 'tool_name', 'unknown')
-                                    logger.info(f"🔧 Executing tool: {tool_name}")
+                                    tool_name = getattr(part, 'tool_name', 'unknown')
+                                    logger.info(f"🔧 Tool call detected: {tool_name}")
 
                         else:
-                            logger.debug(f"📌 Other node type: {type(node).__name__}")
+                            logger.debug(f"📌 Other event type: {type(event).__name__}")
 
                     # After iteration completes, get final result
                     logger.info("🔍 Agent iteration completed, checking results...")
