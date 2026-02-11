@@ -8,6 +8,7 @@ import asyncio
 from typing import Any, Dict, List, AsyncGenerator
 
 from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
+from pydantic_ai.settings import ModelSettings
 from shared.otel_logger import get_otel_logger
 
 from ..core.dependencies import ChatSessionDeps
@@ -101,17 +102,24 @@ class StreamingService:
 
             try:
                 # Run agent with message history and stream text deltas
-                # Tool calling enforced via system prompt (MANDATORY section)
-                # System prompt explicitly instructs model to always call search_knowledge_base
+                # Force tool calling using PydanticAI's ModelSettings with tool_config
+                # Mode: ANY = Forces model to predict at least one function call
+                forced_tool_settings = ModelSettings(
+                    tool_config={
+                        "function_calling_config": {
+                            "mode": "ANY",  # Force at least one tool call
+                            "allowed_function_names": ["search_knowledge_base"]  # Only allow knowledge base tool
+                        }
+                    }
+                )
+
                 async with agent.run_stream(
                     message,
                     message_history=pydantic_messages,
                     deps=session_deps,
-                    model_settings={
-                        'cache_system_prompt': True  # Enable prompt caching for performance
-                    }
+                    model_settings=forced_tool_settings
                 ) as result:
-                    logger.info("🔧 Agent streaming with system prompt enforced tool calling (search_knowledge_base MANDATORY)")
+                    logger.info("🔧 Agent streaming with FORCED TOOL CALLING (mode='ANY', tool=search_knowledge_base)")
                     # Stream text with delta=True for incremental chunks
                     async for delta_text in result.stream_text(delta=True):
                         chunk_count += 1
