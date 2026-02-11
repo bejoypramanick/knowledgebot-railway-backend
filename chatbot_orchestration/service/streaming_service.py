@@ -99,14 +99,27 @@ class StreamingService:
             chunk_count = 0
             tool_call_count = 0
 
+            # WORKAROUND: Since the model refuses to call search_knowledge_base despite system prompt,
+            # call it manually first and inject the results as context
+            try:
+                from ..tools.knowledge_tools import search_knowledge_base
+                logger.info("🔍 Manually calling search_knowledge_base as workaround...")
+                kb_results = await search_knowledge_base(message)
+                logger.info(f"✅ KB Search completed: {len(kb_results)} chars returned")
+
+                # Inject KB results into message for agent to use
+                enriched_message = f"USER QUERY: {message}\n\nKNOWLEDGE BASE SEARCH RESULTS:\n{kb_results}\n\nPlease answer the user's question using the knowledge base search results above."
+                logger.info(f"📝 Enriched message with KB results: {len(enriched_message)} chars")
+            except Exception as kb_error:
+                logger.warning(f"⚠️ Manual KB search failed: {kb_error}")
+                enriched_message = message
+
             try:
                 # Use agent.iter() for proper streaming + tool execution
-                # No forced tool_config - PydanticAI doesn't support native tool forcing per GitHub issues #1777, #1820
-                # Instead rely on: (1) system prompt guidance, (2) end_strategy='exhaustive' on Agent
-                logger.info("🔧 Using agent.iter() with intelligent tool calling (system prompt + end_strategy='exhaustive')")
+                logger.info("🔧 Using agent.iter() with knowledge base results injected")
 
                 async with agent.iter(
-                    message,
+                    enriched_message,
                     message_history=pydantic_messages,
                     deps=session_deps
                 ) as run:
