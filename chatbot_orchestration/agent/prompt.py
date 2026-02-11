@@ -1,8 +1,5 @@
-from typing import Optional
+from typing import Optional, Dict, Any
 import logging
-
-from ..core.ai import MODEL_NAME
-from ..core.cache import cache_system_prompt, get_cached_system_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -12,20 +9,14 @@ def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Opti
     logger.info(f"  - custom_prompt: '{custom_prompt[:50] if custom_prompt else 'None'}...' (truncated)")
     logger.info(f"  - response_policy: {response_policy}")
     
-    # Create prompt components for caching
+    # Build prompt components for potential caching (currently disabled)
     prompt_components = {
         'custom_prompt': custom_prompt,
         'response_policy': response_policy
     }
     
-    # Check cache first
-    cached_prompt = None
-    cached_prompt = get_cached_system_prompt(prompt_components, MODEL_NAME)
-    logger.inf("cached_prompt found")
-    if cached_prompt is not None:
-        return cached_prompt
-    
-    logger.inf("cached_prompt not found")
+    # Application caching disabled - rely on Gemini model caching only
+    # This ensures consistent HTML formatting through Gemini's caching system
     # Comprehensive system prompt designed for Gemini context caching (32,768+ tokens minimum)
     base_prompt = """Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers.
 
@@ -907,8 +898,8 @@ This comprehensive system prompt ensures optimal performance, security, and user
     if custom_prompt:
         base_prompt += f"\n\n## 📝 **ADDITIONAL INSTRUCTIONS**\n{custom_prompt}"
     
-    # Cache and return the generated prompt
-    return cache_system_prompt(prompt_components, base_prompt, MODEL_NAME)
+    # Return the generated prompt (application caching disabled)
+    return base_prompt
 
 
 def extract_gemini_rag_metadata(result) -> list:

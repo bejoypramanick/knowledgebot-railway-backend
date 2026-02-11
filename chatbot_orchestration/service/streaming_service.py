@@ -105,7 +105,7 @@ class StreamingService:
                     message,
                     message_history=pydantic_messages,
                     deps=session_deps,
-                    model_settings={'cache_system_prompt': True}  # DISABLED for testing
+                    model_settings={'cache_system_prompt': True} 
                 ) as result:
                     logger.info("⚠️ Agent streaming WITHOUT caching (testing formatting fix)")
                     # Stream text with delta=True for incremental chunks
