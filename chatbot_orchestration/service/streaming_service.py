@@ -129,17 +129,22 @@ class StreamingService:
 
                     # Iterate through agent events/responses
                     async for event in run:
-                        logger.debug(f"📌 Processing event: {type(event).__name__}")
+                        event_type = type(event).__name__
+                        logger.info(f"📌 Processing event: {event_type}")
 
                         # Check if event is a ModelResponse (contains text/tools)
                         if isinstance(event, ModelResponse):
-                            logger.info("📝 ModelResponse - streaming parts")
+                            logger.info(f"📝 ModelResponse with {len(event.parts)} parts")
 
                             # Iterate through parts in the response
-                            for part in event.parts:
+                            for i, part in enumerate(event.parts):
+                                part_type = type(part).__name__
+                                logger.info(f"  Part {i}: {part_type}")
+
                                 # Stream text parts to frontend
                                 if isinstance(part, TextPart):
                                     text_content = part.content
+                                    logger.info(f"    TextPart content length: {len(text_content) if text_content else 0}")
                                     if text_content:
                                         chunk_count += 1
                                         full_response += text_content
@@ -156,44 +161,61 @@ class StreamingService:
                                         json_response = json.dumps(response_data, ensure_ascii=False)
                                         yield f"data: {json_response}\n\n"
 
-                                        logger.debug(f"📦 Sent chunk {chunk_count}: {text_content[:50]}...")
+                                        logger.info(f"📦 Sent chunk {chunk_count}: {len(text_content)} chars")
 
                                 # Track tool calls
                                 elif isinstance(part, ToolCallPart):
                                     tool_call_count += 1
                                     tool_name = getattr(part, 'tool_name', 'unknown')
-                                    logger.info(f"🔧 Tool call detected: {tool_name}")
+                                    logger.info(f"    🔧 Tool call: {tool_name}")
+                                else:
+                                    logger.info(f"    Other part type: {part_type}")
 
                         else:
-                            logger.debug(f"📌 Other event type: {type(event).__name__}")
+                            logger.info(f"📌 Other event type: {event_type}")
 
                     # After iteration completes, get final result
                     logger.info("🔍 Agent iteration completed, checking results...")
                     try:
                         # Get the final output from the run result
+                        logger.info(f"🔍 Checking for final_output attribute...")
                         if hasattr(run, 'final_output'):
-                            final_output = run.final_output()
-                            logger.info(f"📦 Final output type: {type(final_output).__name__}")
-                            logger.info(f"📦 Final output: {final_output}")
+                            try:
+                                final_output = run.final_output()
+                                logger.info(f"📦 Final output exists: True")
+                                logger.info(f"📦 Final output type: {type(final_output).__name__}")
+                                logger.info(f"📦 Final output value: {final_output}")
+                                logger.info(f"📦 Final output bool: {bool(final_output)}")
+                                logger.info(f"📦 Full response so far: {len(full_response)} chars")
 
-                            # If we didn't stream anything but have final output, stream it now
-                            if full_response == "" and final_output:
-                                final_text = str(final_output)
-                                if final_text:
-                                    chunk_count += 1
-                                    full_response = final_text
+                                # If we didn't stream anything but have final output, stream it now
+                                if full_response == "" and final_output:
+                                    final_text = str(final_output)
+                                    logger.info(f"📦 Converting final_output to string: {len(final_text)} chars")
+                                    if final_text and final_text.strip():
+                                        chunk_count += 1
+                                        full_response = final_text
 
-                                    # Stream final output
-                                    response_data = {
-                                        "type": "chunk",
-                                        "content": final_text,
-                                        "session_id": session_id,
-                                        "chunk_index": chunk_count
-                                    }
+                                        # Stream final output
+                                        response_data = {
+                                            "type": "chunk",
+                                            "content": final_text,
+                                            "session_id": session_id,
+                                            "chunk_index": chunk_count
+                                        }
 
-                                    json_response = json.dumps(response_data, ensure_ascii=False)
-                                    yield f"data: {json_response}\n\n"
-                                    logger.info(f"📦 Streamed final output: {len(final_text)} chars")
+                                        json_response = json.dumps(response_data, ensure_ascii=False)
+                                        yield f"data: {json_response}\n\n"
+                                        logger.info(f"✅ Streamed final output: {len(final_text)} chars")
+                                    else:
+                                        logger.warning(f"⚠️ Final text is empty after conversion")
+                                else:
+                                    logger.info(f"⚠️ Skipping final_output: full_response={len(full_response)} chars, final_output={bool(final_output)}")
+                            except Exception as final_error:
+                                logger.error(f"❌ Error calling final_output(): {final_error}")
+                                raise
+                        else:
+                            logger.warning("⚠️ run object does not have final_output method")
 
                         # Access all messages to verify tool calls were made
                         all_messages = run.all_messages()
