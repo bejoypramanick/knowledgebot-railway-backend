@@ -113,15 +113,25 @@ class StreamingService:
 
 KNOWLEDGE BASE ALREADY SEARCHED: The knowledge base search was already performed for you.
 
-KNOWLEDGE BASE SEARCH RESULTS:
+RAW KNOWLEDGE BASE SEARCH RESULTS:
 {kb_results}
 
-INSTRUCTIONS:
-1. Use the knowledge base search results above to answer the user's question
-2. DO NOT call search_knowledge_base again - the results are already provided above
-3. If you need additional information, you may call other tools (database, human agent)
-4. Format your response using HTML tags as instructed
-5. Include the citation sources from the KB results above"""
+🔴 CRITICAL FORMATTING INSTRUCTIONS (MANDATORY - NON-NEGOTIABLE):
+1. You MUST reformat the knowledge base results above into PROPER HTML
+2. You CANNOT output plain text - EVERY response must use HTML tags
+3. You MUST wrap paragraphs in <p></p> tags
+4. You MUST wrap important terms/names in <strong></strong> tags
+5. You MUST wrap emphasized text in <em></em> tags
+6. You MUST use <ul><li> for lists or facts
+7. You MUST include citations in proper HTML format
+8. You MUST NOT use plain text, markdown, or line breaks without HTML tags
+9. Format example: <p>Here's <strong>important info</strong> with <em>emphasis</em>.</p>
+
+OTHER INSTRUCTIONS:
+- Do NOT call search_knowledge_base again - results already provided above
+- If you need additional data, you may call other tools (database, human agent)
+- Answer the user's question using the KB results above
+- Always include citations with source URLs using <a href="URL" target="_blank">text</a>"""
 
                 logger.info(f"📝 Enriched message with KB results: {len(enriched_message)} chars")
             except Exception as kb_error:
@@ -131,10 +141,17 @@ INSTRUCTIONS:
 
 KNOWLEDGE BASE ALREADY SEARCHED: Knowledge base search was attempted but failed.
 
+🔴 CRITICAL FORMATTING INSTRUCTIONS (MANDATORY - NON-NEGOTIABLE):
+1. You MUST respond in PROPER HTML format
+2. You CANNOT output plain text - EVERY response must use HTML tags
+3. You MUST wrap paragraphs in <p></p> tags
+4. You MUST wrap important information in <strong></strong> tags
+5. Format example: <p><strong>Important:</strong> The knowledge base search failed.</p>
+
 INSTRUCTIONS:
-1. Inform the user that knowledge base search failed
+1. Inform the user that knowledge base search encountered an error
 2. Offer to connect them to a human agent or try alternative queries
-3. Format your response using HTML tags as instructed"""
+3. Use HTML formatting for EVERY part of your response - no plain text"""
 
             try:
                 # Use agent.iter() for proper streaming + tool execution
