@@ -107,7 +107,7 @@ class StreamingService:
                     deps=session_deps,
                     model_settings={'cache_system_prompt': True} 
                 ) as result:
-                    logger.info("⚠️ Agent streaming WITHOUT caching (testing formatting fix)")
+                    #logger.info("⚠️ Agent streaming WITHOUT caching (testing formatting fix)")
                     # Stream text with delta=True for incremental chunks
                     async for delta_text in result.stream_text(delta=True):
                         chunk_count += 1
@@ -127,8 +127,15 @@ class StreamingService:
 
                         logger.debug(f"📦 Sent chunk {chunk_count}: {delta_text[:50]}...")
 
-                    # After streaming, check for tool calls in the conversation
+                    # After streaming, check for tool invocations in the conversation
                     logger.info("🔍 Checking for tool invocations...")
+                    
+                    # Log the system prompt for debugging (truncated)
+                    if hasattr(agent, 'model') and hasattr(agent.model, 'system_instruction'):
+                        system_prompt = agent.model.system_instruction
+                        logger.info(f"📝 System prompt (truncated): {system_prompt[:300]}...")
+                    else:
+                        logger.info("📝 System prompt: Not accessible in agent object")
                     try:
                         # Access all messages to see tool calls
                         all_messages = result.all_messages()
