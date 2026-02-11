@@ -101,14 +101,17 @@ class StreamingService:
 
             try:
                 # Run agent with message history and stream text deltas
-                # TEMPORARILY DISABLED caching to test if it's causing formatting issues
+                # Force tool calling: search_knowledge_base ALWAYS, others optional
                 async with agent.run_stream(
                     message,
                     message_history=pydantic_messages,
                     deps=session_deps,
-                    model_settings={'cache_system_prompt': True} 
+                    model_settings={
+                        'tool_choice': 'any',  # Force at least one tool call (search_knowledge_base MANDATORY)
+                        'cache_system_prompt': True  # Enable prompt caching for performance
+                    }
                 ) as result:
-                    #logger.info("⚠️ Agent streaming WITHOUT caching (testing formatting fix)")
+                    logger.info("🔧 Agent streaming with FORCED TOOL CALLING (tool_choice='any')")
                     # Stream text with delta=True for incremental chunks
                     async for delta_text in result.stream_text(delta=True):
                         chunk_count += 1
