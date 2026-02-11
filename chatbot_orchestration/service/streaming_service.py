@@ -102,24 +102,21 @@ class StreamingService:
             try:
                 # Run agent with message history and stream text deltas
                 # ALWAYS search knowledge base first, then tell user if no results found
-                from pydantic_ai.settings import ModelSettings
-
-                forced_tool_settings = ModelSettings(
-                    tool_config={
-                        "function_calling_config": {
-                            "mode": "ANY",  # Force at least one tool call
-                            "allowed_function_names": ["search_knowledge_base"]  # Only KB tool
-                        }
-                    }
-                )
-
+                # Pass tool_config as plain dictionary to model_settings
                 async with agent.run_stream(
                     message,
                     message_history=pydantic_messages,
                     deps=session_deps,
-                    model_settings=forced_tool_settings
+                    model_settings={
+                        'tool_config': {
+                            'function_calling_config': {
+                                'mode': 'ANY',  # Force at least one tool call
+                                'allowed_function_names': ['search_knowledge_base']
+                            }
+                        }
+                    }
                 ) as result:
-                    logger.info("🔧 Agent streaming (FORCED knowledge base search - tell user if no results)")
+                    logger.info("🔧 Agent streaming (FORCED knowledge base search - tool_config dict format)")
                     # Stream text with delta=True for incremental chunks
                     async for delta_text in result.stream_text(delta=True):
                         chunk_count += 1
