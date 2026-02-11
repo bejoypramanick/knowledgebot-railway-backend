@@ -130,10 +130,11 @@ class StreamingService:
                     # After streaming, check for tool invocations in the conversation
                     logger.info("🔍 Checking for tool invocations...")
                     
-                    # Log the system prompt for debugging (truncated)
-                    if hasattr(agent, 'model') and hasattr(agent.model, 'system_instruction'):
-                        system_prompt = agent.model.system_instruction
+                    # Log system prompt for debugging (truncated)
+                    if hasattr(agent, 'system_prompt'):
+                        system_prompt = agent.system_prompt
                         logger.info(f"📝 System prompt (truncated): {system_prompt[:300]}...")
+                        logger.info(f"📝 Has HTML formatting: {'MANDATORY HTML FORMATTING' in system_prompt}")
                     else:
                         logger.info("📝 System prompt: Not accessible in agent object")
                     try:
