@@ -1033,19 +1033,40 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                 logger.warning(f"📤 Attempting to clear FileSearch store: {file_search_store_name}")
 
                 try:
-                    # Step 1: Delete the entire FileSearch store with force=True (modern approach)
-                    logger.warning(f"🗑️ Deleting entire FileSearch store with force=True: {file_search_store_name}")
-                    genai_client.file_search_stores.delete(
-                        name=file_search_store_name, 
-                        config={'force': True}
-                    )
-                    logger.warning(f"✅ FileSearch store deleted successfully")
-                    nuke_results["filestore_documents_deleted"] = "ALL"
+                    # Step 1: Check if store exists first
+                    store_exists = False
+                    try:
+                        store = genai_client.file_search_stores.get(name=file_search_store_name)
+                        store_exists = True
+                        logger.warning(f"✅ Found FileSearch store: {file_search_store_name}")
+                    except Exception as get_error:
+                        if "404" in str(get_error) or "not found" in str(get_error).lower():
+                            logger.warning(f"⚠️ FileSearch store not found: {file_search_store_name} - may already be deleted")
+                            store_exists = False
+                        else:
+                            logger.warning(f"⚠️ Error checking FileSearch store existence: {get_error}")
+                    
+                    # Step 2: Delete the entire FileSearch store with force=True (modern approach)
+                    if store_exists:
+                        logger.warning(f"🗑️ Deleting entire FileSearch store with force=True: {file_search_store_name}")
+                        genai_client.file_search_stores.delete(
+                            name=file_search_store_name, 
+                            config={'force': True}
+                        )
+                        logger.warning(f"✅ FileSearch store deleted successfully")
+                        nuke_results["filestore_documents_deleted"] = "ALL"
+                    else:
+                        logger.warning(f"ℹ️ FileSearch store already deleted or never existed: {file_search_store_name}")
+                        nuke_results["filestore_documents_deleted"] = "ALREADY_DELETED"
 
-                    # Step 2: Recreate the store for future use
-                    logger.info(f"🔄 Recreating FileSearch store for future use...")
-                    recreated_store = genai_client.file_search_stores.create()
-                    logger.info(f"✅ FileSearch store recreated: {recreated_store.name}")
+                    # Step 3: Recreate the store for future use (only if we deleted it)
+                    if store_exists:
+                        logger.info(f"🔄 Recreating FileSearch store for future use...")
+                        recreated_store = genai_client.file_search_stores.create()
+                        logger.info(f"✅ FileSearch store recreated: {recreated_store.name}")
+                        nuke_results["filestore_recreated"] = True
+                    else:
+                        nuke_results["filestore_recreated"] = False
 
                 except Exception as e:
                     error_msg = f"Error clearing FileSearch store: {str(e)}"
@@ -1067,7 +1088,7 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
         nuke_results["database_errors"].append("Aborted: FileStore deletion failed. Database unchanged.")
         nuke_results["transaction_status"] = "aborted"
     else:
-        # FileStore deletion succeeded or was skipped - proceed with database deletion in transaction
+        # FileStore deletion succeeded, was skipped, or was already deleted - proceed with database deletion in transaction
         try:
             from shared.db import get_db_connection
 
