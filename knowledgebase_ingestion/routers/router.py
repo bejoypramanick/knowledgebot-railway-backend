@@ -12,16 +12,15 @@ from ..service.ingestion_service import (
     process_single_file_upload,
     process_single_file_delete,
     delete_file_logic,
-    nuke_filestore_and_database
+    nuke_filestore_and_database,
+    delete_website_hierarchy
 )
-from website_crawling.service.website_service import WebsiteService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Initialize services
 file_service = FileService()
-website_service = WebsiteService()
 
 def extract_user_from_request(request: Request) -> tuple[str, str]:
     """Extract user information from request headers forwarded by API Gateway"""
@@ -283,8 +282,8 @@ async def delete_website_hierarchy(website_id: str, request: Request = None):
         
         logger.info(f"🌳 User {user_email} requesting hierarchical deletion of website {website_id}")
         
-        # Use website service for hierarchical deletion
-        result = await website_service.delete_website_hierarchy(website_id)
+        # Use local ingestion service function for hierarchical deletion
+        result = await delete_website_hierarchy(website_id)
         
         return {
             "success": result.get("success", True),

@@ -896,6 +896,110 @@ async def process_single_file_delete(file_id: str) -> BatchDeleteItem:
         )
 
 
+async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
+    """Delete a website and all its child pages from FileSearch first, then database."""
+    try:
+        from shared.db import get_db_connection
+        from knowledgebase_ingestion.core.ai import get_genai_client
+
+        # First get all records in hierarchy (parent + all children)
+        async with get_db_connection() as conn:
+            # Get parent and all recursive children
+            hierarchy_query = """
+                WITH RECURSIVE website_hierarchy AS (
+                    -- Base case: parent page
+                    SELECT id, original_url, metadata, parent_id, depth, 0 as level
+                    FROM scraped_websites 
+                    WHERE id = $1
+                    
+                    UNION ALL
+                    
+                    -- Recursive case: all children
+                    SELECT w.id, w.original_url, w.metadata, w.parent_id, w.depth, wh.level + 1
+                    FROM scraped_websites w
+                    INNER JOIN website_hierarchy wh ON w.parent_id = wh.id
+                )
+                SELECT id, original_url, metadata, level
+                FROM website_hierarchy
+                ORDER BY level, id;
+            """
+            hierarchy_records = await conn.fetch(hierarchy_query, int(website_id) if website_id.isdigit() else website_id)
+            
+            if not hierarchy_records:
+                return {"success": False, "error": "Website not found"}
+            
+            logger.info(f"🌳 Found {len(hierarchy_records)} pages in website hierarchy to delete")
+            
+            # Step 1: Delete all from FileSearch first
+            genai_client = get_genai_client()
+            filesearch_deleted = 0
+            filesearch_errors = []
+            
+            for record in hierarchy_records:
+                metadata = record.get("metadata")
+                if metadata and genai_client:
+                    try:
+                        import json
+                        if isinstance(metadata, str):
+                            metadata_dict = json.loads(metadata)
+                        else:
+                            metadata_dict = metadata
+
+                        if metadata_dict.get('type') == 'file_search' and metadata_dict.get('document_name'):
+                            document_name = metadata_dict['document_name']
+                            logger.info(f"🗑️ Deleting page {record['id']} (level {record['level']}) from FileSearch: {document_name}")
+                            
+                            # Use modern FileSearch API
+                            genai_client.file_search_stores.documents.delete(
+                                name=document_name,
+                                force=True
+                            )
+                            filesearch_deleted += 1
+                            logger.info(f"✅ Deleted from FileSearch: {document_name}")
+                    except Exception as e:
+                        if "404" in str(e) or "not found" in str(e).lower():
+                            logger.warning(f"⚠️ FileSearch document already deleted for page {record['id']}: {e}")
+                        else:
+                            error_msg = f"Could not delete from FileSearch for page {record['id']}: {e}"
+                            logger.error(f"❌ {error_msg}")
+                            filesearch_errors.append(error_msg)
+            
+            # Step 2: Delete all from database (only if FileSearch deletion succeeded for most)
+            if len(filesearch_errors) > len(hierarchy_records) / 2:
+                return {
+                    "success": False, 
+                    "error": f"Too many FileSearch deletion errors ({len(filesearch_errors)}/{len(hierarchy_records)}). Aborted database deletion."
+                }
+            
+            # Delete all records in hierarchy
+            delete_query = """
+                WITH RECURSIVE website_hierarchy AS (
+                    SELECT id FROM scraped_websites WHERE id = $1
+                    UNION ALL
+                    SELECT w.id FROM scraped_websites w
+                    INNER JOIN website_hierarchy wh ON w.parent_id = wh.id
+                )
+                DELETE FROM scraped_websites WHERE id IN (SELECT id FROM website_hierarchy)
+            """
+            result = await conn.execute(delete_query, int(website_id) if website_id.isdigit() else website_id)
+            deleted_count = int(result.split()[-1]) if result else 0
+            
+            return {
+                "success": True, 
+                "message": f"Website hierarchy deleted successfully: {deleted_count} pages total",
+                "details": {
+                    "total_pages": len(hierarchy_records),
+                    "filesearch_deleted": filesearch_deleted,
+                    "database_deleted": deleted_count,
+                    "filesearch_errors": filesearch_errors
+                }
+            }
+
+    except Exception as e:
+        logger.error(f"Error deleting website hierarchy {website_id}: {e}")
+        return {"success": False, "error": str(e)}
+
+
 async def nuke_filestore_and_database() -> Dict[str, Any]:
     """
     NUCLEAR DELETE: Completely remove all documents from FileSearch store and all records from database.
