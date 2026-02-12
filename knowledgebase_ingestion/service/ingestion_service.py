@@ -990,13 +990,21 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                     display_name=store_display_name
                 )
 
-                if not file_search_store_name:
-                    logger.warning(f"⚠️ FileSearch store '{store_display_name}' not found")
-                else:
-                    logger.warning(f"📤 Attempting to delete FileSearch store: {file_search_store_name}")
-
-                    try:
-                        # Delete the entire FileSearch store with force=True
+                try:
+                    if not file_search_store_name:
+                        # Store doesn't exist, create it fresh
+                        logger.warning(f"⚠️ FileSearch store '{store_display_name}' not found - creating new one")
+                        logger.info(f"🔨 Creating new FileSearch store with display_name: {store_display_name}")
+                        new_store = genai_client.file_search_stores.create(
+                            displayName=store_display_name
+                        )
+                        logger.info(f"✅ FileSearch store created: {new_store.name}")
+                        logger.info(f"   Display name: {getattr(new_store, 'display_name', 'N/A')}")
+                        nuke_results["filestore_documents_deleted"] = "NONE"
+                        nuke_results["filestore_recreated"] = True
+                    else:
+                        # Store exists, delete and recreate it
+                        logger.warning(f"📤 Attempting to delete FileSearch store: {file_search_store_name}")
                         logger.warning(f"🗑️ Deleting entire FileSearch store with force=True: {file_search_store_name}")
                         genai_client.file_search_stores.delete(
                             name=file_search_store_name,
@@ -1014,10 +1022,10 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                         logger.info(f"   Display name: {getattr(recreated_store, 'display_name', 'N/A')}")
                         nuke_results["filestore_recreated"] = True
 
-                    except Exception as e:
-                        error_msg = f"Error deleting/recreating FileSearch store: {str(e)}"
-                        logger.error(f"❌ {error_msg}")
-                        nuke_results["filestore_errors"].append(error_msg)
+                except Exception as e:
+                    error_msg = f"Error deleting/recreating FileSearch store: {str(e)}"
+                    logger.error(f"❌ {error_msg}")
+                    nuke_results["filestore_errors"].append(error_msg)
 
         except Exception as e:
             error_msg = f"Error accessing FileSearch: {str(e)}"
