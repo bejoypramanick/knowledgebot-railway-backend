@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     database_url: Optional[str] = None
 
     # Health Check Configuration
+    health_check_enabled: bool = True  # Set to False via HEALTH_CHECK_ENABLED=false to disable health checks
     health_check_interval_seconds: int = 300  # 5 minutes
     health_check_timeout_seconds: int = 10
 

@@ -33,17 +33,22 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("⚠️ Database URL not configured - health checks will not be persisted")
 
-        # Start the health check scheduler
-        scheduler = get_scheduler()
-        await scheduler.start()
-        logger.info(f"✅ Health check scheduler started (interval: {settings.health_check_interval_seconds}s)")
+        # Start the health check scheduler (only if enabled)
+        if settings.health_check_enabled:
+            scheduler = get_scheduler()
+            await scheduler.start()
+            logger.info(f"✅ Health check scheduler started (interval: {settings.health_check_interval_seconds}s)")
+        else:
+            logger.warning("⚠️ Health check scheduler is DISABLED (HEALTH_CHECK_ENABLED=false)")
 
         logger.info("✅ Health Monitoring Service started successfully")
         yield
 
         # Shutdown
         logger.info("🛑 Health Monitoring Service shutting down...")
-        await scheduler.stop()
+        if settings.health_check_enabled:
+            scheduler = get_scheduler()
+            await scheduler.stop()
         logger.info("✅ Health Monitoring Service shutdown complete")
 
     except Exception as e:
