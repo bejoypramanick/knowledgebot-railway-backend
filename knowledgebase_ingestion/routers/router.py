@@ -246,11 +246,10 @@ async def get_upload_constraints(request: Request = None):
 @router.delete("/files/{file_id}")
 async def delete_file(file_id: str, request: Request = None):
     """
-    Delete a file, website, or sitemap with appropriate handler.
+    Delete an uploaded file with transactional safety.
 
-    This endpoint detects the record type and routes to:
-    - delete_file_logic for uploaded files
-    - delete_website_hierarchy for scraped websites/sitemaps with cascade delete
+    This endpoint is for uploaded files only (not websites/sitemaps).
+    Use /web/{id} endpoint for websites and sitemaps.
 
     Transaction Safety:
     - FileStore deletion attempted first
@@ -262,48 +261,56 @@ async def delete_file(file_id: str, request: Request = None):
         if not file_id:
             raise HTTPException(status_code=400, detail="file_id is required")
 
-        # First, determine what type of record this is
-        from shared.db import get_db_connection
-
-        async with get_db_connection() as conn:
-            # Try to find in file_uploads first
-            file_record = await conn.fetchrow(
-                "SELECT id FROM file_uploads WHERE id = $1",
-                int(file_id) if file_id.isdigit() else file_id
-            )
-
-            if file_record:
-                # It's an uploaded file - use file deletion logic
-                logger.info(f"📄 Deleting uploaded file: {file_id}")
-                result = await delete_file_logic(file_id)
-            else:
-                # Check if it's a scraped website/sitemap
-                website_record = await conn.fetchrow(
-                    "SELECT id FROM scraped_websites WHERE id = $1",
-                    int(file_id) if file_id.isdigit() else file_id
-                )
-
-                if website_record:
-                    # It's a website/sitemap - use hierarchy deletion with cascade delete
-                    logger.info(f"🌐 Deleting website/sitemap with children: {file_id}")
-                    result = await delete_website_hierarchy(file_id)
-                else:
-                    raise HTTPException(status_code=404, detail="File or website not found")
+        # Use the service layer for file deletion
+        logger.info(f"📄 Deleting uploaded file: {file_id}")
+        result = await delete_file_logic(file_id)
 
         return {
             "success": result.get("success", True),
-            "message": result.get("message", "Item deleted successfully"),
+            "message": result.get("message", "File deleted successfully"),
             "details": result.get("details"),
             "transaction_status": result.get("transaction_status", "unknown")
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting item: {e}", exc_info=True)
+        logger.error(f"Error deleting file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/web/{website_id}")
+async def delete_web_item(website_id: str, request: Request = None):
+    """
+    Delete a website or sitemap and all its child pages with cascade delete.
+
+    This endpoint is for websites and sitemaps (not uploaded files).
+    Automatically deletes all child pages when parent is deleted.
+    """
+    try:
+        # Extract authenticated user information
+        user_email, user_id = extract_user_from_request(request)
+
+        logger.info(f"🌐 User {user_email} requesting deletion of website/sitemap {website_id}")
+
+        # Use hierarchy deletion with cascade delete
+        result = await delete_website_hierarchy(website_id)
+
+        return {
+            "success": result.get("success", True),
+            "message": result.get("message", "Website/sitemap deleted successfully"),
+            "details": result.get("details"),
+            "user": {
+                "email": user_email,
+                "id": user_id
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting website/sitemap: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/websites/{website_id}/hierarchy")
-async def delete_website_hierarchy(website_id: str, request: Request = None):
+async def delete_website_hierarchy_deprecated(website_id: str, request: Request = None):
     """
     Delete a website and all its child pages with transactional safety.
     
