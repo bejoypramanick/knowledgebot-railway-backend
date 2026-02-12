@@ -83,6 +83,11 @@ class ScrapingDAO:
             metadata.get('depth', 0),
             metadata.get('crawl_session_id')
         ]
+        
+        # DEBUG: Log parent_id value
+        parent_id = metadata.get('parent_id')
+        logger.info(f"🔍 [DEBUG] Inserting scraped metadata - URL: {metadata.get('url')}, parent_id: {parent_id}, depth: {metadata.get('depth')}")
+        
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
