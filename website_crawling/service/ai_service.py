@@ -47,26 +47,33 @@ async def upload_content_to_gemini(
         logger.error("❌ Gemini client not available")
         raise Exception("Gemini client not configured")
 
-    # Get FileSearch store from config (must be set in Railway env)
-    file_search_store_display_name = settings.gemini_file_search_store_name
-    if not file_search_store_display_name:
+    # Get FileSearch store from config (must be set in Railway env by API Gateway)
+    file_search_store_value = settings.gemini_file_search_store_name
+    if not file_search_store_value:
         logger.error("❌ GEMINI_FILE_SEARCH_STORE_NAME not configured in Railway environment")
         raise Exception("GEMINI_FILE_SEARCH_STORE_NAME environment variable is required")
 
-    logger.info(f"📦 Looking up FileSearch store: {file_search_store_display_name}")
+    # Check if it's already a store ID (starts with 'fileSearchStores/')
+    if file_search_store_value.startswith('fileSearchStores/'):
+        # It's already a store ID, use it directly
+        file_search_store_name = file_search_store_value
+        logger.info(f"📦 Using FileSearch store ID: {file_search_store_name}")
+    else:
+        # It's a display name, resolve it to store ID
+        logger.info(f"📦 Resolving FileSearch store by display_name: {file_search_store_value}")
 
-    # Resolve store name to actual store ID (with fresh lookup, not cached)
-    from shared.file_search import clear_store_cache
-    clear_store_cache()  # Clear cache to ensure we get fresh store info
+        # Clear cache to ensure we get fresh store info
+        from shared.file_search import clear_store_cache
+        clear_store_cache()
 
-    file_search_store_name = get_file_search_store_by_display_name(
-        genai_client,
-        display_name=file_search_store_display_name
-    )
+        file_search_store_name = get_file_search_store_by_display_name(
+            genai_client,
+            display_name=file_search_store_value
+        )
 
-    if not file_search_store_name:
-        logger.error(f"❌ FileSearch store not found: {file_search_store_display_name}")
-        raise Exception(f"FileSearch store '{file_search_store_display_name}' not found")
+        if not file_search_store_name:
+            logger.error(f"❌ FileSearch store not found: {file_search_store_value}")
+            raise Exception(f"FileSearch store '{file_search_store_value}' not found")
 
     temp_path = None
     try:
