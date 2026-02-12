@@ -374,7 +374,7 @@ class FileService:
                 # Get all websites with hierarchy info, ordered by session and depth
                 websites = await conn.fetch(
                     """SELECT id, original_url, domain, title, description, pages_scraped,
-                              parent_id, depth, crawl_session_id, created_at
+                              content_length, parent_id, depth, crawl_session_id, created_at
                        FROM scraped_websites
                        ORDER BY crawl_session_id DESC NULLS LAST, depth, created_at DESC"""
                 )
@@ -403,7 +403,7 @@ class FileService:
                             "file_extension": "URL",
                             "mime_type": "text/html",
                             "file_type": "WEBSITE",
-                            "size_bytes": 0,  # Not applicable for websites
+                            "size_bytes": website['content_length'] or 0,  # Markdown file size in bytes
                             "sha256_hash": None,
                             "gemini_state": "completed",
                             "processed_at": website['created_at'].isoformat() if website['created_at'] else None,
@@ -415,6 +415,7 @@ class FileService:
                             "title": website['title'],
                             "description": website['description'],
                             "pages_scraped": website['pages_scraped'],
+                            "content_length": website['content_length'] or 0,  # Raw markdown size
                             "depth": website['depth'],
                             "parent_id": website['parent_id'],
                             "crawl_session_id": session_id,
