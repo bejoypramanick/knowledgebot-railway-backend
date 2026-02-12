@@ -50,7 +50,7 @@ async def process_with_gemini(
     file_search_store_name: str = None
 ):
     """
-    Process file with Gemini - uploads file to Gemini FileSearch.
+    Process file with Gemini - uploads file directly to FileSearch store (no fallback).
 
     Args:
         tmp_path: Path to the temporary file
@@ -58,22 +58,17 @@ async def process_with_gemini(
         original_filename: Original filename
         mime_type: MIME type of the file
         user_email: User email for metadata
-        file_search_store_name: Optional FileSearch store name
+        file_search_store_name: Optional override for store name
 
     Returns:
         Tuple of (uploaded_file, final_state, gemini_processed_at, file_search_metadata)
     """
-    genai_client = get_genai_client()
-    file_search_metadata = {}  # Track FileSearch store and document info
+    from shared.file_search import get_file_search_store_by_display_name
 
+    genai_client = get_genai_client()
     if not genai_client:
-        logger.warning("Gemini client not available - returning placeholder response")
-        # Return placeholder for when Gemini is not configured
-        class PlaceholderFile:
-            def __init__(self, name):
-                self.name = name
-                self.uri = None
-        return PlaceholderFile(f"files/{original_filename}"), "ACTIVE", datetime.utcnow(), file_search_metadata
+        logger.error("❌ Gemini client not available")
+        raise Exception("Gemini client not configured")
 
     # Detect proper MIME type - use magic bytes from file path
     final_mime_type = detect_mime_type_from_extension(original_filename, mime_type, tmp_path)
@@ -86,128 +81,86 @@ async def process_with_gemini(
 
     logger.info(f"🤖 [GEMINI] Uploading to FileSearch - Display: {gemini_display_name}, Original: {original_filename}, MIME: {final_mime_type}...")
 
-    uploaded_file = None
-    final_state = "PENDING"
-    gemini_processed_at = None
-
     try:
-        # If no store name provided, resolve it on-demand
+        # Use provided store name or get from config (must be set in Railway env)
         if not file_search_store_name:
-            # Resolve FileSearch store on-demand (not relying on module-level variable which may not be shared across workers)
-            from shared.file_search import get_file_search_store_by_display_name
+            file_search_store_display_name = settings.gemini_file_search_store_name
+            if not file_search_store_display_name:
+                logger.error("❌ GEMINI_FILE_SEARCH_STORE_NAME not configured in Railway environment")
+                raise Exception("GEMINI_FILE_SEARCH_STORE_NAME environment variable is required")
+
+            logger.info(f"📦 Looking up FileSearch store: {file_search_store_display_name}")
             file_search_store_name = get_file_search_store_by_display_name(
                 genai_client,
-                display_name="knowledgebot-search-store"
+                display_name=file_search_store_display_name
             )
 
-        if file_search_store_name:
-            logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
-            operation = genai_client.file_search_stores.upload_to_file_search_store(
-                file=tmp_path,
-                file_search_store_name=file_search_store_name,
-                config={
-                    'display_name': gemini_display_name,
-                    'custom_metadata': [
-                        {'key': 'original_filename', 'string_value': original_filename},
-                        {'key': 'user_email', 'string_value': user_email or 'admin'}
-                    ]
-                }
-            )
+            if not file_search_store_name:
+                logger.error(f"❌ FileSearch store not found: {file_search_store_display_name}")
+                raise Exception(f"FileSearch store '{file_search_store_display_name}' not found")
 
-            if not operation:
-                logger.error("❌ [GEMINI] Failed to create upload operation")
-                raise Exception("Gemini operation creation failed")
+        logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
+        operation = genai_client.file_search_stores.upload_to_file_search_store(
+            file=tmp_path,
+            file_search_store_name=file_search_store_name,
+            config={
+                'display_name': gemini_display_name,
+                'custom_metadata': [
+                    {'key': 'original_filename', 'string_value': original_filename},
+                    {'key': 'user_email', 'string_value': user_email or 'admin'}
+                ]
+            }
+        )
 
-            # Wait for the upload operation to complete
-            start_time = time.time()
-            max_wait_time = 300  # 5 minutes
+        if not operation:
+            logger.error("❌ [GEMINI] Failed to create upload operation")
+            raise Exception("Gemini operation creation failed")
 
-            while not operation.done:
-                elapsed = time.time() - start_time
-                if elapsed > max_wait_time:
-                    logger.error(f"❌ Timeout waiting for file upload to complete")
-                    raise Exception("File upload timeout")
+        # Wait for the upload operation to complete
+        start_time = time.time()
+        max_wait_time = 300  # 5 minutes
+        document_name = None
+        final_state = "PENDING"
+        gemini_processed_at = None
 
-                await asyncio.sleep(5)
-                operation = genai_client.operations.get(operation)
+        while not operation.done:
+            elapsed = time.time() - start_time
+            if elapsed > max_wait_time:
+                logger.error(f"❌ Timeout waiting for file upload to complete")
+                raise Exception("File upload timeout")
 
-            if operation.done:
-                # FileSearch upload returns result in response.document_name, not operation.result
-                if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
-                    document_name = operation.response.document_name
-                    final_state = "ACTIVE"
-                    gemini_processed_at = datetime.utcnow()
+            await asyncio.sleep(5)
+            operation = genai_client.operations.get(operation)
 
-                    # Store FileSearch metadata for deletion later
-                    file_search_metadata = {
-                        'type': 'file_search',
-                        'file_search_store_name': file_search_store_name,
-                        'document_name': document_name,
-                        'uploaded_at': gemini_processed_at.isoformat()
-                    }
+        # FileSearch upload returns result in response.document_name
+        if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
+            document_name = operation.response.document_name
+            final_state = "ACTIVE"
+            gemini_processed_at = datetime.utcnow()
 
-                    # Create a placeholder file object with the document name
-                    class FileSearchDocument:
-                        def __init__(self, name):
-                            self.name = name
-                            self.uri = None
+            # Create a placeholder file object with the document name
+            class FileSearchDocument:
+                def __init__(self, name):
+                    self.name = name
+                    self.uri = None
 
-                    uploaded_file = FileSearchDocument(document_name)
-                    logger.info(f"✅ [GEMINI] Upload complete to FileSearch store. Document: {document_name}")
-                    logger.info(f"📝 [METADATA] Stored FileSearch info: store={file_search_store_name}, document={document_name}")
-                elif hasattr(operation, 'result') and operation.result:
-                    uploaded_file = operation.result
-                    final_state = "ACTIVE"
-                    gemini_processed_at = datetime.utcnow()
-                    logger.info(f"✅ [GEMINI] Upload complete to FileSearch store. File: {uploaded_file.name}")
-                else:
-                    logger.error(f"❌ [GEMINI] Upload failed: {operation}")
-                    raise Exception("File upload failed")
-            else:
-                raise Exception("File upload incomplete")
+            uploaded_file = FileSearchDocument(document_name)
+            file_search_metadata = {
+                'type': 'file_search',
+                'file_search_store_name': file_search_store_name,
+                'document_name': document_name,
+                'uploaded_at': gemini_processed_at.isoformat()
+            }
+
+            logger.info(f"✅ [GEMINI] Upload complete to FileSearch store. Document: {document_name}")
+            logger.info(f"📝 [METADATA] Stored FileSearch info: store={file_search_store_name}, document={document_name}")
+            return uploaded_file, final_state, gemini_processed_at, file_search_metadata
         else:
-            # Fallback to general file upload (old method)
-            logger.info("📤 Using general file upload (no FileSearch store configured)")
-            uploaded_file = genai_client.files.upload(
-                file=tmp_path,
-                config=types.UploadFileConfig(
-                    display_name=gemini_display_name,
-                    mime_type=final_mime_type
-                )
-            )
-
-            # Guard: ensure file was actually uploaded
-            if not uploaded_file:
-                logger.error("❌ [GEMINI] uploaded_file is None after upload call")
-                raise Exception("Gemini upload failed - no file object returned")
-
-            # Poll for processing completion
-            final_state = "PENDING"
-            if hasattr(uploaded_file, 'state'):
-                final_state = uploaded_file.state.name if hasattr(uploaded_file.state, 'name') else str(uploaded_file.state)
-
-            try:
-                for i in range(15):  # Poll for up to 30 seconds
-                    current_file = genai_client.files.get(name=uploaded_file.name)
-                    final_state = current_file.state.name if hasattr(current_file.state, 'name') else str(current_file.state)
-                    logger.info(f"🔄 [GEMINI] Polling state (Attempt {i+1}/15): {final_state}")
-
-                    if final_state == "ACTIVE":
-                        gemini_processed_at = datetime.utcnow()
-                        logger.info("⚡ [GEMINI] Processing complete - File is now ACTIVE")
-                        break
-                    elif final_state == "FAILED":
-                        logger.error(f"❌ [GEMINI] Processing FAILED for {uploaded_file.name}")
-                        break
-
-                    await asyncio.sleep(2)
-            except Exception as e:
-                logger.warning(f"⚠️ [GEMINI] Error during polling: {e}")
-
-        return uploaded_file, final_state, gemini_processed_at, file_search_metadata
+            logger.error(f"❌ [GEMINI] Upload failed - no document_name in response: {operation}")
+            raise Exception("FileSearch upload failed - no document returned")
 
     except Exception as e:
-        logger.error(f"❌ Error processing file with Gemini: {e}")
+        logger.error(f"❌ Error uploading to FileSearch: {e}")
         raise
 
 

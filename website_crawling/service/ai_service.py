@@ -13,7 +13,9 @@ from urllib.parse import urlparse
 from google.genai import types
 
 from shared.otel_logger import get_otel_logger
+from shared.file_search import get_file_search_store_by_display_name
 from website_crawling.core.ai import get_genai_client
+from website_crawling.core.config import settings
 from website_crawling.service.website_service import WebsiteService
 from website_crawling.dao.scraping_dao import ScrapingDAO
 
@@ -25,204 +27,139 @@ async def upload_content_to_gemini(
     url: str,
     title: str,
     user_email: str = None,
-    page_depth: int = 0  # Add page_depth parameter
+    page_depth: int = 0
 ) -> Dict[str, Any]:
     """
-    Upload scraped content to Gemini FileSearch.
+    Upload scraped content directly to Gemini FileSearch store.
+
     Args:
         content: The scraped text content
         url: Original URL that was scraped
         title: Page title
         user_email: User email for metadata
+        page_depth: Depth of page in crawl hierarchy
+
     Returns:
         Dict with upload result including file name and state
     """
     genai_client = get_genai_client()
     if not genai_client:
-        logger.warning("Gemini client not available - returning placeholder response")
-        return {
-            "success": False,
-            "error": "Gemini client not configured",
-            "file_name": None,
-            "state": "FAILED"
-        }
-    
+        logger.error("❌ Gemini client not available")
+        raise Exception("Gemini client not configured")
+
+    # Get FileSearch store from config (must be set in Railway env)
+    file_search_store_display_name = settings.gemini_file_search_store_name
+    if not file_search_store_display_name:
+        logger.error("❌ GEMINI_FILE_SEARCH_STORE_NAME not configured in Railway environment")
+        raise Exception("GEMINI_FILE_SEARCH_STORE_NAME environment variable is required")
+
+    logger.info(f"📦 Looking up FileSearch store: {file_search_store_display_name}")
+
+    # Resolve store name to actual store ID
+    file_search_store_name = get_file_search_store_by_display_name(
+        genai_client,
+        display_name=file_search_store_display_name
+    )
+
+    if not file_search_store_name:
+        logger.error(f"❌ FileSearch store not found: {file_search_store_display_name}")
+        raise Exception(f"FileSearch store '{file_search_store_display_name}' not found")
+
+    temp_path = None
     try:
-        # Get or create FileSearch store with consistent naming
-        from shared.file_search_store_manager import FileSearchStoreManager
-        
-        file_search_store_name = FileSearchStoreManager.get_or_create_store(
-            genai_client, 
-            store_name="knowledgebot-search-store"  # Use consistent naming
-        )
-        
-        logger.info(f"📦 FileSearch store: {file_search_store_name}")
-        
         # Create a temporary file for the content
         fd, temp_path = tempfile.mkstemp(suffix='.md')
-        try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                # Extract page title from first line or use domain
-                page_title = ""
-                if content:
-                    first_line = content.split('\n')[0][:100]
-                    page_title = first_line if first_line else urlparse(url).netloc
-                
-                # Calculate depth based on URL path structure
-                parsed = urlparse(url)
-                path_parts = [p for p in parsed.path.split('/') if p]
-                calculated_depth = len(path_parts)  # Don't shadow the parameter
-                
-                logger.info(f"📄 Uploading page: {url} (depth: {calculated_depth})")
-                
-                try:
-                    # Add title and URL at the top for better context in Gemini FileSearch
-                    if title:
-                        f.write(f"# {title}\n\n")
-                    if url:
-                        f.write(f"Source URL: {url}\n\n")
-                    
-                    f.write(content)
-                except Exception as e:
-                    logger.error(f"❌ Error writing to temporary file: {e}")
-                
-            # Clean URL for filename (remove protocol, slashes, special chars)
-            clean_url = url.replace('https://', '').replace('http://', '')
-            clean_url = clean_url.replace('/', '_').replace(':', '_').replace('?', '_')
-            clean_url = clean_url[:50]  # Limit length
-            temp_filename = f"scraped_{clean_url}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-            
-            # Resolve FileSearch store on-demand
-            from shared.file_search import get_file_search_store_by_display_name
-            file_search_store_name = get_file_search_store_by_display_name(
-                genai_client,
-                display_name="knowledgebot-search-store"
-            )
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            # Add title and URL at the top
+            if title:
+                f.write(f"# {title}\n\n")
+            if url:
+                f.write(f"Source URL: {url}\n\n")
+            f.write(content)
 
-            if file_search_store_name:
-                try:
-                    logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
-                    operation = genai_client.file_search_stores.upload_to_file_search_store(
-                        file=temp_path,
-                        file_search_store_name=file_search_store_name,
-                        config={
-                            'display_name': temp_filename,
-                            'custom_metadata': [
-                                {'key': 'original_url', 'string_value': url},
-                                {'key': 'user_email', 'string_value': user_email or 'admin'},
-                                {'key': 'page_type', 'string_value': 'scraped_page'},
-                                {'key': 'source', 'string_value': 'website_scraping'}
-                            ]
-                        }
-                    )
+        # Clean URL for filename
+        clean_url = url.replace('https://', '').replace('http://', '')
+        clean_url = clean_url.replace('/', '_').replace(':', '_').replace('?', '_')
+        clean_url = clean_url[:50]
+        temp_filename = f"scraped_{clean_url}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
 
-                    # Poll for operation completion
-                    final_state = "PENDING"
-                    gemini_processed_at = None
-                    document_name = None
+        logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
 
-                    for i in range(15):  # Poll for up to 30 seconds
-                        try:
-                            current_operation = genai_client.operations.get(operation)
-                            if not current_operation:
-                                logger.warning(f"🔄 [GEMINI] Poll attempt {i+1}: Operation is None")
-                                await asyncio.sleep(2)
-                                continue
-
-                            # Extremely defensive check for response and state
-                            resp = getattr(current_operation, 'response', None)
-                            if resp:
-                                if hasattr(resp, 'document_name') and resp.document_name:
-                                    final_state = "ACTIVE"
-                                    document_name = resp.document_name
-                                    logger.info(f"✅ [GEMINI] FileSearch upload complete - Document: {document_name}")
-                                    gemini_processed_at = datetime.utcnow()
-                                    break
-
-                                # Check for state nested in response
-                                state_obj = getattr(resp, 'state', None)
-                                if state_obj:
-                                    final_state = getattr(state_obj, 'name', str(state_obj))
-                                    logger.info(f"🔄 [GEMINI] FileSearch operation state (Attempt {i+1}/15): {final_state}")
-                                    if final_state == "ACTIVE":
-                                        gemini_processed_at = datetime.utcnow()
-                                        break
-                            else:
-                                # Some operations have state at the top level
-                                top_state = getattr(current_operation, 'state', None)
-                                if top_state:
-                                    final_state = getattr(top_state, 'name', str(top_state))
-                                    logger.info(f"🔄 [GEMINI] Operation top-level state (Attempt {i+1}/15): {final_state}")
-                                    if final_state == "ACTIVE":
-                                        break
-
-                            await asyncio.sleep(2)
-                        except Exception as poll_err:
-                            logger.warning(f"⚠️ [GEMINI] Error during polling attempt {i+1}: {poll_err}")
-                            await asyncio.sleep(2)
-
-                    return {
-                        "success": final_state == "ACTIVE",
-                        "file_name": document_name or temp_filename,
-                        "state": final_state,
-                        "processed_at": gemini_processed_at.isoformat() if gemini_processed_at else None,
-                        "file_search_metadata": {
-                            "type": "file_search",
-                            "file_search_store_name": file_search_store_name,
-                            "document_name": document_name,
-                            "original_url": url,
-                            "page_type": "scraped_page",
-                            "uploaded_at": gemini_processed_at.isoformat() if gemini_processed_at else None
-                        } if document_name else None,
-                    }
-                except Exception as fs_err:
-                    logger.warning(f"⚠️ FileSearch upload failed ({fs_err}) - falling back to general file upload")
-                    # Fall through to general file upload
-                    file_search_store_name = None
-
-            if not file_search_store_name:
-                # Fallback to general file upload
-                logger.info("📤 Using general file upload (no FileSearch store configured)")
-                gemini_file = genai_client.files.upload(
-                    file=temp_path,
-                    config=types.UploadFileConfig(
-                        display_name=temp_filename,
-                        mime_type="text/markdown"
-                    )
-                )
-                
-                return {
-                    "success": True,
-                    "file_name": gemini_file.name,
-                    "file_uri": gemini_file.uri,
-                    "state": gemini_file.state if hasattr(gemini_file, 'state') else "ACTIVE"
-                }
-
-        except Exception as e:
-            logger.error(f"❌ Error uploading to Gemini: {e}")
-            import traceback
-            logger.error(f"❌ Full traceback: {traceback.format_exc()}")
-            return {
-                "success": False,
-                "error": str(e),
-                "file_name": None,
-                "state": "FAILED"
+        # Upload directly to FileSearch store (no fallback)
+        operation = genai_client.file_search_stores.upload_to_file_search_store(
+            file=temp_path,
+            file_search_store_name=file_search_store_name,
+            config={
+                'display_name': temp_filename,
+                'custom_metadata': [
+                    {'key': 'original_url', 'string_value': url},
+                    {'key': 'user_email', 'string_value': user_email or 'admin'},
+                    {'key': 'page_type', 'string_value': 'scraped_page'},
+                    {'key': 'source', 'string_value': 'website_scraping'},
+                    {'key': 'page_depth', 'string_value': str(page_depth)}
+                ]
             }
-        finally:
-            if os.path.exists(temp_path):
-                try:
-                    os.unlink(temp_path)
-                except:
-                    pass
+        )
+
+        if not operation:
+            raise Exception("Failed to create FileSearch upload operation")
+
+        # Poll for operation completion
+        final_state = "PENDING"
+        gemini_processed_at = None
+        document_name = None
+
+        for i in range(15):  # Poll for up to 30 seconds
+            current_operation = genai_client.operations.get(operation)
+            if not current_operation:
+                logger.warning(f"🔄 [GEMINI] Poll attempt {i+1}: Operation is None")
+                await asyncio.sleep(2)
+                continue
+
+            # Check for document_name in response
+            resp = getattr(current_operation, 'response', None)
+            if resp and hasattr(resp, 'document_name') and resp.document_name:
+                final_state = "ACTIVE"
+                document_name = resp.document_name
+                gemini_processed_at = datetime.utcnow()
+                logger.info(f"✅ [GEMINI] FileSearch upload complete - Document: {document_name}")
+                break
+
+            # Check for state in operation
+            top_state = getattr(current_operation, 'state', None)
+            if top_state:
+                final_state = getattr(top_state, 'name', str(top_state))
+                logger.info(f"🔄 [GEMINI] FileSearch operation state (Attempt {i+1}/15): {final_state}")
+                if final_state == "ACTIVE":
+                    gemini_processed_at = datetime.utcnow()
+                    break
+
+            await asyncio.sleep(2)
+
+        if not document_name:
+            raise Exception(f"FileSearch upload failed - final state: {final_state}")
+
+        return {
+            "success": final_state == "ACTIVE",
+            "file_name": document_name,
+            "state": final_state,
+            "processed_at": gemini_processed_at.isoformat() if gemini_processed_at else None,
+            "file_search_metadata": {
+                "type": "file_search",
+                "file_search_store_name": file_search_store_name,
+                "document_name": document_name,
+                "original_url": url,
+                "page_type": "scraped_page",
+                "uploaded_at": gemini_processed_at.isoformat() if gemini_processed_at else None
+            }
+        }
 
     except Exception as e:
-        logger.error(f"❌ Error uploading content to Gemini: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-            "file_name": None,
-            "state": "FAILED"
-        }
+        logger.error(f"❌ Error uploading to FileSearch: {e}")
+        import traceback
+        logger.error(f"❌ Full traceback: {traceback.format_exc()}")
+        raise
+
     finally:
         if temp_path and os.path.exists(temp_path):
             try:

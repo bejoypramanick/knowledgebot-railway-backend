@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     # Chatbot Configuration
     chatbot_model: str = "gemini-2.0-flash-exp"
 
+    # Gemini FileSearch Store Configuration (required from Railway env)
+    gemini_file_search_store_name: Optional[str] = None  # FileSearch store display name - MUST be set in Railway env
+
     # Docling Service Configuration for Website Crawling (plug-and-play)
     docling_enabled_for_websites: bool = True  # Set to False to disable
     docling_website_timeout_seconds: int = 300  # Processing timeout (5 minutes)
