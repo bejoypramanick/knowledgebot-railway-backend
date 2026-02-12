@@ -14,12 +14,14 @@ from ..service.ingestion_service import (
     delete_file_logic,
     nuke_filestore_and_database
 )
+from website_crawling.service.website_service import WebsiteService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Initialize services
 file_service = FileService()
+website_service = WebsiteService()
 
 def extract_user_from_request(request: Request) -> tuple[str, str]:
     """Extract user information from request headers forwarded by API Gateway"""
@@ -100,6 +102,27 @@ async def list_files(request: Request = None):
         }
     except Exception as e:
         logger.error(f"Error listing files: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/knowledgebase")
+async def list_knowledgebase(request: Request = None):
+    """List all knowledgebase items (files + websites) with hierarchical structure for websites"""
+    try:
+        # Extract authenticated user information
+        user_email, user_id = extract_user_from_request(request)
+        
+        knowledgebase = await file_service.get_all_knowledgebase()
+        
+        return {
+            "success": True,
+            "knowledgebase": knowledgebase,
+            "user": {
+                "email": user_email,
+                "id": user_id
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error listing knowledgebase: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/batchupload")
@@ -244,12 +267,46 @@ async def delete_file(file_id: str, request: Request = None):
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.delete("/websites/{website_id}/hierarchy")
+async def delete_website_hierarchy(website_id: str, request: Request = None):
+    """
+    Delete a website and all its child pages with transactional safety.
+    
+    Transaction Safety:
+    - FileSearch deletion attempted first for all pages
+    - Database deletion happens only if FileSearch mostly succeeds
+    - Uses recursive hierarchy to find all child pages
+    """
+    try:
+        # Extract authenticated user information
+        user_email, user_id = extract_user_from_request(request)
+        
+        logger.info(f"🌳 User {user_email} requesting hierarchical deletion of website {website_id}")
+        
+        # Use website service for hierarchical deletion
+        result = await website_service.delete_website_hierarchy(website_id)
+        
+        return {
+            "success": result.get("success", True),
+            "message": result.get("message", "Website hierarchy deleted successfully"),
+            "details": result.get("details"),
+            "user": {
+                "email": user_email,
+                "id": user_id
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting website hierarchy: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/delete-all")
 async def delete_all_files(request: Request = None):
     """
     Delete all files and websites: Remove all documents from FileSearch store and all database records.
     This is a destructive operation and should only be called with explicit admin confirmation.
-
+    
     Transaction Safety:
     - If FileStore deletion fails, database is NOT touched
     - Database deletion happens in a transaction - rolls back if it fails

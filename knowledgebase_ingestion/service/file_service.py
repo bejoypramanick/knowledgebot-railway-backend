@@ -362,6 +362,92 @@ class FileService:
             logger.error(f"Error getting all files: {e}")
             return []
 
+    async def get_all_websites_hierarchy(self) -> list:
+        """Get all scraped websites in hierarchical tree structure."""
+        try:
+            from shared.db import get_db_connection
+            
+            async with get_db_connection() as conn:
+                # Get all websites with hierarchy info
+                websites = await conn.fetch(
+                    """SELECT id, original_url, domain, title, description, pages_scraped, 
+                              parent_id, depth, crawl_session_id, created_at
+                       FROM scraped_websites 
+                       ORDER BY depth, created_at DESC"""
+                )
+                
+                # Build hierarchical tree structure
+                # First create a map of all nodes
+                nodes = {}
+                root_nodes = []
+                
+                for website in websites:
+                    node = {
+                        "id": str(website['id']),
+                        "original_filename": website['original_url'],  # Use URL as filename for consistency
+                        "display_name": website['title'] or website['domain'] or website['original_url'],
+                        "file_extension": "URL",
+                        "mime_type": "text/html",
+                        "file_type": "WEBSITE",
+                        "size_bytes": 0,  # Not applicable for websites
+                        "sha256_hash": None,
+                        "gemini_state": "completed",
+                        "processed_at": website['created_at'].isoformat() if website['created_at'] else None,
+                        "created_at": website['created_at'].isoformat() if website['created_at'] else None,
+                        "version": 1,
+                        "source": "website",
+                        "url": website['original_url'],
+                        "domain": website['domain'],
+                        "title": website['title'],
+                        "description": website['description'],
+                        "pages_scraped": website['pages_scraped'],
+                        "depth": website['depth'],
+                        "parent_id": website['parent_id'],
+                        "crawl_session_id": str(website['crawl_session_id']) if website['crawl_session_id'] else None,
+                        "children": [],  # Will be populated below
+                        "is_expanded": False  # Frontend can control this
+                    }
+                    nodes[website['id']] = node
+                
+                # Build tree structure
+                for website_id, node in nodes.items():
+                    parent_id = node['parent_id']
+                    if parent_id is None or parent_id not in nodes:
+                        # This is a root node
+                        root_nodes.append(node)
+                    else:
+                        # This is a child node
+                        parent_node = nodes[parent_id]
+                        parent_node['children'].append(node)
+                
+                logger.info(f"Retrieved {len(websites)} websites in hierarchical structure with {len(root_nodes)} root nodes")
+                return root_nodes
+                
+        except Exception as e:
+            logger.error(f"Error getting websites hierarchy: {e}")
+            return []
+
+    async def get_all_knowledgebase(self) -> dict:
+        """Get all knowledgebase items (files + websites) in unified structure."""
+        try:
+            files = await self.get_all_files()
+            websites = await self.get_all_websites_hierarchy()
+            
+            return {
+                "files": files,  # Flat list of uploaded files
+                "websites": websites,  # Hierarchical tree of scraped websites
+                "total_files": len(files),
+                "total_websites": len(websites),
+                "summary": {
+                    "uploaded_files": len(files),
+                    "scraped_websites": sum(1 for w in websites if w.get('parent_id') is None),  # Count root websites only
+                    "total_pages": len(websites)  # All website pages including children
+                }
+            }
+        except Exception as e:
+            logger.error(f"Error getting knowledgebase: {e}")
+            return {"files": [], "websites": [], "total_files": 0, "total_websites": 0, "summary": {}}
+
     async def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get file record by ID"""
         try:
