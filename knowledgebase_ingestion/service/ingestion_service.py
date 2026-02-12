@@ -854,3 +854,97 @@ async def process_single_file_delete(file_id: str) -> BatchDeleteItem:
             message=str(e),
             error=str(e)
         )
+
+
+async def nuke_filestore_and_database() -> Dict[str, Any]:
+    """
+    NUCLEAR DELETE: Completely remove all documents from FileSearch store and all records from database.
+    This is destructive and should only be used when explicitly requested by admin.
+    """
+    logger.warning("⚠️⚠️⚠️ NUCLEAR DELETE INITIATED - REMOVING ALL DATA FROM FILESTORE AND DATABASE ⚠️⚠️⚠️")
+
+    genai_client = get_genai_client()
+    file_service = get_file_service()
+
+    nuke_results = {
+        "filestore_documents_deleted": 0,
+        "filestore_errors": [],
+        "database_files_deleted": 0,
+        "database_scrapes_deleted": 0,
+        "database_errors": [],
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+    # Phase 1: Delete all documents from FileSearch store
+    if genai_client:
+        try:
+            from shared.file_search import get_file_search_store_by_display_name
+
+            file_search_store_name = get_file_search_store_by_display_name(
+                genai_client,
+                display_name="knowledgebot-search-store"
+            )
+
+            if file_search_store_name:
+                logger.warning(f"📤 Attempting to clear FileSearch store: {file_search_store_name}")
+
+                # Get all documents in the store
+                try:
+                    # List documents in the store
+                    store = genai_client.file_search_stores.get(name=file_search_store_name)
+
+                    # Delete the store entirely and recreate it (most efficient)
+                    # This clears all documents, embeddings, and indexes at once
+                    logger.warning(f"🗑️ Deleting FileSearch store {file_search_store_name}...")
+
+                    genai_client.file_search_stores.delete(name=file_search_store_name)
+                    logger.warning(f"✅ FileSearch store deleted")
+                    nuke_results["filestore_documents_deleted"] = -1  # -1 indicates store deleted
+
+                    # Recreate the store for future use
+                    logger.info(f"🔄 Recreating FileSearch store: {file_search_store_name}...")
+                    recreated_store = genai_client.file_search_stores.create()
+                    logger.info(f"✅ FileSearch store recreated: {recreated_store.name}")
+
+                except Exception as e:
+                    error_msg = f"Error clearing FileSearch store: {str(e)}"
+                    logger.error(f"❌ {error_msg}")
+                    nuke_results["filestore_errors"].append(error_msg)
+        except Exception as e:
+            error_msg = f"Error accessing FileSearch: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            nuke_results["filestore_errors"].append(error_msg)
+    else:
+        logger.warning("⚠️ Gemini client not available - skipping FileSearch deletion")
+
+    # Phase 2: Delete all records from database
+    try:
+        from shared.db import get_db_connection
+
+        async with get_db_connection() as conn:
+            # Delete all file_uploads
+            logger.warning("🗑️ Deleting all file_uploads records...")
+            deleted_files = await conn.execute("DELETE FROM file_uploads")
+            nuke_results["database_files_deleted"] = int(deleted_files.split()[-1]) if deleted_files else 0
+            logger.warning(f"✅ Deleted {nuke_results['database_files_deleted']} file uploads from database")
+
+            # Delete all scraped_websites
+            logger.warning("🗑️ Deleting all scraped_websites records...")
+            deleted_scrapes = await conn.execute("DELETE FROM scraped_websites")
+            nuke_results["database_scrapes_deleted"] = int(deleted_scrapes.split()[-1]) if deleted_scrapes else 0
+            logger.warning(f"✅ Deleted {nuke_results['database_scrapes_deleted']} scraped websites from database")
+
+    except Exception as e:
+        error_msg = f"Error deleting database records: {str(e)}"
+        logger.error(f"❌ {error_msg}")
+        nuke_results["database_errors"].append(error_msg)
+
+    # Summary
+    logger.warning("⚠️⚠️⚠️ NUCLEAR DELETE COMPLETED ⚠️⚠️⚠️")
+    logger.warning(f"📊 Results: {nuke_results['database_files_deleted']} files + {nuke_results['database_scrapes_deleted']} scrapes deleted from DB")
+
+    return {
+        "success": True,
+        "message": "Nuclear delete completed - all data removed from FileStore and database",
+        "details": nuke_results
+    }

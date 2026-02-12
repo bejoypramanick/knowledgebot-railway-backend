@@ -11,7 +11,8 @@ from ..service.file_service import FileService
 from ..service.ingestion_service import (
     process_single_file_upload,
     process_single_file_delete,
-    delete_file_logic
+    delete_file_logic,
+    nuke_filestore_and_database
 )
 
 logger = logging.getLogger(__name__)
@@ -232,6 +233,32 @@ async def delete_file(file_id: str, request: Request = None):
         raise
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/nuke")
+async def nuke_everything(request: Request = None):
+    """
+    NUCLEAR DELETE: Remove all documents from FileSearch store and all database records.
+    This is a destructive operation and should only be called with explicit admin confirmation.
+    """
+    try:
+        # Log the nuclear delete for audit purposes
+        user_email = request.headers.get("X-User-Email", "unknown") if request else "unknown"
+        logger.critical(f"🚨 NUCLEAR DELETE INITIATED by {user_email}")
+
+        # Execute the nuke
+        result = await nuke_filestore_and_database()
+
+        logger.critical(f"🚨 NUCLEAR DELETE COMPLETED - All data removed")
+        return {
+            "success": result.get("success", True),
+            "message": result.get("message", "Nuclear delete completed"),
+            "details": result.get("details")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error during nuclear delete: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
