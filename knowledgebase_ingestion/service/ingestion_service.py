@@ -735,11 +735,11 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
                 logger.info(f"   Document: {document_name}")
 
                 try:
-                    # Delete the document from the FileSearch store
+                    # Delete the document from the FileSearch store using modern API
                     # This removes the file from the store AND cleans up embeddings
-                    genai_client.file_search_stores.delete_document(
-                        file_search_store_name=store_name,
-                        document_name=document_name
+                    genai_client.file_search_stores.documents.delete(
+                        name=document_name,
+                        force=True
                     )
                     deletion_results["file_search"]["success"] = True
                     logger.info(f"✅ [FILESEARCH] Deleted document: {document_name} from store: {store_name}")
@@ -748,10 +748,7 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
                     # POST-DELETION: Verify document was deleted
                     logger.info(f"🔍 [POST-DELETE VERIFICATION] Checking if document was deleted...")
                     try:
-                        genai_client.file_search_stores.get_document(
-                            file_search_store_name=store_name,
-                            document_name=document_name
-                        )
+                        genai_client.file_search_stores.documents.get(name=document_name)
                         # If we get here, document still exists - log warning
                         logger.warning(f"⚠️ [POST-DELETE VERIFICATION] Document still exists after deletion attempt!")
                     except Exception:
