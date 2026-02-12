@@ -46,17 +46,43 @@ async def upload_content_to_gemini(
         }
     
     try:
+        # Get or create FileSearch store with consistent naming
+        from shared.file_search_store_manager import FileSearchStoreManager
+        
+        file_search_store_name = FileSearchStoreManager.get_or_create_store(
+            genai_client, 
+            store_name="knowledgebot-search-store"  # Use consistent naming
+        )
+        
+        logger.info(f"📦 FileSearch store: {file_search_store_name}")
+        
         # Create a temporary file for the content
         fd, temp_path = tempfile.mkstemp(suffix='.md')
         try:
             with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                # Add title and URL at the top for better context in Gemini FileSearch
-                if title:
-                    f.write(f"# {title}\n\n")
-                if url:
-                    f.write(f"Source URL: {url}\n\n")
+                # Extract page title from first line or use domain
+                page_title = ""
+                if content:
+                    first_line = content.split('\n')[0][:100]
+                    page_title = first_line if first_line else urlparse(url).netloc
                 
-                f.write(content)
+                # Calculate depth based on URL path structure
+                parsed = urlparse(url)
+                path_parts = [p for p in parsed.path.split('/') if p]
+                page_depth = len(path_parts)
+                
+                logger.info(f"📄 Uploading page: {url} (depth: {page_depth})")
+                
+                try:
+                    # Add title and URL at the top for better context in Gemini FileSearch
+                    if title:
+                        f.write(f"# {title}\n\n")
+                    if url:
+                        f.write(f"Source URL: {url}\n\n")
+                    
+                    f.write(content)
+                except Exception as e:
+                    logger.error(f"❌ Error writing to temporary file: {e}")
                 
             # Clean URL for filename (remove protocol, slashes, special chars)
             clean_url = url.replace('https://', '').replace('http://', '')
