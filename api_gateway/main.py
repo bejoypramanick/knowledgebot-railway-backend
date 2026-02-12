@@ -105,7 +105,7 @@ async def lifespan(app: FastAPI):
                             # Store doesn't exist, create it
                             logger.info(f"🔨 Step 3: Creating FileSearch store with display_name: {store_display_name}")
                             new_store = client.file_search_stores.create(
-                                display_name=store_display_name
+                                config={'display_name': store_display_name}
                             )
                             logger.info(f"✅ FileSearch store created: {new_store.name}")
                             logger.info(f"   Display name: {getattr(new_store, 'display_name', 'N/A')}")
