@@ -132,9 +132,22 @@ async def fetch_and_parse_sitemap(url: str) -> List[str]:
         import httpx
         import gzip
 
+        # Headers to mimic a real browser request (some sites block without proper headers)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/xml, text/xml, */*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        }
+
         async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
             logger.info(f"📥 Fetching sitemap from: {url}")
-            response = await client.get(url)
+            response = await client.get(url, headers=headers)
             response.raise_for_status()
 
             # Check content type
