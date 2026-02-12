@@ -201,17 +201,23 @@ async def extract_urls_from_sitemap(url: str) -> List[str]:
                         found_url = match.group(1) if match.lastindex else match.group(0)
                         found_url = found_url.strip()
                         if found_url:
-                            # Validate URL format - ensure it starts with http/https and doesn't contain invalid characters
-                            if re.match(r'^https?://[a-zA-Z0-9\.\-_]+', found_url):
-                                # Make absolute URL
-                                absolute_url = urljoin(url, found_url)
-                                # Additional validation - ensure no XML/HTML artifacts
-                                if not re.search(r'[<>\{\}\[\]\(\)]', absolute_url):
-                                    extracted_urls.add(absolute_url)
-                                else:
-                                    logger.warning(f"⚠️ Skipping malformed URL: {found_url}")
+                            # Validate URL format - ensure it's a proper URL without artifacts
+                            # Check for common sitemap artifacts that indicate malformed URLs
+                            if (re.search(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}', found_url) or  # Timestamps
+                                re.search(r'(monthly|weekly|daily|yearly|always)$', found_url) or      # Changefreq values
+                                re.search(r'[0-9]+\.[0-9]+$', found_url) or                           # Priority values
+                                re.search(r'[<>\{\}\[\]\(\)]', found_url)):                           # XML/HTML artifacts
+                                logger.warning(f"⚠️ Skipping malformed URL with artifacts: {found_url[:100]}...")
+                                continue
+                            
+                            # Make absolute URL
+                            absolute_url = urljoin(url, found_url)
+                            
+                            # Final validation - ensure it's a proper HTTP/HTTPS URL
+                            if re.match(r'^https?://[a-zA-Z0-9\.\-]+\.[a-zA-Z]{2,}', absolute_url):
+                                extracted_urls.add(absolute_url)
                             else:
-                                logger.warning(f"⚠️ Invalid URL format: {found_url}")
+                                logger.warning(f"⚠️ Invalid URL format: {absolute_url[:100]}...")
 
                 urls = list(extracted_urls)
                 if urls:
