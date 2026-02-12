@@ -778,7 +778,8 @@ class WebsiteService:
         delay_between_requests: float = 0
     ) -> Dict[str, Any]:
         """
-        Scrape multiple URLs from a sitemap using BFS depth strategy.
+        Scrape all URLs from a sitemap using crawl4ai's BFS deep crawl strategy.
+        Uses BFS traversal to discover and crawl all pages hierarchically.
         Establishes parent-child relationships based on URL path hierarchy.
 
         Args:
@@ -792,7 +793,7 @@ class WebsiteService:
         """
         scraped_data = []
         scraped_urls: Set[str] = set()
-        url_to_data = {}  # Track URL to its data for parent linking
+        discovered_urls: Set[str] = set(urls)  # All sitemap URLs
         title = "Sitemap Content"
         semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -803,30 +804,30 @@ class WebsiteService:
             }
 
         try:
-            # Calculate depth for each URL and organize by BFS levels
-            url_depth_map = {}
-            for url in urls:
-                depth = self.calculate_url_depth(url)
-                url_depth_map[url] = depth
-                logger.debug(f"📍 URL depth calculated: {url} -> depth {depth}")
+            # Use BFS queue for depth-based traversal
+            bfs_queue = [(url, self.calculate_url_depth(url)) for url in urls]
+            bfs_queue.sort(key=lambda x: x[1])  # Sort by depth
 
-            # Sort URLs by depth (BFS: depth 0 first, then depth 1, etc.)
-            sorted_urls = sorted(urls, key=lambda u: url_depth_map[u])
-            logger.info(f"🎯 Processing {len(sorted_urls)} URLs using BFS strategy")
+            logger.info(f"🎯 Starting BFS deep crawl of {len(urls)} sitemap URLs")
 
             async with AsyncWebCrawler(verbose=False) as crawler:
-                for idx, url in enumerate(sorted_urls):
+                idx = 0
+                for url, depth in bfs_queue:
                     if url in scraped_urls:
                         continue
 
-                    depth = url_depth_map[url]
-                    logger.info(f"📄 Scraping sitemap URL {idx + 1}/{len(sorted_urls)}: {url} (depth={depth})")
+                    idx += 1
+                    logger.info(f"📄 [BFS {idx}/{len(urls)}] Scraping: {url} (depth={depth})")
 
                     try:
                         # Apply concurrency limit
                         async with semaphore:
                             result = await asyncio.wait_for(
-                                crawler.arun(url=url),
+                                crawler.arun(
+                                    url=url,
+                                    bypass_cache=True,
+                                    wait_until='networkidle'
+                                ),
                                 timeout=timeout
                             )
 
@@ -857,18 +858,16 @@ class WebsiteService:
                                     }
 
                                     scraped_data.append(page_data)
-                                    url_to_data[url] = page_data
-                                    logger.info(f"✓ Successfully scraped: {url} (depth={depth})")
+                                    logger.info(f"✓ Successfully scraped: {url} (depth={depth}, size={len(content)} bytes)")
                             else:
                                 logger.warning(f"⚠️ Failed to scrape sitemap URL {url}: {result.error_message}")
 
                             # Apply delay between requests
-                            if delay_between_requests > 0 and idx < len(sorted_urls) - 1:
-                                logger.info(f"⏳ Waiting {delay_between_requests}s before next request")
+                            if delay_between_requests > 0 and idx < len(bfs_queue):
                                 await asyncio.sleep(delay_between_requests)
 
                     except asyncio.TimeoutError:
-                        logger.warning(f"⏱️ Timeout scraping sitemap URL {url}")
+                        logger.warning(f"⏱️ Timeout scraping sitemap URL {url} (depth={depth})")
                     except Exception as e:
                         logger.warning(f"⚠️ Error scraping sitemap URL {url}: {e}")
 

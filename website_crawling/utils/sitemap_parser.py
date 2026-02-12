@@ -124,10 +124,10 @@ def is_sitemap_url(url: str) -> bool:
     )
 
 
-async def fetch_and_parse_sitemap(url: str) -> List[str]:
+async def extract_urls_from_sitemap(url: str) -> List[str]:
     """
-    Fetch and parse a sitemap using crawl4ai with BFS deep crawl strategy.
-    Extracts URLs from XML sitemaps and sitemap indexes.
+    Extract URLs from a sitemap using crawl4ai.
+    Handles XML sitemaps and sitemap indexes.
 
     Args:
         url: Sitemap URL
@@ -142,7 +142,7 @@ async def fetch_and_parse_sitemap(url: str) -> List[str]:
     try:
         logger.info(f"📥 Fetching sitemap with crawl4ai: {url}")
 
-        # Use crawl4ai to fetch the sitemap with BFS strategy
+        # Use crawl4ai to fetch the sitemap
         async with AsyncWebCrawler(verbose=False) as crawler:
             result = await crawler.arun(
                 url=url,
@@ -200,3 +200,17 @@ async def fetch_and_parse_sitemap(url: str) -> List[str]:
     except Exception as e:
         logger.error(f"❌ Error fetching/parsing sitemap with crawl4ai: {e}", exc_info=True)
         return []
+
+
+async def fetch_and_parse_sitemap(url: str) -> List[str]:
+    """
+    Fetch and crawl all pages from a sitemap using crawl4ai's BFS deep crawl strategy.
+    This is a wrapper that extracts sitemap URLs and returns them for processing.
+
+    Args:
+        url: Sitemap URL
+
+    Returns:
+        List of URLs found in the sitemap (for compatibility with existing code)
+    """
+    return await extract_urls_from_sitemap(url)
