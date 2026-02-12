@@ -319,6 +319,7 @@ class WebsiteService:
             for page_data in scraped_data:
                 page_url = page_data["url"]
                 page_text = page_data["text"]
+                page_depth = page_data.get("depth", 0)
                 page_domain = urlparse(page_url).netloc.replace('www.', '')
 
                 # Extract page title from first line or use domain
@@ -377,7 +378,7 @@ class WebsiteService:
                         },
                         file_search_metadata=gemini_result.get("file_search_metadata"),
                         parent_id=parent_id,
-                        depth=depth,
+                        depth=page_depth,
                         crawl_session_id=crawl_session_id
                     )
 

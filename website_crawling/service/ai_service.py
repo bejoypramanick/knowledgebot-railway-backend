@@ -276,7 +276,7 @@ async def record_scraped_metadata(
             "gemini_file_name": gemini_file_name,
             "gemini_file_uri": gemini_file_uri,
             "parent_id": parent_id,
-            "depth": page_depth,  # Use the parameter, not calculated_depth
+            "depth": depth,  # Use the parameter
             "crawl_session_id": crawl_session_id,
             # Targeting patterns used for this crawl
             "crawl_patterns": {
