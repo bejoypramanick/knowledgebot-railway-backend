@@ -70,9 +70,9 @@ async def upload_content_to_gemini(
                 # Calculate depth based on URL path structure
                 parsed = urlparse(url)
                 path_parts = [p for p in parsed.path.split('/') if p]
-                page_depth = len(path_parts)
+                calculated_depth = len(path_parts)  # Don't shadow the parameter
                 
-                logger.info(f"📄 Uploading page: {url} (depth: {page_depth})")
+                logger.info(f"📄 Uploading page: {url} (depth: {calculated_depth})")
                 
                 try:
                     # Add title and URL at the top for better context in Gemini FileSearch
@@ -276,7 +276,7 @@ async def record_scraped_metadata(
             "gemini_file_name": gemini_file_name,
             "gemini_file_uri": gemini_file_uri,
             "parent_id": parent_id,
-            "depth": depth,
+            "depth": page_depth,  # Use the parameter, not calculated_depth
             "crawl_session_id": crawl_session_id,
             # Targeting patterns used for this crawl
             "crawl_patterns": {
