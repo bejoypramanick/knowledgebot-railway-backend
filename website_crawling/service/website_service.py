@@ -864,9 +864,9 @@ class WebsiteService:
         delay_between_requests: float = 0
     ) -> Dict[str, Any]:
         """
-        Scrape all URLs from a sitemap using crawl4ai's BFS deep crawl strategy.
-        Uses BFS traversal to discover and crawl all pages hierarchically.
-        Establishes parent-child relationships based on URL path hierarchy.
+        Scrape all URLs from a sitemap using BFS depth-based traversal.
+        Uses breadth-first strategy to crawl pages level-by-level, establishing
+        proper parent-child relationships based on URL structure.
 
         Args:
             urls: List of URLs to scrape from sitemap
@@ -875,11 +875,11 @@ class WebsiteService:
             delay_between_requests: Delay between requests in seconds
 
         Returns:
-            Dict with scraped content and metadata with parent-child relationships
+            Dict with scraped content and metadata with proper hierarchy
         """
         scraped_data = []
         scraped_urls: Set[str] = set()
-        discovered_urls: Set[str] = set(urls)  # All sitemap URLs
+        url_depth_map = {}  # Track depth for each URL
         title = "Sitemap Content"
         semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -890,11 +890,24 @@ class WebsiteService:
             }
 
         try:
-            # Use BFS queue for depth-based traversal
-            bfs_queue = [(url, self.calculate_url_depth(url)) for url in urls]
-            bfs_queue.sort(key=lambda x: x[1])  # Sort by depth
+            # Use BFS queue: process URLs level-by-level by path depth
+            # Group URLs by their path depth for proper BFS ordering
+            bfs_queue = []
+            depth_groups = {}
 
-            logger.info(f"🎯 Starting BFS deep crawl of {len(urls)} sitemap URLs")
+            for url in urls:
+                # Calculate depth from URL path structure
+                path_depth = self.calculate_url_depth(url)
+                if path_depth not in depth_groups:
+                    depth_groups[path_depth] = []
+                depth_groups[path_depth].append(url)
+                url_depth_map[url] = path_depth
+
+            # Build BFS queue: process all depth-0 first, then depth-1, etc
+            for depth in sorted(depth_groups.keys()):
+                bfs_queue.extend([(url, depth) for url in depth_groups[depth]])
+
+            logger.info(f"🎯 Starting BFS deep crawl of {len(urls)} sitemap URLs across {len(depth_groups)} depth levels")
 
             async with AsyncWebCrawler(verbose=False) as crawler:
                 idx = 0
@@ -999,17 +1012,22 @@ class WebsiteService:
         include_patterns: List[str] = None,
         exclude_patterns: List[str] = None
     ) -> Dict[str, Any]:
-        """Scrape using crawl4ai library with rate limiting support."""
+        """
+        Scrape website using crawl4ai library with BFS depth-based traversal.
+        Uses breadth-first strategy to crawl pages level-by-level, establishing
+        proper parent-child relationships based on link discovery order.
+        """
         include_patterns = include_patterns or []
         exclude_patterns = exclude_patterns or []
         scraped_data = []  # Track individual page data for citations
         scraped_urls: Set[str] = set()
-        urls_to_scrape = [(url, 0)]  # (url, depth)
+        urls_to_scrape = [(url, 0)]  # BFS queue: (url, depth) - depth based on discovery order
         title = "Untitled"
         semaphore = asyncio.Semaphore(max_concurrent)
 
         try:
             async with AsyncWebCrawler(verbose=False) as crawler:
+                # BFS traversal: process all URLs at depth N before depth N+1
                 while urls_to_scrape and len(scraped_urls) < max_pages:
                     current_url, depth = urls_to_scrape.pop(0)
 
