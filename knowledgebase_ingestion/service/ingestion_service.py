@@ -996,7 +996,7 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                         logger.warning(f"⚠️ FileSearch store '{store_display_name}' not found - creating new one")
                         logger.info(f"🔨 Creating new FileSearch store with display_name: {store_display_name}")
                         new_store = genai_client.file_search_stores.create(
-                            displayName=store_display_name
+                            display_name=store_display_name
                         )
                         logger.info(f"✅ FileSearch store created: {new_store.name}")
                         logger.info(f"   Display name: {getattr(new_store, 'display_name', 'N/A')}")
@@ -1016,7 +1016,7 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                         # Recreate the store with proper display_name for future use
                         logger.info(f"🔄 Recreating FileSearch store with display_name: {store_display_name}")
                         recreated_store = genai_client.file_search_stores.create(
-                            displayName=store_display_name
+                            display_name=store_display_name
                         )
                         logger.info(f"✅ FileSearch store recreated: {recreated_store.name}")
                         logger.info(f"   Display name: {getattr(recreated_store, 'display_name', 'N/A')}")
