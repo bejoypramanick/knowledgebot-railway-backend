@@ -934,7 +934,7 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                 try:
                     # Step 1: List and delete all documents in the store
                     logger.warning(f"📋 Listing documents in FileSearch store...")
-                    documents = genai_client.file_search_stores.list_documents(name=file_search_store_name)
+                    documents = genai_client.file_search_stores.list_files(name=file_search_store_name)
 
                     # Convert to list to count documents
                     doc_list = list(documents) if documents else []
@@ -947,7 +947,8 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                             doc_name = doc.name if hasattr(doc, 'name') else str(doc)
                             logger.warning(f"🗑️ Deleting document: {doc_name}")
                             genai_client.file_search_stores.delete_document(
-                                name=f"{file_search_store_name}/documents/{doc_name.split('/')[-1]}"
+                                file_search_store_name=file_search_store_name,
+                                document_name=doc_name
                             )
                             deleted_count += 1
                         except Exception as doc_error:
