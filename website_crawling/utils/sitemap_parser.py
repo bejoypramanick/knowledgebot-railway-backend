@@ -1,11 +1,18 @@
 """
 Sitemap Parser Utility
-Parses XML sitemaps and extracts URLs for crawling
+Parses XML sitemaps and extracts URLs for crawling using crawl4ai
 """
 import logging
+import re
 from typing import List, Set
 from xml.etree import ElementTree as ET
 from urllib.parse import urljoin, urlparse
+
+try:
+    from crawl4ai import AsyncWebCrawler
+    CRAWL4AI_AVAILABLE = True
+except ImportError:
+    CRAWL4AI_AVAILABLE = False
 
 logger = logging.getLogger("website_crawling")
 
@@ -119,8 +126,8 @@ def is_sitemap_url(url: str) -> bool:
 
 async def fetch_and_parse_sitemap(url: str) -> List[str]:
     """
-    Fetch and parse a sitemap from a URL.
-    Handles standard sitemaps, sitemap indexes, and gzipped content.
+    Fetch and parse a sitemap using crawl4ai with BFS deep crawl strategy.
+    Extracts URLs from XML sitemaps and sitemap indexes.
 
     Args:
         url: Sitemap URL
@@ -128,68 +135,68 @@ async def fetch_and_parse_sitemap(url: str) -> List[str]:
     Returns:
         List of URLs found in the sitemap
     """
+    if not CRAWL4AI_AVAILABLE:
+        logger.error("❌ crawl4ai is not available for sitemap fetching")
+        return []
+
     try:
-        import httpx
-        import gzip
+        logger.info(f"📥 Fetching sitemap with crawl4ai: {url}")
 
-        # Headers to mimic a real browser request (some sites block without proper headers)
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'application/xml, text/xml, */*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
-        }
+        # Use crawl4ai to fetch the sitemap with BFS strategy
+        async with AsyncWebCrawler(verbose=False) as crawler:
+            result = await crawler.arun(
+                url=url,
+                bypass_cache=True,
+                wait_until='networkidle'
+            )
 
-        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-            logger.info(f"📥 Fetching sitemap from: {url}")
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
+            if not result.success:
+                logger.error(f"❌ Failed to fetch sitemap: {result.error_message}")
+                return []
 
-            # Check content type
-            content_type = response.headers.get('content-type', '').lower()
-            logger.info(f"📋 Sitemap content-type: {content_type}")
+            # Get the content (markdown or HTML)
+            content = result.markdown or result.cleaned_html or result.html or ""
 
-            # Handle gzipped content
-            content = response.content
-            if content_type.startswith('application/x-gzip') or url.lower().endswith('.gz'):
-                logger.info("🔧 Decompressing gzipped sitemap")
-                try:
-                    content = gzip.decompress(content)
-                except Exception as gz_error:
-                    logger.warning(f"⚠️ Failed to decompress gzip: {gz_error}")
-                    # Try without decompression
-                    content = response.content
-
-            # Decode content
-            try:
-                content_text = content.decode('utf-8')
-            except UnicodeDecodeError:
-                logger.warning("⚠️ UTF-8 decode failed, trying latin-1")
-                content_text = content.decode('latin-1')
-
-            if not content_text.strip():
+            if not content or not content.strip():
                 logger.error(f"❌ Sitemap is empty at {url}")
                 return []
 
-            logger.info(f"📊 Sitemap size: {len(content_text)} bytes")
+            logger.info(f"📊 Sitemap size: {len(content)} bytes")
 
-            # Parse the sitemap
-            urls = await parse_sitemap(content_text, url)
+            # Try to parse as XML first
+            urls = await parse_sitemap(content, url)
+
+            # If XML parsing fails or returns no URLs, try extracting URLs from markdown/HTML
+            if not urls:
+                logger.info("🔄 Attempting to extract URLs from sitemap content using regex")
+                # Extract URLs from the content using regex patterns
+                # Matches both <loc>URL</loc> patterns and plain URLs
+                url_patterns = [
+                    r'<loc>\s*([^\<]+?)\s*</loc>',  # XML <loc> tags
+                    r'https?://[^\s\)\]\}\<]+',  # Plain HTTP(S) URLs
+                ]
+
+                extracted_urls: Set[str] = set()
+                for pattern in url_patterns:
+                    matches = re.finditer(pattern, content, re.IGNORECASE)
+                    for match in matches:
+                        found_url = match.group(1) if match.lastindex else match.group(0)
+                        found_url = found_url.strip()
+                        if found_url:
+                            # Make absolute URL
+                            absolute_url = urljoin(url, found_url)
+                            extracted_urls.add(absolute_url)
+
+                urls = list(extracted_urls)
+                if urls:
+                    logger.info(f"✅ Extracted {len(urls)} URLs from sitemap content using regex")
 
             if not urls:
                 logger.warning(f"⚠️ No URLs extracted from sitemap at {url}")
-                logger.debug(f"Sitemap content preview: {content_text[:500]}")
+                logger.debug(f"Sitemap content preview: {content[:500]}")
 
             return urls
 
-    except httpx.HTTPStatusError as e:
-        logger.error(f"❌ HTTP error fetching sitemap: {e.response.status_code} - {e.response.text[:200]}")
-        return []
     except Exception as e:
-        logger.error(f"❌ Error fetching sitemap: {e}", exc_info=True)
+        logger.error(f"❌ Error fetching/parsing sitemap with crawl4ai: {e}", exc_info=True)
         return []
