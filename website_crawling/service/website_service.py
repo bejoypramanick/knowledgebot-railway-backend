@@ -72,6 +72,44 @@ class WebsiteService:
             parent_path = '/'.join(path_parts[:-1])
             return f"{parsed.scheme}://{parsed.netloc}/{parent_path}"
 
+    @staticmethod
+    def should_include_url(url: str, include_patterns: List[str], exclude_patterns: List[str]) -> bool:
+        """
+        Check if a URL should be included based on include/exclude patterns.
+
+        Args:
+            url: The URL to check
+            include_patterns: List of regex patterns - URL must match at least one (if list is non-empty)
+            exclude_patterns: List of regex patterns - URL must not match any
+
+        Returns:
+            True if URL should be included, False otherwise
+        """
+        # Check exclude patterns first (faster to fail)
+        for pattern in exclude_patterns:
+            try:
+                if re.search(pattern, url):
+                    logger.debug(f"🚫 URL excluded by pattern '{pattern}': {url}")
+                    return False
+            except re.error as e:
+                logger.warning(f"⚠️ Invalid exclude pattern '{pattern}': {e}")
+
+        # Check include patterns (only if provided)
+        if include_patterns:
+            for pattern in include_patterns:
+                try:
+                    if re.search(pattern, url):
+                        logger.debug(f"✓ URL included by pattern '{pattern}': {url}")
+                        return True
+                except re.error as e:
+                    logger.warning(f"⚠️ Invalid include pattern '{pattern}': {e}")
+            # If include patterns are provided and URL doesn't match any, exclude it
+            logger.debug(f"🚫 URL doesn't match any include pattern: {url}")
+            return False
+
+        # No include patterns specified, and URL passed exclude patterns
+        return True
+
     async def scrape_website(self, url: str, options: Dict[str, Any]) -> Dict[str, Any]:
         """
         Scrape a website and optionally crawl linked pages.
@@ -95,8 +133,12 @@ class WebsiteService:
         delay_between_requests = options.get("delay_between_requests", 0)
         max_concurrent = options.get("max_concurrent", 10)
         timeout = options.get("timeout", 30)
+        include_patterns = options.get("include_patterns", []) or []
+        exclude_patterns = options.get("exclude_patterns", []) or []
 
         logger.info(f"🌐 Starting scrape for {url} - max_pages={max_pages}, max_depth={max_depth}, delay={delay_between_requests}s, concurrent={max_concurrent}")
+        if include_patterns or exclude_patterns:
+            logger.info(f"🎯 URL targeting - include: {len(include_patterns)} patterns, exclude: {len(exclude_patterns)} patterns")
 
         # Check for existing record
         existing = await self.scraping_dao.get_existing_website(url)
@@ -127,8 +169,17 @@ class WebsiteService:
                     }
 
                 logger.info(f"📋 Found {len(sitemap_urls)} URLs in sitemap, will scrape up to {max_pages}")
-                # Limit to max_pages
-                urls_to_scrape = sitemap_urls[:max_pages]
+
+                # Filter URLs based on targeting patterns
+                if include_patterns or exclude_patterns:
+                    filtered_urls = [
+                        u for u in sitemap_urls
+                        if self.should_include_url(u, include_patterns, exclude_patterns)
+                    ]
+                    logger.info(f"🎯 Filtered sitemap URLs: {len(filtered_urls)} out of {len(sitemap_urls)}")
+                    urls_to_scrape = filtered_urls[:max_pages]
+                else:
+                    urls_to_scrape = sitemap_urls[:max_pages]
 
                 # Scrape all URLs from sitemap
                 result = await self._scrape_urls_from_sitemap(
@@ -147,12 +198,14 @@ class WebsiteService:
                 if CRAWL4AI_AVAILABLE:
                     result = await self._scrape_with_crawl4ai(
                         url, max_pages, max_depth, timeout,
-                        delay_between_requests, max_concurrent
+                        delay_between_requests, max_concurrent,
+                        include_patterns, exclude_patterns
                     )
                 elif HTTPX_AVAILABLE:
                     result = await self._scrape_with_httpx(
                         url, max_pages, max_depth, timeout,
-                        delay_between_requests, max_concurrent
+                        delay_between_requests, max_concurrent,
+                        include_patterns, exclude_patterns
                     )
                 else:
                     return {
@@ -469,9 +522,13 @@ class WebsiteService:
         max_depth: int,
         timeout: int,
         delay_between_requests: float = 0,
-        max_concurrent: int = 10
+        max_concurrent: int = 10,
+        include_patterns: List[str] = None,
+        exclude_patterns: List[str] = None
     ) -> Dict[str, Any]:
         """Scrape using crawl4ai library with rate limiting support."""
+        include_patterns = include_patterns or []
+        exclude_patterns = exclude_patterns or []
         scraped_data = []  # Track individual page data for citations
         scraped_urls: Set[str] = set()
         urls_to_scrape = [(url, 0)]  # (url, depth)
@@ -519,6 +576,10 @@ class WebsiteService:
                                 if depth < max_depth and len(scraped_urls) < max_pages:
                                     links = extract_links_from_result(result, current_url)
                                     for link in links:
+                                        # Check if URL should be included based on patterns
+                                        if not self.should_include_url(link, include_patterns, exclude_patterns):
+                                            continue
+
                                         if link not in scraped_urls and (link, depth + 1) not in urls_to_scrape:
                                             urls_to_scrape.append((link, depth + 1))
 
@@ -564,9 +625,13 @@ class WebsiteService:
         max_depth: int,
         timeout: int,
         delay_between_requests: float = 0,
-        max_concurrent: int = 10
+        max_concurrent: int = 10,
+        include_patterns: List[str] = None,
+        exclude_patterns: List[str] = None
     ) -> Dict[str, Any]:
         """Fallback scraping using httpx and BeautifulSoup with rate limiting."""
+        include_patterns = include_patterns or []
+        exclude_patterns = exclude_patterns or []
         scraped_data = []  # Track individual page data for citations
         scraped_urls: Set[str] = set()
         urls_to_scrape = [(url, 0)]  # (url, depth)
@@ -635,6 +700,11 @@ class WebsiteService:
                                 # Only follow same-domain links
                                 if parsed.netloc == base_domain:
                                     clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+
+                                    # Check if URL should be included based on patterns
+                                    if not self.should_include_url(clean_url, include_patterns, exclude_patterns):
+                                        continue
+
                                     if clean_url not in scraped_urls:
                                         urls_to_scrape.append((clean_url, depth + 1))
 

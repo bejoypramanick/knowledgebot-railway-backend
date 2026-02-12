@@ -39,6 +39,10 @@ async def scrape_website(request: Request):
         max_depth = body.get("max_depth", 2)
         replace_existing = body.get("replace_existing", False)
 
+        # Get targeting patterns (URL filtering)
+        include_patterns = body.get("include_patterns", []) or []
+        exclude_patterns = body.get("exclude_patterns", []) or []
+
         # Scrape options - combine frontend params with defaults
         options = {
             "url": url,
@@ -51,7 +55,10 @@ async def scrape_website(request: Request):
             "extract_images": body.get("extract_images", False),
             "respect_robots_txt": body.get("respect_robots_txt", True),
             "user_agent": body.get("user_agent", "KnowledgeBot-Crawler/1.0"),
-            "timeout": body.get("timeout", 30)
+            "timeout": body.get("timeout", 30),
+            # URL targeting patterns
+            "include_patterns": include_patterns,
+            "exclude_patterns": exclude_patterns
         }
 
         logger.info(f"Starting scrape for {url} with options: max_pages={options['max_pages']}, max_depth={options['max_depth']}, replace_existing={options['replace_existing']}")
