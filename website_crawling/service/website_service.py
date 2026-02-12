@@ -436,7 +436,6 @@ class WebsiteService:
             for page_data in scraped_data:
                 page_url = page_data["url"]
                 page_text = page_data["text"]
-                page_depth = page_data.get("depth", 0)
                 page_domain = urlparse(page_url).netloc.replace('www.', '')
 
                 # Extract page title from first line or use domain
@@ -445,7 +444,7 @@ class WebsiteService:
                     first_line = page_text.split('\n')[0][:100]
                     page_title = first_line if first_line else page_domain
 
-                logger.info(f"📄 Uploading page: {page_url}")
+                logger.info(f"📄 Uploading sitemap page: {page_url}")
 
                 try:
                     # Upload individual page
@@ -454,92 +453,16 @@ class WebsiteService:
                         url=page_url,  # Use individual page URL
                         title=page_title,
                         user_email=options.get("user_email"),
-                        page_depth=page_depth  # Pass the calculated depth
+                        page_depth=1  # All sitemap URLs are depth 1 (direct children of sitemap)
                     )
 
-                    # Determine parent relationship
-                    parent_id = None
-                    # For sitemap URLs, parent_url is already set in page_data (should be None for depth=0)
-                    parent_url = page_data.get("parent_url")
-
-                    if parent_url and page_depth > 0:
-                        if parent_url in url_to_record_id:
-                            # Parent already exists
-                            parent_id = url_to_record_id[parent_url]
-                            logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to existing parent {parent_url} (id={parent_id})")
-                        else:
-                            # Parent doesn't exist - create all missing parent levels up to root
-                            logger.info(f"📝 Creating parent record hierarchy for {page_url}")
-
-                            # Collect all missing parents in the chain from immediate parent to root
-                            missing_parents = []
-                            current_url = page_url
-                            current_depth = page_depth
-
-                            while current_url:
-                                current_url = self.get_parent_url(current_url)
-                                if not current_url:
-                                    break
-                                current_depth -= 1
-
-                                # Check if this URL already has a record
-                                if current_url not in url_to_record_id:
-                                    missing_parents.append((current_url, current_depth))
-                                else:
-                                    # Found an existing parent - stop here
-                                    logger.debug(f"  Found existing parent at depth {current_depth}: {current_url}")
-                                    break
-
-                            # Create all missing parents (in reverse order from root to immediate parent)
-                            if missing_parents:
-                                for missing_url, missing_depth in reversed(missing_parents):
-                                    if missing_url not in url_to_record_id:
-                                        # Get the parent's parent (which might exist or need to be created)
-                                        grandparent_url = self.get_parent_url(missing_url)
-                                        grandparent_id = url_to_record_id.get(grandparent_url) if grandparent_url else None
-
-                                        parent_record_id = await record_scraped_metadata(
-                                            url=missing_url,
-                                            domain=urlparse(missing_url).netloc.replace('www.', ''),
-                                            title=missing_url,
-                                            content_length=0,
-                                            pages_scraped=0,
-                                            gemini_file_name=None,
-                                            gemini_file_uri=None,
-                                            gemini_state="DISCOVERED",
-                                            scraped_urls=[missing_url],
-                                            scraping_config={
-                                                "max_pages": max_pages,
-                                                "max_depth": max_depth,
-                                                "source": "sitemap",
-                                                "sitemap_url": url,
-                                                "include_patterns": include_patterns,
-                                                "exclude_patterns": exclude_patterns
-                                            },
-                                            file_search_metadata=None,
-                                            parent_id=grandparent_id,
-                                            depth=missing_depth,
-                                            crawl_session_id=crawl_session_id
-                                        )
-                                        url_to_record_id[missing_url] = parent_record_id
-                                        logger.info(f"✅ Created parent record: {missing_url} (depth={missing_depth}, parent_id={grandparent_id})")
-
-                            parent_id = url_to_record_id.get(parent_url)
-                            if parent_id:
-                                logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to parent {parent_url} (id={parent_id})")
-                            else:
-                                logger.warning(f"⚠️ Failed to establish parent for {page_url}: parent {parent_url} not in mapping")
-                    else:
-                        # All sitemap pages should have depth=1 with sitemap as parent
-                        if page_depth == 1 and parent_url:
-                            logger.debug(f"📄 Sitemap child page: {page_url} (depth=1, parent={parent_url})")
-                        else:
-                            logger.warning(f"⚠️ Unexpected sitemap URL structure: {page_url} (depth={page_depth}, parent={parent_url})")
+                    # All sitemap URLs have the sitemap.xml as parent (depth 1)
+                    parent_id = sitemap_record_id
 
                     # Record metadata for individual page
                     record_id = await record_scraped_metadata(
                         url=page_url,  # Individual page URL in database
-                        domain=urlparse(page_url).netloc.replace('www.', ''),
+                        domain=page_domain,
                         title=page_title or page_url,
                         content_length=len(page_text),
                         pages_scraped=1,
@@ -556,8 +479,8 @@ class WebsiteService:
                             "exclude_patterns": exclude_patterns
                         },
                         file_search_metadata=gemini_result.get("file_search_metadata"),
-                        parent_id=parent_id,
-                        depth=page_depth,
+                        parent_id=parent_id,  # Sitemap XML as parent
+                        depth=1,  # All sitemap URLs are depth 1
                         crawl_session_id=crawl_session_id
                     )
 
