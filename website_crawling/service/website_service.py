@@ -441,11 +441,58 @@ class WebsiteService:
                         if not parent_url:
                             parent_url = self.get_parent_url(page_url)
 
-                        if parent_url and parent_url in url_to_record_id:
-                            parent_id = url_to_record_id[parent_url]
-                            logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to parent {parent_url} (id={parent_id})")
+                        if parent_url:
+                            if parent_url in url_to_record_id:
+                                # Parent already exists
+                                parent_id = url_to_record_id[parent_url]
+                                logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to parent {parent_url} (id={parent_id})")
+                            else:
+                                # Parent doesn't exist - create a placeholder parent record
+                                logger.info(f"📝 Creating parent record for {parent_url}")
+                                parent_domain = urlparse(parent_url).netloc.replace('www.', '')
+                                parent_depth = page_depth - 1
+
+                                # Recursively create all missing parent levels
+                                current_parent_url = parent_url
+                                for _ in range(parent_depth):
+                                    if current_parent_url not in url_to_record_id:
+                                        # Create parent record
+                                        parent_record_id = await record_scraped_metadata(
+                                            url=current_parent_url,
+                                            domain=urlparse(current_parent_url).netloc.replace('www.', ''),
+                                            title=current_parent_url,
+                                            content_length=0,
+                                            pages_scraped=0,
+                                            gemini_file_name=None,
+                                            gemini_file_uri=None,
+                                            gemini_state="DISCOVERED",
+                                            scraped_urls=[current_parent_url],
+                                            scraping_config={
+                                                "max_pages": max_pages,
+                                                "max_depth": max_depth,
+                                                "source": "sitemap",
+                                                "sitemap_url": url,
+                                                "include_patterns": include_patterns,
+                                                "exclude_patterns": exclude_patterns
+                                            },
+                                            file_search_metadata=None,
+                                            parent_id=url_to_record_id.get(self.get_parent_url(current_parent_url)),
+                                            depth=parent_depth if current_parent_url == parent_url else parent_depth - 1,
+                                            crawl_session_id=crawl_session_id
+                                        )
+                                        url_to_record_id[current_parent_url] = parent_record_id
+                                        logger.info(f"✅ Created parent record for {current_parent_url} (depth={parent_depth})")
+
+                                    # Move up to grandparent
+                                    current_parent_url = self.get_parent_url(current_parent_url)
+                                    if not current_parent_url:
+                                        break
+
+                                parent_id = url_to_record_id.get(parent_url)
+                                if parent_id:
+                                    logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to newly created parent {parent_url} (id={parent_id})")
                         else:
-                            logger.warning(f"⚠️ Could not find parent for {page_url} at depth {page_depth}. Parent URL: {parent_url}")
+                            logger.warning(f"⚠️ Could not calculate parent for {page_url} at depth {page_depth}")
                     else:
                         # Root page - check if this URL was already processed as a parent
                         if page_url in url_to_record_id:
