@@ -927,7 +927,12 @@ class WebsiteService:
             logger.debug(f"   Sitemap parent: {sitemap_url}")
             logger.debug(f"   Alphabetical order sample: {sorted_urls[:5] if len(sorted_urls) > 5 else sorted_urls}")
 
-            async with AsyncWebCrawler(verbose=False) as crawler:
+            async with AsyncWebCrawler(
+                verbose=False,
+                headless=True,
+                browser_type="chromium",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ) as crawler:
                 idx = 0
                 for url in sorted_urls:
                     if url in scraped_urls:
@@ -940,14 +945,29 @@ class WebsiteService:
                     try:
                         # Apply concurrency limit
                         async with semaphore:
-                            result = await asyncio.wait_for(
-                                crawler.arun(
-                                    url=url,
-                                    bypass_cache=True,
-                                    wait_until='networkidle'
-                                ),
-                                timeout=timeout
-                            )
+                            try:
+                                result = await asyncio.wait_for(
+                                    crawler.arun(
+                                        url=url,
+                                        bypass_cache=True,
+                                        wait_until='networkidle'
+                                    ),
+                                    timeout=timeout
+                                )
+                            except Exception as cookie_error:
+                                if "Invalid cookie fields" in str(cookie_error):
+                                    logger.warning(f"⚠️ Cookie error for {url}, retrying with bypass_cache=False")
+                                    # Retry with different settings to avoid cookie handling
+                                    result = await asyncio.wait_for(
+                                        crawler.arun(
+                                            url=url,
+                                            bypass_cache=False,
+                                            wait_until='domcontentloaded'
+                                        ),
+                                        timeout=timeout
+                                    )
+                                else:
+                                    raise
 
                             if result.success:
                                 scraped_urls.add(url)
@@ -1050,7 +1070,12 @@ class WebsiteService:
         semaphore = asyncio.Semaphore(max_concurrent)
 
         try:
-            async with AsyncWebCrawler(verbose=False) as crawler:
+            async with AsyncWebCrawler(
+                verbose=False,
+                headless=True,
+                browser_type="chromium",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ) as crawler:
                 # BFS traversal: process all URLs at depth N before depth N+1
                 while urls_to_scrape and len(scraped_urls) < max_pages:
                     current_url, depth = urls_to_scrape.pop(0)
@@ -1063,10 +1088,25 @@ class WebsiteService:
                     try:
                         # Apply concurrency limit
                         async with semaphore:
-                            result = await asyncio.wait_for(
-                                crawler.arun(url=current_url),
-                                timeout=timeout
-                            )
+                            try:
+                                result = await asyncio.wait_for(
+                                    crawler.arun(url=current_url),
+                                    timeout=timeout
+                                )
+                            except Exception as cookie_error:
+                                if "Invalid cookie fields" in str(cookie_error):
+                                    logger.warning(f"⚠️ Cookie error for {current_url}, retrying with different settings")
+                                    # Retry with different settings to avoid cookie handling
+                                    result = await asyncio.wait_for(
+                                        crawler.arun(
+                                            url=current_url,
+                                            bypass_cache=False,
+                                            wait_until='domcontentloaded'
+                                        ),
+                                        timeout=timeout
+                                    )
+                                else:
+                                    raise
 
                             if result.success:
                                 scraped_urls.add(current_url)
