@@ -367,7 +367,6 @@ class WebsiteService:
                         url=page_url,  # Individual page URL in database
                         domain=urlparse(page_url).netloc.replace('www.', ''),
                         title=page_title or page_url,
-                        title=page_title,
                         content_length=len(page_text),
                         pages_scraped=1,
                         gemini_file_name=gemini_result.get("file_name"),
