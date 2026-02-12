@@ -977,57 +977,48 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
     # Phase 1: Delete all documents from FileSearch store
     if genai_client:
         try:
-            # Use FileSearchStoreManager to get store by display name (same pattern as file uploads)
-            from shared.file_search_store_manager import FileSearchStoreManager
-            
-            file_search_store_name = FileSearchStoreManager.get_or_create_store(
-                genai_client, 
-                store_name="knowledgebot-search-store"
-            )
-            
-            logger.warning(f"📤 Attempting to clear FileSearch store: {file_search_store_name}")
+            # Get store display name from settings (same pattern as other services)
+            store_display_name = settings.gemini_file_search_store_name
+            if not store_display_name:
+                logger.warning("⚠️ GEMINI_FILE_SEARCH_STORE_NAME not configured - skipping FileSearch deletion")
+            else:
+                # Look up store by display name
+                from shared.file_search import get_file_search_store_by_display_name
 
-            try:
-                # Step 1: Check if store exists first
-                store_exists = False
-                try:
-                    store = genai_client.file_search_stores.get(name=file_search_store_name)
-                    store_exists = True
-                    logger.warning(f"✅ Found FileSearch store: {file_search_store_name}")
-                except Exception as get_error:
-                    if "404" in str(get_error) or "not found" in str(get_error).lower():
-                        logger.warning(f"⚠️ FileSearch store not found: {file_search_store_name} - may already be deleted")
-                        store_exists = False
-                    else:
-                        logger.warning(f"⚠️ Error checking FileSearch store existence: {get_error}")
-                
-                # Step 2: Delete the entire FileSearch store with force=True (modern approach)
-                if store_exists:
-                    logger.warning(f"🗑️ Deleting entire FileSearch store with force=True: {file_search_store_name}")
-                    genai_client.file_search_stores.delete(
-                        name=file_search_store_name, 
-                        config={'force': True}
-                    )
-                    logger.warning(f"✅ FileSearch store deleted successfully")
-                    nuke_results["filestore_documents_deleted"] = "ALL"
+                file_search_store_name = get_file_search_store_by_display_name(
+                    genai_client,
+                    display_name=store_display_name
+                )
+
+                if not file_search_store_name:
+                    logger.warning(f"⚠️ FileSearch store '{store_display_name}' not found")
                 else:
-                    logger.warning(f"ℹ️ FileSearch store already deleted or never existed: {file_search_store_name}")
-                    nuke_results["filestore_documents_deleted"] = "ALREADY_DELETED"
+                    logger.warning(f"📤 Attempting to delete FileSearch store: {file_search_store_name}")
 
-                # Step 3: Clear cache and recreate the store for future use (only if we deleted it)
-                FileSearchStoreManager.clear_cache()  # Clear cache after deletion
-                if store_exists:
-                    logger.info(f"🔄 Recreating FileSearch store for future use...")
-                    recreated_store = genai_client.file_search_stores.create()
-                    logger.info(f"✅ FileSearch store recreated: {recreated_store.name}")
-                    nuke_results["filestore_recreated"] = True
-                else:
-                    nuke_results["filestore_recreated"] = False
+                    try:
+                        # Delete the entire FileSearch store with force=True
+                        logger.warning(f"🗑️ Deleting entire FileSearch store with force=True: {file_search_store_name}")
+                        genai_client.file_search_stores.delete(
+                            name=file_search_store_name,
+                            config={'force': True}
+                        )
+                        logger.warning(f"✅ FileSearch store deleted successfully")
+                        nuke_results["filestore_documents_deleted"] = "ALL"
 
-            except Exception as e:
-                error_msg = f"Error clearing FileSearch store: {str(e)}"
-                logger.error(f"❌ {error_msg}")
-                nuke_results["filestore_errors"].append(error_msg)
+                        # Recreate the store with proper display_name for future use
+                        logger.info(f"🔄 Recreating FileSearch store with display_name: {store_display_name}")
+                        recreated_store = genai_client.file_search_stores.create(
+                            displayName=store_display_name
+                        )
+                        logger.info(f"✅ FileSearch store recreated: {recreated_store.name}")
+                        logger.info(f"   Display name: {getattr(recreated_store, 'display_name', 'N/A')}")
+                        nuke_results["filestore_recreated"] = True
+
+                    except Exception as e:
+                        error_msg = f"Error deleting/recreating FileSearch store: {str(e)}"
+                        logger.error(f"❌ {error_msg}")
+                        nuke_results["filestore_errors"].append(error_msg)
+
         except Exception as e:
             error_msg = f"Error accessing FileSearch: {str(e)}"
             logger.error(f"❌ {error_msg}")
