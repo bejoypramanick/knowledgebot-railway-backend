@@ -714,9 +714,16 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
                         logger.info(f"✅ [POST-DELETE VERIFICATION] Document successfully removed from FileSearch store")
 
                 except Exception as fs_error:
-                    if "404" in str(fs_error) or "not found" in str(fs_error).lower():
+                    error_str = str(fs_error).lower()
+                    if "404" in str(fs_error) or "not found" in error_str:
                         deletion_results["file_search"]["error"] = "Document not found (already deleted)"
                         logger.warning(f"⚠️ [FILESEARCH] Document already deleted or not found: {document_name}")
+                    elif "failed_precondition" in error_str or "cannot delete non-empty" in error_str:
+                        # Document is non-empty - we'll just proceed with DB deletion
+                        # The database record will be deleted, making this FileSearch doc orphaned
+                        logger.warning(f"⚠️ [FILESEARCH] Document is non-empty, skipping FileSearch deletion: {document_name}")
+                        logger.info(f"   Database record will be deleted, orphaning this FileSearch document")
+                        deletion_results["file_search"]["error"] = "Non-empty document (will be orphaned)"
                     else:
                         deletion_results["file_search"]["error"] = str(fs_error)
                         logger.error(f"❌ [FILESEARCH] Error deleting document: {fs_error}")
@@ -920,8 +927,13 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
                             filesearch_deleted += 1
                             logger.info(f"✅ Deleted from FileSearch: {document_name}")
                     except Exception as e:
-                        if "404" in str(e) or "not found" in str(e).lower():
+                        error_str = str(e).lower()
+                        if "404" in str(e) or "not found" in error_str:
                             logger.warning(f"⚠️ FileSearch document already deleted for page {record['id']}: {e}")
+                        elif "failed_precondition" in error_str or "cannot delete non-empty" in error_str:
+                            # Document is non-empty - skip deletion and continue
+                            # Database record will be deleted, orphaning the FileSearch doc
+                            logger.warning(f"⚠️ FileSearch document is non-empty for page {record['id']}, will be orphaned: {document_name}")
                         else:
                             error_msg = f"Could not delete from FileSearch for page {record['id']}: {e}"
                             logger.error(f"❌ {error_msg}")
