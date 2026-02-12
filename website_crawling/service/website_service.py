@@ -145,6 +145,58 @@ class WebsiteService:
             logger.error(f"❌ Failed to retrieve crawl patterns for website {website_id}: {e}")
             return {"include_patterns": [], "exclude_patterns": []}
 
+    @staticmethod
+    def clean_content(content: str) -> str:
+        """
+        Remove navigation elements, search boxes, and redundant links from scraped content.
+
+        Removes:
+        - Jump to content links (e.g., [Jump to content](#bodyContent))
+        - Search this site prompts
+        - Navigation menus and headers
+        - Skip to main content links
+        - Advertisement sections
+        - Social media follow buttons
+        - Subscribe prompts
+
+        Args:
+            content: Raw HTML or markdown content from scraper
+
+        Returns:
+            Cleaned content with navigation artifacts removed
+        """
+        if not content:
+            return content
+
+        # Remove markdown-style jump links (e.g., [Jump to content](url))
+        content = re.sub(r'\[\s*(?:Jump|Skip|Go)\s+(?:to\s+)?(?:content|main|body|article|text)\s*\]\s*\([^)]*\)', '', content, flags=re.IGNORECASE)
+
+        # Remove "Search this site" and similar prompts
+        content = re.sub(r'Search\s+(?:this\s+)?site.*?(?:\n|$)', '', content, flags=re.IGNORECASE | re.MULTILINE)
+        content = re.sub(r'Search\s+the\s+site.*?(?:\n|$)', '', content, flags=re.IGNORECASE | re.MULTILINE)
+
+        # Remove navigation section markers (common patterns)
+        content = re.sub(r'--- Navigation.*?---', '', content, flags=re.IGNORECASE)
+        content = re.sub(r'--- Menu.*?---', '', content, flags=re.IGNORECASE)
+        content = re.sub(r'--- Header.*?---', '', content, flags=re.IGNORECASE)
+
+        # Remove "Subscribe" and "Follow" prompts
+        content = re.sub(r'(?:Subscribe|Follow|Sign up).*?(?:button|now|here).*?(?:\n|$)', '', content, flags=re.IGNORECASE)
+
+        # Remove advertisement markers
+        content = re.sub(r'\[(?:AD|Advertisement|Ad)\].*?(?:\n|$)', '', content, flags=re.IGNORECASE)
+
+        # Remove common navigation link patterns
+        content = re.sub(r'\[(?:Home|Back|Previous|Next|Top|Up)\]\([^)]*\)', '', content, flags=re.IGNORECASE)
+
+        # Remove multiple consecutive blank lines (keep content compact)
+        content = re.sub(r'\n\n\n+', '\n\n', content)
+
+        # Remove leading/trailing whitespace
+        content = content.strip()
+
+        return content
+
     async def scrape_website(self, url: str, options: Dict[str, Any]) -> Dict[str, Any]:
         """
         Scrape a website and optionally crawl linked pages.
@@ -771,6 +823,9 @@ class WebsiteService:
                 for item in scraped_data
             ])
 
+            # Clean content to remove navigation artifacts and search prompts
+            combined_content = self.clean_content(combined_content)
+
             return {
                 "success": len(scraped_urls) > 0,
                 "content": combined_content,
@@ -873,6 +928,9 @@ class WebsiteService:
                 f"\n\n--- Page: {item['url']} ---\n\n{item['text']}"
                 for item in scraped_data
             ])
+
+            # Clean content to remove navigation artifacts and search prompts
+            combined_content = self.clean_content(combined_content)
 
             return {
                 "success": len(scraped_urls) > 0,
