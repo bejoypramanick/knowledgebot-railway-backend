@@ -201,21 +201,18 @@ async def extract_urls_from_sitemap(url: str) -> List[str]:
                         found_url = match.group(1) if match.lastindex else match.group(0)
                         found_url = found_url.strip()
                         if found_url:
-                            # Validate URL format - ensure it's a proper URL without artifacts
-                            # Check for common sitemap artifacts that indicate malformed URLs
-                            if (re.search(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}', found_url) or  # Timestamps
-                                re.search(r'(monthly|weekly|daily|yearly|always)$', found_url) or      # Changefreq values
-                                re.search(r'[0-9]+\.[0-9]+$', found_url) or                           # Priority values
-                                re.search(r'[<>\{\}\[\]\(\)]', found_url)):                           # XML/HTML artifacts
-                                logger.warning(f"⚠️ Skipping malformed URL with artifacts: {found_url[:100]}...")
-                                continue
+                            # Clean the URL by removing sitemap metadata after common file extensions
+                            # This handles cases like: https://example.com/page.html2024-11-21T11:30:35.863Z0.5monthly
+                            cleaned_url = re.sub(r'(\.html?|\.php|\.asp|\.aspx|\.jsp|\.htm)[^<>\{\}\[\]\(\)\s]*', r'\1', found_url)
                             
                             # Make absolute URL
-                            absolute_url = urljoin(url, found_url)
+                            absolute_url = urljoin(url, cleaned_url)
                             
                             # Final validation - ensure it's a proper HTTP/HTTPS URL
                             if re.match(r'^https?://[a-zA-Z0-9\.\-]+\.[a-zA-Z]{2,}', absolute_url):
                                 extracted_urls.add(absolute_url)
+                                if found_url != cleaned_url:
+                                    logger.info(f"🧹 Cleaned URL: {found_url[:80]}... → {absolute_url}")
                             else:
                                 logger.warning(f"⚠️ Invalid URL format: {absolute_url[:100]}...")
 
