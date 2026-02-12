@@ -246,7 +246,11 @@ async def get_upload_constraints(request: Request = None):
 @router.delete("/files/{file_id}")
 async def delete_file(file_id: str, request: Request = None):
     """
-    Delete a file with transactional safety.
+    Delete a file, website, or sitemap with appropriate handler.
+
+    This endpoint detects the record type and routes to:
+    - delete_file_logic for uploaded files
+    - delete_website_hierarchy for scraped websites/sitemaps with cascade delete
 
     Transaction Safety:
     - FileStore deletion attempted first
@@ -255,19 +259,47 @@ async def delete_file(file_id: str, request: Request = None):
     - If database transaction fails, it rolls back automatically
     """
     try:
-        # Use the service layer for deletion (handles both Gemini and DB with transactions)
-        result = await delete_file_logic(file_id)
+        if not file_id:
+            raise HTTPException(status_code=400, detail="file_id is required")
+
+        # First, determine what type of record this is
+        from shared.db import get_db_connection
+
+        async with get_db_connection() as conn:
+            # Try to find in file_uploads first
+            file_record = await conn.fetchrow(
+                "SELECT id FROM file_uploads WHERE id = $1",
+                int(file_id) if file_id.isdigit() else file_id
+            )
+
+            if file_record:
+                # It's an uploaded file - use file deletion logic
+                logger.info(f"📄 Deleting uploaded file: {file_id}")
+                result = await delete_file_logic(file_id)
+            else:
+                # Check if it's a scraped website/sitemap
+                website_record = await conn.fetchrow(
+                    "SELECT id FROM scraped_websites WHERE id = $1",
+                    int(file_id) if file_id.isdigit() else file_id
+                )
+
+                if website_record:
+                    # It's a website/sitemap - use hierarchy deletion with cascade delete
+                    logger.info(f"🌐 Deleting website/sitemap with children: {file_id}")
+                    result = await delete_website_hierarchy(file_id)
+                else:
+                    raise HTTPException(status_code=404, detail="File or website not found")
 
         return {
             "success": result.get("success", True),
-            "message": result.get("message", "File deleted successfully"),
+            "message": result.get("message", "Item deleted successfully"),
             "details": result.get("details"),
             "transaction_status": result.get("transaction_status", "unknown")
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting file: {e}")
+        logger.error(f"Error deleting item: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/websites/{website_id}/hierarchy")
