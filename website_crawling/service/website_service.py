@@ -448,7 +448,8 @@ class WebsiteService:
                             content=page_text,
                             url=page_url,  # Use individual page URL
                             title=page_title,
-                            user_email=options.get("user_email")
+                            user_email=options.get("user_email"),
+                            page_depth=page_depth  # Add missing page_depth parameter
                         )
 
                         # Determine parent relationship
@@ -534,7 +535,8 @@ class WebsiteService:
                     content=content_for_upload,
                     url=url,
                     title=title,
-                    user_email=options.get("user_email")
+                    user_email=options.get("user_email"),
+                    page_depth=0  # Single page has depth 0
                 )
 
                 # Record metadata to database
