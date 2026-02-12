@@ -219,15 +219,24 @@ async def get_upload_constraints(request: Request = None):
 
 @router.delete("/files/{file_id}")
 async def delete_file(file_id: str, request: Request = None):
-    """Delete a file"""
+    """
+    Delete a file with transactional safety.
+
+    Transaction Safety:
+    - FileStore deletion attempted first
+    - Database deletion happens in a transaction
+    - If FileStore fails, database is not touched
+    - If database transaction fails, it rolls back automatically
+    """
     try:
-        # Use the service layer for deletion (handles both Gemini and DB)
+        # Use the service layer for deletion (handles both Gemini and DB with transactions)
         result = await delete_file_logic(file_id)
 
         return {
             "success": result.get("success", True),
             "message": result.get("message", "File deleted successfully"),
-            "details": result.get("details")
+            "details": result.get("details"),
+            "transaction_status": result.get("transaction_status", "unknown")
         }
     except HTTPException:
         raise
@@ -240,26 +249,48 @@ async def nuke_everything(request: Request = None):
     """
     NUCLEAR DELETE: Remove all documents from FileSearch store and all database records.
     This is a destructive operation and should only be called with explicit admin confirmation.
+
+    Transaction Safety:
+    - If FileStore deletion fails, database is NOT touched
+    - Database deletion happens in a transaction - rolls back if it fails
+    - Returns detailed status of what succeeded/failed
     """
     try:
         # Log the nuclear delete for audit purposes
         user_email = request.headers.get("X-User-Email", "unknown") if request else "unknown"
         logger.critical(f"🚨 NUCLEAR DELETE INITIATED by {user_email}")
 
-        # Execute the nuke
+        # Execute the nuke with transactional safety
         result = await nuke_filestore_and_database()
 
-        logger.critical(f"🚨 NUCLEAR DELETE COMPLETED - All data removed")
-        return {
-            "success": result.get("success", True),
-            "message": result.get("message", "Nuclear delete completed"),
-            "details": result.get("details")
-        }
+        transaction_status = result.get("transaction_status", "unknown")
+        success = result.get("success", False)
+
+        if success:
+            logger.critical(f"🚨 NUCLEAR DELETE SUCCESSFUL - All data removed (transaction: {transaction_status})")
+            # Return 200 with success details
+            return {
+                "success": True,
+                "message": result.get("message"),
+                "details": result.get("details"),
+                "transaction_status": transaction_status
+            }
+        else:
+            # Transaction failed or was aborted - return error
+            logger.critical(f"🚨 NUCLEAR DELETE FAILED - Transaction status: {transaction_status}")
+            logger.critical(f"   Message: {result.get('message')}")
+
+            # Return 500 error with detailed message
+            raise HTTPException(
+                status_code=500,
+                detail=f"{result.get('message')} (Transaction: {transaction_status})"
+            )
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error during nuclear delete: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Nuclear delete failed with error: {str(e)}")
 
 # =================================
 # HEALTH ENDPOINTS

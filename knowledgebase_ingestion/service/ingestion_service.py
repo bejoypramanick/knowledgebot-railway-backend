@@ -789,50 +789,93 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
         else:
             logger.warning(f"⚠️ [GEMINI] No gemini_file_name provided, skipping raw file deletion")
 
-    # Delete from DB
+    # Delete from DB within a transaction - only if FileStore deletion succeeded or was skipped
     if table_name != "gemini_only":
-        try:
-            await file_service.delete_file_record(file_id, table_name)
-            deletion_results["postgres"]["success"] = True
-            logger.info(f"✅ [DATABASE] Deleted from {table_name}: ID={file_id}")
-        except Exception as e:
-            deletion_results["postgres"]["error"] = str(e)
-            logger.error(f"❌ [DATABASE] Error deleting from {table_name}: {e}")
+        # Check if FileStore deletion was critical and failed
+        file_search_was_attempted = genai_client and file_search_metadata
+        file_search_failed = file_search_was_attempted and deletion_results["file_search"]["success"] == False
+
+        if file_search_failed:
+            # FileStore deletion was attempted but failed - abort database deletion
+            deletion_results["postgres"]["error"] = "Aborting database deletion: FileStore deletion failed. Database unchanged."
+            logger.error(f"❌ [TRANSACTION] Aborting database deletion due to FileStore failure. Database remains unchanged.")
+        else:
+            # FileStore deletion succeeded or was not applicable - proceed with database deletion in a transaction
+            try:
+                from shared.db import get_db_connection
+
+                async with get_db_connection() as conn:
+                    # Start explicit transaction
+                    async with conn.transaction():
+                        await file_service.delete_file_record(file_id, table_name)
+                        deletion_results["postgres"]["success"] = True
+                        logger.info(f"✅ [DATABASE] Deleted from {table_name}: ID={file_id} (transaction committed)")
+            except Exception as e:
+                # Transaction automatically rolled back on exception
+                deletion_results["postgres"]["error"] = f"Database deletion failed and rolled back: {str(e)}"
+                logger.error(f"❌ [DATABASE] Transaction rolled back - Error deleting from {table_name}: {e}")
 
     # Determine success
     db_success = deletion_results["postgres"].get("success", False)
+    db_error = deletion_results["postgres"].get("error")
     file_search_success = deletion_results["file_search"].get("success", False)
+    file_search_error = deletion_results["file_search"].get("error")
     gemini_success = deletion_results["gemini"].get("success", False)
+    gemini_error = deletion_results["gemini"].get("error")
 
     logger.info(f"📊 Deletion Summary for {original_filename}:")
     logger.info(f"   FileSearch Store: {file_search_success}")
     logger.info(f"   Gemini Raw File: {gemini_success}")
     logger.info(f"   Database: {db_success}")
 
-    # Check for complete success
-    if db_success and (file_search_success or gemini_success or deletion_results["gemini"].get("error") == "Gemini client not available"):
-        logger.info(f"✅ [SUCCESS] File {original_filename} completely removed from all locations")
+    # Check for transactional success - all critical operations must succeed
+    all_operations_succeeded = db_success and (file_search_success or gemini_success or table_name == "gemini_only")
+
+    if all_operations_succeeded:
+        # Complete success - file removed from all locations, database transaction committed
+        logger.info(f"✅ [TRANSACTION SUCCESS] File {original_filename} completely removed from all locations")
         return {
             "success": True,
-            "message": "File deleted successfully from FileSearch, Gemini, and database (all embeddings removed)",
-            "details": deletion_results
+            "message": f"File deleted successfully (all embeddings removed, database transaction committed)",
+            "details": deletion_results,
+            "transaction_status": "committed"
         }
-    elif db_success or file_search_success or gemini_success:
-        logger.warning(f"⚠️ [PARTIAL] File {original_filename} removed from some locations:")
-        logger.warning(f"   FileSearch: {deletion_results['file_search'].get('success', False)}")
-        logger.warning(f"   Gemini: {deletion_results['gemini'].get('success', False)}")
-        logger.warning(f"   Database: {deletion_results['postgres'].get('success', False)}")
+    elif db_error and "Aborting" in db_error:
+        # FileStore deletion failed, database was NOT touched
+        logger.error(f"❌ [TRANSACTION ABORTED] {db_error}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Deletion failed: FileStore deletion failed - database unchanged. Error: {file_search_error or gemini_error}"
+        )
+    elif db_error and "rolled back" in db_error.lower():
+        # Database deletion failed, transaction was rolled back
+        logger.error(f"❌ [TRANSACTION ROLLED BACK] {db_error}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Deletion failed: Database deletion failed and rolled back - FileStore changes remain. Please contact support. Error: {db_error}"
+        )
+    elif db_success and (file_search_success or gemini_success):
+        # Partial success but database was committed
+        logger.warning(f"⚠️ [PARTIAL SUCCESS] File {original_filename} partially removed")
+        logger.warning(f"   Database: ✅ Committed")
+        logger.warning(f"   FileSearch: {file_search_success}")
+        logger.warning(f"   Gemini: {gemini_success}")
         return {
             "success": True,
-            "message": "File deletion processed (removed from some locations)",
-            "details": deletion_results
+            "message": f"File deleted from database. FileSearch/Gemini status: FileSearch={file_search_success}, Gemini={gemini_success}",
+            "details": deletion_results,
+            "transaction_status": "committed"
         }
     else:
+        # Complete failure
         logger.error(f"❌ [FAILURE] Could not delete {original_filename} from any location!")
-        logger.error(f"   FileSearch error: {deletion_results['file_search'].get('error')}")
-        logger.error(f"   Gemini error: {deletion_results['gemini'].get('error')}")
-        logger.error(f"   Database error: {deletion_results['postgres'].get('error')}")
-        raise HTTPException(status_code=500, detail="Failed to delete file from FileSearch, Gemini, and database")
+        logger.error(f"   FileSearch error: {file_search_error}")
+        logger.error(f"   Gemini error: {gemini_error}")
+        logger.error(f"   Database error: {db_error}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete file. FileSearch: {file_search_error or 'N/A'}, Gemini: {gemini_error or 'N/A'}, Database: {db_error or 'N/A'}"
+        )
 
 
 async def process_single_file_delete(file_id: str) -> BatchDeleteItem:
@@ -917,34 +960,85 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
     else:
         logger.warning("⚠️ Gemini client not available - skipping FileSearch deletion")
 
-    # Phase 2: Delete all records from database
-    try:
-        from shared.db import get_db_connection
+    # Phase 2: Delete all records from database within a transaction
+    # Only proceed if FileStore deletion succeeded or had no errors
+    if nuke_results["filestore_errors"]:
+        # FileStore deletion had errors - abort database deletion
+        logger.error(f"❌ [TRANSACTION ABORTED] FileStore deletion had errors. Aborting database deletion to maintain consistency.")
+        logger.error(f"   FileStore errors: {nuke_results['filestore_errors']}")
+        nuke_results["database_errors"].append("Aborted: FileStore deletion failed. Database unchanged.")
+        nuke_results["transaction_status"] = "aborted"
+    else:
+        # FileStore deletion succeeded or was skipped - proceed with database deletion in transaction
+        try:
+            from shared.db import get_db_connection
 
-        async with get_db_connection() as conn:
-            # Delete all file_uploads
-            logger.warning("🗑️ Deleting all file_uploads records...")
-            deleted_files = await conn.execute("DELETE FROM file_uploads")
-            nuke_results["database_files_deleted"] = int(deleted_files.split()[-1]) if deleted_files else 0
-            logger.warning(f"✅ Deleted {nuke_results['database_files_deleted']} file uploads from database")
+            async with get_db_connection() as conn:
+                # Start explicit transaction for database deletion
+                async with conn.transaction():
+                    logger.warning("🗑️ Deleting all file_uploads records within transaction...")
+                    deleted_files = await conn.execute("DELETE FROM file_uploads")
+                    nuke_results["database_files_deleted"] = int(deleted_files.split()[-1]) if deleted_files else 0
+                    logger.warning(f"✅ Deleted {nuke_results['database_files_deleted']} file uploads from database")
 
-            # Delete all scraped_websites
-            logger.warning("🗑️ Deleting all scraped_websites records...")
-            deleted_scrapes = await conn.execute("DELETE FROM scraped_websites")
-            nuke_results["database_scrapes_deleted"] = int(deleted_scrapes.split()[-1]) if deleted_scrapes else 0
-            logger.warning(f"✅ Deleted {nuke_results['database_scrapes_deleted']} scraped websites from database")
+                    # Delete all scraped_websites
+                    logger.warning("🗑️ Deleting all scraped_websites records within transaction...")
+                    deleted_scrapes = await conn.execute("DELETE FROM scraped_websites")
+                    nuke_results["database_scrapes_deleted"] = int(deleted_scrapes.split()[-1]) if deleted_scrapes else 0
+                    logger.warning(f"✅ Deleted {nuke_results['database_scrapes_deleted']} scraped websites from database")
 
-    except Exception as e:
-        error_msg = f"Error deleting database records: {str(e)}"
-        logger.error(f"❌ {error_msg}")
-        nuke_results["database_errors"].append(error_msg)
+                # Transaction automatically commits on successful completion
+                logger.warning(f"✅ Database transaction committed - all records deleted")
+                nuke_results["transaction_status"] = "committed"
 
-    # Summary
+        except Exception as e:
+            # Transaction automatically rolled back on exception
+            error_msg = f"Database transaction failed and rolled back: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            nuke_results["database_errors"].append(error_msg)
+            nuke_results["transaction_status"] = "rolled_back"
+
+    # Summary and determine final status
+    transaction_status = nuke_results.get("transaction_status", "unknown")
+    has_db_errors = len(nuke_results["database_errors"]) > 0
+    has_fs_errors = len(nuke_results["filestore_errors"]) > 0
+
     logger.warning("⚠️⚠️⚠️ NUCLEAR DELETE COMPLETED ⚠️⚠️⚠️")
-    logger.warning(f"📊 Results: {nuke_results['database_files_deleted']} files + {nuke_results['database_scrapes_deleted']} scrapes deleted from DB")
 
-    return {
-        "success": True,
-        "message": "Nuclear delete completed - all data removed from FileStore and database",
-        "details": nuke_results
-    }
+    if transaction_status == "committed":
+        # Complete success - both FileStore and database cleared
+        logger.warning(f"✅ SUCCESS: FileStore and database fully cleared")
+        logger.warning(f"📊 Deleted: {nuke_results['database_files_deleted']} files, {nuke_results['database_scrapes_deleted']} scrapes")
+        return {
+            "success": True,
+            "message": f"Nuclear delete successful: Deleted {nuke_results['database_files_deleted']} uploaded files and {nuke_results['database_scrapes_deleted']} scraped websites from database. FileStore cleared.",
+            "details": nuke_results,
+            "transaction_status": "committed"
+        }
+    elif transaction_status == "rolled_back":
+        # Database transaction failed - rolled back, but FileStore may have been modified
+        logger.error(f"❌ PARTIAL FAILURE: FileStore was cleared but database deletion rolled back")
+        return {
+            "success": False,
+            "message": f"Nuclear delete FAILED: FileStore was cleared but database deletion failed and was rolled back. Please contact support. Error: {nuke_results['database_errors'][0] if nuke_results['database_errors'] else 'Unknown'}",
+            "details": nuke_results,
+            "transaction_status": "rolled_back"
+        }
+    elif transaction_status == "aborted":
+        # FileStore deletion failed, database was not touched
+        logger.error(f"❌ FAILURE: FileStore deletion failed, database remains unchanged")
+        return {
+            "success": False,
+            "message": f"Nuclear delete FAILED: FileStore deletion failed. Database unchanged. Please contact support. Error: {nuke_results['filestore_errors'][0] if nuke_results['filestore_errors'] else 'Unknown'}",
+            "details": nuke_results,
+            "transaction_status": "aborted"
+        }
+    else:
+        # Unknown state
+        logger.error(f"⚠️ Unknown transaction state: {transaction_status}")
+        return {
+            "success": False,
+            "message": f"Nuclear delete ended in unknown state. Please review the logs. FileStore errors: {nuke_results['filestore_errors']}, Database errors: {nuke_results['database_errors']}",
+            "details": nuke_results,
+            "transaction_status": "unknown"
+        }
