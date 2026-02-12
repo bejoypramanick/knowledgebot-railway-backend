@@ -90,6 +90,11 @@ async def process_with_gemini(
                 raise Exception("GEMINI_FILE_SEARCH_STORE_NAME environment variable is required")
 
             logger.info(f"📦 Looking up FileSearch store: {file_search_store_display_name}")
+
+            # Clear cache to ensure we get fresh store info (avoid stale cached IDs)
+            from shared.file_search import clear_store_cache
+            clear_store_cache()
+
             file_search_store_name = get_file_search_store_by_display_name(
                 genai_client,
                 display_name=file_search_store_display_name

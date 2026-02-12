@@ -55,7 +55,10 @@ async def upload_content_to_gemini(
 
     logger.info(f"📦 Looking up FileSearch store: {file_search_store_display_name}")
 
-    # Resolve store name to actual store ID
+    # Resolve store name to actual store ID (with fresh lookup, not cached)
+    from shared.file_search import clear_store_cache
+    clear_store_cache()  # Clear cache to ensure we get fresh store info
+
     file_search_store_name = get_file_search_store_by_display_name(
         genai_client,
         display_name=file_search_store_display_name
