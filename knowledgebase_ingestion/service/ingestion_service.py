@@ -1022,56 +1022,57 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
     # Phase 1: Delete all documents from FileSearch store
     if genai_client:
         try:
-            from shared.file_search import get_file_search_store_by_display_name
-
-            file_search_store_name = get_file_search_store_by_display_name(
-                genai_client,
-                display_name="knowledgebot-search-store"
+            # Use FileSearchStoreManager to get store by display name (same pattern as file uploads)
+            from shared.file_search_store_manager import FileSearchStoreManager
+            
+            file_search_store_name = FileSearchStoreManager.get_or_create_store(
+                genai_client, 
+                store_name="knowledgebot-search-store"
             )
+            
+            logger.warning(f"📤 Attempting to clear FileSearch store: {file_search_store_name}")
 
-            if file_search_store_name:
-                logger.warning(f"📤 Attempting to clear FileSearch store: {file_search_store_name}")
-
+            try:
+                # Step 1: Check if store exists first
+                store_exists = False
                 try:
-                    # Step 1: Check if store exists first
-                    store_exists = False
-                    try:
-                        store = genai_client.file_search_stores.get(name=file_search_store_name)
-                        store_exists = True
-                        logger.warning(f"✅ Found FileSearch store: {file_search_store_name}")
-                    except Exception as get_error:
-                        if "404" in str(get_error) or "not found" in str(get_error).lower():
-                            logger.warning(f"⚠️ FileSearch store not found: {file_search_store_name} - may already be deleted")
-                            store_exists = False
-                        else:
-                            logger.warning(f"⚠️ Error checking FileSearch store existence: {get_error}")
-                    
-                    # Step 2: Delete the entire FileSearch store with force=True (modern approach)
-                    if store_exists:
-                        logger.warning(f"🗑️ Deleting entire FileSearch store with force=True: {file_search_store_name}")
-                        genai_client.file_search_stores.delete(
-                            name=file_search_store_name, 
-                            config={'force': True}
-                        )
-                        logger.warning(f"✅ FileSearch store deleted successfully")
-                        nuke_results["filestore_documents_deleted"] = "ALL"
+                    store = genai_client.file_search_stores.get(name=file_search_store_name)
+                    store_exists = True
+                    logger.warning(f"✅ Found FileSearch store: {file_search_store_name}")
+                except Exception as get_error:
+                    if "404" in str(get_error) or "not found" in str(get_error).lower():
+                        logger.warning(f"⚠️ FileSearch store not found: {file_search_store_name} - may already be deleted")
+                        store_exists = False
                     else:
-                        logger.warning(f"ℹ️ FileSearch store already deleted or never existed: {file_search_store_name}")
-                        nuke_results["filestore_documents_deleted"] = "ALREADY_DELETED"
+                        logger.warning(f"⚠️ Error checking FileSearch store existence: {get_error}")
+                
+                # Step 2: Delete the entire FileSearch store with force=True (modern approach)
+                if store_exists:
+                    logger.warning(f"🗑️ Deleting entire FileSearch store with force=True: {file_search_store_name}")
+                    genai_client.file_search_stores.delete(
+                        name=file_search_store_name, 
+                        config={'force': True}
+                    )
+                    logger.warning(f"✅ FileSearch store deleted successfully")
+                    nuke_results["filestore_documents_deleted"] = "ALL"
+                else:
+                    logger.warning(f"ℹ️ FileSearch store already deleted or never existed: {file_search_store_name}")
+                    nuke_results["filestore_documents_deleted"] = "ALREADY_DELETED"
 
-                    # Step 3: Recreate the store for future use (only if we deleted it)
-                    if store_exists:
-                        logger.info(f"🔄 Recreating FileSearch store for future use...")
-                        recreated_store = genai_client.file_search_stores.create()
-                        logger.info(f"✅ FileSearch store recreated: {recreated_store.name}")
-                        nuke_results["filestore_recreated"] = True
-                    else:
-                        nuke_results["filestore_recreated"] = False
+                # Step 3: Clear cache and recreate the store for future use (only if we deleted it)
+                FileSearchStoreManager.clear_cache()  # Clear cache after deletion
+                if store_exists:
+                    logger.info(f"🔄 Recreating FileSearch store for future use...")
+                    recreated_store = genai_client.file_search_stores.create()
+                    logger.info(f"✅ FileSearch store recreated: {recreated_store.name}")
+                    nuke_results["filestore_recreated"] = True
+                else:
+                    nuke_results["filestore_recreated"] = False
 
-                except Exception as e:
-                    error_msg = f"Error clearing FileSearch store: {str(e)}"
-                    logger.error(f"❌ {error_msg}")
-                    nuke_results["filestore_errors"].append(error_msg)
+            except Exception as e:
+                error_msg = f"Error clearing FileSearch store: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                nuke_results["filestore_errors"].append(error_msg)
         except Exception as e:
             error_msg = f"Error accessing FileSearch: {str(e)}"
             logger.error(f"❌ {error_msg}")
