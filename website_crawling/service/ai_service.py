@@ -15,6 +15,7 @@ from google.genai import types
 from shared.otel_logger import get_otel_logger
 from website_crawling.core.ai import get_genai_client
 from website_crawling.service.website_service import WebsiteService
+from website_crawling.dao.scraping_dao import ScrapingDAO
 
 logger = get_otel_logger("ai_service", "website-crawling")
 
@@ -294,7 +295,9 @@ async def record_scraped_metadata(
         if include_patterns or exclude_patterns:
             logger.info(f"🎯 [METADATA] Storing crawl patterns: include={len(include_patterns)}, exclude={len(exclude_patterns)}")
 
-        record_id = await website_service.insert_scraped_metadata(metadata)
+        # Use ScrapingDAO to record metadata
+        scraping_dao = ScrapingDAO()
+        record_id = await scraping_dao.record_scraped_metadata(metadata)
         logger.info(f"✅ Scraped metadata recorded: {record_id}")
         return record_id
 
