@@ -84,16 +84,20 @@ async def upload_file(
 
 @router.get("/files")
 async def list_files(request: Request = None):
-    """List all files"""
+    """List all files and websites in hierarchical structure (backward compatible)"""
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
         
-        files = await file_service.get_all_files()
+        # Get unified knowledgebase (files + hierarchical websites)
+        knowledgebase = await file_service.get_all_knowledgebase()
         
+        # Return in format that's backward compatible but includes websites
         return {
             "success": True,
-            "files": files,
+            "files": knowledgebase["files"],  # Original files list
+            "websites": knowledgebase["websites"],  # Add hierarchical websites
+            "summary": knowledgebase["summary"],  # Add summary info
             "user": {
                 "email": user_email,
                 "id": user_id
