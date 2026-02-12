@@ -697,26 +697,52 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
                     # First, delete all chunks from the document
                     logger.info(f"🗑️ [FILESEARCH] Deleting all chunks from document: {document_name}")
                     try:
-                        chunks = genai_client.file_search_stores.documents.chunks.list(parent=document_name)
+                        # List chunks using the correct API method
+                        chunks_response = genai_client.file_search_stores.documents.chunks.list(parent=document_name)
                         chunk_count = 0
-                        if hasattr(chunks, '__iter__'):
-                            for chunk in chunks:
-                                try:
-                                    genai_client.file_search_stores.documents.chunks.delete(name=chunk.name)
-                                    chunk_count += 1
-                                except Exception as chunk_error:
-                                    logger.warning(f"⚠️ Could not delete chunk {chunk.name}: {chunk_error}")
+                        
+                        # Handle different response formats
+                        chunks = []
+                        if hasattr(chunks_response, 'chunks'):
+                            chunks = chunks_response.chunks
+                        elif hasattr(chunks_response, '__iter__'):
+                            chunks = chunks_response
+                        
+                        for chunk in chunks:
+                            try:
+                                chunk_name = chunk.name if hasattr(chunk, 'name') else chunk
+                                genai_client.file_search_stores.documents.chunks.delete(name=chunk_name)
+                                chunk_count += 1
+                                logger.debug(f"   Deleted chunk: {chunk_name}")
+                            except Exception as chunk_error:
+                                logger.warning(f"⚠️ Could not delete chunk {chunk_name}: {chunk_error}")
+                        
                         logger.info(f"✅ [FILESEARCH] Deleted {chunk_count} chunks from document")
+                        
+                        # Wait a moment for chunks to be fully deleted
+                        import time
+                        time.sleep(0.5)
+                        
                     except Exception as chunks_error:
                         logger.warning(f"⚠️ [FILESEARCH] Could not list/delete chunks for {document_name}: {chunks_error}")
+                        # Continue with document deletion anyway
 
                     # Now delete the document itself
                     logger.info(f"🗑️ [FILESEARCH] Deleting document: {document_name}")
-                    genai_client.file_search_stores.documents.delete(
-                        name=document_name
-                    )
-                    deletion_results["file_search"]["success"] = True
-                    logger.info(f"✅ [FILESEARCH] Deleted document: {document_name} from store: {store_name}")
+                    try:
+                        genai_client.file_search_stores.documents.delete(name=document_name)
+                        deletion_results["file_search"]["success"] = True
+                        logger.info(f"✅ [FILESEARCH] Deleted document: {document_name} from store: {store_name}")
+                    except Exception as doc_delete_error:
+                        if "FAILED_PRECONDITION" in str(doc_delete_error) and chunk_count > 0:
+                            logger.warning(f"⚠️ Document still has chunks, retrying after delay...")
+                            time.sleep(1)
+                            # Retry document deletion
+                            genai_client.file_search_stores.documents.delete(name=document_name)
+                            deletion_results["file_search"]["success"] = True
+                            logger.info(f"✅ [FILESEARCH] Deleted document on retry: {document_name}")
+                        else:
+                            raise doc_delete_error
                     logger.info(f"   All embeddings and index entries removed")
 
                     # POST-DELETION: Verify document was deleted
@@ -931,25 +957,54 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
 
                             # First delete all chunks from the document
                             try:
-                                chunks = genai_client.file_search_stores.documents.chunks.list(parent=document_name)
+                                # List chunks using the correct API method
+                                chunks_response = genai_client.file_search_stores.documents.chunks.list(parent=document_name)
                                 chunk_count = 0
-                                if hasattr(chunks, '__iter__'):
-                                    for chunk in chunks:
-                                        try:
-                                            genai_client.file_search_stores.documents.chunks.delete(name=chunk.name)
-                                            chunk_count += 1
-                                        except Exception:
-                                            pass  # Continue even if individual chunks fail
+                                
+                                # Handle different response formats
+                                chunks = []
+                                if hasattr(chunks_response, 'chunks'):
+                                    chunks = chunks_response.chunks
+                                elif hasattr(chunks_response, '__iter__'):
+                                    chunks = chunks_response
+                                
+                                for chunk in chunks:
+                                    try:
+                                        chunk_name = chunk.name if hasattr(chunk, 'name') else chunk
+                                        genai_client.file_search_stores.documents.chunks.delete(name=chunk_name)
+                                        chunk_count += 1
+                                    except Exception as chunk_error:
+                                        logger.debug(f"   Could not delete chunk {chunk_name}: {chunk_error}")
+                                        pass  # Continue even if individual chunks fail
                                 logger.info(f"   Deleted {chunk_count} chunks from document")
+                                
+                                # Wait a moment for chunks to be fully deleted
+                                import time
+                                time.sleep(0.5)
+                                
                             except Exception as chunks_error:
                                 logger.debug(f"   Could not delete chunks: {chunks_error}")
+                                pass  # Continue with document deletion anyway
 
                             # Now delete the document itself
-                            genai_client.file_search_stores.documents.delete(
-                                name=document_name
-                            )
-                            filesearch_deleted += 1
-                            logger.info(f"✅ Deleted from FileSearch: {document_name}")
+                            try:
+                                genai_client.file_search_stores.documents.delete(
+                                    name=document_name
+                                )
+                                filesearch_deleted += 1
+                                logger.info(f"✅ Deleted from FileSearch: {document_name}")
+                            except Exception as doc_delete_error:
+                                if "FAILED_PRECONDITION" in str(doc_delete_error):
+                                    logger.warning(f"⚠️ Document still has chunks, retrying after delay...")
+                                    import time
+                                    time.sleep(1)
+                                    # Retry document deletion
+                                    genai_client.file_search_stores.documents.delete(name=document_name)
+                                    filesearch_deleted += 1
+                                    logger.info(f"✅ Deleted from FileSearch on retry: {document_name}")
+                                else:
+                                    logger.error(f"❌ Failed to delete from FileSearch: {doc_delete_error}")
+                                    filesearch_errors.append(str(doc_delete_error))
                     except Exception as e:
                         if "404" in str(e) or "not found" in str(e).lower():
                             logger.warning(f"⚠️ FileSearch document already deleted for page {record['id']}: {e}")
