@@ -201,27 +201,23 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
 
         # Prepare inline citations for the model
         # The model should cite sources inline using [1], [2], etc. as it writes
+        # NO FOOTER sources list - only inline citations shown by default
         enhanced_content = response_text
         if all_source_urls:
-            # Create inline citation instructions for the model
+            # Create inline citation instructions for the model (no footer)
+            # Use SOURCE REFERENCE LIST header for frontend compatibility
             citation_instructions = (
                 "\n\n---\n"
-                "**IMPORTANT - HOW TO CITE SOURCES:**\n"
-                "When providing information from the sources above, cite them INLINE in your response using [1], [2], [3], etc.\n"
-                "Place the citation number immediately after the relevant sentence or fact.\n"
-                "Example: \"The company was founded in 2020 [1]. Their main product is software [2].\"\n"
-                "\n"
                 "**SOURCE REFERENCE LIST:**\n"
             )
 
-            # Add numbered sources
+            # Add numbered sources for inline reference (hidden by default, shown when toggled)
             for idx, url in enumerate(all_source_urls, 1):
                 citation_instructions += f"[{idx}] {url}\n"
 
             enhanced_content += citation_instructions
 
-            logger.info(f"📎 Added {len(all_source_urls)} source URL(s) for inline citation")
-            logger.info(f"📋 Citation instruction format added to response")
+            logger.info(f"📎 Added {len(all_source_urls)} source URL(s) for inline citation (hidden by default)")
             logger.info(f"   Sources: {all_source_urls}")
             logger.info(f"📄 Full enhanced content length: {len(enhanced_content)} characters")
         else:
