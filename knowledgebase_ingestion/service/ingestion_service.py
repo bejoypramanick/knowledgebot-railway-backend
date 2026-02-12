@@ -697,8 +697,7 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
                     # Delete the document from the FileSearch store using modern API
                     # This removes the file from the store AND cleans up embeddings
                     genai_client.file_search_stores.documents.delete(
-                        name=document_name,
-                        force=True
+                        name=document_name
                     )
                     deletion_results["file_search"]["success"] = True
                     logger.info(f"✅ [FILESEARCH] Deleted document: {document_name} from store: {store_name}")
@@ -913,11 +912,10 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
                         if metadata_dict.get('type') == 'file_search' and metadata_dict.get('document_name'):
                             document_name = metadata_dict['document_name']
                             logger.info(f"🗑️ Deleting page {record['id']} (level {record['level']}) from FileSearch: {document_name}")
-                            
+
                             # Use modern FileSearch API
                             genai_client.file_search_stores.documents.delete(
-                                name=document_name,
-                                force=True
+                                name=document_name
                             )
                             filesearch_deleted += 1
                             logger.info(f"✅ Deleted from FileSearch: {document_name}")
