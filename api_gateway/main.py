@@ -89,9 +89,23 @@ async def lifespan(app: FastAPI):
                             # Store doesn't exist, create it
                             logger.info(f"🔨 Creating FileSearch store with display_name: {store_display_name}")
                             new_store = client.file_search_stores.create(
-                                config={'display_name': store_display_name}
+                                displayName=store_display_name
                             )
                             logger.info(f"✅ FileSearch store created: {new_store.name}")
+
+                        # Clean up any unnamed stores (display_name is None or empty)
+                        logger.info("🧹 Cleaning up unnamed FileSearch stores...")
+                        unnamed_stores = [s for s in stores if not getattr(s, 'display_name', None)]
+                        if unnamed_stores:
+                            for unnamed_store in unnamed_stores:
+                                try:
+                                    logger.info(f"   🗑️ Deleting unnamed store: {unnamed_store.name}")
+                                    client.file_search_stores.delete(name=unnamed_store.name)
+                                    logger.info(f"   ✅ Deleted: {unnamed_store.name}")
+                                except Exception as delete_error:
+                                    logger.warning(f"   ⚠️ Failed to delete {unnamed_store.name}: {delete_error}")
+                        else:
+                            logger.info("   ✅ No unnamed stores to clean up")
 
         except Exception as e:
             logger.error(f"❌ Error initializing FileSearch store: {e}")
