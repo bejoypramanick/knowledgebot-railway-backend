@@ -13,6 +13,7 @@ logger = logging.getLogger("website_crawling")
 async def parse_sitemap(sitemap_content: str, base_url: str) -> List[str]:
     """
     Parse XML sitemap and extract all URLs.
+    Handles standard sitemaps, sitemap indexes, and various namespace configurations.
 
     Args:
         sitemap_content: Raw XML content of the sitemap
@@ -26,6 +27,7 @@ async def parse_sitemap(sitemap_content: str, base_url: str) -> List[str]:
     try:
         # Parse XML
         root = ET.fromstring(sitemap_content)
+        logger.info(f"📄 Root element: {root.tag}")
 
         # Handle different sitemap namespaces
         namespaces = {
@@ -43,11 +45,13 @@ async def parse_sitemap(sitemap_content: str, base_url: str) -> List[str]:
             for sitemap in sitemap_elements:
                 loc = sitemap.find('sm:loc', namespaces)
                 if loc is not None and loc.text:
-                    urls.add(loc.text.strip())
+                    sitemap_url = loc.text.strip()
+                    logger.debug(f"  → Sitemap: {sitemap_url}")
+                    urls.add(sitemap_url)
         else:
             # This is a regular sitemap with URLs
             url_elements = root.findall('.//sm:url', namespaces)
-            logger.info(f"📄 Found {len(url_elements)} URLs in sitemap")
+            logger.info(f"📄 Found {len(url_elements)} URLs with namespace")
 
             for url_element in url_elements:
                 loc = url_element.find('sm:loc', namespaces)
@@ -59,7 +63,9 @@ async def parse_sitemap(sitemap_content: str, base_url: str) -> List[str]:
 
         # Also try without namespace (some sitemaps don't use it)
         if not urls:
-            logger.info("🔄 Trying to parse sitemap without namespace")
+            logger.info("🔄 Trying to parse sitemap without namespace...")
+
+            # Try finding URLs without namespace
             for url_element in root.findall('.//url'):
                 loc = url_element.find('loc')
                 if loc is not None and loc.text:
@@ -67,19 +73,28 @@ async def parse_sitemap(sitemap_content: str, base_url: str) -> List[str]:
                     absolute_url = urljoin(base_url, url)
                     urls.add(absolute_url)
 
+            if urls:
+                logger.info(f"📄 Found {len(urls)} URLs without namespace")
+
+            # Try finding sitemaps without namespace
             for sitemap_element in root.findall('.//sitemap'):
                 loc = sitemap_element.find('loc')
                 if loc is not None and loc.text:
-                    urls.add(loc.text.strip())
+                    sitemap_url = loc.text.strip()
+                    urls.add(sitemap_url)
 
-        logger.info(f"✅ Extracted {len(urls)} URLs from sitemap")
+            if urls:
+                logger.info(f"📋 Found {len(urls)} sitemaps without namespace")
+
+        logger.info(f"✅ Extracted {len(urls)} total URLs from sitemap")
         return list(urls)
 
     except ET.ParseError as e:
         logger.error(f"❌ XML parsing error: {e}")
+        logger.debug(f"Content preview: {sitemap_content[:200]}")
         return []
     except Exception as e:
-        logger.error(f"❌ Error parsing sitemap: {e}")
+        logger.error(f"❌ Error parsing sitemap: {e}", exc_info=True)
         return []
 
 
@@ -105,6 +120,7 @@ def is_sitemap_url(url: str) -> bool:
 async def fetch_and_parse_sitemap(url: str) -> List[str]:
     """
     Fetch and parse a sitemap from a URL.
+    Handles standard sitemaps, sitemap indexes, and gzipped content.
 
     Args:
         url: Sitemap URL
@@ -114,6 +130,7 @@ async def fetch_and_parse_sitemap(url: str) -> List[str]:
     """
     try:
         import httpx
+        import gzip
 
         async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
             logger.info(f"📥 Fetching sitemap from: {url}")
@@ -122,16 +139,44 @@ async def fetch_and_parse_sitemap(url: str) -> List[str]:
 
             # Check content type
             content_type = response.headers.get('content-type', '').lower()
-            if 'xml' not in content_type and 'text' not in content_type:
-                logger.warning(f"⚠️ Unexpected content type: {content_type}")
+            logger.info(f"📋 Sitemap content-type: {content_type}")
+
+            # Handle gzipped content
+            content = response.content
+            if content_type.startswith('application/x-gzip') or url.lower().endswith('.gz'):
+                logger.info("🔧 Decompressing gzipped sitemap")
+                try:
+                    content = gzip.decompress(content)
+                except Exception as gz_error:
+                    logger.warning(f"⚠️ Failed to decompress gzip: {gz_error}")
+                    # Try without decompression
+                    content = response.content
+
+            # Decode content
+            try:
+                content_text = content.decode('utf-8')
+            except UnicodeDecodeError:
+                logger.warning("⚠️ UTF-8 decode failed, trying latin-1")
+                content_text = content.decode('latin-1')
+
+            if not content_text.strip():
+                logger.error(f"❌ Sitemap is empty at {url}")
+                return []
+
+            logger.info(f"📊 Sitemap size: {len(content_text)} bytes")
 
             # Parse the sitemap
-            urls = await parse_sitemap(response.text, url)
+            urls = await parse_sitemap(content_text, url)
+
+            if not urls:
+                logger.warning(f"⚠️ No URLs extracted from sitemap at {url}")
+                logger.debug(f"Sitemap content preview: {content_text[:500]}")
+
             return urls
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"❌ HTTP error fetching sitemap: {e.response.status_code}")
+        logger.error(f"❌ HTTP error fetching sitemap: {e.response.status_code} - {e.response.text[:200]}")
         return []
     except Exception as e:
-        logger.error(f"❌ Error fetching sitemap: {e}")
+        logger.error(f"❌ Error fetching sitemap: {e}", exc_info=True)
         return []
