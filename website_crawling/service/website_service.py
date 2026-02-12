@@ -307,9 +307,9 @@ class WebsiteService:
                 else:
                     urls_to_scrape = sitemap_urls[:max_pages]
 
-                # Scrape all URLs from sitemap
+                # Scrape all URLs from sitemap (passing sitemap URL as parent)
                 result = await self._scrape_urls_from_sitemap(
-                    urls_to_scrape, timeout, max_concurrent, delay_between_requests
+                    urls_to_scrape, timeout, max_concurrent, delay_between_requests, sitemap_url=url
                 )
 
             except Exception as e:
@@ -406,6 +406,32 @@ class WebsiteService:
             uploaded_files = []
             record_ids = []
             url_to_record_id = {}  # Track URLs to their record IDs for parent linking
+
+            # Create sitemap record first (depth=0, parent=None)
+            sitemap_record_id = await record_scraped_metadata(
+                url=url,  # The sitemap URL itself
+                domain=urlparse(url).netloc.replace('www.', ''),
+                title=result.get("title", url),
+                content_length=len(result["content"]),
+                pages_scraped=len(scraped_data),
+                gemini_file_name=None,
+                gemini_file_uri=None,
+                gemini_state="DISCOVERED",
+                scraped_urls=[url],
+                scraping_config={
+                    "max_pages": max_pages,
+                    "max_depth": max_depth,
+                    "source": "sitemap",
+                    "include_patterns": include_patterns,
+                    "exclude_patterns": exclude_patterns
+                },
+                file_search_metadata=None,
+                parent_id=None,  # Sitemap is root
+                depth=0,  # Sitemap is depth 0
+                crawl_session_id=crawl_session_id
+            )
+            url_to_record_id[url] = sitemap_record_id
+            logger.info(f"✅ Created sitemap parent record: {url} (depth=0, id={sitemap_record_id})")
 
             for page_data in scraped_data:
                 page_url = page_data["url"]
@@ -504,11 +530,11 @@ class WebsiteService:
                             else:
                                 logger.warning(f"⚠️ Failed to establish parent for {page_url}: parent {parent_url} not in mapping")
                     else:
-                        # Sitemap URLs are all depth=0 (no parent)
-                        if page_depth == 0:
-                            logger.debug(f"📄 Sitemap root page: {page_url} (no parent)")
+                        # All sitemap pages should have depth=1 with sitemap as parent
+                        if page_depth == 1 and parent_url:
+                            logger.debug(f"📄 Sitemap child page: {page_url} (depth=1, parent={parent_url})")
                         else:
-                            logger.warning(f"⚠️ Unexpected depth for sitemap URL: {page_url} (depth={page_depth})")
+                            logger.warning(f"⚠️ Unexpected sitemap URL structure: {page_url} (depth={page_depth}, parent={parent_url})")
 
                     # Record metadata for individual page
                     record_id = await record_scraped_metadata(
@@ -871,25 +897,26 @@ class WebsiteService:
         urls: List[str],
         timeout: int = 30,
         max_concurrent: int = 10,
-        delay_between_requests: float = 0
+        delay_between_requests: float = 0,
+        sitemap_url: str = None
     ) -> Dict[str, Any]:
         """
         Scrape all URLs from a sitemap using crawl4ai's native BFS depth tracking.
-        Sorts URLs alphabetically first, then uses crawl4ai to determine actual
-        traversal depth based on link discovery order.
+        Sorts URLs alphabetically first. All extracted URLs are depth=1 with
+        the sitemap itself as the parent (depth=0).
 
         Args:
             urls: List of URLs to scrape from sitemap
             timeout: Request timeout in seconds
             max_concurrent: Maximum concurrent requests
             delay_between_requests: Delay between requests in seconds
+            sitemap_url: The sitemap URL (will be the parent, depth=0)
 
         Returns:
             Dict with scraped content and metadata with proper hierarchy
         """
         scraped_data = []
         scraped_urls: Set[str] = set()
-        url_depth_map = {}  # Track crawl4ai BFS depth for each URL
         title = "Sitemap Content"
         semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -902,7 +929,8 @@ class WebsiteService:
         try:
             # Sort URLs alphabetically for consistent ordering
             sorted_urls = sorted(urls)
-            logger.info(f"🎯 Starting BFS deep crawl of {len(sorted_urls)} sitemap URLs (sorted alphabetically)")
+            logger.info(f"🎯 Starting sitemap crawl of {len(sorted_urls)} URLs (sorted alphabetically)")
+            logger.debug(f"   Sitemap parent: {sitemap_url}")
             logger.debug(f"   Alphabetical order sample: {sorted_urls[:5] if len(sorted_urls) > 5 else sorted_urls}")
 
             async with AsyncWebCrawler(verbose=False) as crawler:
@@ -939,17 +967,17 @@ class WebsiteService:
                                         title = result.title
                                         page_title = result.title
 
-                                    # For sitemap URLs, depth is 0 (all from sitemap are root-level)
-                                    # Parent will be determined by alphabetical sorting and crawl4ai BFS
-                                    depth = 0  # All sitemap URLs start at depth 0
-                                    parent_url = None
+                                    # All URLs extracted from sitemap are depth=1
+                                    # Parent is the sitemap URL itself (depth=0)
+                                    depth = 1  # All sitemap URLs are children of sitemap
+                                    parent_url = sitemap_url
 
                                     page_data = {
                                         "url": url,
                                         "text": content,
                                         "title": page_title,
                                         "depth": depth,
-                                        "parent_url": parent_url  # No parent for sitemap URLs
+                                        "parent_url": parent_url  # Parent is the sitemap
                                     }
 
                                     scraped_data.append(page_data)
@@ -977,13 +1005,13 @@ class WebsiteService:
 
             # Log scraping summary
             logger.info(f"📊 Sitemap scraping summary:")
-            logger.info(f"  Total URLs scraped: {len(scraped_urls)}")
+            logger.info(f"  Sitemap parent (depth=0): {sitemap_url}")
+            logger.info(f"  Total URLs scraped (depth=1): {len(scraped_urls)}")
             logger.info(f"  Alphabetical ordering: Applied")
-            logger.info(f"  Depth tracking: Native crawl4ai BFS (used in subsequent traversal)")
             if scraped_data:
                 # Show sample of URLs in alphabetical order
                 sample_urls = scraped_data[:5]
-                logger.info(f"  Sample URLs (alphabetical order):")
+                logger.info(f"  Sample URLs (alphabetical order, all depth=1):")
                 for i, sample in enumerate(sample_urls, 1):
                     logger.info(f"    {i}. {sample['url']}")
 
