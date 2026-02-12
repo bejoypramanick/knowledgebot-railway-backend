@@ -25,41 +25,34 @@ async def search_knowledge_base(query: Annotated[str, "The search query to find 
         )]
 
     try:
-        # Get the file search store from environment (set by API Gateway on startup)
-        file_search_store_value = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME")
+        # Get store display name from environment
+        store_display_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME")
 
-        if not file_search_store_value:
-            logger.warning(f"⚠️ GEMINI_FILE_SEARCH_STORE_NAME environment variable not set")
+        if not store_display_name:
+            logger.warning(f"⚠️ GEMINI_FILE_SEARCH_STORE_NAME not configured")
             return [SearchResult(
                 file_name="RAG_Response",
-                content="FileSearch store not configured. Please ensure API Gateway has initialized it."
+                content="FileSearch store not configured. Please set GEMINI_FILE_SEARCH_STORE_NAME environment variable."
             )]
 
-        # Check if it's already a store ID (starts with 'fileSearchStores/')
-        if file_search_store_value.startswith('fileSearchStores/'):
-            # It's already a store ID, use it directly
-            file_search_store_name = file_search_store_value
-            logger.info(f"🔍 Using File Search store ID: {file_search_store_name}")
-        else:
-            # It's a display name, resolve it to store ID
-            from shared.file_search import get_file_search_store_by_display_name, clear_store_cache
+        logger.info(f"🔍 Looking up FileSearch store: {store_display_name}")
 
-            logger.info(f"🔍 Resolving FileSearch store by display_name: {file_search_store_value}")
-            clear_store_cache()  # Ensure fresh lookup
+        # Look up store by display name
+        from shared.file_search import get_file_search_store_by_display_name
 
-            file_search_store_name = get_file_search_store_by_display_name(
-                genai_client,
-                display_name=file_search_store_value
-            )
+        file_search_store_name = get_file_search_store_by_display_name(
+            genai_client,
+            display_name=store_display_name
+        )
 
-            if not file_search_store_name:
-                logger.warning(f"⚠️ FileSearch store '{file_search_store_value}' not found")
-                return [SearchResult(
-                    file_name="RAG_Response",
-                    content=f"File Search store '{file_search_store_value}' not found. Please check configuration."
-                )]
+        if not file_search_store_name:
+            logger.warning(f"⚠️ FileSearch store '{store_display_name}' not found")
+            return [SearchResult(
+                file_name="RAG_Response",
+                content=f"FileSearch store '{store_display_name}' not found. Please check configuration."
+            )]
 
-            logger.info(f"🔍 Resolved to File Search store ID: {file_search_store_name}")
+        logger.info(f"✅ Using FileSearch store: {file_search_store_name}")
 
         # Generate response using FileSearch tool (CORRECT WAY)
         response = genai_client.models.generate_content(

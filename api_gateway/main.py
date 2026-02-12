@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI):
         logger.info(f"🚀 API Gateway starting up...")
         logger.info(f"({settings.service_identity})")
 
-        # Initialize Gemini FileSearch Store (centralized - done once here)
+        # Initialize Gemini FileSearch Store (create if doesn't exist)
         logger.info("📂 Initializing Gemini FileSearch store...")
         try:
             from google.genai import Client
@@ -56,100 +56,45 @@ async def lifespan(app: FastAPI):
             if not gemini_api_key:
                 logger.warning("⚠️ GEMINI_API_KEY not set - FileSearch store initialization skipped")
             else:
-                # Initialize Gemini client
-                client = Client(api_key=gemini_api_key)
-
-                # Get store name from environment
-                store_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
-
-                # Check if file_search_stores API is available
-                if not hasattr(client, 'file_search_stores'):
-                    logger.warning("⚠️ file_search_stores API not available")
-                    formatted_name = f"fileSearchStores/{store_name}"
-                    logger.info(f"   Using store name directly: {formatted_name}")
-                    os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = formatted_name
+                # Get store display name from environment (must be set)
+                store_display_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME")
+                if not store_display_name:
+                    logger.warning("⚠️ GEMINI_FILE_SEARCH_STORE_NAME not set - cannot initialize FileSearch store")
                 else:
-                    logger.info(f"🔍 Checking for existing FileSearch store with display_name: {store_name}")
+                    # Initialize Gemini client
+                    client = Client(api_key=gemini_api_key)
 
-                    # List existing stores
-                    stores = list(client.file_search_stores.list())
-                    logger.info(f"📋 Available FileSearch stores ({len(stores)}):")
-                    logger.log_file_search_operation("list_stores", details={"count": len(stores)})
-
-                    # Check if a store with our desired display_name already exists
-                    existing_store = None
-                    for idx, store in enumerate(stores):
-                        store_display_name = getattr(store, 'display_name', None)
-                        logger.info(f"   {idx+1}. {store.name} - Display: {store_display_name}")
-                        if store_display_name == store_name:
-                            existing_store = store
-                            logger.info(f"      ✅ MATCHES desired display_name")
-
-                    if existing_store:
-                        # Use the existing store with matching display_name
-                        store_id = existing_store.name
-                        logger.info(f"✅ Found existing FileSearch store with matching display_name")
-                        logger.info(f"   Store ID: {store_id}")
-                        logger.info(f"   Display name: {existing_store.display_name}")
-                        logger.log_file_search_operation("store_found", store_id=store_id,
-                                                        details={"display_name": existing_store.display_name})
-                        os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
-
-                        # Clean up any stores without display_name
-                        logger.info("🧹 Cleaning up unnamed FileSearch stores...")
-                        unnamed_stores = [s for s in stores if not getattr(s, 'display_name', None)]
-                        if unnamed_stores:
-                            for unnamed_store in unnamed_stores:
-                                try:
-                                    logger.info(f"   🗑️ Deleting unnamed store: {unnamed_store.name}")
-                                    client.file_search_stores.delete(name=unnamed_store.name)
-                                    logger.info(f"   ✅ Deleted: {unnamed_store.name}")
-                                except Exception as delete_error:
-                                    logger.warning(f"   ⚠️ Failed to delete {unnamed_store.name}: {delete_error}")
-                            logger.log_file_search_operation("cleanup_unnamed", details={"count": len(unnamed_stores)})
-                        else:
-                            logger.info("   ✅ No unnamed stores to clean up")
-
-                        logger.info("=" * 80)
-                        logger.info(f"📋 GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
-                        logger.info("=" * 80)
+                    if not hasattr(client, 'file_search_stores'):
+                        logger.warning("⚠️ file_search_stores API not available")
                     else:
-                        # No store with matching display_name found
-                        # Create a new store with the proper display_name
-                        logger.info(f"🔨 No store found with display_name '{store_name}'")
-                        logger.info(f"   Creating new FileSearch store with display_name '{store_name}'...")
-                        new_store = client.file_search_stores.create(
-                            config={'display_name': store_name}
-                        )
-                        store_id = new_store.name
-                        logger.info(f"✅ FileSearch store created: {store_id}")
-                        logger.info(f"   Display name: {getattr(new_store, 'display_name', store_name)}")
-                        logger.log_file_search_operation("store_created", store_id=store_id,
-                                                        details={"display_name": getattr(new_store, 'display_name', store_name)})
-                        os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = store_id
+                        logger.info(f"🔍 Checking for FileSearch store with display_name: {store_display_name}")
 
-                        # Clean up any stores without display_name
-                        logger.info("🧹 Cleaning up unnamed FileSearch stores...")
-                        unnamed_stores = [s for s in stores if not getattr(s, 'display_name', None)]
-                        if unnamed_stores:
-                            for unnamed_store in unnamed_stores:
-                                try:
-                                    logger.info(f"   🗑️ Deleting unnamed store: {unnamed_store.name}")
-                                    client.file_search_stores.delete(name=unnamed_store.name)
-                                    logger.info(f"   ✅ Deleted: {unnamed_store.name}")
-                                except Exception as delete_error:
-                                    logger.warning(f"   ⚠️ Failed to delete {unnamed_store.name}: {delete_error}")
-                            logger.log_file_search_operation("cleanup_unnamed", details={"count": len(unnamed_stores)})
+                        # List existing stores
+                        stores = list(client.file_search_stores.list())
+                        logger.info(f"📋 Found {len(stores)} FileSearch store(s)")
+
+                        # Check if store with matching display_name exists
+                        existing_store = None
+                        for store in stores:
+                            store_name = getattr(store, 'display_name', None)
+                            if store_name == store_display_name:
+                                existing_store = store
+                                break
+
+                        if existing_store:
+                            # Store already exists
+                            logger.info(f"✅ FileSearch store exists: {existing_store.name}")
+                            logger.info(f"   Display name: {store_display_name}")
                         else:
-                            logger.info("   ✅ No unnamed stores to clean up")
-
-                        logger.info("=" * 80)
-                        logger.info(f"📋 GEMINI_FILE_SEARCH_STORE_NAME={store_id}")
-                        logger.info("=" * 80)
+                            # Store doesn't exist, create it
+                            logger.info(f"🔨 Creating FileSearch store with display_name: {store_display_name}")
+                            new_store = client.file_search_stores.create(
+                                config={'display_name': store_display_name}
+                            )
+                            logger.info(f"✅ FileSearch store created: {new_store.name}")
 
         except Exception as e:
             logger.error(f"❌ Error initializing FileSearch store: {e}")
-            logger.log_file_search_operation("initialization_error", details={"error": str(e)})
             logger.warning("⚠️ Services will continue but file uploads may fail")
 
         logger.info(f"🚀 API Gateway ({settings.service_identity}) started successfully")
