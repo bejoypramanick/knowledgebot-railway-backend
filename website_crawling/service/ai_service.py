@@ -231,6 +231,10 @@ async def record_scraped_metadata(
             logger.error("❌ Failed to get admin user_role_id for scraped metadata")
             return None
 
+        # Extract targeting patterns from scraping config
+        include_patterns = scraping_config.get("include_patterns", []) if scraping_config else []
+        exclude_patterns = scraping_config.get("exclude_patterns", []) if scraping_config else []
+
         metadata = {
             "user_role_id": admin_user_role_id,  # Use the admin user_role_id
             "url": url,
@@ -244,13 +248,22 @@ async def record_scraped_metadata(
             "gemini_file_uri": gemini_file_uri,
             "parent_id": parent_id,
             "depth": depth,
-            "crawl_session_id": crawl_session_id
+            "crawl_session_id": crawl_session_id,
+            # Targeting patterns used for this crawl
+            "crawl_patterns": {
+                "include_patterns": include_patterns,
+                "exclude_patterns": exclude_patterns
+            }
         }
 
         # Add FileSearch metadata if available
         if file_search_metadata:
             metadata["file_search_metadata"] = file_search_metadata
             logger.info(f"📝 [METADATA] Storing FileSearch info: store={file_search_metadata.get('file_search_store_name')}, document={file_search_metadata.get('document_name')}")
+
+        # Log targeting patterns if present
+        if include_patterns or exclude_patterns:
+            logger.info(f"🎯 [METADATA] Storing crawl patterns: include={len(include_patterns)}, exclude={len(exclude_patterns)}")
 
         record_id = await website_service.insert_scraped_metadata(metadata)
         logger.info(f"✅ Scraped metadata recorded: {record_id}")

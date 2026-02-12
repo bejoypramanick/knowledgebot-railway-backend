@@ -110,6 +110,42 @@ class WebsiteService:
         # No include patterns specified, and URL passed exclude patterns
         return True
 
+    async def get_crawl_patterns(self, website_id: int) -> Dict[str, List[str]]:
+        """
+        Retrieve the targeting patterns used when a website was crawled.
+        Useful for re-crawling with the same patterns.
+
+        Args:
+            website_id: ID of the scraped website record
+
+        Returns:
+            Dict with include_patterns and exclude_patterns
+        """
+        try:
+            from shared.db import get_db_connection
+
+            async with get_db_connection() as conn:
+                record = await conn.fetchrow(
+                    "SELECT metadata FROM scraped_websites WHERE id = $1",
+                    website_id
+                )
+
+                if not record or not record["metadata"]:
+                    logger.debug(f"No metadata found for website ID {website_id}")
+                    return {"include_patterns": [], "exclude_patterns": []}
+
+                metadata = record["metadata"]
+                crawl_patterns = metadata.get("crawl_patterns", {})
+
+                return {
+                    "include_patterns": crawl_patterns.get("include_patterns", []),
+                    "exclude_patterns": crawl_patterns.get("exclude_patterns", [])
+                }
+
+        except Exception as e:
+            logger.error(f"❌ Failed to retrieve crawl patterns for website {website_id}: {e}")
+            return {"include_patterns": [], "exclude_patterns": []}
+
     async def scrape_website(self, url: str, options: Dict[str, Any]) -> Dict[str, Any]:
         """
         Scrape a website and optionally crawl linked pages.
@@ -330,7 +366,9 @@ class WebsiteService:
                             "max_pages": max_pages,
                             "max_depth": max_depth,
                             "source": "sitemap",
-                            "sitemap_url": url  # Store original sitemap URL
+                            "sitemap_url": url,  # Store original sitemap URL
+                            "include_patterns": include_patterns,
+                            "exclude_patterns": exclude_patterns
                         },
                         file_search_metadata=gemini_result.get("file_search_metadata"),
                         parent_id=parent_id,
@@ -427,7 +465,9 @@ class WebsiteService:
                                 "page_depth": page_depth,
                                 "source": "regular_crawl",
                                 "parent_domain": urlparse(url).netloc,
-                                "total_pages_in_crawl": len(scraped_data)
+                                "total_pages_in_crawl": len(scraped_data),
+                                "include_patterns": include_patterns,
+                                "exclude_patterns": exclude_patterns
                             },
                             file_search_metadata=gemini_result.get("file_search_metadata"),
                             parent_id=parent_id,
@@ -490,7 +530,9 @@ class WebsiteService:
                     scraped_urls=result.get("scraped_urls", [url]),
                     scraping_config={
                         "max_pages": max_pages,
-                        "max_depth": max_depth
+                        "max_depth": max_depth,
+                        "include_patterns": include_patterns,
+                        "exclude_patterns": exclude_patterns
                     },
                     file_search_metadata=gemini_result.get("file_search_metadata"),
                     parent_id=None,
