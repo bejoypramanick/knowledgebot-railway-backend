@@ -80,7 +80,9 @@ async def upload_content_to_gemini(
                         'display_name': temp_filename,
                         'custom_metadata': [
                             {'key': 'original_url', 'string_value': url},
-                            {'key': 'user_email', 'string_value': user_email or 'admin'}
+                            {'key': 'user_email', 'string_value': user_email or 'admin'},
+                            {'key': 'page_type', 'string_value': 'scraped_page'},
+                            {'key': 'source', 'string_value': 'website_scraping'}
                         ]
                     }
                 )
@@ -139,6 +141,8 @@ async def upload_content_to_gemini(
                         "type": "file_search",
                         "file_search_store_name": file_search_store_name,
                         "document_name": document_name,
+                        "original_url": url,
+                        "page_type": "scraped_page",
                         "uploaded_at": gemini_processed_at.isoformat() if gemini_processed_at else None
                     } if document_name else None,
                 }

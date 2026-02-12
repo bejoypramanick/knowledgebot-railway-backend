@@ -276,51 +276,131 @@ class WebsiteService:
             }
 
         else:
-            # Single page: Upload normally
-            domain = urlparse(url).netloc.replace('www.', '')
-            title = result.get("title") or ""  # Empty string if no title found (URL is already shown)
+            # Regular (non-sitemap) crawl: check if multi-page
+            scraped_data = result.get("scraped_data", [])
 
-            gemini_result = await upload_content_to_gemini(
-                content=content_for_upload,
-                url=url,
-                title=title,
-                user_email=options.get("user_email")
-            )
+            if scraped_data and len(scraped_data) > 1:
+                # Multi-page crawl: upload each page individually with its own URL
+                logger.info(f"📋 Regular multi-page crawl detected: uploading {len(scraped_data)} pages individually")
 
-            # Record metadata to database
-            record_id = await record_scraped_metadata(
-                url=url,
-                domain=domain,
-                title=title,
-                content_length=len(result["content"]),
-                pages_scraped=result.get("pages_scraped", 1),
-                gemini_file_name=gemini_result.get("file_name"),
-                gemini_file_uri=gemini_result.get("file_uri"),
-                gemini_state=gemini_result.get("state", "UNKNOWN"),
-                scraped_urls=result.get("scraped_urls", [url]),
-                scraping_config={
-                    "max_pages": max_pages,
-                    "max_depth": max_depth
-                },
-                file_search_metadata=gemini_result.get("file_search_metadata")
-            )
+                uploaded_files = []
+                record_ids = []
+                all_child_urls = []
 
-            processing_time = time.perf_counter() - start_time
+                for page_data in scraped_data:
+                    page_url = page_data["url"]
+                    page_text = page_data["text"]
+                    page_title = page_data.get("title", "")
+                    page_depth = page_data.get("depth", 0)
 
-            return {
-                "success": True,
-                "job_id": f"job_{int(time.time())}",
-                "url": url,
-                "status": "completed",
-                "pages_scraped": result.get("pages_scraped", 1),
-                "content_length": len(result["content"]),
-                "title": result.get("title"),
-                "gemini_file": gemini_result.get("file_name"),
-                "gemini_state": gemini_result.get("state"),
-                "record_id": record_id,
-                "processing_time_seconds": round(processing_time, 2),
-                "scraped_urls": result.get("scraped_urls", [url])
-            }
+                    all_child_urls.append(page_url)
+
+                    try:
+                        # Upload individual page with its own URL
+                        gemini_result = await upload_content_to_gemini(
+                            content=page_text,
+                            url=page_url,  # Use individual page URL
+                            title=page_title,
+                            user_email=options.get("user_email")
+                        )
+
+                        # Record metadata for individual page
+                        record_id = await record_scraped_metadata(
+                            url=page_url,  # Individual page URL in database
+                            domain=urlparse(page_url).netloc.replace('www.', ''),
+                            title=page_title or page_url,
+                            content_length=len(page_text),
+                            pages_scraped=1,  # Each is a separate record
+                            gemini_file_name=gemini_result.get("file_name"),
+                            gemini_file_uri=gemini_result.get("file_uri"),
+                            gemini_state=gemini_result.get("state", "UNKNOWN"),
+                            scraped_urls=[page_url],  # Individual page URL for citation
+                            scraping_config={
+                                "max_pages": max_pages,
+                                "max_depth": max_depth,
+                                "page_depth": page_depth,
+                                "source": "regular_crawl",
+                                "parent_domain": urlparse(url).netloc,
+                                "total_pages_in_crawl": len(scraped_data)
+                            },
+                            file_search_metadata=gemini_result.get("file_search_metadata")
+                        )
+
+                        uploaded_files.append({
+                            "url": page_url,
+                            "file_name": gemini_result.get("file_name"),
+                            "record_id": record_id,
+                            "depth": page_depth
+                        })
+                        record_ids.append(record_id)
+
+                        logger.info(f"✅ Uploaded child page: {page_url}")
+
+                    except Exception as e:
+                        logger.error(f"❌ Failed to upload page {page_url}: {e}")
+
+                processing_time = time.perf_counter() - start_time
+
+                return {
+                    "success": True,
+                    "job_id": f"job_{int(time.time())}",
+                    "url": url,  # Original domain
+                    "status": "completed",
+                    "pages_scraped": len(uploaded_files),
+                    "content_length": len(result["content"]),
+                    "title": result.get("title"),
+                    "uploaded_files": uploaded_files,
+                    "record_ids": record_ids,
+                    "processing_time_seconds": round(processing_time, 2),
+                    "scraped_urls": all_child_urls,
+                    "parent_domain": urlparse(url).netloc
+                }
+            else:
+                # Single page: Upload normally
+                domain = urlparse(url).netloc.replace('www.', '')
+                title = result.get("title") or ""  # Empty string if no title found (URL is already shown)
+
+                gemini_result = await upload_content_to_gemini(
+                    content=content_for_upload,
+                    url=url,
+                    title=title,
+                    user_email=options.get("user_email")
+                )
+
+                # Record metadata to database
+                record_id = await record_scraped_metadata(
+                    url=url,
+                    domain=domain,
+                    title=title,
+                    content_length=len(result["content"]),
+                    pages_scraped=result.get("pages_scraped", 1),
+                    gemini_file_name=gemini_result.get("file_name"),
+                    gemini_file_uri=gemini_result.get("file_uri"),
+                    gemini_state=gemini_result.get("state", "UNKNOWN"),
+                    scraped_urls=result.get("scraped_urls", [url]),
+                    scraping_config={
+                        "max_pages": max_pages,
+                        "max_depth": max_depth
+                    },
+                    file_search_metadata=gemini_result.get("file_search_metadata")
+                )
+
+                processing_time = time.perf_counter() - start_time
+
+                return {
+                    "success": True,
+                    "job_id": f"job_{int(time.time())}",
+                    "url": url,
+                    "status": "completed",
+                    "pages_scraped": result.get("pages_scraped", 1),
+                    "content_length": len(result["content"]),
+                    "title": result.get("title"),
+                    "gemini_file": gemini_result.get("file_name"),
+                    "gemini_state": gemini_result.get("state"),
+                    "record_id": record_id,
+                    "processing_time_seconds": round(processing_time, 2),
+                    "scraped_urls": result.get("scraped_urls", [url])
+                }
 
     async def _scrape_with_crawl4ai(
         self,
@@ -332,7 +412,7 @@ class WebsiteService:
         max_concurrent: int = 10
     ) -> Dict[str, Any]:
         """Scrape using crawl4ai library with rate limiting support."""
-        all_content = []
+        scraped_data = []  # Track individual page data for citations
         scraped_urls: Set[str] = set()
         urls_to_scrape = [(url, 0)]  # (url, depth)
         title = "Untitled"
@@ -362,11 +442,18 @@ class WebsiteService:
                                 # Get content
                                 content = result.markdown or result.cleaned_html or result.html or ""
                                 if content:
-                                    all_content.append(f"\n\n--- Page: {current_url} ---\n\n{content}")
+                                    # Store individual page data for citations
+                                    page_title = ""
+                                    if len(scraped_urls) == 1 and hasattr(result, 'title') and result.title:
+                                        title = result.title
+                                        page_title = result.title
 
-                                # Get title from first page
-                                if len(scraped_urls) == 1 and hasattr(result, 'title') and result.title:
-                                    title = result.title
+                                    scraped_data.append({
+                                        "url": current_url,
+                                        "text": content,
+                                        "title": page_title,
+                                        "depth": depth
+                                    })
 
                                 # Extract links for further crawling
                                 if depth < max_depth and len(scraped_urls) < max_pages:
@@ -388,14 +475,19 @@ class WebsiteService:
                     except Exception as e:
                         logger.warning(f"⚠️ Error scraping {current_url}: {e}")
 
-            combined_content = "\n".join(all_content)
+            # Combine content for display but preserve individual page data
+            combined_content = "\n".join([
+                f"\n\n--- Page: {item['url']} ---\n\n{item['text']}"
+                for item in scraped_data
+            ])
 
             return {
                 "success": len(scraped_urls) > 0,
                 "content": combined_content,
                 "title": title,
                 "pages_scraped": len(scraped_urls),
-                "scraped_urls": list(scraped_urls)
+                "scraped_urls": list(scraped_urls),
+                "scraped_data": scraped_data  # Return individual page data
             }
 
         except Exception as e:
@@ -415,7 +507,7 @@ class WebsiteService:
         max_concurrent: int = 10
     ) -> Dict[str, Any]:
         """Fallback scraping using httpx and BeautifulSoup with rate limiting."""
-        all_content = []
+        scraped_data = []  # Track individual page data for citations
         scraped_urls: Set[str] = set()
         urls_to_scrape = [(url, 0)]  # (url, depth)
         title = "Untitled"
@@ -450,10 +542,12 @@ class WebsiteService:
                             element.decompose()
 
                         # Get title from first page
+                        page_title = ""
                         if len(scraped_urls) == 1:
                             title_tag = soup.find('title')
                             if title_tag:
                                 title = title_tag.get_text(strip=True)
+                                page_title = title
 
                         # Extract text content
                         text = soup.get_text(separator='\n', strip=True)
@@ -461,7 +555,13 @@ class WebsiteService:
                         text = re.sub(r'\n{3,}', '\n\n', text)
 
                         if text:
-                            all_content.append(f"\n\n--- Page: {current_url} ---\n\n{text}")
+                            # Store individual page data for citations
+                            scraped_data.append({
+                                "url": current_url,
+                                "text": text,
+                                "title": page_title,
+                                "depth": depth
+                            })
 
                         # Extract links for further crawling
                         if depth < max_depth and len(scraped_urls) < max_pages:
@@ -488,14 +588,19 @@ class WebsiteService:
                 except Exception as e:
                     logger.warning(f"⚠️ Error scraping {current_url}: {e}")
 
-        combined_content = "\n".join(all_content)
+        # Combine content for display but preserve individual page data
+        combined_content = "\n".join([
+            f"\n\n--- Page: {item['url']} ---\n\n{item['text']}"
+            for item in scraped_data
+        ])
 
         return {
             "success": len(scraped_urls) > 0,
             "content": combined_content,
             "title": title,
             "pages_scraped": len(scraped_urls),
-            "scraped_urls": list(scraped_urls)
+            "scraped_urls": list(scraped_urls),
+            "scraped_data": scraped_data  # Return individual page data
         }
 
     async def _scrape_urls_from_sitemap(
