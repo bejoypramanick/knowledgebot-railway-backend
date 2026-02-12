@@ -596,6 +596,10 @@ async def query_gemini_file_existence(
 
 async def delete_file_logic(file_id: str) -> Dict[str, Any]:
     """Delete a file from Gemini FileSearch and database with proper metadata handling."""
+    # Validate file_id
+    if not file_id:
+        return {"success": False, "error": "file_id is required"}
+
     genai_client = get_genai_client()
     file_service = get_file_service()
 
@@ -735,7 +739,7 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
                 deletion_results["gemini"]["error"] = str(e)
                 logger.error(f"❌ [GEMINI] Error deleting raw file: {e}")
     else:
-        if gemini_file_name.startswith("documents/"):
+        if gemini_file_name and gemini_file_name.startswith("documents/"):
             logger.info(f"ℹ️ [GEMINI] File is a FileSearch document, not a standalone file - skipping raw file deletion")
             deletion_results["gemini"]["success"] = True
         else:
