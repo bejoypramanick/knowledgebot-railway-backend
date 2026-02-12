@@ -67,6 +67,7 @@ async def lifespan(app: FastAPI):
                     logger.warning("⚠️ file_search_stores API not available")
                     formatted_name = f"fileSearchStores/{store_name}"
                     logger.info(f"   Using store name directly: {formatted_name}")
+                    os.environ["GEMINI_FILE_SEARCH_STORE_NAME"] = formatted_name
                 else:
                     logger.info(f"🔍 Checking for existing FileSearch store with display_name: {store_name}")
 
