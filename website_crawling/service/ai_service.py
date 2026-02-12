@@ -23,7 +23,8 @@ async def upload_content_to_gemini(
     content: str,
     url: str,
     title: str,
-    user_email: str = None
+    user_email: str = None,
+    page_depth: int = 0  # Add page_depth parameter
 ) -> Dict[str, Any]:
     """
     Upload scraped content to Gemini FileSearch.

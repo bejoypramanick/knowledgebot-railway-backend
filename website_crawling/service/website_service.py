@@ -342,7 +342,8 @@ class WebsiteService:
                         content=page_text,
                         url=page_url,  # Use individual page URL
                         title=page_title,
-                        user_email=options.get("user_email")
+                        user_email=options.get("user_email"),
+                        page_depth=page_depth  # Pass the calculated depth
                     )
 
                     # Determine parent relationship
