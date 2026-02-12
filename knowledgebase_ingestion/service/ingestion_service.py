@@ -599,6 +599,12 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
     # Validate file_id
     if not file_id:
         return {"success": False, "error": "file_id is required"}
+    
+    # Check if this looks like a URL instead of a file ID
+    if file_id.startswith(('http://', 'https://')):
+        logger.error(f"❌ [INVALID INPUT] {file_id} appears to be a URL, not a file ID")
+        logger.error(f"   Use /web/{id} endpoint for websites, not /files/{id}")
+        return {"success": False, "error": f"Invalid input: {file_id} appears to be a URL. Use /web/{id} endpoint for websites."}
 
     genai_client = get_genai_client()
     file_service = get_file_service()
