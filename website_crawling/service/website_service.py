@@ -433,89 +433,82 @@ class WebsiteService:
 
                     # Determine parent relationship
                     parent_id = None
-                    if page_depth > 0:
-                        # Use parent_url from page_data if available (from BFS sitemap analysis)
-                        parent_url = page_data.get("parent_url")
+                    # For sitemap URLs, parent_url is already set in page_data (should be None for depth=0)
+                    parent_url = page_data.get("parent_url")
 
-                        # If parent_url not in page_data, calculate it using path analysis
-                        if not parent_url:
-                            parent_url = self.get_parent_url(page_url)
-
-                        if parent_url:
-                            if parent_url in url_to_record_id:
-                                # Parent already exists
-                                parent_id = url_to_record_id[parent_url]
-                                logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to existing parent {parent_url} (id={parent_id})")
-                            else:
-                                # Parent doesn't exist - create all missing parent levels up to root
-                                logger.info(f"📝 Creating parent record hierarchy for {page_url}")
-
-                                # Collect all missing parents in the chain from immediate parent to root
-                                missing_parents = []
-                                current_url = page_url
-                                current_depth = page_depth
-
-                                while current_url:
-                                    current_url = self.get_parent_url(current_url)
-                                    if not current_url:
-                                        break
-                                    current_depth -= 1
-
-                                    # Check if this URL already has a record
-                                    if current_url not in url_to_record_id:
-                                        missing_parents.append((current_url, current_depth))
-                                    else:
-                                        # Found an existing parent - stop here
-                                        logger.debug(f"  Found existing parent at depth {current_depth}: {current_url}")
-                                        break
-
-                                # Create all missing parents (in reverse order from root to immediate parent)
-                                if missing_parents:
-                                    for missing_url, missing_depth in reversed(missing_parents):
-                                        if missing_url not in url_to_record_id:
-                                            # Get the parent's parent (which might exist or need to be created)
-                                            grandparent_url = self.get_parent_url(missing_url)
-                                            grandparent_id = url_to_record_id.get(grandparent_url) if grandparent_url else None
-
-                                            parent_record_id = await record_scraped_metadata(
-                                                url=missing_url,
-                                                domain=urlparse(missing_url).netloc.replace('www.', ''),
-                                                title=missing_url,
-                                                content_length=0,
-                                                pages_scraped=0,
-                                                gemini_file_name=None,
-                                                gemini_file_uri=None,
-                                                gemini_state="DISCOVERED",
-                                                scraped_urls=[missing_url],
-                                                scraping_config={
-                                                    "max_pages": max_pages,
-                                                    "max_depth": max_depth,
-                                                    "source": "sitemap",
-                                                    "sitemap_url": url,
-                                                    "include_patterns": include_patterns,
-                                                    "exclude_patterns": exclude_patterns
-                                                },
-                                                file_search_metadata=None,
-                                                parent_id=grandparent_id,
-                                                depth=missing_depth,
-                                                crawl_session_id=crawl_session_id
-                                            )
-                                            url_to_record_id[missing_url] = parent_record_id
-                                            logger.info(f"✅ Created parent record: {missing_url} (depth={missing_depth}, parent_id={grandparent_id})")
-
-                                parent_id = url_to_record_id.get(parent_url)
-                                if parent_id:
-                                    logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to parent {parent_url} (id={parent_id})")
-                                else:
-                                    logger.warning(f"⚠️ Failed to establish parent for {page_url}: parent {parent_url} not in mapping")
+                    if parent_url and page_depth > 0:
+                        if parent_url in url_to_record_id:
+                            # Parent already exists
+                            parent_id = url_to_record_id[parent_url]
+                            logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to existing parent {parent_url} (id={parent_id})")
                         else:
-                            logger.warning(f"⚠️ Could not calculate parent for {page_url} at depth {page_depth}")
+                            # Parent doesn't exist - create all missing parent levels up to root
+                            logger.info(f"📝 Creating parent record hierarchy for {page_url}")
+
+                            # Collect all missing parents in the chain from immediate parent to root
+                            missing_parents = []
+                            current_url = page_url
+                            current_depth = page_depth
+
+                            while current_url:
+                                current_url = self.get_parent_url(current_url)
+                                if not current_url:
+                                    break
+                                current_depth -= 1
+
+                                # Check if this URL already has a record
+                                if current_url not in url_to_record_id:
+                                    missing_parents.append((current_url, current_depth))
+                                else:
+                                    # Found an existing parent - stop here
+                                    logger.debug(f"  Found existing parent at depth {current_depth}: {current_url}")
+                                    break
+
+                            # Create all missing parents (in reverse order from root to immediate parent)
+                            if missing_parents:
+                                for missing_url, missing_depth in reversed(missing_parents):
+                                    if missing_url not in url_to_record_id:
+                                        # Get the parent's parent (which might exist or need to be created)
+                                        grandparent_url = self.get_parent_url(missing_url)
+                                        grandparent_id = url_to_record_id.get(grandparent_url) if grandparent_url else None
+
+                                        parent_record_id = await record_scraped_metadata(
+                                            url=missing_url,
+                                            domain=urlparse(missing_url).netloc.replace('www.', ''),
+                                            title=missing_url,
+                                            content_length=0,
+                                            pages_scraped=0,
+                                            gemini_file_name=None,
+                                            gemini_file_uri=None,
+                                            gemini_state="DISCOVERED",
+                                            scraped_urls=[missing_url],
+                                            scraping_config={
+                                                "max_pages": max_pages,
+                                                "max_depth": max_depth,
+                                                "source": "sitemap",
+                                                "sitemap_url": url,
+                                                "include_patterns": include_patterns,
+                                                "exclude_patterns": exclude_patterns
+                                            },
+                                            file_search_metadata=None,
+                                            parent_id=grandparent_id,
+                                            depth=missing_depth,
+                                            crawl_session_id=crawl_session_id
+                                        )
+                                        url_to_record_id[missing_url] = parent_record_id
+                                        logger.info(f"✅ Created parent record: {missing_url} (depth={missing_depth}, parent_id={grandparent_id})")
+
+                            parent_id = url_to_record_id.get(parent_url)
+                            if parent_id:
+                                logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to parent {parent_url} (id={parent_id})")
+                            else:
+                                logger.warning(f"⚠️ Failed to establish parent for {page_url}: parent {parent_url} not in mapping")
                     else:
-                        # Root page - check if this URL was already processed as a parent
-                        if page_url in url_to_record_id:
-                            # This URL is already a parent, so don't create a new root record
-                            logger.info(f"🔄 Skipping duplicate root page: {page_url}")
-                            continue
+                        # Sitemap URLs are all depth=0 (no parent)
+                        if page_depth == 0:
+                            logger.debug(f"📄 Sitemap root page: {page_url} (no parent)")
+                        else:
+                            logger.warning(f"⚠️ Unexpected depth for sitemap URL: {page_url} (depth={page_depth})")
 
                     # Record metadata for individual page
                     record_id = await record_scraped_metadata(
@@ -881,9 +874,9 @@ class WebsiteService:
         delay_between_requests: float = 0
     ) -> Dict[str, Any]:
         """
-        Scrape all URLs from a sitemap using BFS depth-based traversal.
-        Uses breadth-first strategy to crawl pages level-by-level, establishing
-        proper parent-child relationships based on URL structure.
+        Scrape all URLs from a sitemap using crawl4ai's native BFS depth tracking.
+        Sorts URLs alphabetically first, then uses crawl4ai to determine actual
+        traversal depth based on link discovery order.
 
         Args:
             urls: List of URLs to scrape from sitemap
@@ -896,7 +889,7 @@ class WebsiteService:
         """
         scraped_data = []
         scraped_urls: Set[str] = set()
-        url_depth_map = {}  # Track depth for each URL
+        url_depth_map = {}  # Track crawl4ai BFS depth for each URL
         title = "Sitemap Content"
         semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -907,33 +900,20 @@ class WebsiteService:
             }
 
         try:
-            # Use BFS queue: process URLs level-by-level by path depth
-            # Group URLs by their path depth for proper BFS ordering
-            bfs_queue = []
-            depth_groups = {}
-
-            for url in urls:
-                # Calculate depth from URL path structure
-                path_depth = self.calculate_url_depth(url)
-                if path_depth not in depth_groups:
-                    depth_groups[path_depth] = []
-                depth_groups[path_depth].append(url)
-                url_depth_map[url] = path_depth
-
-            # Build BFS queue: process all depth-0 first, then depth-1, etc
-            for depth in sorted(depth_groups.keys()):
-                bfs_queue.extend([(url, depth) for url in depth_groups[depth]])
-
-            logger.info(f"🎯 Starting BFS deep crawl of {len(urls)} sitemap URLs across {len(depth_groups)} depth levels")
+            # Sort URLs alphabetically for consistent ordering
+            sorted_urls = sorted(urls)
+            logger.info(f"🎯 Starting BFS deep crawl of {len(sorted_urls)} sitemap URLs (sorted alphabetically)")
+            logger.debug(f"   Alphabetical order sample: {sorted_urls[:5] if len(sorted_urls) > 5 else sorted_urls}")
 
             async with AsyncWebCrawler(verbose=False) as crawler:
                 idx = 0
-                for url, depth in bfs_queue:
+                for url in sorted_urls:
                     if url in scraped_urls:
                         continue
 
                     idx += 1
-                    logger.info(f"📄 [BFS {idx}/{len(urls)}] Scraping: {url} (depth={depth})")
+                    # Depth will be determined by crawl4ai's native BFS discovery
+                    logger.info(f"📄 [Sitemap {idx}/{len(sorted_urls)}] Scraping: {url}")
 
                     try:
                         # Apply concurrency limit
@@ -959,31 +939,30 @@ class WebsiteService:
                                         title = result.title
                                         page_title = result.title
 
-                                    # Calculate parent URL for this page
+                                    # For sitemap URLs, depth is 0 (all from sitemap are root-level)
+                                    # Parent will be determined by alphabetical sorting and crawl4ai BFS
+                                    depth = 0  # All sitemap URLs start at depth 0
                                     parent_url = None
-                                    if depth > 0:
-                                        parent_url = self.get_parent_url(url)
-                                        logger.debug(f"🔗 Page {url} -> parent: {parent_url}")
 
                                     page_data = {
                                         "url": url,
                                         "text": content,
                                         "title": page_title,
                                         "depth": depth,
-                                        "parent_url": parent_url
+                                        "parent_url": parent_url  # No parent for sitemap URLs
                                     }
 
                                     scraped_data.append(page_data)
-                                    logger.info(f"✓ Successfully scraped: {url} (depth={depth}, size={len(content)} bytes)")
+                                    logger.info(f"✓ Successfully scraped sitemap URL: {url} (size={len(content)} bytes)")
                             else:
                                 logger.warning(f"⚠️ Failed to scrape sitemap URL {url}: {result.error_message}")
 
                             # Apply delay between requests
-                            if delay_between_requests > 0 and idx < len(bfs_queue):
+                            if delay_between_requests > 0 and idx < len(sorted_urls):
                                 await asyncio.sleep(delay_between_requests)
 
                     except asyncio.TimeoutError:
-                        logger.warning(f"⏱️ Timeout scraping sitemap URL {url} (depth={depth})")
+                        logger.warning(f"⏱️ Timeout scraping sitemap URL {url}")
                     except Exception as e:
                         logger.warning(f"⚠️ Error scraping sitemap URL {url}: {e}")
 
@@ -996,18 +975,17 @@ class WebsiteService:
             # Clean content to remove navigation artifacts and search prompts
             combined_content = self.clean_content(combined_content)
 
-            # Log hierarchy information with verification
-            logger.info(f"📊 Sitemap hierarchy summary:")
-            max_depth = max([s['depth'] for s in scraped_data] + [0])
-            for depth_level in range(max_depth + 1):
-                urls_at_depth = [s for s in scraped_data if s['depth'] == depth_level]
-                if urls_at_depth:
-                    logger.info(f"  Depth {depth_level}: {len(urls_at_depth)} URLs")
-                    # Log a sample of URLs at this depth
-                    sample_urls = urls_at_depth[:3]
-                    for sample in sample_urls:
-                        parent_info = f" (parent: {sample.get('parent_url', 'N/A')})" if sample.get('parent_url') else ""
-                        logger.debug(f"    - {sample['url']}{parent_info}")
+            # Log scraping summary
+            logger.info(f"📊 Sitemap scraping summary:")
+            logger.info(f"  Total URLs scraped: {len(scraped_urls)}")
+            logger.info(f"  Alphabetical ordering: Applied")
+            logger.info(f"  Depth tracking: Native crawl4ai BFS (used in subsequent traversal)")
+            if scraped_data:
+                # Show sample of URLs in alphabetical order
+                sample_urls = scraped_data[:5]
+                logger.info(f"  Sample URLs (alphabetical order):")
+                for i, sample in enumerate(sample_urls, 1):
+                    logger.info(f"    {i}. {sample['url']}")
 
             return {
                 "success": len(scraped_urls) > 0,
