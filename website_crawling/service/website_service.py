@@ -340,21 +340,33 @@ class WebsiteService:
                     # Upload individual page
                     gemini_result = await upload_content_to_gemini(
                         content=page_text,
-                        url=page_url,  # Use child page URL, not sitemap URL
+                        url=page_url,  # Use individual page URL
                         title=page_title,
                         user_email=options.get("user_email")
                     )
 
                     # Determine parent relationship
                     parent_id = None
-                    # For sitemaps, pages are siblings (all children of the sitemap)
-                    # We don't track hierarchical parent-child in sitemaps
-                    depth = 0
+                    if page_depth > 0:
+                        # Find parent URL by removing last path segment
+                        parent_url = self.get_parent_url(page_url)
+                        if parent_url and parent_url in url_to_record_id:
+                            parent_id = url_to_record_id[parent_url]
+                            logger.info(f"🔗 Page {page_url} linked to parent {parent_url} (id={parent_id})")
+                        else:
+                            logger.warning(f"⚠️ Could not find parent for {page_url} at depth {page_depth}")
+                    else:
+                        # Root page - check if this URL was already processed as a parent
+                        if page_url in url_to_record_id:
+                            # This URL is already a parent, so don't create a new root record
+                            logger.info(f"🔄 Skipping duplicate root page: {page_url}")
+                            continue
 
                     # Record metadata for individual page
                     record_id = await record_scraped_metadata(
-                        url=page_url,  # Use child page URL
-                        domain=page_domain,
+                        url=page_url,  # Individual page URL in database
+                        domain=urlparse(page_url).netloc.replace('www.', ''),
+                        title=page_title or page_url,
                         title=page_title,
                         content_length=len(page_text),
                         pages_scraped=1,
