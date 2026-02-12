@@ -5,8 +5,9 @@ Contains all tool implementations as standalone functions
 
 import os
 import re
+import json
 import logging
-from typing import List
+from typing import List, Dict, Any, Optional
 
 from google.genai import types
 from shared.otel_logger import get_otel_logger
@@ -15,6 +16,99 @@ from ..core.ai import get_genai_client
 from ..schemas.models import SearchResult
 
 logger = get_otel_logger("knowledge_tools", "chatbot-orchestration")
+
+
+def build_citation_tree(urls: List[str]) -> Dict[str, Any]:
+    """
+    Convert flat list of URLs to hierarchical tree structure.
+
+    Examples:
+        Input: ["https://example.com", "https://example.com/about", "https://example.com/services"]
+        Output: {
+            "https://example.com": {
+                "url": "https://example.com",
+                "children": {
+                    "https://example.com/about": {"url": "...", "children": {}},
+                    "https://example.com/services": {"url": "...", "children": {}}
+                }
+            }
+        }
+    """
+    tree = {}
+
+    # Sort URLs by depth (fewer slashes = higher level)
+    sorted_urls = sorted(urls, key=lambda u: u.count('/'))
+
+    for url in sorted_urls:
+        parts = url.split('/')
+        current_level = tree
+        current_url = ""
+
+        # Build URL progressively: scheme://domain, then add path segments
+        for i, part in enumerate(parts):
+            if i <= 2:  # scheme, empty, domain
+                current_url += part + ("/" if i < 2 else "")
+            else:  # path segments
+                current_url += "/" + part
+
+            if current_url not in current_level:
+                current_level[current_url] = {"url": current_url, "children": {}}
+
+            current_level = current_level[current_url]["children"]
+
+    return tree
+
+
+async def get_citation_hierarchy(urls: List[str]) -> Dict[str, Any]:
+    """
+    Query database to get actual parent-child relationships from scraped_websites table.
+    Falls back to tree building if database relationships not available.
+    """
+    try:
+        from shared.db import get_db_connection
+
+        async with get_db_connection() as conn:
+            # Get all records matching URLs with hierarchy info
+            records = await conn.fetch("""
+                SELECT id, original_url, parent_id, depth, crawl_session_id
+                FROM scraped_websites
+                WHERE original_url = ANY($1::text[])
+                ORDER BY depth, original_url
+            """, urls)
+
+            if not records:
+                # Fall back to building tree from flat list
+                logger.info("No hierarchy records found - building tree from flat URL list")
+                return build_citation_tree(urls)
+
+            # Build tree from database relationships
+            tree = {}
+            id_to_node = {}
+
+            for record in records:
+                node = {
+                    "id": record["id"],
+                    "url": record["original_url"],
+                    "depth": record["depth"],
+                    "children": {}
+                }
+                id_to_node[record["id"]] = node
+
+                if record["parent_id"] is None:
+                    # Root node
+                    tree[record["original_url"]] = node
+                else:
+                    # Add to parent's children
+                    parent_node = id_to_node.get(record["parent_id"])
+                    if parent_node:
+                        parent_node["children"][record["original_url"]] = node
+
+            return tree
+
+    except Exception as e:
+        logger.warning(f"Error querying database for hierarchy: {e} - falling back to URL parsing")
+        # Fall back to building tree from flat list
+        return build_citation_tree(urls)
 
 async def search_knowledge_base(query: str) -> str:
     """
@@ -203,12 +297,22 @@ async def search_knowledge_base(query: str) -> str:
         # Append source URLs to content for citation
         enhanced_content = response_text
         if source_urls:
-            citation_section = "\n\n[CITATION_SOURCES]"
+            # Build tree structure for hierarchical citations
+            citation_tree = await get_citation_hierarchy(source_urls)
+
+            # Format as JSON for frontend parsing
+            citation_section = "\n\n[CITATION_TREE]"
+            citation_section += json.dumps(citation_tree, indent=2)
+            citation_section += "\n[/CITATION_TREE]"
+
+            # Also include flat list for backward compatibility
+            citation_section += "\n\n[CITATION_SOURCES]"
             for url in source_urls:
                 citation_section += f"\n- {url}"
             citation_section += "\n[/CITATION_SOURCES]"
+
             enhanced_content += citation_section
-            logger.info(f"📎 Appended {len(source_urls)} source URL(s) to content")
+            logger.info(f"📎 Appended {len(source_urls)} source URL(s) to content with tree structure")
             logger.info("=" * 80)
             logger.info("📎 CITATIONS ADDED:")
             for i, url in enumerate(source_urls, 1):

@@ -424,16 +424,24 @@ When the user asks a question similar to or identical to one they've asked befor
 
 **STEP-BY-STEP CITATION PROCESS:**
 1. After calling search_knowledge_base, look at the tool response
-2. Find the `[CITATION_SOURCES]` section (between the markers)
-3. Extract ALL URLs from that section
-4. At the END of your response, add: `<p><strong>Sources:</strong></p><ul><li><a href="URL">Source</a></li></ul>`
-5. Remove [CITATION_SOURCES] markers - DON'T show them to user
+2. Look for BOTH `[CITATION_TREE]` and `[CITATION_SOURCES]` sections
+3. If `[CITATION_TREE]` exists (hierarchical website structure):
+   - This is a JSON structure representing parent-child relationships between scraped pages
+   - The frontend will automatically render this as an expandable tree with clickable URLs
+   - The tree will display parent URLs with "+" buttons that expand to show child pages
+   - DO NOT manually parse or display the tree - let the frontend handle it
+   - Keep the [CITATION_TREE] markers in your response so the frontend can extract and render it
+4. If only `[CITATION_SOURCES]` exists (flat list):
+   - Extract ALL URLs from that section
+   - At the END of your response, add: `<p><strong>Sources:</strong></p><ul><li><a href="URL">Source</a></li></ul>`
+5. Keep ALL citation sections ([CITATION_TREE] and [CITATION_SOURCES]) in your response - the frontend will remove them after parsing
 
 - **How to Find Source URLs**:
-  - Look for `[CITATION_SOURCES]` section in tool responses
-  - URLs will be listed between `[CITATION_SOURCES]` and `[/CITATION_SOURCES]` markers
-  - Extract ALL URLs and include them in your Sources section
-  - Remove the `[CITATION_SOURCES]` markers from your response (don't show them to user)
+  - Look for `[CITATION_TREE]` section first - contains hierarchical structure from multi-page website scrapes
+  - Also look for `[CITATION_SOURCES]` section - contains flat list of URLs
+  - URLs in both sections should be included in your response as-is
+  - The frontend will detect the [CITATION_TREE] section and render it as an interactive tree
+  - If [CITATION_TREE] is present, the frontend will use it instead of a flat list
 
 - **Citation Requirements**:
   - **ALWAYS** add a "Sources:" section at the end of your response

@@ -7,7 +7,7 @@ import time
 import re
 import uuid
 from typing import Any, Dict, List, Optional, Set
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, urlunparse
 from datetime import datetime
 
 from shared.otel_logger import get_otel_logger
@@ -47,6 +47,30 @@ class WebsiteService:
 
     def __init__(self):
         self.scraping_dao = ScrapingDAO()
+
+    @staticmethod
+    def get_parent_url(url: str) -> Optional[str]:
+        """
+        Extract parent URL by removing last path segment.
+
+        Examples:
+            https://example.com/about/team -> https://example.com/about
+            https://example.com/about -> https://example.com
+            https://example.com -> None (already at root)
+        """
+        parsed = urlparse(url)
+        path_parts = [p for p in parsed.path.split('/') if p]
+
+        if not path_parts:
+            # Already at root
+            return None
+        elif len(path_parts) == 1:
+            # Direct child of domain, parent is the root
+            return f"{parsed.scheme}://{parsed.netloc}"
+        else:
+            # Remove last path segment
+            parent_path = '/'.join(path_parts[:-1])
+            return f"{parsed.scheme}://{parsed.netloc}/{parent_path}"
 
     async def scrape_website(self, url: str, options: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -202,8 +226,13 @@ class WebsiteService:
             # Sitemap: Upload each page separately with its own URL
             logger.info(f"📋 Sitemap detected: uploading {len(scraped_data)} pages individually")
 
+            # Generate unique session ID for this scraping session
+            crawl_session_id = str(uuid.uuid4())
+            logger.info(f"📊 Crawl session ID: {crawl_session_id}")
+
             uploaded_files = []
             record_ids = []
+            url_to_record_id = {}  # Track URLs to their record IDs for parent linking
 
             for page_data in scraped_data:
                 page_url = page_data["url"]
@@ -227,6 +256,12 @@ class WebsiteService:
                         user_email=options.get("user_email")
                     )
 
+                    # Determine parent relationship
+                    parent_id = None
+                    # For sitemaps, pages are siblings (all children of the sitemap)
+                    # We don't track hierarchical parent-child in sitemaps
+                    depth = 0
+
                     # Record metadata for individual page
                     record_id = await record_scraped_metadata(
                         url=page_url,  # Use child page URL
@@ -244,7 +279,10 @@ class WebsiteService:
                             "source": "sitemap",
                             "sitemap_url": url  # Store original sitemap URL
                         },
-                        file_search_metadata=gemini_result.get("file_search_metadata")
+                        file_search_metadata=gemini_result.get("file_search_metadata"),
+                        parent_id=parent_id,
+                        depth=depth,
+                        crawl_session_id=crawl_session_id
                     )
 
                     uploaded_files.append({
@@ -253,6 +291,7 @@ class WebsiteService:
                         "record_id": record_id
                     })
                     record_ids.append(record_id)
+                    url_to_record_id[page_url] = record_id
 
                 except Exception as e:
                     logger.error(f"❌ Failed to upload page {page_url}: {e}")
@@ -283,9 +322,14 @@ class WebsiteService:
                 # Multi-page crawl: upload each page individually with its own URL
                 logger.info(f"📋 Regular multi-page crawl detected: uploading {len(scraped_data)} pages individually")
 
+                # Generate unique session ID for this scraping session
+                crawl_session_id = str(uuid.uuid4())
+                logger.info(f"📊 Crawl session ID: {crawl_session_id}")
+
                 uploaded_files = []
                 record_ids = []
                 all_child_urls = []
+                url_to_record_id = {}  # Track URLs to their record IDs for parent linking
 
                 for page_data in scraped_data:
                     page_url = page_data["url"]
@@ -303,6 +347,15 @@ class WebsiteService:
                             title=page_title,
                             user_email=options.get("user_email")
                         )
+
+                        # Determine parent relationship
+                        parent_id = None
+                        if page_depth > 0:
+                            # Find parent URL by removing last path segment
+                            parent_url = self.get_parent_url(page_url)
+                            if parent_url and parent_url in url_to_record_id:
+                                parent_id = url_to_record_id[parent_url]
+                                logger.info(f"🔗 Page {page_url} linked to parent {parent_url} (id={parent_id})")
 
                         # Record metadata for individual page
                         record_id = await record_scraped_metadata(
@@ -323,7 +376,10 @@ class WebsiteService:
                                 "parent_domain": urlparse(url).netloc,
                                 "total_pages_in_crawl": len(scraped_data)
                             },
-                            file_search_metadata=gemini_result.get("file_search_metadata")
+                            file_search_metadata=gemini_result.get("file_search_metadata"),
+                            parent_id=parent_id,
+                            depth=page_depth,
+                            crawl_session_id=crawl_session_id
                         )
 
                         uploaded_files.append({
@@ -333,6 +389,7 @@ class WebsiteService:
                             "depth": page_depth
                         })
                         record_ids.append(record_id)
+                        url_to_record_id[page_url] = record_id
 
                         logger.info(f"✅ Uploaded child page: {page_url}")
 
@@ -382,7 +439,10 @@ class WebsiteService:
                         "max_pages": max_pages,
                         "max_depth": max_depth
                     },
-                    file_search_metadata=gemini_result.get("file_search_metadata")
+                    file_search_metadata=gemini_result.get("file_search_metadata"),
+                    parent_id=None,
+                    depth=0,
+                    crawl_session_id=None
                 )
 
                 processing_time = time.perf_counter() - start_time

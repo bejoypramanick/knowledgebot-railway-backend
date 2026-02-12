@@ -208,7 +208,10 @@ async def record_scraped_metadata(
     scraping_config: Dict[str, Any],
     file_search_metadata: Dict[str, Any] = None,
     version: int = 1,
-    user_id: str = None
+    user_id: str = None,
+    parent_id: Optional[int] = None,
+    depth: int = 0,
+    crawl_session_id: Optional[str] = None
 ) -> Optional[str]:
     """
     Record scraped website metadata to database.
@@ -238,7 +241,10 @@ async def record_scraped_metadata(
             "pages_scraped": pages_scraped,
             "status": gemini_state if gemini_state else "pending",
             "gemini_file_name": gemini_file_name,
-            "gemini_file_uri": gemini_file_uri
+            "gemini_file_uri": gemini_file_uri,
+            "parent_id": parent_id,
+            "depth": depth,
+            "crawl_session_id": crawl_session_id
         }
 
         # Add FileSearch metadata if available
