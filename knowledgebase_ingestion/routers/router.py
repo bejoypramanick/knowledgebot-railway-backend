@@ -244,10 +244,10 @@ async def delete_file(file_id: str, request: Request = None):
         logger.error(f"Error deleting file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/nuke")
-async def nuke_everything(request: Request = None):
+@router.post("/delete-all")
+async def delete_all_files(request: Request = None):
     """
-    NUCLEAR DELETE: Remove all documents from FileSearch store and all database records.
+    Delete all files and websites: Remove all documents from FileSearch store and all database records.
     This is a destructive operation and should only be called with explicit admin confirmation.
 
     Transaction Safety:
@@ -256,18 +256,18 @@ async def nuke_everything(request: Request = None):
     - Returns detailed status of what succeeded/failed
     """
     try:
-        # Log the nuclear delete for audit purposes
+        # Log the delete all for audit purposes
         user_email = request.headers.get("X-User-Email", "unknown") if request else "unknown"
-        logger.critical(f"🚨 NUCLEAR DELETE INITIATED by {user_email}")
+        logger.critical(f"🚨 DELETE ALL INITIATED by {user_email}")
 
-        # Execute the nuke with transactional safety
+        # Execute the deletion with transactional safety
         result = await nuke_filestore_and_database()
 
         transaction_status = result.get("transaction_status", "unknown")
         success = result.get("success", False)
 
         if success:
-            logger.critical(f"🚨 NUCLEAR DELETE SUCCESSFUL - All data removed (transaction: {transaction_status})")
+            logger.critical(f"🚨 DELETE ALL SUCCESSFUL - All data removed (transaction: {transaction_status})")
             # Return 200 with success details
             return {
                 "success": True,
@@ -277,7 +277,7 @@ async def nuke_everything(request: Request = None):
             }
         else:
             # Transaction failed or was aborted - return error
-            logger.critical(f"🚨 NUCLEAR DELETE FAILED - Transaction status: {transaction_status}")
+            logger.critical(f"🚨 DELETE ALL FAILED - Transaction status: {transaction_status}")
             logger.critical(f"   Message: {result.get('message')}")
 
             # Return 500 error with detailed message
@@ -289,8 +289,8 @@ async def nuke_everything(request: Request = None):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error during nuclear delete: {e}")
-        raise HTTPException(status_code=500, detail=f"Nuclear delete failed with error: {str(e)}")
+        logger.error(f"Error during delete all operation: {e}")
+        raise HTTPException(status_code=500, detail=f"Delete all operation failed with error: {str(e)}")
 
 # =================================
 # HEALTH ENDPOINTS
