@@ -521,57 +521,171 @@ class WebsiteService:
                     "parent_domain": urlparse(url).netloc
                 }
             else:
-                # Single page: Upload normally
+                # Single page or multi-URL crawl
                 domain = urlparse(url).netloc.replace('www.', '')
                 title = result.get("title") or ""  # Empty string if no title found (URL is already shown)
+                discovered_urls = result.get("scraped_urls", [url])
 
-                gemini_result = await upload_content_to_gemini(
-                    content=content_for_upload,
-                    url=url,
-                    title=title,
-                    user_email=options.get("user_email"),
-                    page_depth=0  # Single page has depth 0
-                )
+                # Check if multiple child URLs were discovered
+                if discovered_urls and len(discovered_urls) > 1:
+                    # Multiple URLs discovered: create individual records for each
+                    logger.info(f"📋 Single page has {len(discovered_urls)} child URLs - creating individual records")
 
-                # Record metadata to database
-                record_id = await record_scraped_metadata(
-                    url=url,
-                    domain=domain,
-                    title=title,
-                    content_length=len(result["content"]),
-                    pages_scraped=result.get("pages_scraped", 1),
-                    gemini_file_name=gemini_result.get("file_name"),
-                    gemini_file_uri=gemini_result.get("file_uri"),
-                    gemini_state=gemini_result.get("state", "UNKNOWN"),
-                    scraped_urls=result.get("scraped_urls", [url]),
-                    scraping_config={
-                        "max_pages": max_pages,
-                        "max_depth": max_depth,
-                        "include_patterns": include_patterns,
-                        "exclude_patterns": exclude_patterns
-                    },
-                    file_search_metadata=gemini_result.get("file_search_metadata"),
-                    parent_id=None,
-                    depth=0,
-                    crawl_session_id=None
-                )
+                    crawl_session_id = str(uuid.uuid4())
+                    logger.info(f"📊 Crawl session ID: {crawl_session_id}")
 
-                processing_time = time.perf_counter() - start_time
+                    uploaded_files = []
+                    record_ids = []
+                    url_to_record_id = {}
 
-                return {
-                    "success": True,
-                    "job_id": f"job_{int(time.time())}",
-                    "url": url,
-                    "status": "completed",
-                    "pages_scraped": result.get("pages_scraped", 1),
-                    "content_length": len(result["content"]),
-                    "title": result.get("title"),
-                    "gemini_file": gemini_result.get("file_name"),
-                    "gemini_state": gemini_result.get("state"),
-                    "record_id": record_id,
-                    "processing_time_seconds": round(processing_time, 2),
-                    "scraped_urls": result.get("scraped_urls", [url])
-                }
+                    # Upload parent URL first
+                    gemini_result = await upload_content_to_gemini(
+                        content=content_for_upload,
+                        url=url,
+                        title=title,
+                        user_email=options.get("user_email"),
+                        page_depth=0
+                    )
+
+                    # Record parent
+                    record_id = await record_scraped_metadata(
+                        url=url,
+                        domain=domain,
+                        title=title,
+                        content_length=len(result["content"]),
+                        pages_scraped=1,
+                        gemini_file_name=gemini_result.get("file_name"),
+                        gemini_file_uri=gemini_result.get("file_uri"),
+                        gemini_state=gemini_result.get("state", "UNKNOWN"),
+                        scraped_urls=[url],
+                        scraping_config={
+                            "max_pages": max_pages,
+                            "max_depth": max_depth,
+                            "include_patterns": include_patterns,
+                            "exclude_patterns": exclude_patterns
+                        },
+                        file_search_metadata=gemini_result.get("file_search_metadata"),
+                        parent_id=None,
+                        depth=0,
+                        crawl_session_id=crawl_session_id
+                    )
+
+                    uploaded_files.append({
+                        "url": url,
+                        "file_name": gemini_result.get("file_name"),
+                        "record_id": record_id,
+                        "depth": 0
+                    })
+                    record_ids.append(record_id)
+                    url_to_record_id[url] = record_id
+
+                    # Record child URLs discovered during crawl
+                    logger.info(f"📝 Recording {len(discovered_urls) - 1} child URLs discovered during crawl")
+                    for child_url in discovered_urls:
+                        if child_url == url:
+                            # Skip if it's the parent URL
+                            continue
+
+                        try:
+                            logger.info(f"📄 Recording child URL: {child_url}")
+
+                            # Record metadata for discovered child URL
+                            child_record_id = await record_scraped_metadata(
+                                url=child_url,
+                                domain=urlparse(child_url).netloc.replace('www.', ''),
+                                title=child_url,
+                                content_length=0,  # Not actually scraped yet, just discovered
+                                pages_scraped=0,
+                                gemini_file_name=None,
+                                gemini_file_uri=None,
+                                gemini_state="DISCOVERED",
+                                scraped_urls=[child_url],
+                                scraping_config={
+                                    "max_pages": max_pages,
+                                    "max_depth": max_depth,
+                                    "source": "discovered_during_crawl",
+                                    "include_patterns": include_patterns,
+                                    "exclude_patterns": exclude_patterns
+                                },
+                                file_search_metadata=None,
+                                parent_id=record_id,  # Link to parent
+                                depth=1,
+                                crawl_session_id=crawl_session_id
+                            )
+
+                            record_ids.append(child_record_id)
+                            url_to_record_id[child_url] = child_record_id
+                            logger.info(f"✅ Recorded child URL: {child_url}")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to record child URL {child_url}: {e}")
+
+                    processing_time = time.perf_counter() - start_time
+
+                    return {
+                        "success": True,
+                        "job_id": f"job_{int(time.time())}",
+                        "url": url,
+                        "status": "completed",
+                        "pages_scraped": len(discovered_urls),
+                        "pages_recorded": len(record_ids),
+                        "content_length": len(result["content"]),
+                        "title": title,
+                        "gemini_file": gemini_result.get("file_name"),
+                        "gemini_state": gemini_result.get("state"),
+                        "record_ids": record_ids,
+                        "processing_time_seconds": round(processing_time, 2),
+                        "scraped_urls": discovered_urls
+                    }
+
+                else:
+                    # True single page - only parent URL
+                    gemini_result = await upload_content_to_gemini(
+                        content=content_for_upload,
+                        url=url,
+                        title=title,
+                        user_email=options.get("user_email"),
+                        page_depth=0  # Single page has depth 0
+                    )
+
+                    # Record metadata to database
+                    record_id = await record_scraped_metadata(
+                        url=url,
+                        domain=domain,
+                        title=title,
+                        content_length=len(result["content"]),
+                        pages_scraped=result.get("pages_scraped", 1),
+                        gemini_file_name=gemini_result.get("file_name"),
+                        gemini_file_uri=gemini_result.get("file_uri"),
+                        gemini_state=gemini_result.get("state", "UNKNOWN"),
+                        scraped_urls=[url],
+                        scraping_config={
+                            "max_pages": max_pages,
+                            "max_depth": max_depth,
+                            "include_patterns": include_patterns,
+                            "exclude_patterns": exclude_patterns
+                        },
+                        file_search_metadata=gemini_result.get("file_search_metadata"),
+                        parent_id=None,
+                        depth=0,
+                        crawl_session_id=None
+                    )
+
+                    processing_time = time.perf_counter() - start_time
+
+                    return {
+                        "success": True,
+                        "job_id": f"job_{int(time.time())}",
+                        "url": url,
+                        "status": "completed",
+                        "pages_scraped": result.get("pages_scraped", 1),
+                        "content_length": len(result["content"]),
+                        "title": result.get("title"),
+                        "gemini_file": gemini_result.get("file_name"),
+                        "gemini_state": gemini_result.get("state"),
+                        "record_id": record_id,
+                        "processing_time_seconds": round(processing_time, 2),
+                        "scraped_urls": [url]
+                    }
 
     async def _scrape_with_crawl4ai(
         self,
