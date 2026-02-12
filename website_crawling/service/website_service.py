@@ -607,7 +607,11 @@ class WebsiteService:
                 all_child_urls = []
                 url_to_record_id = {}  # Track URLs to their record IDs for parent linking
 
-                for page_data in scraped_data:
+                # Sort pages by depth to ensure parents are processed before children
+                sorted_scraped_data = sorted(scraped_data, key=lambda x: x.get("depth", 0))
+                logger.info(f"📊 Processing {len(sorted_scraped_data)} pages in depth-first order")
+
+                for page_data in sorted_scraped_data:
                     page_url = page_data["url"]
                     page_text = page_data["text"]
                     page_title = page_data.get("title", "")
