@@ -363,66 +363,83 @@ class FileService:
             return []
 
     async def get_all_websites_hierarchy(self) -> list:
-        """Get all scraped websites in hierarchical tree structure."""
+        """
+        Get all scraped websites grouped by crawl_session_id.
+        Each session's websites are returned as separate hierarchical tree structures.
+        """
         try:
             from shared.db import get_db_connection
-            
+
             async with get_db_connection() as conn:
-                # Get all websites with hierarchy info
+                # Get all websites with hierarchy info, ordered by session and depth
                 websites = await conn.fetch(
-                    """SELECT id, original_url, domain, title, description, pages_scraped, 
+                    """SELECT id, original_url, domain, title, description, pages_scraped,
                               parent_id, depth, crawl_session_id, created_at
-                       FROM scraped_websites 
-                       ORDER BY depth, created_at DESC"""
+                       FROM scraped_websites
+                       ORDER BY crawl_session_id DESC NULLS LAST, depth, created_at DESC"""
                 )
-                
-                # Build hierarchical tree structure
-                # First create a map of all nodes
-                nodes = {}
-                root_nodes = []
-                
+
+                # Group websites by crawl_session_id
+                sessions = {}
                 for website in websites:
-                    node = {
-                        "id": str(website['id']),
-                        "original_filename": website['original_url'],  # Use URL as filename for consistency
-                        "display_name": website['title'] or website['domain'] or website['original_url'],
-                        "file_extension": "URL",
-                        "mime_type": "text/html",
-                        "file_type": "WEBSITE",
-                        "size_bytes": 0,  # Not applicable for websites
-                        "sha256_hash": None,
-                        "gemini_state": "completed",
-                        "processed_at": website['created_at'].isoformat() if website['created_at'] else None,
-                        "created_at": website['created_at'].isoformat() if website['created_at'] else None,
-                        "version": 1,
-                        "source": "website",
-                        "url": website['original_url'],
-                        "domain": website['domain'],
-                        "title": website['title'],
-                        "description": website['description'],
-                        "pages_scraped": website['pages_scraped'],
-                        "depth": website['depth'],
-                        "parent_id": website['parent_id'],
-                        "crawl_session_id": str(website['crawl_session_id']) if website['crawl_session_id'] else None,
-                        "children": [],  # Will be populated below
-                        "is_expanded": False  # Frontend can control this
-                    }
-                    nodes[website['id']] = node
-                
-                # Build tree structure
-                for website_id, node in nodes.items():
-                    parent_id = node['parent_id']
-                    if parent_id is None or parent_id not in nodes:
-                        # This is a root node
-                        root_nodes.append(node)
-                    else:
-                        # This is a child node
-                        parent_node = nodes[parent_id]
-                        parent_node['children'].append(node)
-                
-                logger.info(f"Retrieved {len(websites)} websites in hierarchical structure with {len(root_nodes)} root nodes")
-                return root_nodes
-                
+                    session_id = str(website['crawl_session_id']) if website['crawl_session_id'] else "unknown_session"
+                    if session_id not in sessions:
+                        sessions[session_id] = []
+                    sessions[session_id].append(website)
+
+                # Build hierarchical tree structure for each session
+                all_root_nodes = []
+
+                for session_id, session_websites in sessions.items():
+                    # Create a map of all nodes in this session
+                    nodes = {}
+                    session_root_nodes = []
+
+                    for website in session_websites:
+                        node = {
+                            "id": str(website['id']),
+                            "original_filename": website['original_url'],  # Use URL as filename for consistency
+                            "display_name": website['title'] or website['domain'] or website['original_url'],
+                            "file_extension": "URL",
+                            "mime_type": "text/html",
+                            "file_type": "WEBSITE",
+                            "size_bytes": 0,  # Not applicable for websites
+                            "sha256_hash": None,
+                            "gemini_state": "completed",
+                            "processed_at": website['created_at'].isoformat() if website['created_at'] else None,
+                            "created_at": website['created_at'].isoformat() if website['created_at'] else None,
+                            "version": 1,
+                            "source": "website",
+                            "url": website['original_url'],
+                            "domain": website['domain'],
+                            "title": website['title'],
+                            "description": website['description'],
+                            "pages_scraped": website['pages_scraped'],
+                            "depth": website['depth'],
+                            "parent_id": website['parent_id'],
+                            "crawl_session_id": session_id,
+                            "children": [],  # Will be populated below
+                            "is_expanded": False  # Frontend can control this
+                        }
+                        nodes[website['id']] = node
+
+                    # Build tree structure within this session
+                    for website_id, node in nodes.items():
+                        parent_id = node['parent_id']
+                        if parent_id is None or parent_id not in nodes:
+                            # This is a root node in this session
+                            session_root_nodes.append(node)
+                        else:
+                            # This is a child node
+                            parent_node = nodes[parent_id]
+                            parent_node['children'].append(node)
+
+                    all_root_nodes.extend(session_root_nodes)
+                    logger.info(f"📊 Session {session_id[:8]}...: {len(session_websites)} websites, {len(session_root_nodes)} root nodes")
+
+                logger.info(f"✅ Retrieved {len(websites)} websites across {len(sessions)} crawl sessions")
+                return all_root_nodes
+
         except Exception as e:
             logger.error(f"Error getting websites hierarchy: {e}")
             return []
@@ -432,16 +449,28 @@ class FileService:
         try:
             files = await self.get_all_files()
             websites = await self.get_all_websites_hierarchy()
-            
+
+            # Helper function to count all nodes recursively
+            def count_all_nodes(nodes):
+                count = 0
+                for node in nodes:
+                    count += 1
+                    if node.get('children'):
+                        count += count_all_nodes(node['children'])
+                return count
+
+            total_website_pages = count_all_nodes(websites)
+            root_website_count = len(websites)  # Root nodes only (each is a separate session)
+
             return {
                 "files": files,  # Flat list of uploaded files
-                "websites": websites,  # Hierarchical tree of scraped websites
+                "websites": websites,  # Hierarchical tree of scraped websites grouped by session
                 "total_files": len(files),
-                "total_websites": len(websites),
+                "total_websites": root_website_count,
                 "summary": {
                     "uploaded_files": len(files),
-                    "scraped_websites": sum(1 for w in websites if w.get('parent_id') is None),  # Count root websites only
-                    "total_pages": len(websites)  # All website pages including children
+                    "scraped_websites": root_website_count,  # Root websites (one per session)
+                    "total_pages": total_website_pages  # All website pages including children
                 }
             }
         except Exception as e:
