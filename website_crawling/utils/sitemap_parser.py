@@ -32,8 +32,26 @@ async def parse_sitemap(sitemap_content: str, base_url: str) -> List[str]:
     urls: Set[str] = set()
 
     try:
-        # Parse XML
-        root = ET.fromstring(sitemap_content)
+        # Parse XML with better error handling
+        try:
+            root = ET.fromstring(sitemap_content)
+        except ET.ParseError as xml_error:
+            logger.error(f"❌ XML parsing error: {xml_error}")
+            logger.debug(f"Content preview: {sitemap_content[:200]}")
+            
+            # Try to fix common XML issues and retry
+            try:
+                # Remove any BOM and clean whitespace
+                cleaned_content = sitemap_content.strip()
+                if cleaned_content.startswith('<?xml'):
+                    cleaned_content = cleaned_content.split('?>', 1)[1].strip()
+                
+                root = ET.fromstring(cleaned_content)
+                logger.info("✅ Successfully parsed XML after cleaning")
+            except ET.ParseError as retry_error:
+                logger.error(f"❌ XML parsing failed even after cleaning: {retry_error}")
+                return []
+        
         logger.info(f"📄 Root element: {root.tag}")
 
         # Handle different sitemap namespaces
@@ -173,7 +191,7 @@ async def extract_urls_from_sitemap(url: str) -> List[str]:
                 # Matches both <loc>URL</loc> patterns and plain URLs
                 url_patterns = [
                     r'<loc>\s*([^\<]+?)\s*</loc>',  # XML <loc> tags
-                    r'https?://[^\s\)\]\}\<]+',  # Plain HTTP(S) URLs
+                    r'https?://[^\s\<\>\{\}\[\]\(\)]+',  # Plain HTTP(S) URLs - more restrictive
                 ]
 
                 extracted_urls: Set[str] = set()
@@ -183,9 +201,17 @@ async def extract_urls_from_sitemap(url: str) -> List[str]:
                         found_url = match.group(1) if match.lastindex else match.group(0)
                         found_url = found_url.strip()
                         if found_url:
-                            # Make absolute URL
-                            absolute_url = urljoin(url, found_url)
-                            extracted_urls.add(absolute_url)
+                            # Validate URL format - ensure it starts with http/https and doesn't contain invalid characters
+                            if re.match(r'^https?://[a-zA-Z0-9\.\-_]+', found_url):
+                                # Make absolute URL
+                                absolute_url = urljoin(url, found_url)
+                                # Additional validation - ensure no XML/HTML artifacts
+                                if not re.search(r'[<>\{\}\[\]\(\)]', absolute_url):
+                                    extracted_urls.add(absolute_url)
+                                else:
+                                    logger.warning(f"⚠️ Skipping malformed URL: {found_url}")
+                            else:
+                                logger.warning(f"⚠️ Invalid URL format: {found_url}")
 
                 urls = list(extracted_urls)
                 if urls:
