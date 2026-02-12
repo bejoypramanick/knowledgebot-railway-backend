@@ -687,6 +687,106 @@ class WebsiteService:
                         "scraped_urls": [url]
                     }
 
+    async def _scrape_urls_from_sitemap(
+        self,
+        urls: List[str],
+        timeout: int = 30,
+        max_concurrent: int = 10,
+        delay_between_requests: float = 0
+    ) -> Dict[str, Any]:
+        """
+        Scrape multiple URLs from a sitemap.
+
+        Args:
+            urls: List of URLs to scrape from sitemap
+            timeout: Request timeout in seconds
+            max_concurrent: Maximum concurrent requests
+            delay_between_requests: Delay between requests in seconds
+
+        Returns:
+            Dict with scraped content and metadata
+        """
+        scraped_data = []
+        scraped_urls: Set[str] = set()
+        title = "Sitemap Content"
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        if not urls:
+            return {
+                "success": False,
+                "error": "No URLs provided to scrape from sitemap"
+            }
+
+        try:
+            async with AsyncWebCrawler(verbose=False) as crawler:
+                for idx, url in enumerate(urls):
+                    if url in scraped_urls:
+                        continue
+
+                    logger.info(f"📄 Scraping sitemap URL {idx + 1}/{len(urls)}: {url}")
+
+                    try:
+                        # Apply concurrency limit
+                        async with semaphore:
+                            result = await asyncio.wait_for(
+                                crawler.arun(url=url),
+                                timeout=timeout
+                            )
+
+                            if result.success:
+                                scraped_urls.add(url)
+
+                                # Get content
+                                content = result.markdown or result.cleaned_html or result.html or ""
+                                if content:
+                                    # Store individual page data for citations
+                                    page_title = ""
+                                    if len(scraped_urls) == 1 and hasattr(result, 'title') and result.title:
+                                        title = result.title
+                                        page_title = result.title
+
+                                    scraped_data.append({
+                                        "url": url,
+                                        "text": content,
+                                        "title": page_title,
+                                        "depth": 0  # All sitemap URLs are at depth 0
+                                    })
+                                    logger.info(f"✓ Successfully scraped: {url}")
+                            else:
+                                logger.warning(f"⚠️ Failed to scrape sitemap URL {url}: {result.error_message}")
+
+                            # Apply delay between requests
+                            if delay_between_requests > 0 and idx < len(urls) - 1:
+                                logger.info(f"⏳ Waiting {delay_between_requests}s before next request")
+                                await asyncio.sleep(delay_between_requests)
+
+                    except asyncio.TimeoutError:
+                        logger.warning(f"⏱️ Timeout scraping sitemap URL {url}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Error scraping sitemap URL {url}: {e}")
+
+            # Combine content for display but preserve individual page data
+            combined_content = "\n".join([
+                f"\n\n--- Page: {item['url']} ---\n\n{item['text']}"
+                for item in scraped_data
+            ])
+
+            return {
+                "success": len(scraped_urls) > 0,
+                "content": combined_content,
+                "title": title,
+                "pages_scraped": len(scraped_urls),
+                "scraped_urls": list(scraped_urls),
+                "scraped_data": scraped_data  # Return individual page data
+            }
+
+        except Exception as e:
+            logger.error(f"❌ Sitemap scraping error: {e}")
+            return {
+                "success": False,
+                "error": f"Failed to scrape sitemap URLs: {str(e)}"
+            }
+
     async def _scrape_with_crawl4ai(
         self,
         url: str,
