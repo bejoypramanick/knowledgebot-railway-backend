@@ -935,38 +935,12 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                     # Step 1: List and delete all documents in the store
                     logger.warning(f"📋 Listing documents in FileSearch store...")
                     
-                    # Try different approaches to list documents
-                    documents = None
-                    try:
-                        # Try 'documents' as a property first
-                        if hasattr(genai_client.file_search_stores, 'documents'):
-                            logger.warning(f"🔍 Trying 'documents' as property")
-                            documents_attr = genai_client.file_search_stores.documents
-                            logger.warning(f"🔍 documents type: {type(documents_attr)}")
-                            if hasattr(documents_attr, 'list'):
-                                documents = documents_attr.list(name=file_search_store_name)
-                                logger.warning(f"✅ Used documents.list() method")
-                            elif callable(documents_attr):
-                                documents = documents_attr(name=file_search_store_name)
-                                logger.warning(f"✅ Used documents() as callable")
-                    except Exception as prop_error:
-                        logger.warning(f"⚠️ documents property approach failed: {prop_error}")
-                    
-                    # If that didn't work, try other methods
-                    if documents is None:
-                        logger.warning(f"🔍 Trying alternative approaches...")
-                        # Try getting the store first, then list its contents
-                        try:
-                            store = genai_client.file_search_stores.get(name=file_search_store_name)
-                            logger.warning(f"🔍 Got store: {store}")
-                            if hasattr(store, 'documents'):
-                                documents = store.documents
-                                logger.warning(f"✅ Got documents from store.documents")
-                        except Exception as store_error:
-                            logger.warning(f"⚠️ Store approach failed: {store_error}")
+                    # Use the correct API: client.file_search_stores.documents.list(parent=store_name)
+                    logger.warning(f"🔍 Using documents.list(parent=store_name) method")
+                    documents = genai_client.file_search_stores.documents.list(parent=file_search_store_name)
                     
                     if documents is None:
-                        raise Exception("Failed to list documents with all attempted methods")
+                        raise Exception("Failed to list documents")
 
                     # Convert to list to count documents
                     doc_list = list(documents) if documents else []
@@ -978,8 +952,8 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                         try:
                             doc_name = doc.name if hasattr(doc, 'name') else str(doc)
                             logger.warning(f"🗑️ Deleting document: {doc_name}")
-                            # Use the 'delete' method instead of 'delete_document'
-                            genai_client.file_search_stores.delete(name=doc_name)
+                            # Use the correct API: client.file_search_stores.documents.delete(name=doc_name, force=True)
+                            genai_client.file_search_stores.documents.delete(name=doc_name, force=True)
                             deleted_count += 1
                         except Exception as doc_error:
                             logger.warning(f"⚠️ Error deleting document {doc}: {doc_error}")
