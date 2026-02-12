@@ -818,8 +818,8 @@ class WebsiteService:
                         logger.warning(f"⚠️ Error scraping sitemap URL {url}: {e}")
 
             # Combine content for display but preserve individual page data
-            combined_content = "\n".join([
-                f"\n\n--- Page: {item['url']} ---\n\n{item['text']}"
+            combined_content = "\n\n".join([
+                item['text']
                 for item in scraped_data
             ])
 
@@ -924,8 +924,8 @@ class WebsiteService:
                         logger.warning(f"⚠️ Error scraping {current_url}: {e}")
 
             # Combine content for display but preserve individual page data
-            combined_content = "\n".join([
-                f"\n\n--- Page: {item['url']} ---\n\n{item['text']}"
+            combined_content = "\n\n".join([
+                item['text']
                 for item in scraped_data
             ])
 
