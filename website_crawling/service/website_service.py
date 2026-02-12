@@ -447,6 +447,14 @@ class WebsiteService:
                             if parent_url and parent_url in url_to_record_id:
                                 parent_id = url_to_record_id[parent_url]
                                 logger.info(f"🔗 Page {page_url} linked to parent {parent_url} (id={parent_id})")
+                            else:
+                                logger.warning(f"⚠️ Could not find parent for {page_url} at depth {page_depth}")
+                        else:
+                            # Root page - check if this URL was already processed as a parent
+                            if page_url in url_to_record_id:
+                                # This URL is already a parent, so don't create a new root record
+                                logger.info(f"🔄 Skipping duplicate root page: {page_url}")
+                                continue
 
                         # Record metadata for individual page
                         record_id = await record_scraped_metadata(
