@@ -694,8 +694,24 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
                 logger.info(f"   Document: {document_name}")
 
                 try:
-                    # Delete the document from the FileSearch store using modern API
-                    # This removes the file from the store AND cleans up embeddings
+                    # First, delete all chunks from the document
+                    logger.info(f"🗑️ [FILESEARCH] Deleting all chunks from document: {document_name}")
+                    try:
+                        chunks = genai_client.file_search_stores.documents.chunks.list(parent=document_name)
+                        chunk_count = 0
+                        if hasattr(chunks, '__iter__'):
+                            for chunk in chunks:
+                                try:
+                                    genai_client.file_search_stores.documents.chunks.delete(name=chunk.name)
+                                    chunk_count += 1
+                                except Exception as chunk_error:
+                                    logger.warning(f"⚠️ Could not delete chunk {chunk.name}: {chunk_error}")
+                        logger.info(f"✅ [FILESEARCH] Deleted {chunk_count} chunks from document")
+                    except Exception as chunks_error:
+                        logger.warning(f"⚠️ [FILESEARCH] Could not list/delete chunks for {document_name}: {chunks_error}")
+
+                    # Now delete the document itself
+                    logger.info(f"🗑️ [FILESEARCH] Deleting document: {document_name}")
                     genai_client.file_search_stores.documents.delete(
                         name=document_name
                     )
@@ -714,16 +730,9 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
                         logger.info(f"✅ [POST-DELETE VERIFICATION] Document successfully removed from FileSearch store")
 
                 except Exception as fs_error:
-                    error_str = str(fs_error).lower()
-                    if "404" in str(fs_error) or "not found" in error_str:
+                    if "404" in str(fs_error) or "not found" in str(fs_error).lower():
                         deletion_results["file_search"]["error"] = "Document not found (already deleted)"
                         logger.warning(f"⚠️ [FILESEARCH] Document already deleted or not found: {document_name}")
-                    elif "failed_precondition" in error_str or "cannot delete non-empty" in error_str:
-                        # Document is non-empty - we'll just proceed with DB deletion
-                        # The database record will be deleted, making this FileSearch doc orphaned
-                        logger.warning(f"⚠️ [FILESEARCH] Document is non-empty, skipping FileSearch deletion: {document_name}")
-                        logger.info(f"   Database record will be deleted, orphaning this FileSearch document")
-                        deletion_results["file_search"]["error"] = "Non-empty document (will be orphaned)"
                     else:
                         deletion_results["file_search"]["error"] = str(fs_error)
                         logger.error(f"❌ [FILESEARCH] Error deleting document: {fs_error}")
@@ -920,20 +929,30 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
                             document_name = metadata_dict['document_name']
                             logger.info(f"🗑️ Deleting page {record['id']} (level {record['level']}) from FileSearch: {document_name}")
 
-                            # Use modern FileSearch API
+                            # First delete all chunks from the document
+                            try:
+                                chunks = genai_client.file_search_stores.documents.chunks.list(parent=document_name)
+                                chunk_count = 0
+                                if hasattr(chunks, '__iter__'):
+                                    for chunk in chunks:
+                                        try:
+                                            genai_client.file_search_stores.documents.chunks.delete(name=chunk.name)
+                                            chunk_count += 1
+                                        except Exception:
+                                            pass  # Continue even if individual chunks fail
+                                logger.info(f"   Deleted {chunk_count} chunks from document")
+                            except Exception as chunks_error:
+                                logger.debug(f"   Could not delete chunks: {chunks_error}")
+
+                            # Now delete the document itself
                             genai_client.file_search_stores.documents.delete(
                                 name=document_name
                             )
                             filesearch_deleted += 1
                             logger.info(f"✅ Deleted from FileSearch: {document_name}")
                     except Exception as e:
-                        error_str = str(e).lower()
-                        if "404" in str(e) or "not found" in error_str:
+                        if "404" in str(e) or "not found" in str(e).lower():
                             logger.warning(f"⚠️ FileSearch document already deleted for page {record['id']}: {e}")
-                        elif "failed_precondition" in error_str or "cannot delete non-empty" in error_str:
-                            # Document is non-empty - skip deletion and continue
-                            # Database record will be deleted, orphaning the FileSearch doc
-                            logger.warning(f"⚠️ FileSearch document is non-empty for page {record['id']}, will be orphaned: {document_name}")
                         else:
                             error_msg = f"Could not delete from FileSearch for page {record['id']}: {e}"
                             logger.error(f"❌ {error_msg}")
