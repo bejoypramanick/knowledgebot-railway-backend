@@ -938,25 +938,15 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                     # Debug: Log available methods on file_search_stores
                     logger.warning(f"🔍 Available methods on file_search_stores: {[attr for attr in dir(genai_client.file_search_stores) if not attr.startswith('_')]}")
                     
-                    # Try different method names that might exist
-                    documents = None
-                    for method_name in ['list_files', 'list_documents', 'list']:
-                        if hasattr(genai_client.file_search_stores, method_name):
-                            logger.warning(f"🔍 Found method: {method_name}")
-                            try:
-                                method = getattr(genai_client.file_search_stores, method_name)
-                                if method_name == 'list':
-                                    documents = method()
-                                else:
-                                    documents = method(name=file_search_store_name)
-                                logger.warning(f"✅ Successfully called {method_name}")
-                                break
-                            except Exception as method_error:
-                                logger.warning(f"⚠️ Method {method_name} failed: {method_error}")
-                                continue
+                    # Use the 'documents' method to list documents in the store
+                    if hasattr(genai_client.file_search_stores, 'documents'):
+                        logger.warning(f"🔍 Using 'documents' method to list documents")
+                        documents = genai_client.file_search_stores.documents(name=file_search_store_name)
+                    else:
+                        raise Exception("'documents' method not found on file_search_stores")
                     
                     if documents is None:
-                        raise Exception("No working method found to list documents")
+                        raise Exception("Failed to list documents")
 
                     # Convert to list to count documents
                     doc_list = list(documents) if documents else []
@@ -968,10 +958,8 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                         try:
                             doc_name = doc.name if hasattr(doc, 'name') else str(doc)
                             logger.warning(f"🗑️ Deleting document: {doc_name}")
-                            genai_client.file_search_stores.delete_document(
-                                file_search_store_name=file_search_store_name,
-                                document_name=doc_name
-                            )
+                            # Use the 'delete' method instead of 'delete_document'
+                            genai_client.file_search_stores.delete(name=doc_name)
                             deleted_count += 1
                         except Exception as doc_error:
                             logger.warning(f"⚠️ Error deleting document {doc}: {doc_error}")
