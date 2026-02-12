@@ -857,6 +857,10 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
         from shared.db import get_db_connection
         from knowledgebase_ingestion.core.ai import get_genai_client
 
+        # Validate website_id
+        if not website_id:
+            return {"success": False, "error": "website_id is required"}
+
         # First get all records in hierarchy (parent + all children)
         async with get_db_connection() as conn:
             # Get parent and all recursive children
@@ -878,7 +882,9 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
                 FROM website_hierarchy
                 ORDER BY level, id;
             """
-            hierarchy_records = await conn.fetch(hierarchy_query, int(website_id) if website_id.isdigit() else website_id)
+            # Convert website_id to int if it's numeric, otherwise keep as string
+            website_id_param = int(website_id) if website_id and website_id.isdigit() else website_id
+            hierarchy_records = await conn.fetch(hierarchy_query, website_id_param)
             
             if not hierarchy_records:
                 return {"success": False, "error": "Website not found"}
@@ -936,7 +942,7 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
                 )
                 DELETE FROM scraped_websites WHERE id IN (SELECT id FROM website_hierarchy)
             """
-            result = await conn.execute(delete_query, int(website_id) if website_id.isdigit() else website_id)
+            result = await conn.execute(delete_query, website_id_param)
             deleted_count = int(result.split()[-1]) if result else 0
             
             return {
