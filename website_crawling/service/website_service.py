@@ -395,13 +395,18 @@ class WebsiteService:
                     # Determine parent relationship
                     parent_id = None
                     if page_depth > 0:
-                        # Find parent URL by removing last path segment
-                        parent_url = self.get_parent_url(page_url)
+                        # Use parent_url from page_data if available (from BFS sitemap analysis)
+                        parent_url = page_data.get("parent_url")
+
+                        # If parent_url not in page_data, calculate it using path analysis
+                        if not parent_url:
+                            parent_url = self.get_parent_url(page_url)
+
                         if parent_url and parent_url in url_to_record_id:
                             parent_id = url_to_record_id[parent_url]
-                            logger.info(f"🔗 Page {page_url} linked to parent {parent_url} (id={parent_id})")
+                            logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to parent {parent_url} (id={parent_id})")
                         else:
-                            logger.warning(f"⚠️ Could not find parent for {page_url} at depth {page_depth}")
+                            logger.warning(f"⚠️ Could not find parent for {page_url} at depth {page_depth}. Parent URL: {parent_url}")
                     else:
                         # Root page - check if this URL was already processed as a parent
                         if page_url in url_to_record_id:
@@ -739,6 +744,32 @@ class WebsiteService:
                         "scraped_urls": [url]
                     }
 
+    @staticmethod
+    def calculate_url_depth(url: str) -> int:
+        """
+        Calculate depth of a URL based on path segments using BFS strategy.
+
+        Examples:
+            https://example.com -> 0 (root)
+            https://example.com/about -> 1
+            https://example.com/about/team -> 2
+            https://example.com/about/team/members -> 3
+
+        Args:
+            url: The URL to calculate depth for
+
+        Returns:
+            Depth level (0 for root, 1+ for nested paths)
+        """
+        try:
+            parsed = urlparse(url)
+            # Count non-empty path segments
+            path_parts = [p for p in parsed.path.split('/') if p]
+            return len(path_parts)
+        except Exception as e:
+            logger.warning(f"⚠️ Error calculating URL depth for {url}: {e}")
+            return 0
+
     async def _scrape_urls_from_sitemap(
         self,
         urls: List[str],
@@ -747,7 +778,8 @@ class WebsiteService:
         delay_between_requests: float = 0
     ) -> Dict[str, Any]:
         """
-        Scrape multiple URLs from a sitemap.
+        Scrape multiple URLs from a sitemap using BFS depth strategy.
+        Establishes parent-child relationships based on URL path hierarchy.
 
         Args:
             urls: List of URLs to scrape from sitemap
@@ -756,10 +788,11 @@ class WebsiteService:
             delay_between_requests: Delay between requests in seconds
 
         Returns:
-            Dict with scraped content and metadata
+            Dict with scraped content and metadata with parent-child relationships
         """
         scraped_data = []
         scraped_urls: Set[str] = set()
+        url_to_data = {}  # Track URL to its data for parent linking
         title = "Sitemap Content"
         semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -770,12 +803,24 @@ class WebsiteService:
             }
 
         try:
+            # Calculate depth for each URL and organize by BFS levels
+            url_depth_map = {}
+            for url in urls:
+                depth = self.calculate_url_depth(url)
+                url_depth_map[url] = depth
+                logger.debug(f"📍 URL depth calculated: {url} -> depth {depth}")
+
+            # Sort URLs by depth (BFS: depth 0 first, then depth 1, etc.)
+            sorted_urls = sorted(urls, key=lambda u: url_depth_map[u])
+            logger.info(f"🎯 Processing {len(sorted_urls)} URLs using BFS strategy")
+
             async with AsyncWebCrawler(verbose=False) as crawler:
-                for idx, url in enumerate(urls):
+                for idx, url in enumerate(sorted_urls):
                     if url in scraped_urls:
                         continue
 
-                    logger.info(f"📄 Scraping sitemap URL {idx + 1}/{len(urls)}: {url}")
+                    depth = url_depth_map[url]
+                    logger.info(f"📄 Scraping sitemap URL {idx + 1}/{len(sorted_urls)}: {url} (depth={depth})")
 
                     try:
                         # Apply concurrency limit
@@ -797,18 +842,28 @@ class WebsiteService:
                                         title = result.title
                                         page_title = result.title
 
-                                    scraped_data.append({
+                                    # Calculate parent URL for this page
+                                    parent_url = None
+                                    if depth > 0:
+                                        parent_url = self.get_parent_url(url)
+                                        logger.debug(f"🔗 Page {url} -> parent: {parent_url}")
+
+                                    page_data = {
                                         "url": url,
                                         "text": content,
                                         "title": page_title,
-                                        "depth": 0  # All sitemap URLs are at depth 0
-                                    })
-                                    logger.info(f"✓ Successfully scraped: {url}")
+                                        "depth": depth,
+                                        "parent_url": parent_url
+                                    }
+
+                                    scraped_data.append(page_data)
+                                    url_to_data[url] = page_data
+                                    logger.info(f"✓ Successfully scraped: {url} (depth={depth})")
                             else:
                                 logger.warning(f"⚠️ Failed to scrape sitemap URL {url}: {result.error_message}")
 
                             # Apply delay between requests
-                            if delay_between_requests > 0 and idx < len(urls) - 1:
+                            if delay_between_requests > 0 and idx < len(sorted_urls) - 1:
                                 logger.info(f"⏳ Waiting {delay_between_requests}s before next request")
                                 await asyncio.sleep(delay_between_requests)
 
@@ -826,13 +881,19 @@ class WebsiteService:
             # Clean content to remove navigation artifacts and search prompts
             combined_content = self.clean_content(combined_content)
 
+            # Log hierarchy information
+            logger.info(f"📊 Sitemap hierarchy summary:")
+            for depth_level in range(max([s['depth'] for s in scraped_data] + [0]) + 1):
+                urls_at_depth = [s for s in scraped_data if s['depth'] == depth_level]
+                logger.info(f"  Depth {depth_level}: {len(urls_at_depth)} URLs")
+
             return {
                 "success": len(scraped_urls) > 0,
                 "content": combined_content,
                 "title": title,
                 "pages_scraped": len(scraped_urls),
                 "scraped_urls": list(scraped_urls),
-                "scraped_data": scraped_data  # Return individual page data
+                "scraped_data": scraped_data  # Return individual page data with depth and parent info
             }
 
         except Exception as e:
