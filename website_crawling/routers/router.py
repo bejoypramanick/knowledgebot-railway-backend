@@ -45,6 +45,8 @@ async def scrape_website(request: Request):
             "max_pages": min(max_pages, 100),  # Cap at 100 pages
             "max_depth": min(max_depth, 5),     # Cap at depth 5
             "replace_existing": replace_existing,
+            "delay_between_requests": max(0, float(body.get("delay_between_requests", 0))),  # Delay in seconds
+            "max_concurrent": min(int(body.get("max_concurrent", 10)), 50),  # Cap concurrent at 50
             "extract_links": body.get("extract_links", True),
             "extract_images": body.get("extract_images", False),
             "respect_robots_txt": body.get("respect_robots_txt", True),

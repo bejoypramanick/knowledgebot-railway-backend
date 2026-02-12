@@ -68,9 +68,11 @@ class WebsiteService:
         max_pages = options.get("max_pages", 1)
         max_depth = options.get("max_depth", 2)
         replace_existing = options.get("replace_existing", False)
+        delay_between_requests = options.get("delay_between_requests", 0)
+        max_concurrent = options.get("max_concurrent", 10)
         timeout = options.get("timeout", 30)
 
-        logger.info(f"🌐 Starting scrape for {url} - max_pages={max_pages}, max_depth={max_depth}")
+        logger.info(f"🌐 Starting scrape for {url} - max_pages={max_pages}, max_depth={max_depth}, delay={delay_between_requests}s, concurrent={max_concurrent}")
 
         # Check for existing record
         existing = await self.scraping_dao.get_existing_website(url)
@@ -105,7 +107,9 @@ class WebsiteService:
                 urls_to_scrape = sitemap_urls[:max_pages]
 
                 # Scrape all URLs from sitemap
-                result = await self._scrape_urls_from_sitemap(urls_to_scrape, timeout)
+                result = await self._scrape_urls_from_sitemap(
+                    urls_to_scrape, timeout, max_concurrent, delay_between_requests
+                )
 
             except Exception as e:
                 logger.error(f"❌ Error processing sitemap: {e}")
@@ -117,9 +121,15 @@ class WebsiteService:
             # Perform regular website scraping
             try:
                 if CRAWL4AI_AVAILABLE:
-                    result = await self._scrape_with_crawl4ai(url, max_pages, max_depth, timeout)
+                    result = await self._scrape_with_crawl4ai(
+                        url, max_pages, max_depth, timeout,
+                        delay_between_requests, max_concurrent
+                    )
                 elif HTTPX_AVAILABLE:
-                    result = await self._scrape_with_httpx(url, max_pages, max_depth, timeout)
+                    result = await self._scrape_with_httpx(
+                        url, max_pages, max_depth, timeout,
+                        delay_between_requests, max_concurrent
+                    )
                 else:
                     return {
                         "success": False,
@@ -317,13 +327,16 @@ class WebsiteService:
         url: str,
         max_pages: int,
         max_depth: int,
-        timeout: int
+        timeout: int,
+        delay_between_requests: float = 0,
+        max_concurrent: int = 10
     ) -> Dict[str, Any]:
-        """Scrape using crawl4ai library."""
+        """Scrape using crawl4ai library with rate limiting support."""
         all_content = []
         scraped_urls: Set[str] = set()
         urls_to_scrape = [(url, 0)]  # (url, depth)
         title = "Untitled"
+        semaphore = asyncio.Semaphore(max_concurrent)
 
         try:
             async with AsyncWebCrawler(verbose=False) as crawler:
@@ -336,32 +349,39 @@ class WebsiteService:
                     logger.info(f"📄 Scraping page {len(scraped_urls) + 1}/{max_pages}: {current_url} (depth={depth})")
 
                     try:
-                        result = await asyncio.wait_for(
-                            crawler.arun(url=current_url),
-                            timeout=timeout
-                        )
+                        # Apply concurrency limit
+                        async with semaphore:
+                            result = await asyncio.wait_for(
+                                crawler.arun(url=current_url),
+                                timeout=timeout
+                            )
 
-                        if result.success:
-                            scraped_urls.add(current_url)
+                            if result.success:
+                                scraped_urls.add(current_url)
 
-                            # Get content
-                            content = result.markdown or result.cleaned_html or result.html or ""
-                            if content:
-                                all_content.append(f"\n\n--- Page: {current_url} ---\n\n{content}")
+                                # Get content
+                                content = result.markdown or result.cleaned_html or result.html or ""
+                                if content:
+                                    all_content.append(f"\n\n--- Page: {current_url} ---\n\n{content}")
 
-                            # Get title from first page
-                            if len(scraped_urls) == 1 and hasattr(result, 'title') and result.title:
-                                title = result.title
+                                # Get title from first page
+                                if len(scraped_urls) == 1 and hasattr(result, 'title') and result.title:
+                                    title = result.title
 
-                            # Extract links for further crawling
-                            if depth < max_depth and len(scraped_urls) < max_pages:
-                                links = extract_links_from_result(result, current_url)
-                                for link in links:
-                                    if link not in scraped_urls and (link, depth + 1) not in urls_to_scrape:
-                                        urls_to_scrape.append((link, depth + 1))
+                                # Extract links for further crawling
+                                if depth < max_depth and len(scraped_urls) < max_pages:
+                                    links = extract_links_from_result(result, current_url)
+                                    for link in links:
+                                        if link not in scraped_urls and (link, depth + 1) not in urls_to_scrape:
+                                            urls_to_scrape.append((link, depth + 1))
 
-                        else:
-                            logger.warning(f"⚠️ Failed to scrape {current_url}: {result.error_message}")
+                            else:
+                                logger.warning(f"⚠️ Failed to scrape {current_url}: {result.error_message}")
+
+                            # Apply delay between requests
+                            if delay_between_requests > 0 and urls_to_scrape:
+                                logger.info(f"⏳ Waiting {delay_between_requests}s before next request")
+                                await asyncio.sleep(delay_between_requests)
 
                     except asyncio.TimeoutError:
                         logger.warning(f"⏱️ Timeout scraping {current_url}")
@@ -390,13 +410,16 @@ class WebsiteService:
         url: str,
         max_pages: int,
         max_depth: int,
-        timeout: int
+        timeout: int,
+        delay_between_requests: float = 0,
+        max_concurrent: int = 10
     ) -> Dict[str, Any]:
-        """Fallback scraping using httpx and BeautifulSoup."""
+        """Fallback scraping using httpx and BeautifulSoup with rate limiting."""
         all_content = []
         scraped_urls: Set[str] = set()
         urls_to_scrape = [(url, 0)]  # (url, depth)
         title = "Untitled"
+        semaphore = asyncio.Semaphore(max_concurrent)
 
         headers = {
             "User-Agent": "KnowledgeBot-Crawler/1.0 (+https://globistaan.com)"
@@ -412,46 +435,53 @@ class WebsiteService:
                 logger.info(f"📄 Scraping page {len(scraped_urls) + 1}/{max_pages}: {current_url} (depth={depth})")
 
                 try:
-                    response = await client.get(current_url, headers=headers)
-                    response.raise_for_status()
+                    # Apply concurrency limit
+                    async with semaphore:
+                        response = await client.get(current_url, headers=headers)
+                        response.raise_for_status()
 
-                    scraped_urls.add(current_url)
+                        scraped_urls.add(current_url)
 
-                    # Parse HTML
-                    soup = BeautifulSoup(response.text, 'lxml')
+                        # Parse HTML
+                        soup = BeautifulSoup(response.text, 'lxml')
 
-                    # Remove script and style elements
-                    for element in soup(['script', 'style', 'nav', 'footer', 'header']):
-                        element.decompose()
+                        # Remove script and style elements
+                        for element in soup(['script', 'style', 'nav', 'footer', 'header']):
+                            element.decompose()
 
-                    # Get title from first page
-                    if len(scraped_urls) == 1:
-                        title_tag = soup.find('title')
-                        if title_tag:
-                            title = title_tag.get_text(strip=True)
+                        # Get title from first page
+                        if len(scraped_urls) == 1:
+                            title_tag = soup.find('title')
+                            if title_tag:
+                                title = title_tag.get_text(strip=True)
 
-                    # Extract text content
-                    text = soup.get_text(separator='\n', strip=True)
-                    # Clean up excessive whitespace
-                    text = re.sub(r'\n{3,}', '\n\n', text)
+                        # Extract text content
+                        text = soup.get_text(separator='\n', strip=True)
+                        # Clean up excessive whitespace
+                        text = re.sub(r'\n{3,}', '\n\n', text)
 
-                    if text:
-                        all_content.append(f"\n\n--- Page: {current_url} ---\n\n{text}")
+                        if text:
+                            all_content.append(f"\n\n--- Page: {current_url} ---\n\n{text}")
 
-                    # Extract links for further crawling
-                    if depth < max_depth and len(scraped_urls) < max_pages:
-                        base_domain = urlparse(url).netloc
-                        for link in soup.find_all('a', href=True):
-                            href = link['href']
-                            # Make absolute URL
-                            absolute_url = urljoin(current_url, href)
-                            parsed = urlparse(absolute_url)
+                        # Extract links for further crawling
+                        if depth < max_depth and len(scraped_urls) < max_pages:
+                            base_domain = urlparse(url).netloc
+                            for link in soup.find_all('a', href=True):
+                                href = link['href']
+                                # Make absolute URL
+                                absolute_url = urljoin(current_url, href)
+                                parsed = urlparse(absolute_url)
 
-                            # Only follow same-domain links
-                            if parsed.netloc == base_domain:
-                                clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-                                if clean_url not in scraped_urls:
-                                    urls_to_scrape.append((clean_url, depth + 1))
+                                # Only follow same-domain links
+                                if parsed.netloc == base_domain:
+                                    clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                                    if clean_url not in scraped_urls:
+                                        urls_to_scrape.append((clean_url, depth + 1))
+
+                        # Apply delay between requests
+                        if delay_between_requests > 0 and urls_to_scrape:
+                            logger.info(f"⏳ Waiting {delay_between_requests}s before next request")
+                            await asyncio.sleep(delay_between_requests)
 
                 except httpx.HTTPStatusError as e:
                     logger.warning(f"⚠️ HTTP error scraping {current_url}: {e.response.status_code}")
@@ -471,7 +501,9 @@ class WebsiteService:
     async def _scrape_urls_from_sitemap(
         self,
         urls: List[str],
-        timeout: int
+        timeout: int,
+        max_concurrent: int = 10,
+        delay_between_requests: float = 0
     ) -> Dict[str, Any]:
         """Scrape multiple URLs from a sitemap in parallel."""
         all_content = []
@@ -488,7 +520,6 @@ class WebsiteService:
             from bs4 import BeautifulSoup
 
             # Limit concurrent requests to avoid overwhelming target site
-            max_concurrent = 10
             semaphore = asyncio.Semaphore(max_concurrent)
 
             async def scrape_single_url(url: str, index: int, client: httpx.AsyncClient):
