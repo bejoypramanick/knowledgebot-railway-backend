@@ -607,11 +607,72 @@ class WebsiteService:
                 all_child_urls = []
                 url_to_record_id = {}  # Track URLs to their record IDs for parent linking
 
-                # Sort pages by depth to ensure parents are processed before children
-                sorted_scraped_data = sorted(scraped_data, key=lambda x: x.get("depth", 0))
-                logger.info(f"📊 Processing {len(sorted_scraped_data)} pages in depth-first order")
+                # First, create the root URL as parent (depth=0) if it's in the scraped data
+                root_page = next((page for page in scraped_data if page.get("depth", 0) == 0), None)
+                root_record_id = None
 
-                for page_data in sorted_scraped_data:
+                if root_page:
+                    root_url = root_page["url"]
+                    root_text = root_page["text"]
+                    root_title = root_page.get("title", "")
+
+                    logger.info(f"📄 Creating root page record: {root_url}")
+
+                    try:
+                        # Upload root page
+                        gemini_result = await upload_content_to_gemini(
+                            content=root_text,
+                            url=root_url,
+                            title=root_title,
+                            user_email=options.get("user_email"),
+                            page_depth=0
+                        )
+
+                        # Record root page metadata
+                        root_record_id = await record_scraped_metadata(
+                            url=root_url,
+                            domain=urlparse(root_url).netloc.replace('www.', ''),
+                            title=root_title or root_url,
+                            content_length=len(root_text),
+                            pages_scraped=1,
+                            gemini_file_name=gemini_result.get("file_name"),
+                            gemini_file_uri=gemini_result.get("file_uri"),
+                            gemini_state=gemini_result.get("state", "UNKNOWN"),
+                            scraped_urls=[root_url],
+                            scraping_config={
+                                "max_pages": max_pages,
+                                "max_depth": max_depth,
+                                "page_depth": 0,
+                                "source": "regular_crawl",
+                                "parent_domain": urlparse(url).netloc,
+                                "total_pages_in_crawl": len(scraped_data),
+                                "include_patterns": include_patterns,
+                                "exclude_patterns": exclude_patterns
+                            },
+                            file_search_metadata=gemini_result.get("file_search_metadata"),
+                            parent_id=None,  # Root has no parent
+                            depth=0,
+                            crawl_session_id=crawl_session_id
+                        )
+
+                        uploaded_files.append({
+                            "url": root_url,
+                            "file_name": gemini_result.get("file_name"),
+                            "record_id": root_record_id,
+                            "depth": 0
+                        })
+                        record_ids.append(root_record_id)
+                        url_to_record_id[root_url] = root_record_id
+                        logger.info(f"✅ Created root page record: {root_url} (id={root_record_id})")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to create root page record: {e}")
+
+                # Sort child pages by depth to ensure parents are processed before children
+                child_pages = [page for page in scraped_data if page.get("depth", 0) > 0]
+                sorted_child_pages = sorted(child_pages, key=lambda x: x.get("depth", 0))
+                logger.info(f"📊 Processing {len(sorted_child_pages)} child pages in depth order")
+
+                for page_data in sorted_child_pages:
                     page_url = page_data["url"]
                     page_text = page_data["text"]
                     page_title = page_data.get("title", "")
@@ -629,22 +690,28 @@ class WebsiteService:
                             page_depth=page_depth  # Add missing page_depth parameter
                         )
 
-                        # Determine parent relationship
+                        # Determine parent relationship - find parent in the hierarchy
                         parent_id = None
-                        if page_depth > 0:
-                            # Find parent URL by removing last path segment
-                            parent_url = self.get_parent_url(page_url)
-                            if parent_url and parent_url in url_to_record_id:
+                        current_depth = page_depth
+                        current_url = page_url
+
+                        # Walk up the URL hierarchy to find the closest existing parent
+                        while current_depth > 0:
+                            parent_url = self.get_parent_url(current_url)
+                            if not parent_url:
+                                break
+
+                            if parent_url in url_to_record_id:
                                 parent_id = url_to_record_id[parent_url]
-                                logger.info(f"🔗 Page {page_url} linked to parent {parent_url} (id={parent_id})")
+                                logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to parent {parent_url} (depth={current_depth - 1}, id={parent_id})")
+                                break
                             else:
-                                logger.warning(f"⚠️ Could not find parent for {page_url} at depth {page_depth}")
-                        else:
-                            # Root page - check if this URL was already processed as a parent
-                            if page_url in url_to_record_id:
-                                # This URL is already a parent, so don't create a new root record
-                                logger.info(f"🔄 Skipping duplicate root page: {page_url}")
-                                continue
+                                # Parent doesn't exist yet, try going up one more level
+                                current_url = parent_url
+                                current_depth -= 1
+
+                        if parent_id is None and page_depth > 0:
+                            logger.warning(f"⚠️ Could not find parent for {page_url} at depth {page_depth} - will link to root or null")
 
                         # Record metadata for individual page
                         record_id = await record_scraped_metadata(
