@@ -1043,24 +1043,35 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
                             filesearch_errors.append(error_msg)
             
             # Step 2: Delete all from database (only if FileSearch deletion succeeded for most)
-            if len(filesearch_errors) > len(hierarchy_records) / 2:
+            successful_deletions = len(hierarchy_records) - len(filesearch_errors)
+            success_rate = successful_deletions / len(hierarchy_records) if len(hierarchy_records) > 0 else 0
+            
+            logger.info(f"📊 FileSearch Deletion Results: {successful_deletions}/{len(hierarchy_records)} successful ({success_rate:.1%})")
+            
+            # Only proceed with database deletion if at least 50% succeeded AND no critical errors
+            if success_rate < 0.5:
                 return {
                     "success": False, 
-                    "error": f"Too many FileSearch deletion errors ({len(filesearch_errors)}/{len(hierarchy_records)}). Aborted database deletion."
+                    "error": f"Too many FileSearch deletion failures ({len(filesearch_errors)}/{len(hierarchy_records)}). Success rate: {success_rate:.1%}. Aborted database deletion."
                 }
             
-            # Delete all records in hierarchy
-            delete_query = """
-                WITH RECURSIVE website_hierarchy AS (
-                    SELECT id FROM scraped_websites WHERE id = $1
-                    UNION ALL
-                    SELECT w.id FROM scraped_websites w
-                    INNER JOIN website_hierarchy wh ON w.parent_id = wh.id
-                )
-                DELETE FROM scraped_websites WHERE id IN (SELECT id FROM website_hierarchy)
-            """
-            result = await conn.execute(delete_query, website_id_param)
-            deleted_count = int(result.split()[-1]) if result else 0
+            if len(filesearch_errors) > 0:
+                logger.warning(f"⚠️ Proceeding with database deletion despite {len(filesearch_errors)} FileSearch errors (success rate: {success_rate:.1%})")
+            
+            # Begin database transaction
+            async with get_db_connection() as conn:
+                # Delete all records in hierarchy
+                delete_query = """
+                    WITH RECURSIVE website_hierarchy AS (
+                        SELECT id FROM scraped_websites WHERE id = $1
+                        UNION ALL
+                        SELECT w.id FROM scraped_websites w
+                        INNER JOIN website_hierarchy wh ON w.parent_id = wh.id
+                    )
+                    DELETE FROM scraped_websites WHERE id IN (SELECT id FROM website_hierarchy)
+                """
+                result = await conn.execute(delete_query, website_id_param)
+                deleted_count = int(result.split()[-1]) if result else 0
             
             return {
                 "success": True, 
