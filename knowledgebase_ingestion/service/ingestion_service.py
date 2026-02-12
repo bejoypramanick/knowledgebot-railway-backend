@@ -931,21 +931,40 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
             if file_search_store_name:
                 logger.warning(f"📤 Attempting to clear FileSearch store: {file_search_store_name}")
 
-                # Get all documents in the store
                 try:
-                    # List documents in the store
-                    store = genai_client.file_search_stores.get(name=file_search_store_name)
+                    # Step 1: List and delete all documents in the store
+                    logger.warning(f"📋 Listing documents in FileSearch store...")
+                    documents = genai_client.file_search_stores.list_documents(name=file_search_store_name)
 
-                    # Delete the store entirely and recreate it (most efficient)
-                    # This clears all documents, embeddings, and indexes at once
-                    logger.warning(f"🗑️ Deleting FileSearch store {file_search_store_name}...")
+                    # Convert to list to count documents
+                    doc_list = list(documents) if documents else []
+                    logger.warning(f"📊 Found {len(doc_list)} documents to delete")
 
+                    # Delete each document individually
+                    deleted_count = 0
+                    for doc in doc_list:
+                        try:
+                            doc_name = doc.name if hasattr(doc, 'name') else str(doc)
+                            logger.warning(f"🗑️ Deleting document: {doc_name}")
+                            genai_client.file_search_stores.delete_document(
+                                name=f"{file_search_store_name}/documents/{doc_name.split('/')[-1]}"
+                            )
+                            deleted_count += 1
+                        except Exception as doc_error:
+                            logger.warning(f"⚠️ Error deleting document {doc}: {doc_error}")
+                            # Continue with next document
+                            continue
+
+                    logger.warning(f"✅ Deleted {deleted_count}/{len(doc_list)} documents from FileSearch store")
+                    nuke_results["filestore_documents_deleted"] = deleted_count
+
+                    # Step 2: Delete the now-empty FileSearch store
+                    logger.warning(f"🗑️ Deleting empty FileSearch store {file_search_store_name}...")
                     genai_client.file_search_stores.delete(name=file_search_store_name)
                     logger.warning(f"✅ FileSearch store deleted")
-                    nuke_results["filestore_documents_deleted"] = -1  # -1 indicates store deleted
 
-                    # Recreate the store for future use
-                    logger.info(f"🔄 Recreating FileSearch store: {file_search_store_name}...")
+                    # Step 3: Recreate the store for future use
+                    logger.info(f"🔄 Recreating FileSearch store for future use...")
                     recreated_store = genai_client.file_search_stores.create()
                     logger.info(f"✅ FileSearch store recreated: {recreated_store.name}")
 
