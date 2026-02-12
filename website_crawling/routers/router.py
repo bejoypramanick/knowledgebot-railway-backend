@@ -22,20 +22,34 @@ website_service = WebsiteService()
 
 @router.post("/")
 async def scrape_website(request: Request):
-    """Scrape a single website or crawl multiple pages"""
+    """
+    Scrape websites, sitemaps, or single pages.
+    Supports single URL or multiple comma-separated URLs.
+    Intelligently detects URL type and applies appropriate strategy.
+    """
     try:
         body = await request.json()
 
-        url = body.get("url")
-        if not url:
-            raise HTTPException(status_code=400, detail="URL is required")
+        # Support both single URL and multiple URLs
+        url_input = body.get("url") or body.get("urls") or ""
+        if not url_input:
+            raise HTTPException(status_code=400, detail="URL or URLs parameter is required")
 
-        # Validate URL format
-        if not url.startswith(("http://", "https://")):
-            raise HTTPException(status_code=400, detail=f"Invalid URL format: {url}")
+        # Parse URLs - handle both single URL and comma-separated list
+        if isinstance(url_input, list):
+            urls = url_input
+        else:
+            urls = [u.strip() for u in str(url_input).split(",") if u.strip()]
+
+        if not urls:
+            raise HTTPException(status_code=400, detail="At least one valid URL is required")
+
+        # Validate URLs
+        for url in urls:
+            if not url.startswith(("http://", "https://")):
+                raise HTTPException(status_code=400, detail=f"Invalid URL format: {url}")
 
         # Get crawling parameters from frontend (with sensible defaults)
-        max_pages = body.get("max_pages", 1)
         max_depth = body.get("max_depth", 2)
         replace_existing = body.get("replace_existing", False)
 
@@ -43,38 +57,77 @@ async def scrape_website(request: Request):
         include_patterns = body.get("include_patterns", []) or []
         exclude_patterns = body.get("exclude_patterns", []) or []
 
-        # Scrape options - combine frontend params with defaults
-        options = {
-            "url": url,
-            "max_pages": min(max_pages, 100),  # Cap at 100 pages
-            "max_depth": min(max_depth, 5),     # Cap at depth 5
-            "replace_existing": replace_existing,
-            "delay_between_requests": max(0, float(body.get("delay_between_requests", 0))),  # Delay in seconds
-            "max_concurrent": min(int(body.get("max_concurrent", 10)), 50),  # Cap concurrent at 50
-            "extract_links": body.get("extract_links", True),
-            "extract_images": body.get("extract_images", False),
-            "respect_robots_txt": body.get("respect_robots_txt", True),
-            "user_agent": body.get("user_agent", "KnowledgeBot-Crawler/1.0"),
-            "timeout": body.get("timeout", 30),
-            # URL targeting patterns
-            "include_patterns": include_patterns,
-            "exclude_patterns": exclude_patterns
-        }
+        logger.info(f"🎯 Starting batch scrape for {len(urls)} URL(s)")
+        all_results = []
 
-        logger.info(f"Starting scrape for {url} with options: max_pages={options['max_pages']}, max_depth={options['max_depth']}, replace_existing={options['replace_existing']}")
+        # Process each URL with intelligent type detection
+        for idx, url in enumerate(urls, 1):
+            # Classify URL type
+            url_type = WebsiteService.classify_url_type(url)
+            logger.info(f"[{idx}/{len(urls)}] Processing {url_type}: {url}")
 
-        result = await website_service.scrape_website(url, options)
+            try:
+                # Adjust max_pages and max_depth based on URL type
+                if url_type == 'sitemap':
+                    max_pages = 1000  # Sitemaps can have many pages
+                    crawl_depth = 1   # Don't crawl deeper, just extract from sitemap
+                elif url_type == 'single_page':
+                    max_pages = 1
+                    crawl_depth = 0   # Just scrape this page
+                else:  # website
+                    max_pages = 100
+                    crawl_depth = max_depth
+
+                # Scrape options - combine frontend params with defaults
+                options = {
+                    "url": url,
+                    "max_pages": min(max_pages, 100),  # Cap at 100 pages
+                    "max_depth": min(crawl_depth, 5),   # Cap at depth 5
+                    "replace_existing": replace_existing,
+                    "delay_between_requests": max(0, float(body.get("delay_between_requests", 0))),
+                    "max_concurrent": min(int(body.get("max_concurrent", 10)), 50),
+                    "extract_links": body.get("extract_links", True),
+                    "extract_images": body.get("extract_images", False),
+                    "respect_robots_txt": body.get("respect_robots_txt", True),
+                    "user_agent": body.get("user_agent", "KnowledgeBot-Crawler/1.0"),
+                    "timeout": body.get("timeout", 30),
+                    "include_patterns": include_patterns,
+                    "exclude_patterns": exclude_patterns
+                }
+
+                result = await website_service.scrape_website(url, options)
+                all_results.append({
+                    "url": url,
+                    "type": url_type,
+                    "success": result.get("success", True),
+                    "result": result
+                })
+
+            except Exception as e:
+                logger.error(f"❌ Error scraping {url_type} ({url}): {e}")
+                all_results.append({
+                    "url": url,
+                    "type": url_type,
+                    "success": False,
+                    "error": str(e)
+                })
+
+        # Determine overall success
+        overall_success = all(r.get("success", False) for r in all_results)
+        total_pages = sum(r.get("result", {}).get("pages_scraped", 0) for r in all_results if r.get("success"))
+
+        logger.info(f"✅ Batch scrape completed: {len([r for r in all_results if r.get('success')])}/{len(urls)} succeeded")
 
         return {
-            "success": True,
-            "data": result,
-            "message": "Website scraped successfully",
-            "total_files_uploaded": result.get("pages_scraped", 0) if isinstance(result, dict) else 0
+            "success": overall_success,
+            "data": all_results,
+            "message": f"Scraped {len(urls)} URL(s)" + (f": {total_pages} pages processed" if total_pages > 0 else ""),
+            "total_files_uploaded": total_pages
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error scraping website: {e}")
+        logger.error(f"❌ Error in scrape endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/jobs")

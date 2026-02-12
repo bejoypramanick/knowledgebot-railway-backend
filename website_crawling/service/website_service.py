@@ -197,6 +197,45 @@ class WebsiteService:
 
         return content
 
+    @staticmethod
+    def classify_url_type(url: str) -> str:
+        """
+        Intelligently classify a URL as sitemap, single page, or website.
+
+        Args:
+            url: URL to classify
+
+        Returns:
+            One of: 'sitemap', 'single_page', 'website'
+        """
+        url_lower = url.lower()
+
+        # Check if it's a sitemap
+        if url_lower.endswith('.xml') or 'sitemap' in url_lower:
+            logger.debug(f"📋 Classified as sitemap: {url}")
+            return 'sitemap'
+
+        try:
+            parsed = urlparse(url)
+            path_parts = [p for p in parsed.path.split('/') if p]
+
+            # If URL has no path (just domain) or simple path (1-2 segments), treat as website
+            # If URL has deeper path, could be single page
+            # For now, classify as website if path is shallow, single_page if deeper
+            if len(path_parts) <= 1:
+                logger.debug(f"🌐 Classified as website (root/shallow): {url}")
+                return 'website'
+            elif len(path_parts) > 3:
+                logger.debug(f"📄 Classified as single page (deep path): {url}")
+                return 'single_page'
+            else:
+                # 2-3 segments: treat as website for crawling
+                logger.debug(f"🌐 Classified as website (moderate depth): {url}")
+                return 'website'
+        except Exception as e:
+            logger.warning(f"⚠️ Error classifying URL {url}: {e}, defaulting to website")
+            return 'website'
+
     async def scrape_website(self, url: str, options: Dict[str, Any]) -> Dict[str, Any]:
         """
         Scrape a website and optionally crawl linked pages.
