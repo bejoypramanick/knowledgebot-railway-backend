@@ -1199,77 +1199,78 @@ class WebsiteService:
             
             logger.info(f"🔍 Single_page mode: discovering actual depth for {url} from domain root {domain_root}")
             
-            # Create crawler instance early for both depth discovery and crawling phases
-            try:
-                async with AsyncWebCrawler(
-                    verbose=False,
-                    headless=True,
-                    browser_type="chromium",
-                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                ) as crawler:
-                    # Start BFS from domain root to discover the actual depth of our target URL
-                    urls_to_scrape = [(domain_root, 0)]  # BFS queue: (url, depth) - start from domain root
-                    target_url_depth = None  # Will store the actual depth of our single_page
-                    target_url_found = False
-                    
-                    # First phase: discover the actual depth of our target single_page
-                    while urls_to_scrape and not target_url_found and len(scraped_urls) < max_pages:
-                        current_url, depth = urls_to_scrape.pop(0)
+            # Create crawler instance for both depth discovery and crawling phases
+            async with AsyncWebCrawler(
+                verbose=False,
+                headless=True,
+                browser_type="chromium",
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ) as crawler:
+                # Start BFS from domain root to discover the actual depth of our target URL
+                discovery_urls = [(domain_root, 0)]  # BFS queue: (url, depth) - start from domain root
+                target_url_depth = None  # Will store actual depth of our single_page
+                target_url_found = False
+                
+                # First phase: discover the actual depth of our target single_page
+                while discovery_urls and not target_url_found and len(scraped_urls) < max_pages:
+                    current_url, depth = discovery_urls.pop(0)
 
-                        if current_url in scraped_urls:
-                            continue
+                    if current_url in scraped_urls:
+                        continue
 
-                        try:
-                            # Apply concurrency limit
-                            async with semaphore:
-                                result = await asyncio.wait_for(
-                                    crawler.arun(url=current_url),
-                                    timeout=timeout
-                                )
+                    try:
+                        # Apply concurrency limit
+                        async with semaphore:
+                            result = await asyncio.wait_for(
+                                crawler.arun(url=current_url),
+                                timeout=timeout
+                            )
 
-                            if result.success:
-                                scraped_urls.add(current_url)
+                        if result.success:
+                            scraped_urls.add(current_url)
 
-                                # Check if this is our target single_page URL
-                                if current_url.rstrip('/') == url.rstrip('/'):
-                                    target_url_depth = depth
-                                    target_url_found = True
-                                    logger.info(f"🎯 Found target single_page {url} at actual depth {depth}")
-                                    break
+                            # Check if this is our target single_page URL
+                            if current_url.rstrip('/') == url.rstrip('/'):
+                                target_url_depth = depth
+                                target_url_found = True
+                                logger.info(f"🎯 Found target single_page {url} at actual depth {depth}")
+                                break
 
-                                # Extract links for further discovery (only if we haven't found target yet)
-                                if depth < max_depth and len(scraped_urls) < max_pages:
-                                    links = extract_links_from_result(result, current_url)
-                                    for link in links:
-                                        if not self.should_include_url(link, include_patterns, exclude_patterns):
-                                            continue
-                                        if link not in scraped_urls and (link, depth + 1) not in urls_to_scrape:
-                                            urls_to_scrape.append((link, depth + 1))
+                            # Extract links for further discovery (only if we haven't found target yet)
+                            if depth < max_depth and len(scraped_urls) < max_pages:
+                                links = extract_links_from_result(result, current_url)
+                                for link in links:
+                                    if not self.should_include_url(link, include_patterns, exclude_patterns):
+                                        continue
+                                    if link not in scraped_urls and (link, depth + 1) not in discovery_urls:
+                                        discovery_urls.append((link, depth + 1))
 
                         except Exception as e:
                             logger.warning(f"⚠️ Error during depth discovery for {current_url}: {e}")
                             continue
 
-                    if target_url_depth is None:
-                        logger.error(f"❌ Could not determine depth for single_page {url}")
-                        return {"success": False, "error": f"Could not find target URL {url} during depth discovery"}
+                if target_url_depth is None:
+                    logger.error(f"❌ Could not determine depth for single_page {url}")
+                    return {"success": False, "error": f"Could not find target URL {url} during depth discovery"}
 
-                    # Second phase: crawl starting from our single_page with its actual depth
-                    logger.info(f"🚀 Starting crawl from single_page {url} at discovered depth {target_url_depth}")
-                    scraped_urls.clear()  # Reset for actual crawling
-                    scraped_data = []  # Reset for actual crawling
-                    urls_to_scrape = [(url, target_url_depth)]  # Start from single_page at its actual depth
+                # Second phase: crawl starting from our single_page with its actual depth
+                logger.info(f"🚀 Starting crawl from single_page {url} at discovered depth {target_url_depth}")
+                scraped_urls.clear()  # Reset for actual crawling
+                scraped_data = []  # Reset for actual crawling
+                urls_to_scrape = [(url, target_url_depth)]  # Start from single_page at its actual depth
 
-            except Exception as e:
-                logger.error(f"❌ Error creating crawler for single_page discovery: {e}")
-                return {"success": False, "error": f"Failed to initialize crawler: {str(e)}"}
+                # Continue with the same crawler for the actual crawling phase
+                # (The rest of the method will use the same crawler instance)
             
         else:
             # Regular website crawling: start from provided URL at depth 0
             urls_to_scrape = [(url, 0)]  # BFS queue: (url, depth) - depth based on discovery order
+            
         title = "Untitled"
 
-        try:
+        # Create crawler instance for the main crawling phase
+        # (For single_page, we already have a crawler instance from depth discovery)
+        if url_type != "single_page":
             async with AsyncWebCrawler(
                 verbose=False,
                 headless=True,
