@@ -1263,10 +1263,10 @@ class WebsiteService:
                 scraped_urls.clear()  # Reset for actual crawling
                 scraped_data = []  # Reset for actual crawling
                 
-                # For single_page crawling, adjust max_depth to include the target_url_depth offset
-                # This allows crawling to the full depth specified by UI from the starting point
-                adjusted_max_depth = max_depth + target_url_depth
-                logger.info(f"📏 Single_page crawling: original max_depth={max_depth}, target_url_depth={target_url_depth}, adjusted_max_depth={adjusted_max_depth}")
+                # For single_page crawling, adjust max_depth to allow crawling from single_page starting point
+                # Total depth should be: single_page_depth + ui_max_depth
+                # This means crawler can go up to ui_max_depth levels deeper than the single_page
+                logger.info(f"📏 Single_page crawling: single_page_depth={target_url_depth}, ui_max_depth={max_depth}, total_max_depth={max_depth}")
                 
                 urls_to_scrape = [(url, target_url_depth)]  # Start from single_page at its actual depth
 
