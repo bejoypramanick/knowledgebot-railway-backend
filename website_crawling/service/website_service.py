@@ -343,7 +343,7 @@ class WebsiteService:
         replace_existing = options.get("replace_existing", False)
         delay_between_requests = options.get("delay_between_requests", 0)
         max_concurrent = options.get("max_concurrent", 10)
-        timeout = options.get("timeout", 30)
+        timeout = options.get("timeout", 60)  # Increased from 30 to 60 seconds for better reliability
         include_patterns = options.get("include_patterns", []) or []
         exclude_patterns = options.get("exclude_patterns", []) or []
 
@@ -1000,7 +1000,7 @@ class WebsiteService:
     async def _scrape_urls_from_sitemap(
         self,
         urls: List[str],
-        timeout: int = 30,
+        timeout: int = 60,  # Increased from 30 to 60 seconds for better reliability
         max_concurrent: int = 10,
         delay_between_requests: float = 0,
         sitemap_url: str = None
@@ -1056,6 +1056,9 @@ class WebsiteService:
                     try:
                         # Apply concurrency limit
                         async with semaphore:
+                            result = None
+
+                            # Strategy 1: Try with networkidle (most complete)
                             try:
                                 result = await asyncio.wait_for(
                                     crawler.arun(
@@ -1065,22 +1068,47 @@ class WebsiteService:
                                     ),
                                     timeout=timeout
                                 )
-                            except Exception as cookie_error:
-                                if "Invalid cookie fields" in str(cookie_error):
-                                    logger.warning(f"⚠️ Cookie error for {url}, retrying with bypass_cache=False")
-                                    # Retry with different settings to avoid cookie handling
+                            except asyncio.TimeoutError:
+                                # Strategy 2: Timeout occurred, try with faster domcontentloaded
+                                logger.warning(f"⏱️ Timeout with networkidle for {url}, retrying with domcontentloaded")
+                                try:
                                     result = await asyncio.wait_for(
                                         crawler.arun(
                                             url=url,
-                                            bypass_cache=False,
-                                            wait_until='domcontentloaded'
+                                            bypass_cache=True,
+                                            wait_until='domcontentloaded'  # Faster loading strategy
                                         ),
-                                        timeout=timeout
+                                        timeout=timeout // 2  # Use half timeout for faster retry
                                     )
+                                except asyncio.TimeoutError:
+                                    logger.warning(f"⏱️ Timeout with domcontentloaded for {url}, skipping")
+                                    raise  # Re-raise to be caught by outer except
+                                except Exception as retry_error:
+                                    logger.warning(f"⚠️ Fallback attempt failed for {url}: {retry_error}")
+                                    raise  # Re-raise to be caught by outer except
+                            except Exception as cookie_error:
+                                if "Invalid cookie fields" in str(cookie_error):
+                                    # Strategy 3: Cookie error, retry with different cache settings
+                                    logger.warning(f"⚠️ Cookie error for {url}, retrying with bypass_cache=False")
+                                    try:
+                                        result = await asyncio.wait_for(
+                                            crawler.arun(
+                                                url=url,
+                                                bypass_cache=False,
+                                                wait_until='domcontentloaded'
+                                            ),
+                                            timeout=timeout
+                                        )
+                                    except asyncio.TimeoutError:
+                                        logger.warning(f"⏱️ Timeout on cookie retry for {url}")
+                                        raise  # Re-raise to be caught by outer except
+                                    except Exception as retry_error:
+                                        logger.warning(f"⚠️ Cookie retry failed for {url}: {retry_error}")
+                                        raise  # Re-raise to be caught by outer except
                                 else:
                                     raise
 
-                            if result.success:
+                            if result and result.success:
                                 scraped_urls.add(url)
 
                                 # Get content
