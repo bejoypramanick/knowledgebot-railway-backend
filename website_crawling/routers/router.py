@@ -51,7 +51,6 @@ async def scrape_website(request: Request):
 
         # Get crawling parameters from frontend (with sensible defaults)
         max_depth = body.get("max_depth", 2)
-        max_pages_from_frontend = body.get("max_pages")  # Get max_pages from frontend
         replace_existing = body.get("replace_existing", False)
 
         # Get targeting patterns (URL filtering)
@@ -64,34 +63,30 @@ async def scrape_website(request: Request):
         # Process each URL with intelligent type detection
         for idx, url in enumerate(urls, 1):
             try:
-                # First, classify URL type
+                # First, classify URL type (sitemap / website / single_page)
                 url_type = WebsiteService.classify_url_type(url)
+                logger.info(f"[{idx}/{len(urls)}] Processing {url_type}: {url}")
 
-                # If frontend explicitly requested single page crawl (max_pages=1),
-                # override classification and treat as single_page regardless of URL structure
-                if max_pages_from_frontend == 1:
-                    url_type = 'single_page'
-                    max_pages = 1
-                    crawl_depth = 0  # Just scrape this page
-                    logger.info(f"[{idx}/{len(urls)}] Processing single page (frontend requested): {url}")
-                else:
-                    logger.info(f"[{idx}/{len(urls)}] Processing {url_type}: {url}")
+                # Determine crawl depth based on URL type, but always respect UI depth where it makes sense.
+                if url_type == 'sitemap':
+                    # Sitemaps: depth 1 (just the sitemap entries themselves)
+                    crawl_depth = 1
+                elif url_type == 'single_page':
+                    # Webpage: allow link-following up to the depth chosen in the UI.
+                    # Depth 0 = just this page, >0 = follow links up to that depth.
+                    crawl_depth = max(0, max_depth)
+                else:  # website
+                    # Website root or section: use full UI depth
+                    crawl_depth = max_depth
 
-                    # Adjust max_pages and max_depth based on URL type
-                    if url_type == 'sitemap':
-                        max_pages = max_pages_from_frontend or 1000  # Use frontend value or default for sitemaps
-                        crawl_depth = 1   # Don't crawl deeper, just extract from sitemap
-                    elif url_type == 'single_page':
-                        max_pages = 1
-                        crawl_depth = 0   # Just scrape this page
-                    else:  # website
-                        max_pages = max_pages_from_frontend or 100  # Use frontend value or default
-                        crawl_depth = max_depth
+                # Use a generous internal page cap so depth is the primary limiter.
+                # This is independent of any frontend "max_pages" value.
+                max_pages = 1000
 
                 # Scrape options - combine frontend params with defaults
                 options = {
                     "url": url,
-                    "max_pages": min(max_pages, 100),  # Cap at 100 pages
+                    "max_pages": max_pages,
                     "max_depth": min(crawl_depth, 5),   # Cap at depth 5
                     "replace_existing": replace_existing,
                     "delay_between_requests": max(0, float(body.get("delay_between_requests", 0))),

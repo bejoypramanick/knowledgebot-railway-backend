@@ -210,31 +210,69 @@ class WebsiteService:
         """
         url_lower = url.lower()
 
-        # Check if it's a sitemap
-        if url_lower.endswith('.xml') or 'sitemap' in url_lower:
-            logger.debug(f"📋 Classified as sitemap: {url}")
-            return 'sitemap'
+        # 1) Strong sitemap detection
+        try:
+            parsed = urlparse(url_lower)
+            path = parsed.path or "/"
+            filename = path.split("/")[-1]
+
+            # Common sitemap patterns
+            sitemap_like = (
+                filename == "sitemap.xml"
+                or filename.endswith(".xml") and "sitemap" in filename
+                or "sitemap=" in (parsed.query or "")
+            )
+            if sitemap_like:
+                logger.debug(f"📋 Classified as sitemap: {url}")
+                return "sitemap"
+        except Exception:
+            # If parsing fails, fall back to simple string check
+            if url_lower.endswith(".xml") or "sitemap" in url_lower:
+                logger.debug(f"📋 Classified as sitemap (fallback): {url}")
+                return "sitemap"
 
         try:
             parsed = urlparse(url)
-            path_parts = [p for p in parsed.path.split('/') if p]
+            path = parsed.path or "/"
+            path_parts = [p for p in path.split('/') if p]
+            filename = path_parts[-1] if path_parts else ""
 
-            # If URL has no path (just domain) or simple path (1-2 segments), treat as website
-            # If URL has deeper path, could be single page
-            # For now, classify as website if path is shallow, single_page if deeper
-            if len(path_parts) <= 1:
-                logger.debug(f"🌐 Classified as website (root/shallow): {url}")
-                return 'website'
-            elif len(path_parts) > 3:
-                logger.debug(f"📄 Classified as single page (deep path): {url}")
-                return 'single_page'
+            # 2) Detect single pages by file extension or query-style URLs
+            page_exts = {
+                "html", "htm", "php", "asp", "aspx", "jsp",
+                "pdf", "doc", "docx", "ppt", "pptx",
+                "xls", "xlsx", "csv", "txt", "md", "rtf"
+            }
+
+            # If there is a dot in the last path segment, try to treat it as a file
+            if "." in filename:
+                ext = filename.rsplit(".", 1)[-1].lower()
+                if ext in page_exts:
+                    logger.debug(f"📄 Classified as single page by extension .{ext}: {url}")
+                    return "single_page"
+
+            # URLs with query parameters and a non-root path are often individual pages
+            if parsed.query and len(path_parts) >= 1:
+                logger.debug(f"📄 Classified as single page by query string: {url}")
+                return "single_page"
+
+            # 3) Fallback heuristic by path depth:
+            # - 0–1 segments: treat as website root
+            # - 2–3 segments: still website (section/collection)
+            # - 4+ segments: more likely a deep content page
+            depth = len(path_parts)
+            if depth <= 1:
+                logger.debug(f"🌐 Classified as website (root/shallow, depth={depth}): {url}")
+                return "website"
+            elif depth >= 4:
+                logger.debug(f"📄 Classified as single page (deep path, depth={depth}): {url}")
+                return "single_page"
             else:
-                # 2-3 segments: treat as website for crawling
-                logger.debug(f"🌐 Classified as website (moderate depth): {url}")
-                return 'website'
+                logger.debug(f"🌐 Classified as website (moderate depth={depth}): {url}")
+                return "website"
         except Exception as e:
             logger.warning(f"⚠️ Error classifying URL {url}: {e}, defaulting to website")
-            return 'website'
+            return "website"
 
     async def scrape_website(self, url: str, options: Dict[str, Any]) -> Dict[str, Any]:
         """
