@@ -722,12 +722,12 @@ class WebsiteService:
                                 if original_page_data and original_page_data.get("url") in url_to_record_id:
                                     parent_id = url_to_record_id[original_page_data["url"]]
                                     logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to original single_page parent {original_page_data['url']} (id={parent_id})")
-                            else:
-                                # If this is the original single_page itself, no parent needed
-                                if page_url.rstrip('/') == original_single_page.rstrip('/'):
-                                    logger.info(f"🔗 Page {page_url} (depth={page_depth}) is original single_page, no parent")
                                 else:
-                                    logger.warning(f"⚠️ Original single_page {original_single_page} not found in url_to_record_id for non-original page")
+                                    # If this is the original single_page itself, no parent needed
+                                    if page_url.rstrip('/') == original_single_page.rstrip('/'):
+                                        logger.info(f"🔗 Page {page_url} (depth={page_depth}) is original single_page, no parent")
+                                    else:
+                                        logger.warning(f"⚠️ Original single_page {original_single_page} not found in url_to_record_id for non-original page")
                         else:
                             # Regular website crawling: walk up URL hierarchy
                             while current_depth > 0:
