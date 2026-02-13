@@ -1175,6 +1175,12 @@ class WebsiteService:
         For single_page URLs: crawl4ai determines actual depth relative to domain root,
         and the original single_page becomes parent for all its discovered children.
         """
+        if not CRAWL4AI_AVAILABLE:
+            return {
+                "success": False,
+                "error": "Crawl4AI is required for website scraping. Please install crawl4ai."
+            }
+        
         include_patterns = include_patterns or []
         exclude_patterns = exclude_patterns or []
         scraped_data = []  # Track individual page data for citations
