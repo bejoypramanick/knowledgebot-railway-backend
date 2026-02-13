@@ -706,29 +706,28 @@ class WebsiteService:
                         current_url = page_url
 
                         # Special handling for single_page crawling: 
-                        # For single_page URLs, use crawl4ai-calculated depth for parent-child relationships
-                        # Parent should be the actual URL that was crawled, not necessarily the original parameter
+                        # For single_page URLs, the original single_page should always be the parent
+                        # of ALL other pages, regardless of their depth
                         if url_type == "single_page":
-                            # Find the parent by walking up the depth hierarchy
-                            # The parent should be the URL at depth-1 in the crawled data
-                            parent_depth = page_depth - 1
-                            parent_candidates = [p for p in scraped_data if p.get("depth", 0) == parent_depth]
+                            # The original single_page is the URL passed to scrape_website()
+                            original_single_page = url  # The URL passed to scrape_website()
                             
-                            if parent_candidates:
-                                # Use the first parent candidate found
-                                parent_url = parent_candidates[0]["url"]
-                                if parent_url in url_to_record_id:
-                                    parent_id = url_to_record_id[parent_url]
-                                    logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to parent {parent_url} (depth={parent_depth}, id={parent_id})")
-                                else:
-                                    logger.warning(f"⚠️ Parent {parent_url} found but not in url_to_record_id")
+                            if original_single_page in url_to_record_id:
+                                parent_id = url_to_record_id[original_single_page]
+                                logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to original single_page parent {original_single_page} (id={parent_id})")
                             else:
-                                # If no parent found at depth-1, this might be the root single_page
-                                if page_depth == 1:
-                                    # This is likely the original single_page at depth 1, no parent
-                                    logger.info(f"🔗 Page {page_url} (depth={page_depth}) is root single_page, no parent")
+                                logger.warning(f"⚠️ Original single_page {original_single_page} not found in url_to_record_id")
+                                # Fallback: try to find the original single_page in scraped_data
+                                original_page_data = next((p for p in scraped_data if p.get("url", "").rstrip('/') == original_single_page.rstrip('/')), None)
+                                if original_page_data and original_page_data.get("url") in url_to_record_id:
+                                    parent_id = url_to_record_id[original_page_data["url"]]
+                                    logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to original single_page parent {original_page_data['url']} (id={parent_id})")
+                            else:
+                                # If this is the original single_page itself, no parent needed
+                                if page_url.rstrip('/') == original_single_page.rstrip('/'):
+                                    logger.info(f"🔗 Page {page_url} (depth={page_depth}) is original single_page, no parent")
                                 else:
-                                    logger.warning(f"⚠️ No parent found for {page_url} at depth {page_depth}")
+                                    logger.warning(f"⚠️ Original single_page {original_single_page} not found in url_to_record_id for non-original page")
                         else:
                             # Regular website crawling: walk up URL hierarchy
                             while current_depth > 0:
