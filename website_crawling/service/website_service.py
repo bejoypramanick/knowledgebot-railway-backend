@@ -1273,7 +1273,6 @@ class WebsiteService:
 
                 # Continue with the same crawler for the actual crawling phase
                 # (The rest of the method will use the same crawler instance)
-            
         else:
             # Regular website crawling: start from provided URL at depth 0
             urls_to_scrape = [(url, 0)]  # BFS queue: (url, depth) - depth based on discovery order
