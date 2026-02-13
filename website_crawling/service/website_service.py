@@ -1246,9 +1246,9 @@ class WebsiteService:
                                         if link not in scraped_urls and (link, depth + 1) not in urls_to_scrape:
                                             urls_to_scrape.append((link, depth + 1))
 
-                            except Exception as e:
-                                logger.warning(f"⚠️ Error during depth discovery for {current_url}: {e}")
-                                continue
+                        except Exception as e:
+                            logger.warning(f"⚠️ Error during depth discovery for {current_url}: {e}")
+                            continue
 
                     if target_url_depth is None:
                         logger.error(f"❌ Could not determine depth for single_page {url}")
