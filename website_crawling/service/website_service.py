@@ -271,18 +271,50 @@ class WebsiteService:
                 logger.debug(f"📄 Classified as single page by query string: {url}")
                 return "single_page"
 
-            # 3) Fallback heuristic by path depth:
-            # - 0–1 segments: treat as website root
-            # - 2–3 segments: still website (section/collection)
+            # 3) Enhanced heuristic by path depth and page patterns:
+            # - 0–1 segments: check if it's a specific page vs section
+            # - 2–3 segments: could be section or specific page
             # - 4+ segments: more likely a deep content page
             depth = len(path_parts)
+            
+            # Common single page patterns at depth 1-2 that should be treated as pages, not sections
+            single_page_patterns = {
+                'contact', 'contact-us', 'about', 'about-us', 'team', 'teams',
+                'services', 'service', 'products', 'product', 'portfolio',
+                'blog', 'news', 'careers', 'jobs', 'help', 'support',
+                'faq', 'terms', 'privacy', 'policy', 'login', 'register',
+                'signup', 'search', 'profile', 'account', 'dashboard'
+            }
+            
+            # Check if the last path segment matches single page patterns
+            if path_parts:
+                last_segment = path_parts[-1].lower().replace('-', '').replace('_', '')
+                if last_segment in single_page_patterns:
+                    logger.debug(f"📄 Classified as single page by pattern '{last_segment}': {url}")
+                    return "single_page"
+            
+            # Original depth-based logic as fallback
             if depth <= 1:
+                # For depth 1, check if it looks like a specific page vs section
+                if path_parts and len(path_parts) == 1:
+                    segment = path_parts[0].lower()
+                    if segment in single_page_patterns:
+                        logger.debug(f"📄 Classified as single page (depth 1, pattern '{segment}'): {url}")
+                        return "single_page"
+                
                 logger.debug(f"🌐 Classified as website (root/shallow, depth={depth}): {url}")
                 return "website"
             elif depth >= 4:
                 logger.debug(f"📄 Classified as single page (deep path, depth={depth}): {url}")
                 return "single_page"
             else:
+                # For depth 2-3, use additional heuristics
+                if path_parts:
+                    last_segment = path_parts[-1].lower().replace('-', '').replace('_', '')
+                    if last_segment in single_page_patterns:
+                        logger.debug(f"📄 Classified as single page (depth {depth}, pattern '{last_segment}'): {url}")
+                        return "single_page"
+                
                 logger.debug(f"🌐 Classified as website (moderate depth={depth}): {url}")
                 return "website"
         except Exception as e:
