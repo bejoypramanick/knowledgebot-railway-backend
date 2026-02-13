@@ -677,117 +677,7 @@ class WebsiteService:
                     except Exception as e:
                         logger.error(f"❌ Failed to create root page record: {e}")
 
-                # Sort child pages by depth to ensure parents are processed before children
-                child_pages = [page for page in scraped_data if page.get("depth", 0) > 0]
-                sorted_child_pages = sorted(child_pages, key=lambda x: x.get("depth", 0))
-                logger.info(f"📊 Processing {len(sorted_child_pages)} child pages in depth order")
-
-                for page_data in sorted_child_pages:
-                    page_url = page_data["url"]
-                    page_text = page_data["text"]
-                    page_title = page_data.get("title", "")
-                    page_depth = page_data.get("depth", 0)
-
-                    all_child_urls.append(page_url)
-
-                    try:
-                        # Upload individual page with its own URL
-                        gemini_result = await upload_content_to_gemini(
-                            content=page_text,
-                            url=page_url,  # Use individual page URL
-                            title=page_title,
-                            user_email=options.get("user_email"),
-                            page_depth=page_depth  # Add missing page_depth parameter
-                        )
-
-                        # Determine parent relationship - find parent in the hierarchy
-                        parent_id = None
-                        current_depth = page_depth
-                        current_url = page_url
-
-                        # Special handling for single_page crawling: 
-                        # For single_page URLs, the original single_page should always be the parent
-                        # of ALL other pages, regardless of their depth
-                        if url_type == "single_page":
-                            # The original single_page is the URL passed to scrape_website()
-                            original_single_page = url  # The URL passed to scrape_website()
-                            
-                            if original_single_page in url_to_record_id:
-                                parent_id = url_to_record_id[original_single_page]
-                                logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to original single_page parent {original_single_page} (id={parent_id})")
-                            else:
-                                logger.warning(f"⚠️ Original single_page {original_single_page} not found in url_to_record_id")
-                                # Fallback: try to find the original single_page in scraped_data
-                                original_page_data = next((p for p in scraped_data if p.get("url", "").rstrip('/') == original_single_page.rstrip('/')), None)
-                                if original_page_data and original_page_data.get("url") in url_to_record_id:
-                                    parent_id = url_to_record_id[original_page_data["url"]]
-                                    logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to original single_page parent {original_page_data['url']} (id={parent_id})")
-                                else:
-                                    # If this is the original single_page itself, no parent needed
-                                    if page_url.rstrip('/') == original_single_page.rstrip('/'):
-                                        logger.info(f"🔗 Page {page_url} (depth={page_depth}) is original single_page, no parent")
-                                    else:
-                                        logger.warning(f"⚠️ Original single_page {original_single_page} not found in url_to_record_id for non-original page")
-                        else:
-                            # Regular website crawling: walk up URL hierarchy
-                            while current_depth > 0:
-                                parent_url = self.get_parent_url(current_url)
-                                if not parent_url:
-                                    break
-
-                                if parent_url in url_to_record_id:
-                                    parent_id = url_to_record_id[parent_url]
-                                    logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to parent {parent_url} (depth={current_depth - 1}, id={parent_id})")
-                                    break
-                                else:
-                                    # Parent doesn't exist yet, try going up one more level
-                                    current_url = parent_url
-                                    current_depth -= 1
-
-                        if parent_id is None and page_depth > 0:
-                            logger.warning(f"⚠️ Could not find parent for {page_url} at depth {page_depth} - will link to root or null")
-
-                        # Record metadata for individual page
-                        record_id = await record_scraped_metadata(
-                            url=page_url,  # Individual page URL in database
-                            domain=urlparse(page_url).netloc.replace('www.', ''),
-                            title=page_title or page_url,
-                            content_length=len(page_text),
-                            pages_scraped=1,  # Each is a separate record
-                            gemini_file_name=gemini_result.get("file_name"),
-                            gemini_file_uri=gemini_result.get("file_uri"),
-                            gemini_state=gemini_result.get("state", "UNKNOWN"),
-                            scraped_urls=[page_url],  # Individual page URL for citation
-                            scraping_config={
-                                "max_pages": max_pages,
-                                "max_depth": max_depth,
-                                "page_depth": page_depth,
-                                "source": "regular_crawl",
-                                "parent_domain": urlparse(url).netloc,
-                                "total_pages_in_crawl": len(scraped_data),
-                                "include_patterns": include_patterns,
-                                "exclude_patterns": exclude_patterns
-                            },
-                            file_search_metadata=gemini_result.get("file_search_metadata"),
-                            parent_id=parent_id,
-                            depth=page_depth,
-                            crawl_session_id=crawl_session_id
-                        )
-
-                        uploaded_files.append({
-                            "url": page_url,
-                            "file_name": gemini_result.get("file_name"),
-                            "record_id": record_id,
-                            "depth": page_depth
-                        })
-                        record_ids.append(record_id)
-                        url_to_record_id[page_url] = record_id
-
-                        logger.info(f"✅ Uploaded child page: {page_url}")
-
-                    except Exception as e:
-                        logger.error(f"❌ Failed to upload page {page_url}: {e}")
-
+                
                 processing_time = time.perf_counter() - start_time
 
                 return {
@@ -1372,6 +1262,99 @@ class WebsiteService:
                                             "depth": depth,
                                             "url_type": url_type
                                         })
+                                        
+                                        # IMMEDIATELY process this URL to Firestore and database
+                                        try:
+                                            logger.info(f"🚀 Immediately processing scraped URL: {current_url} (depth={depth})")
+                                            
+                                            # Upload individual page with its own URL
+                                            gemini_result = await upload_content_to_gemini(
+                                                content=content,
+                                                url=current_url,  # Use individual page URL
+                                                title=page_title,
+                                                user_email=options.get("user_email"),
+                                                page_depth=depth
+                                            )
+                                            
+                                            # Determine parent relationship
+                                            parent_id = None
+                                            current_depth = depth
+                                            current_url_for_parent = current_url
+                                            
+                                            # Special handling for single_page crawling
+                                            if url_type == "single_page":
+                                                # The original single_page is the URL passed to scrape_website()
+                                                original_single_page = url  # The URL passed to scrape_website()
+                                                
+                                                if original_single_page in url_to_record_id:
+                                                    parent_id = url_to_record_id[original_single_page]
+                                                    logger.info(f"🔗 Page {current_url} (depth={depth}) linked to original single_page parent {original_single_page} (id={parent_id})")
+                                                else:
+                                                    # If this is the original single_page itself, no parent needed
+                                                    if current_url.rstrip('/') == original_single_page.rstrip('/'):
+                                                        logger.info(f"🔗 Page {current_url} (depth={depth}) is original single_page, no parent")
+                                                    else:
+                                                        logger.warning(f"⚠️ Original single_page {original_single_page} not found in url_to_record_id for non-original page")
+                                            else:
+                                                # Regular website crawling: walk up URL hierarchy
+                                                while current_depth > 0:
+                                                    parent_url = self.get_parent_url(current_url_for_parent)
+                                                    if not parent_url:
+                                                        break
+                                                    
+                                                    if parent_url in url_to_record_id:
+                                                        parent_id = url_to_record_id[parent_url]
+                                                        logger.info(f"🔗 Page {current_url} (depth={depth}) linked to parent {parent_url} (depth={current_depth - 1}, id={parent_id})")
+                                                        break
+                                                    else:
+                                                        # Parent doesn't exist yet, try going up one more level
+                                                        current_url_for_parent = parent_url
+                                                        current_depth -= 1
+                                            
+                                            if parent_id is None and depth > 0:
+                                                logger.warning(f"⚠️ Could not find parent for {current_url} at depth {depth} - will link to root or null")
+                                            
+                                            # Record metadata for individual page
+                                            record_id = await record_scraped_metadata(
+                                                url=current_url,  # Individual page URL in database
+                                                domain=urlparse(current_url).netloc.replace('www.', ''),
+                                                title=page_title or current_url,
+                                                content_length=len(content),
+                                                pages_scraped=1,  # Each is a separate record
+                                                gemini_file_name=gemini_result.get("file_name"),
+                                                gemini_file_uri=gemini_result.get("file_uri"),
+                                                gemini_state=gemini_result.get("state", "UNKNOWN"),
+                                                scraped_urls=[current_url],  # Individual page URL for citation
+                                                scraping_config={
+                                                    "max_pages": max_pages,
+                                                    "max_depth": max_depth,
+                                                    "page_depth": depth,
+                                                    "source": "regular_crawl",
+                                                    "parent_domain": urlparse(url).netloc,
+                                                    "total_pages_in_crawl": len(scraped_data),
+                                                    "include_patterns": include_patterns,
+                                                    "exclude_patterns": exclude_patterns
+                                                },
+                                                file_search_metadata=gemini_result.get("file_search_metadata"),
+                                                parent_id=parent_id,
+                                                depth=depth,
+                                                crawl_session_id=str(uuid.uuid4())  # Unique session for each URL
+                                            )
+                                            
+                                            # Add to tracking collections
+                                            uploaded_files.append({
+                                                "url": current_url,
+                                                "file_name": gemini_result.get("file_name"),
+                                                "record_id": record_id,
+                                                "depth": depth
+                                            })
+                                            record_ids.append(record_id)
+                                            url_to_record_id[current_url] = record_id
+                                            
+                                            logger.info(f"✅ Immediately uploaded and recorded: {current_url} (id={record_id})")
+                                            
+                                        except Exception as e:
+                                            logger.error(f"❌ Failed to immediately process {current_url}: {e}")
     
                                     # Extract links for further crawling
                                     # Use adjusted_max_depth for single_page crawling, original max_depth for regular crawling
