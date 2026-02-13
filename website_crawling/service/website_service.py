@@ -1180,6 +1180,9 @@ class WebsiteService:
         scraped_data = []  # Track individual page data for citations
         scraped_urls: Set[str] = set()
         
+        # Create semaphore early for both depth discovery and crawling phases
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
         # For single_page crawling, we need to discover the actual depth of the starting URL
         # by crawling from domain root first, then finding our target URL's depth
         if url_type == "single_page":
@@ -1192,7 +1195,7 @@ class WebsiteService:
             
             # Start BFS from domain root to discover the actual depth of our target URL
             urls_to_scrape = [(domain_root, 0)]  # BFS queue: (url, depth) - start from domain root
-            target_url_depth = None  # Will store actual depth of our single_page
+            target_url_depth = None  # Will store the actual depth of our single_page
             target_url_found = False
             
             # First phase: discover the actual depth of our target single_page
@@ -1247,7 +1250,6 @@ class WebsiteService:
             # Regular website crawling: start from provided URL at depth 0
             urls_to_scrape = [(url, 0)]  # BFS queue: (url, depth) - depth based on discovery order
         title = "Untitled"
-        semaphore = asyncio.Semaphore(max_concurrent)
 
         try:
             async with AsyncWebCrawler(
