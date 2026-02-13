@@ -1193,180 +1193,183 @@ class WebsiteService:
         
         # Create semaphore early for both depth discovery and crawling phases
         semaphore = asyncio.Semaphore(max_concurrent)
-        
-        # For single_page crawling, we need to discover the actual depth of the starting URL
-        # by crawling from domain root first, then finding our target URL's depth
-        if url_type == "single_page":
-            # Extract domain root for BFS discovery
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            domain_root = f"{parsed.scheme}://{parsed.netloc}"
-            
-            logger.info(f"🔍 Single_page mode: discovering actual depth for {url} from domain root {domain_root}")
-            
-            # Create crawler instance for both depth discovery and crawling phases
-            async with AsyncWebCrawler(
-                verbose=False,
-                headless=True,
-                browser_type="chromium",
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ) as crawler:
-                # Start BFS from domain root to discover the actual depth of our target URL
-                discovery_urls = [(domain_root, 0)]  # BFS queue: (url, depth) - start from domain root
-                target_url_depth = None  # Will store actual depth of our single_page
-                target_url_found = False
-                
-                # First phase: discover the actual depth of our target single_page
-                while discovery_urls and not target_url_found and len(scraped_urls) < max_pages:
-                    current_url, depth = discovery_urls.pop(0)
 
-                    if current_url in scraped_urls:
-                        continue
+        try:
+            title = "Untitled"
+            adjusted_max_depth = max_depth  # Default to max_depth, will be adjusted for single_page
 
-                    try:
-                        # Apply concurrency limit
-                        async with semaphore:
-                            result = await asyncio.wait_for(
-                                crawler.arun(url=current_url),
-                                timeout=timeout
-                            )
+            # For single_page crawling, we need to discover the actual depth of the starting URL
+            # by crawling from domain root first, then finding our target URL's depth
+            if url_type == "single_page":
+                # Extract domain root for BFS discovery
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                domain_root = f"{parsed.scheme}://{parsed.netloc}"
 
-                        if result.success:
-                            scraped_urls.add(current_url)
+                logger.info(f"🔍 Single_page mode: discovering actual depth for {url} from domain root {domain_root}")
 
-                            # Check if this is our target single_page URL
-                            if current_url.rstrip('/') == url.rstrip('/'):
-                                target_url_depth = depth
-                                target_url_found = True
-                                logger.info(f"🎯 Found target single_page {url} at actual depth {depth}")
-                                break
+                # Create crawler instance for both depth discovery and crawling phases
+                async with AsyncWebCrawler(
+                    verbose=False,
+                    headless=True,
+                    browser_type="chromium",
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ) as crawler:
+                    # Start BFS from domain root to discover the actual depth of our target URL
+                    discovery_urls = [(domain_root, 0)]  # BFS queue: (url, depth) - start from domain root
+                    target_url_depth = None  # Will store actual depth of our single_page
+                    target_url_found = False
 
-                            # Extract links for further discovery (only if we haven't found target yet)
-                            if depth < max_depth and len(scraped_urls) < max_pages:
-                                links = extract_links_from_result(result, current_url)
-                                for link in links:
-                                    if not self.should_include_url(link, include_patterns, exclude_patterns):
-                                        continue
-                                    if link not in scraped_urls and (link, depth + 1) not in discovery_urls:
-                                        discovery_urls.append((link, depth + 1))
+                    # First phase: discover the actual depth of our target single_page
+                    while discovery_urls and not target_url_found and len(scraped_urls) < max_pages:
+                        current_url, depth = discovery_urls.pop(0)
 
-                    except Exception as e:
-                        logger.warning(f"⚠️ Error during depth discovery for {current_url}: {e}")
-                        continue
+                        if current_url in scraped_urls:
+                            continue
 
-                if target_url_depth is None:
-                    logger.error(f"❌ Could not determine depth for single_page {url}")
-                    return {"success": False, "error": f"Could not find target URL {url} during depth discovery"}
-
-                # Second phase: crawl starting from our single_page with its actual depth
-                logger.info(f"🚀 Starting crawl from single_page {url} at discovered depth {target_url_depth}")
-                scraped_urls.clear()  # Reset for actual crawling
-                scraped_data = []  # Reset for actual crawling
-                
-                # For single_page crawling, adjust max_depth to allow crawling from single_page starting point
-                # Total depth should be: single_page_depth + ui_max_depth
-                # This means crawler can go up to ui_max_depth levels deeper than the single_page
-                logger.info(f"📏 Single_page crawling: single_page_depth={target_url_depth}, ui_max_depth={max_depth}, total_max_depth={max_depth}")
-                
-                urls_to_scrape = [(url, target_url_depth)]  # Start from single_page at its actual depth
-
-                # Continue with the same crawler for the actual crawling phase
-                # (The rest of the method will use the same crawler instance)
-        else:
-            # Regular website crawling: start from provided URL at depth 0
-            urls_to_scrape = [(url, 0)]  # BFS queue: (url, depth) - depth based on discovery order
-            
-        title = "Untitled"
-
-        # Create crawler instance for the main crawling phase
-        # (For single_page, we already have a crawler instance from depth discovery)
-        if url_type != "single_page":
-            async with AsyncWebCrawler(
-                verbose=False,
-                headless=True,
-                browser_type="chromium",
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            ) as crawler:
-                # BFS traversal: process all URLs at depth N before depth N+1
-                while urls_to_scrape and len(scraped_urls) < max_pages:
-                    current_url, depth = urls_to_scrape.pop(0)
-
-                    if current_url in scraped_urls:
-                        continue
-
-                    logger.info(f"📄 Scraping page {len(scraped_urls) + 1}/{max_pages}: {current_url} (depth={depth})")
-
-                    try:
-                        # Apply concurrency limit
-                        async with semaphore:
-                            try:
+                        try:
+                            # Apply concurrency limit
+                            async with semaphore:
                                 result = await asyncio.wait_for(
                                     crawler.arun(url=current_url),
                                     timeout=timeout
                                 )
-                            except Exception as cookie_error:
-                                if "Invalid cookie fields" in str(cookie_error):
-                                    logger.warning(f"⚠️ Cookie error for {current_url}, retrying with different settings")
-                                    # Retry with different settings to avoid cookie handling
-                                    result = await asyncio.wait_for(
-                                        crawler.arun(
-                                            url=current_url,
-                                            bypass_cache=False,
-                                            wait_until='domcontentloaded'
-                                        ),
-                                        timeout=timeout
-                                    )
-                                else:
-                                    raise
 
                             if result.success:
                                 scraped_urls.add(current_url)
 
-                                # Get content
-                                content = result.markdown or result.cleaned_html or result.html or ""
-                                if content:
-                                    # Store individual page data for citations
-                                    page_title = ""
-                                    if len(scraped_urls) == 1 and hasattr(result, 'title') and result.title:
-                                        title = result.title
-                                        page_title = result.title
+                                # Check if this is our target single_page URL
+                                if current_url.rstrip('/') == url.rstrip('/'):
+                                    target_url_depth = depth
+                                    target_url_found = True
+                                    logger.info(f"🎯 Found target single_page {url} at actual depth {depth}")
+                                    break
 
-                                    # Classify URL type based on crawl4ai depth
-                                    url_type = self.classify_url_type(current_url, crawl4ai_depth=depth)
-                                    
-                                    scraped_data.append({
-                                        "url": current_url,
-                                        "text": content,
-                                        "title": page_title,
-                                        "depth": depth,
-                                        "url_type": url_type
-                                    })
-
-                                # Extract links for further crawling
-                                # Use adjusted_max_depth for single_page crawling, original max_depth for regular crawling
-                                current_max_depth = adjusted_max_depth if url_type == "single_page" else max_depth
-                                if depth < current_max_depth and len(scraped_urls) < max_pages:
+                                # Extract links for further discovery (only if we haven't found target yet)
+                                if depth < max_depth and len(scraped_urls) < max_pages:
                                     links = extract_links_from_result(result, current_url)
                                     for link in links:
-                                        # Check if URL should be included based on patterns
                                         if not self.should_include_url(link, include_patterns, exclude_patterns):
                                             continue
+                                        if link not in scraped_urls and (link, depth + 1) not in discovery_urls:
+                                            discovery_urls.append((link, depth + 1))
 
-                                        if link not in scraped_urls and (link, depth + 1) not in urls_to_scrape:
-                                            urls_to_scrape.append((link, depth + 1))
+                        except Exception as e:
+                            logger.warning(f"⚠️ Error during depth discovery for {current_url}: {e}")
+                            continue
 
-                            else:
-                                logger.warning(f"⚠️ Failed to scrape {current_url}: {result.error_message}")
+                    if target_url_depth is None:
+                        logger.error(f"❌ Could not determine depth for single_page {url}")
+                        return {"success": False, "error": f"Could not find target URL {url} during depth discovery"}
 
-                            # Apply delay between requests
-                            if delay_between_requests > 0 and urls_to_scrape:
-                                logger.info(f"⏳ Waiting {delay_between_requests}s before next request")
-                                await asyncio.sleep(delay_between_requests)
+                    # Second phase: crawl starting from our single_page with its actual depth
+                    logger.info(f"🚀 Starting crawl from single_page {url} at discovered depth {target_url_depth}")
+                    scraped_urls.clear()  # Reset for actual crawling
+                    scraped_data = []  # Reset for actual crawling
+                
+                    # For single_page crawling, adjust max_depth to allow crawling from single_page starting point
+                    # Total depth should be: single_page_depth + ui_max_depth
+                    # This means crawler can go up to ui_max_depth levels deeper than the single_page
+                    adjusted_max_depth = target_url_depth + max_depth
+                    logger.info(f"📏 Single_page crawling: single_page_depth={target_url_depth}, ui_max_depth={max_depth}, total_max_depth={adjusted_max_depth}")
 
-                    except asyncio.TimeoutError:
-                        logger.warning(f"⏱️ Timeout scraping {current_url}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Error scraping {current_url}: {e}")
+                    urls_to_scrape = [(url, target_url_depth)]  # Start from single_page at its actual depth
+
+                    # Continue with the same crawler for the actual crawling phase
+                    # (The rest of the method will use the same crawler instance)
+            else:
+                # Regular website crawling: start from provided URL at depth 0
+                urls_to_scrape = [(url, 0)]  # BFS queue: (url, depth) - depth based on discovery order
+
+            # Create crawler instance for the main crawling phase
+            # (For single_page, we already have a crawler instance from depth discovery)
+            if url_type != "single_page":
+                async with AsyncWebCrawler(
+                    verbose=False,
+                    headless=True,
+                    browser_type="chromium",
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                ) as crawler:
+                    # BFS traversal: process all URLs at depth N before depth N+1
+                    while urls_to_scrape and len(scraped_urls) < max_pages:
+                        current_url, depth = urls_to_scrape.pop(0)
+    
+                        if current_url in scraped_urls:
+                            continue
+    
+                        logger.info(f"📄 Scraping page {len(scraped_urls) + 1}/{max_pages}: {current_url} (depth={depth})")
+    
+                        try:
+                            # Apply concurrency limit
+                            async with semaphore:
+                                try:
+                                    result = await asyncio.wait_for(
+                                        crawler.arun(url=current_url),
+                                        timeout=timeout
+                                    )
+                                except Exception as cookie_error:
+                                    if "Invalid cookie fields" in str(cookie_error):
+                                        logger.warning(f"⚠️ Cookie error for {current_url}, retrying with different settings")
+                                        # Retry with different settings to avoid cookie handling
+                                        result = await asyncio.wait_for(
+                                            crawler.arun(
+                                                url=current_url,
+                                                bypass_cache=False,
+                                                wait_until='domcontentloaded'
+                                            ),
+                                            timeout=timeout
+                                        )
+                                    else:
+                                        raise
+    
+                                if result.success:
+                                    scraped_urls.add(current_url)
+    
+                                    # Get content
+                                    content = result.markdown or result.cleaned_html or result.html or ""
+                                    if content:
+                                        # Store individual page data for citations
+                                        page_title = ""
+                                        if len(scraped_urls) == 1 and hasattr(result, 'title') and result.title:
+                                            title = result.title
+                                            page_title = result.title
+    
+                                        # Classify URL type based on crawl4ai depth
+                                        url_type = self.classify_url_type(current_url, crawl4ai_depth=depth)
+                                        
+                                        scraped_data.append({
+                                            "url": current_url,
+                                            "text": content,
+                                            "title": page_title,
+                                            "depth": depth,
+                                            "url_type": url_type
+                                        })
+    
+                                    # Extract links for further crawling
+                                    # Use adjusted_max_depth for single_page crawling, original max_depth for regular crawling
+                                    current_max_depth = adjusted_max_depth if url_type == "single_page" else max_depth
+                                    if depth < current_max_depth and len(scraped_urls) < max_pages:
+                                        links = extract_links_from_result(result, current_url)
+                                        for link in links:
+                                            # Check if URL should be included based on patterns
+                                            if not self.should_include_url(link, include_patterns, exclude_patterns):
+                                                continue
+    
+                                            if link not in scraped_urls and (link, depth + 1) not in urls_to_scrape:
+                                                urls_to_scrape.append((link, depth + 1))
+    
+                                else:
+                                    logger.warning(f"⚠️ Failed to scrape {current_url}: {result.error_message}")
+    
+                                # Apply delay between requests
+                                if delay_between_requests > 0 and urls_to_scrape:
+                                    logger.info(f"⏳ Waiting {delay_between_requests}s before next request")
+                                    await asyncio.sleep(delay_between_requests)
+    
+                        except asyncio.TimeoutError:
+                            logger.warning(f"⏱️ Timeout scraping {current_url}")
+                        except Exception as e:
+                            logger.warning(f"⚠️ Error scraping {current_url}: {e}")
 
             # Combine content for display but preserve individual page data
             combined_content = "\n\n".join([
