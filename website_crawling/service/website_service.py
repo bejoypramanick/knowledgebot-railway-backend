@@ -198,16 +198,31 @@ class WebsiteService:
         return content
 
     @staticmethod
-    def classify_url_type(url: str) -> str:
+    def classify_url_type(url: str, crawl4ai_depth: Optional[int] = None) -> str:
         """
         Intelligently classify a URL as sitemap, single page, or website.
-
+        
+        If crawl4ai_depth is provided, use it for more accurate classification:
+        - depth 0 (root): classify as 'website'
+        - depth > 0 (child pages): classify as 'single_page'
+        
         Args:
             url: URL to classify
+            crawl4ai_depth: Optional depth from crawl4ai during crawling
 
         Returns:
             One of: 'sitemap', 'single_page', 'website'
         """
+        # If crawl4ai depth is available, use it for classification
+        if crawl4ai_depth is not None:
+            if crawl4ai_depth == 0:
+                logger.debug(f"🌐 Classified as website (crawl4ai depth=0): {url}")
+                return "website"
+            elif crawl4ai_depth > 0:
+                logger.debug(f"📄 Classified as single page (crawl4ai depth={crawl4ai_depth}): {url}")
+                return "single_page"
+        
+        # Fall back to static heuristics if crawl4ai depth not available
         url_lower = url.lower()
 
         # 1) Strong sitemap detection
@@ -300,7 +315,9 @@ class WebsiteService:
         include_patterns = options.get("include_patterns", []) or []
         exclude_patterns = options.get("exclude_patterns", []) or []
 
-        logger.info(f"🌐 Starting scrape for {url} - max_pages={max_pages}, max_depth={max_depth}, delay={delay_between_requests}s, concurrent={max_concurrent}")
+        # Classify URL type for proper parent-child relationship handling
+        url_type = self.classify_url_type(url)
+        logger.info(f"🌐 Starting {url_type} scrape for {url} - max_pages={max_pages}, max_depth={max_depth}, delay={delay_between_requests}s, concurrent={max_concurrent}")
         if include_patterns or exclude_patterns:
             logger.info(f"🎯 URL targeting - include: {len(include_patterns)} patterns, exclude: {len(exclude_patterns)} patterns")
 
@@ -363,7 +380,7 @@ class WebsiteService:
                     result = await self._scrape_with_crawl4ai(
                         url, max_pages, max_depth, timeout,
                         delay_between_requests, max_concurrent,
-                        include_patterns, exclude_patterns
+                        include_patterns, exclude_patterns, url_type
                     )
                 else:
                     return {
@@ -656,20 +673,39 @@ class WebsiteService:
                         current_depth = page_depth
                         current_url = page_url
 
-                        # Walk up the URL hierarchy to find the closest existing parent
-                        while current_depth > 0:
-                            parent_url = self.get_parent_url(current_url)
-                            if not parent_url:
-                                break
-
-                            if parent_url in url_to_record_id:
-                                parent_id = url_to_record_id[parent_url]
-                                logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to parent {parent_url} (depth={current_depth - 1}, id={parent_id})")
-                                break
+                        # Special handling for single_page crawling: 
+                        # For single_page URLs, the original single_page should always be the parent
+                        # of all its children, regardless of their crawl4ai depth
+                        if url_type == "single_page":
+                            # The original single_page is the URL passed to scrape_website()
+                            # We need to find it in the scraped_data to get its record ID
+                            original_single_page = url  # The URL passed to scrape_website()
+                            
+                            if original_single_page in url_to_record_id:
+                                parent_id = url_to_record_id[original_single_page]
+                                logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to original single_page parent {original_single_page} (id={parent_id})")
                             else:
-                                # Parent doesn't exist yet, try going up one more level
-                                current_url = parent_url
-                                current_depth -= 1
+                                logger.warning(f"⚠️ Original single_page {original_single_page} not found in url_to_record_id")
+                                # Fallback: try to find the original single_page in scraped_data
+                                original_page_data = next((p for p in scraped_data if p.get("url", "").rstrip('/') == original_single_page.rstrip('/')), None)
+                                if original_page_data and original_page_data.get("url") in url_to_record_id:
+                                    parent_id = url_to_record_id[original_page_data["url"]]
+                                    logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to original single_page parent {original_page_data['url']} (id={parent_id})")
+                        else:
+                            # Regular website crawling: walk up URL hierarchy
+                            while current_depth > 0:
+                                parent_url = self.get_parent_url(current_url)
+                                if not parent_url:
+                                    break
+
+                                if parent_url in url_to_record_id:
+                                    parent_id = url_to_record_id[parent_url]
+                                    logger.info(f"🔗 Page {page_url} (depth={page_depth}) linked to parent {parent_url} (depth={current_depth - 1}, id={parent_id})")
+                                    break
+                                else:
+                                    # Parent doesn't exist yet, try going up one more level
+                                    current_url = parent_url
+                                    current_depth -= 1
 
                         if parent_id is None and page_depth > 0:
                             logger.warning(f"⚠️ Could not find parent for {page_url} at depth {page_depth} - will link to root or null")
@@ -1023,12 +1059,16 @@ class WebsiteService:
                                     # Parent is the sitemap URL itself (depth=0)
                                     depth = 1  # All sitemap URLs are children of sitemap
                                     parent_url = sitemap_url
+                                    
+                                    # Classify URL type based on crawl4ai depth
+                                    url_type = self.classify_url_type(url, crawl4ai_depth=depth)
 
                                     page_data = {
                                         "url": url,
                                         "text": content,
                                         "title": page_title,
                                         "depth": depth,
+                                        "url_type": url_type,
                                         "parent_url": parent_url  # Parent is the sitemap
                                     }
 
@@ -1092,18 +1132,88 @@ class WebsiteService:
         delay_between_requests: float = 0,
         max_concurrent: int = 10,
         include_patterns: List[str] = None,
-        exclude_patterns: List[str] = None
+        exclude_patterns: List[str] = None,
+        url_type: str = "website"  # New parameter: "website", "single_page", or "sitemap"
     ) -> Dict[str, Any]:
         """
         Scrape website using crawl4ai library with BFS depth-based traversal.
         Uses breadth-first strategy to crawl pages level-by-level, establishing
         proper parent-child relationships based on link discovery order.
+        
+        For single_page URLs: crawl4ai determines actual depth relative to domain root,
+        and the original single_page becomes parent for all its discovered children.
         """
         include_patterns = include_patterns or []
         exclude_patterns = exclude_patterns or []
         scraped_data = []  # Track individual page data for citations
         scraped_urls: Set[str] = set()
-        urls_to_scrape = [(url, 0)]  # BFS queue: (url, depth) - depth based on discovery order
+        
+        # For single_page crawling, we need to discover the actual depth of the starting URL
+        # by crawling from domain root first, then finding our target URL's depth
+        if url_type == "single_page":
+            # Extract domain root for BFS discovery
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            domain_root = f"{parsed.scheme}://{parsed.netloc}"
+            
+            logger.info(f"🔍 Single_page mode: discovering actual depth for {url} from domain root {domain_root}")
+            
+            # Start BFS from domain root to discover the actual depth of our target URL
+            urls_to_scrape = [(domain_root, 0)]  # BFS queue: (url, depth) - start from domain root
+            target_url_depth = None  # Will store actual depth of our single_page
+            target_url_found = False
+            
+            # First phase: discover the actual depth of our target single_page
+            while urls_to_scrape and not target_url_found and len(scraped_urls) < max_pages:
+                current_url, depth = urls_to_scrape.pop(0)
+
+                if current_url in scraped_urls:
+                    continue
+
+                try:
+                    # Apply concurrency limit
+                    async with semaphore:
+                        result = await asyncio.wait_for(
+                            crawler.arun(url=current_url),
+                            timeout=timeout
+                        )
+
+                    if result.success:
+                        scraped_urls.add(current_url)
+
+                        # Check if this is our target single_page URL
+                        if current_url.rstrip('/') == url.rstrip('/'):
+                            target_url_depth = depth
+                            target_url_found = True
+                            logger.info(f"🎯 Found target single_page {url} at actual depth {depth}")
+                            break
+
+                        # Extract links for further discovery (only if we haven't found target yet)
+                        if depth < max_depth and len(scraped_urls) < max_pages:
+                            links = extract_links_from_result(result, current_url)
+                            for link in links:
+                                if not self.should_include_url(link, include_patterns, exclude_patterns):
+                                    continue
+                                if link not in scraped_urls and (link, depth + 1) not in urls_to_scrape:
+                                    urls_to_scrape.append((link, depth + 1))
+
+                except Exception as e:
+                    logger.warning(f"⚠️ Error during depth discovery for {current_url}: {e}")
+                    continue
+
+            if target_url_depth is None:
+                logger.error(f"❌ Could not determine depth for single_page {url}")
+                return {"success": False, "error": f"Could not find target URL {url} during depth discovery"}
+
+            # Second phase: crawl starting from our single_page with its actual depth
+            logger.info(f"🚀 Starting crawl from single_page {url} at discovered depth {target_url_depth}")
+            scraped_urls.clear()  # Reset for actual crawling
+            scraped_data = []  # Reset for actual crawling
+            urls_to_scrape = [(url, target_url_depth)]  # Start from single_page at its actual depth
+            
+        else:
+            # Regular website crawling: start from provided URL at depth 0
+            urls_to_scrape = [(url, 0)]  # BFS queue: (url, depth) - depth based on discovery order
         title = "Untitled"
         semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -1158,11 +1268,15 @@ class WebsiteService:
                                         title = result.title
                                         page_title = result.title
 
+                                    # Classify URL type based on crawl4ai depth
+                                    url_type = self.classify_url_type(current_url, crawl4ai_depth=depth)
+                                    
                                     scraped_data.append({
                                         "url": current_url,
                                         "text": content,
                                         "title": page_title,
-                                        "depth": depth
+                                        "depth": depth,
+                                        "url_type": url_type
                                     })
 
                                 # Extract links for further crawling
