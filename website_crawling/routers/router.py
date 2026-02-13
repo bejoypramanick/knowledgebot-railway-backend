@@ -63,28 +63,30 @@ async def scrape_website(request: Request):
 
         # Process each URL with intelligent type detection
         for idx, url in enumerate(urls, 1):
-            # Check if frontend explicitly requested single page crawl (max_pages=1)
-            # If so, respect that regardless of URL structure
-            if max_pages_from_frontend == 1:
-                url_type = 'single_page'
-                max_pages = 1
-                crawl_depth = 0  # Just scrape this page
-                logger.info(f"[{idx}/{len(urls)}] Processing single page (frontend requested): {url}")
-            else:
-                # Classify URL type only if frontend didn't specify single page
+            try:
+                # First, classify URL type
                 url_type = WebsiteService.classify_url_type(url)
-                logger.info(f"[{idx}/{len(urls)}] Processing {url_type}: {url}")
 
-                # Adjust max_pages and max_depth based on URL type
-                if url_type == 'sitemap':
-                    max_pages = max_pages_from_frontend or 1000  # Use frontend value or default for sitemaps
-                    crawl_depth = 1   # Don't crawl deeper, just extract from sitemap
-                elif url_type == 'single_page':
+                # If frontend explicitly requested single page crawl (max_pages=1),
+                # override classification and treat as single_page regardless of URL structure
+                if max_pages_from_frontend == 1:
+                    url_type = 'single_page'
                     max_pages = 1
-                    crawl_depth = 0   # Just scrape this page
-                else:  # website
-                    max_pages = max_pages_from_frontend or 100  # Use frontend value or default
-                    crawl_depth = max_depth
+                    crawl_depth = 0  # Just scrape this page
+                    logger.info(f"[{idx}/{len(urls)}] Processing single page (frontend requested): {url}")
+                else:
+                    logger.info(f"[{idx}/{len(urls)}] Processing {url_type}: {url}")
+
+                    # Adjust max_pages and max_depth based on URL type
+                    if url_type == 'sitemap':
+                        max_pages = max_pages_from_frontend or 1000  # Use frontend value or default for sitemaps
+                        crawl_depth = 1   # Don't crawl deeper, just extract from sitemap
+                    elif url_type == 'single_page':
+                        max_pages = 1
+                        crawl_depth = 0   # Just scrape this page
+                    else:  # website
+                        max_pages = max_pages_from_frontend or 100  # Use frontend value or default
+                        crawl_depth = max_depth
 
                 # Scrape options - combine frontend params with defaults
                 options = {
