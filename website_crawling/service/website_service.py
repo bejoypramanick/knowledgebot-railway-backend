@@ -1263,6 +1263,12 @@ class WebsiteService:
                 logger.info(f"🚀 Starting crawl from single_page {url} at discovered depth {target_url_depth}")
                 scraped_urls.clear()  # Reset for actual crawling
                 scraped_data = []  # Reset for actual crawling
+                
+                # For single_page crawling, adjust max_depth to include the target_url_depth offset
+                # This allows crawling to the full depth specified by UI from the starting point
+                adjusted_max_depth = max_depth + target_url_depth
+                logger.info(f"📏 Single_page crawling: original max_depth={max_depth}, target_url_depth={target_url_depth}, adjusted_max_depth={adjusted_max_depth}")
+                
                 urls_to_scrape = [(url, target_url_depth)]  # Start from single_page at its actual depth
 
                 # Continue with the same crawler for the actual crawling phase
@@ -1339,7 +1345,9 @@ class WebsiteService:
                                     })
 
                                 # Extract links for further crawling
-                                if depth < max_depth and len(scraped_urls) < max_pages:
+                                # Use adjusted_max_depth for single_page crawling, original max_depth for regular crawling
+                                current_max_depth = adjusted_max_depth if url_type == "single_page" else max_depth
+                                if depth < current_max_depth and len(scraped_urls) < max_pages:
                                     links = extract_links_from_result(result, current_url)
                                     for link in links:
                                         # Check if URL should be included based on patterns
