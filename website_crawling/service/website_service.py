@@ -434,7 +434,7 @@ class WebsiteService:
                 sitemap_record_id = await record_scraped_metadata(
                     url=url,
                     domain=urlparse(url).netloc.replace('www.', ''),
-                    title=result.get("title", url) if 'result' in locals() else url,
+                    title=url,  # Use URL as title for sitemap parent
                     content_length=0,  # Sitemap itself isn't counted
                     pages_scraped=len(urls_to_scrape),
                     gemini_file_name=None,
@@ -453,6 +453,15 @@ class WebsiteService:
                     depth=0,
                     crawl_session_id=crawl_session_id
                 )
+
+                # ✅ CRITICAL: Check if parent creation succeeded before processing children
+                if not sitemap_record_id:
+                    logger.error(f"❌ Failed to create sitemap parent record for {url}")
+                    return {
+                        "success": False,
+                        "error": "Failed to create sitemap parent record in database"
+                    }
+
                 logger.info(f"✅ Sitemap parent record created: {url} (id={sitemap_record_id})")
 
                 # Step 2: Scrape and process all URLs with INTERLEAVED uploads
@@ -1129,6 +1138,14 @@ class WebsiteService:
         options = options or {}
         include_patterns = include_patterns or []
         exclude_patterns = exclude_patterns or []
+
+        # ✅ CRITICAL: Validate that sitemap parent record exists before processing children
+        if not sitemap_record_id:
+            logger.error("❌ Sitemap parent record ID is missing - cannot process child pages")
+            return {
+                "success": False,
+                "error": "Sitemap parent record ID is missing"
+            }
 
         if not urls:
             return {
