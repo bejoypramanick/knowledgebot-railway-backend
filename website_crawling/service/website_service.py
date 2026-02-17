@@ -3,6 +3,7 @@ Website Service Layer for Website Crawling
 Provides business logic for website scraping and crawling operations with session management
 """
 import asyncio
+import os
 import time
 import re
 import uuid
@@ -321,23 +322,36 @@ class WebsiteService:
             logger.warning(f"⚠️ Error classifying URL {url}: {e}, defaulting to website")
             return "website"
 
-    async def scrape_website(self, url: str, options: Dict[str, Any], celery_task_id: str = None) -> Dict[str, Any]:
+    async def scrape_website(self, url: str, options: Dict[str, Any], celery_task_id: str = None, website_id: int = None) -> Dict[str, Any]:
         """
         Scrape a website and optionally crawl linked pages.
 
         Args:
             url: The URL to scrape
-            options: Scraping options including:
-                - max_pages: Maximum number of pages to scrape (default 1)
-                - max_depth: Maximum crawl depth (default 2)
-                - replace_existing: Whether to replace existing records
-                - extract_links: Whether to follow links (default True)
-                - timeout: Request timeout in seconds (default 30)
+            options: Scraping options
+            celery_task_id: Celery task ID for cancellation checking
+            website_id: Database website ID for status updates
 
         Returns:
             Dict with scraping results
         """
         start_time = time.perf_counter()
+
+        # Helper function to check if task was cancelled
+        async def check_cancellation():
+            if not celery_task_id:
+                return False
+            try:
+                import redis as redis_lib
+                redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/1')
+                redis_conn = redis_lib.from_url(redis_url)
+                cancelled_key = f"task_cancelled:{celery_task_id}"
+                result = redis_conn.exists(cancelled_key)
+                redis_conn.close()
+                return bool(result)
+            except Exception as e:
+                logger.warning(f"⚠️ Error checking cancellation: {e}")
+                return False
         max_pages = options.get("max_pages", 1)
         max_depth = options.get("max_depth", 2)
         replace_existing = options.get("replace_existing", False)
@@ -522,6 +536,11 @@ class WebsiteService:
             logger.info(f"✅ Created sitemap parent record: {url} (depth=0, id={sitemap_record_id})")
 
             for page_idx, page_data in enumerate(scraped_data, 1):
+                # ✅ CHECK FOR CANCELLATION AT START OF EACH PAGE
+                if await check_cancellation():
+                    logger.warning(f"❌ [CANCEL] Task cancelled - stopping sitemap upload at page {page_idx}/{len(scraped_data)}")
+                    break
+
                 page_url = page_data["url"]
                 page_text = page_data["text"]
                 page_domain = urlparse(page_url).netloc.replace('www.', '')
@@ -771,6 +790,11 @@ class WebsiteService:
                     # Record child URLs discovered during crawl
                     logger.info(f"📝 Recording {len(discovered_urls) - 1} child URLs discovered during crawl")
                     for child_url in discovered_urls:
+                        # ✅ CHECK FOR CANCELLATION BEFORE RECORDING EACH CHILD
+                        if await check_cancellation():
+                            logger.warning(f"❌ [CANCEL] Task cancelled - stopping child URL recording")
+                            break
+
                         if child_url == url:
                             # Skip if it's the parent URL
                             continue

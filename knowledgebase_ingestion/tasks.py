@@ -15,6 +15,26 @@ from shared.otel_logger import get_otel_logger
 logger = get_otel_logger("celery_tasks", "knowledgebase-ingestion")
 
 
+async def is_task_cancelled(celery_task_id: str) -> bool:
+    """Check if task has been marked for cancellation via Redis"""
+    if not celery_task_id:
+        return False
+
+    try:
+        import redis as redis_lib
+        redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+        redis_conn = redis_lib.from_url(redis_url)
+
+        cancelled_key = f"task_cancelled:{celery_task_id}"
+        result = redis_conn.exists(cancelled_key)
+        redis_conn.close()
+
+        return bool(result)
+    except Exception as e:
+        logger.warning(f"⚠️ Error checking cancellation status: {e}")
+        return False
+
+
 async def update_file_processing_status(file_id: int, status: str, error_message: str = None):
     """Update file processing status in database"""
     try:
@@ -44,13 +64,21 @@ async def process_file_async(
     detected_mime_type: str,
     user_email: str,
     file_size: int,
-    sha256_hash: str
+    sha256_hash: str,
+    celery_task_id: str = None
 ):
     """
     Async file processing logic
     Handles HTML, Docling (PDF/DOCX), and text files
+    Checks for cancellation flags before executing
     """
     try:
+        # ✅ CHECK FOR CANCELLATION BEFORE STARTING
+        if await is_task_cancelled(celery_task_id):
+            logger.warning(f"❌ [CELERY] Task {celery_task_id} was marked for cancellation - aborting")
+            await update_file_processing_status(file_id, "cancelled", "Task cancelled by admin")
+            return
+
         await update_file_processing_status(file_id, "processing")
 
         logger.info(f"🔄 [CELERY] Starting processing for file ID {file_id}: {original_filename}")
@@ -192,6 +220,10 @@ def process_file_upload_task(
     try:
         logger.info(f"📋 [TASK] Starting Celery task for file ID {file_id}")
 
+        # Get the current task ID from Celery
+        task_id = self.request.id
+        logger.info(f"🆔 [TASK_ID] Current task ID: {task_id}")
+
         # Run async function in event loop
         loop = asyncio.get_event_loop()
         loop.run_until_complete(
@@ -203,7 +235,8 @@ def process_file_upload_task(
                 detected_mime_type=detected_mime_type,
                 user_email=user_email,
                 file_size=file_size,
-                sha256_hash=sha256_hash
+                sha256_hash=sha256_hash,
+                celery_task_id=task_id
             )
         )
 

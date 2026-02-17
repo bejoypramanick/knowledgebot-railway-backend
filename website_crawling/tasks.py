@@ -5,11 +5,32 @@ Handles async website scraping and crawling with database status tracking
 
 import asyncio
 from typing import Dict, Any
+import os
 
 from celery import shared_task
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("celery_tasks", "website-crawling")
+
+
+async def is_task_cancelled(celery_task_id: str) -> bool:
+    """Check if task has been marked for cancellation via Redis"""
+    if not celery_task_id:
+        return False
+
+    try:
+        import redis as redis_lib
+        redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/1')
+        redis_conn = redis_lib.from_url(redis_url)
+
+        cancelled_key = f"task_cancelled:{celery_task_id}"
+        result = redis_conn.exists(cancelled_key)
+        redis_conn.close()
+
+        return bool(result)
+    except Exception as e:
+        logger.warning(f"⚠️ Error checking cancellation status: {e}")
+        return False
 
 
 async def update_website_processing_status(website_id: int, status: str, error_message: str = None):
@@ -42,8 +63,15 @@ async def process_website_async(
     """
     Async website scraping logic
     Handles Crawl4AI scraping, Docling conversion, and Gemini upload
+    Checks for cancellation flags before executing
     """
     try:
+        # ✅ CHECK FOR CANCELLATION BEFORE STARTING
+        if await is_task_cancelled(celery_task_id):
+            logger.warning(f"❌ [CELERY] Task {celery_task_id} was marked for cancellation - aborting")
+            await update_website_processing_status(website_id, "cancelled", "Task cancelled by admin")
+            return
+
         await update_website_processing_status(website_id, "processing")
 
         logger.info(f"🔄 [CELERY] Starting scraping for website ID {website_id}: {url}")
@@ -52,7 +80,7 @@ async def process_website_async(
 
         # Create service and perform scraping
         service = WebsiteService()
-        result = await service.scrape_website(url, options, celery_task_id=celery_task_id)
+        result = await service.scrape_website(url, options, celery_task_id=celery_task_id, website_id=website_id)
 
         if result.get("success"):
             logger.info(f"✅ [CELERY] Website ID {website_id} scraped successfully")
