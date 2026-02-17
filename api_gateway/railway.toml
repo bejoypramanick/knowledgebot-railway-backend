@@ -1,6 +1,7 @@
 [build]
 dockerfilePath = "api_gateway/Dockerfile"
 rootDirectory = ".."
+watchPaths = ["api_gateway/", "shared/"]
 
 [deploy]
 restartPolicyType = "ON_FAILURE"

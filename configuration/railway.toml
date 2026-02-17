@@ -1,6 +1,7 @@
 [build]
 dockerfilePath = "configuration/Dockerfile"
 rootDirectory = ".."
+watchPaths = ["configuration/", "shared/"]
 
 [deploy]
 restartPolicyType = "ON_FAILURE"

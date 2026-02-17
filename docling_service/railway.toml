@@ -1,8 +1,7 @@
 [build]
 dockerfilePath = "docling_service/Dockerfile"
 rootDirectory = ".."
-# Only rebuild when docling_service or shared changes
-# Ignores changes in other services (knowledgebase_ingestion, website_crawling, etc.)
+watchPaths = ["docling_service/", "shared/"]
 
 [deploy]
 restartPolicyType = "ON_FAILURE"

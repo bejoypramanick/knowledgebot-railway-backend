@@ -1,7 +1,7 @@
 [build]
 dockerfilePath = "knowledgebase_ingestion/Dockerfile"
 rootDirectory = ".."
-# Force rebuild to pick up logging changes
+watchPaths = ["knowledgebase_ingestion/", "shared/"]
 
 [deploy]
 restartPolicyType = "ON_FAILURE"
