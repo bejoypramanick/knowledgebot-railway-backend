@@ -961,15 +961,12 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
                 celery_task_id = record.get("celery_task_id")
                 if celery_task_id:
                     try:
-                        # Try to import and revoke from website_crawling service
-                        try:
-                            from website_crawling.celery_app import celery_app as website_celery_app
-                            website_celery_app.control.revoke(celery_task_id, terminate=True)
-                            celery_tasks_revoked += 1
-                            logger.info(f"🔴 Revoked website Celery task {celery_task_id} for page {record['id']}")
-                        except ImportError:
-                            # website_crawling app not available, try generic approach
-                            logger.warning(f"⚠️ Could not import website_crawling celery_app")
+                        # Revoke task using knowledgebase_ingestion's celery_app
+                        # Both services share the same Redis broker, so this works for all task types
+                        from knowledgebase_ingestion.celery_app import celery_app
+                        celery_app.control.revoke(celery_task_id, terminate=True)
+                        celery_tasks_revoked += 1
+                        logger.info(f"🔴 Revoked Celery task {celery_task_id} for page {record['id']}")
                     except Exception as e:
                         error_msg = f"Failed to revoke Celery task {celery_task_id}: {e}"
                         logger.warning(f"⚠️ {error_msg}")
@@ -1221,17 +1218,15 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                     all_task_ids = [t['celery_task_id'] for t in file_tasks + website_tasks]
                     logger.info(f"📊 Found {len(all_task_ids)} running Celery tasks to revoke")
 
-                    # Revoke all tasks
-                    try:
-                        from website_crawling.celery_app import celery_app as website_celery_app
-                        for task_id in all_task_ids:
-                            try:
-                                website_celery_app.control.revoke(task_id, terminate=True)
-                                celery_tasks_revoked += 1
-                            except Exception as e:
-                                logger.warning(f"⚠️ Failed to revoke task {task_id}: {e}")
-                    except ImportError:
-                        logger.warning(f"⚠️ Could not import website_crawling celery_app - some tasks may not be revoked")
+                    # Revoke all tasks using knowledgebase_ingestion's celery_app
+                    # Both services share the same Redis broker, so this works for all task types
+                    from knowledgebase_ingestion.celery_app import celery_app
+                    for task_id in all_task_ids:
+                        try:
+                            celery_app.control.revoke(task_id, terminate=True)
+                            celery_tasks_revoked += 1
+                        except Exception as e:
+                            logger.warning(f"⚠️ Failed to revoke task {task_id}: {e}")
 
                 if celery_tasks_revoked > 0:
                     logger.info(f"✅ Revoked {celery_tasks_revoked} Celery tasks before deletion")
