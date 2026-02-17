@@ -1463,6 +1463,15 @@ async def scrape_website_celery(
         logger.info(f"✅ [CELERY] Dispatched Celery task {task.id} for website ID {website_record_id}")
         logger.info(f"📊 [TASK_INFO] Task State: {task.state}, Routing: 'web_crawling' queue, Timeout: 2 hours")
 
+        # Store the Celery task_id in database so we can revoke it later if needed
+        from shared.db import get_db_connection
+        async with get_db_connection() as conn:
+            await conn.execute(
+                "UPDATE scraped_websites SET celery_task_id = $1 WHERE id = $2",
+                task.id, website_record_id
+            )
+        logger.info(f"💾 [TASK_TRACKING] Stored celery_task_id {task.id} in database for website {website_record_id}")
+
         # Return immediate response with pending status
         return {
             "success": True,

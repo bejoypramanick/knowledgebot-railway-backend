@@ -301,14 +301,14 @@ async def get_domain_analytics():
 async def cancel_scraping_task(item_id: str):
     """
     Cancel a pending or processing website scraping task.
-    Marks as cancelled in database.
+    Revokes the Celery task and marks as cancelled in database.
     """
     try:
         from shared.db import get_db_connection
 
         async with get_db_connection() as conn:
             website_record = await conn.fetchrow(
-                "SELECT id, processing_status FROM scraped_websites WHERE id = $1",
+                "SELECT id, processing_status, celery_task_id FROM scraped_websites WHERE id = $1",
                 int(item_id)
             )
 
@@ -321,16 +321,28 @@ async def cancel_scraping_task(item_id: str):
                     detail=f"Cannot cancel website with status '{website_record['processing_status']}'"
                 )
 
-            # Update database
+            # Revoke the Celery task if it exists
+            celery_task_id = website_record['celery_task_id']
+            if celery_task_id:
+                try:
+                    from website_crawling.celery_app import celery_app
+                    celery_app.control.revoke(celery_task_id, terminate=True)
+                    logger.info(f"🔴 [CELERY_REVOKE] Revoked task {celery_task_id} from Redis queue")
+                except Exception as e:
+                    logger.error(f"⚠️  Failed to revoke task {celery_task_id}: {e}")
+                    # Don't fail the cancellation if revoke fails - still update the database
+
+            # Update database with cancelled status and revoke timestamp
             await conn.execute(
-                "UPDATE scraped_websites SET processing_status = 'cancelled' WHERE id = $1",
+                "UPDATE scraped_websites SET processing_status = 'cancelled', task_revoked_at = NOW() WHERE id = $1",
                 int(item_id)
             )
 
-            logger.info(f"✅ Cancelled website scraping task: {item_id}")
+            logger.info(f"✅ Cancelled website scraping task: {item_id} (celery_task_id: {celery_task_id})")
             return {
                 "success": True,
                 "item_id": item_id,
+                "celery_task_id": celery_task_id,
                 "message": "Website scraping cancelled successfully"
             }
 
@@ -345,28 +357,46 @@ async def cancel_scraping_task(item_id: str):
 async def cancel_all_scraping_tasks():
     """
     Cancel all pending and processing website scraping tasks.
-    Marks all as cancelled in database.
+    Revokes tasks from Redis queue and marks as cancelled in database.
     """
     try:
         from shared.db import get_db_connection
+        from website_crawling.celery_app import celery_app
 
         async with get_db_connection() as conn:
-            # Cancel all pending/processing websites
+            # Get all pending/processing websites with task IDs
+            pending_websites = await conn.fetch(
+                """SELECT id, celery_task_id FROM scraped_websites
+                   WHERE processing_status IN ('pending', 'processing') AND celery_task_id IS NOT NULL"""
+            )
+
+            # Revoke all website tasks
+            websites_revoked = 0
+            for website_record in pending_websites:
+                try:
+                    celery_app.control.revoke(website_record['celery_task_id'], terminate=True)
+                    websites_revoked += 1
+                    logger.info(f"🔴 [CELERY_REVOKE] Revoked website task {website_record['celery_task_id']}")
+                except Exception as e:
+                    logger.error(f"⚠️  Failed to revoke website task {website_record['celery_task_id']}: {e}")
+
+            # Cancel all pending/processing websites in database
             result = await conn.execute(
                 """UPDATE scraped_websites
-                   SET processing_status = 'cancelled'
+                   SET processing_status = 'cancelled', task_revoked_at = NOW()
                    WHERE processing_status IN ('pending', 'processing')"""
             )
 
             # Parse result to get count
             websites_cancelled = int(result.split()[-1]) if result else 0
 
-            logger.info(f"✅ Cancelled all scraping tasks: {websites_cancelled} websites")
+            logger.info(f"✅ Cancelled all scraping tasks: {websites_cancelled} websites (Revoked: {websites_revoked} tasks)")
 
             return {
                 "success": True,
                 "message": "All pending scraping tasks cancelled successfully",
-                "websites_cancelled": websites_cancelled
+                "websites_cancelled": websites_cancelled,
+                "websites_revoked": websites_revoked
             }
 
     except Exception as e:

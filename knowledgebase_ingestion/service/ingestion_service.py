@@ -1347,6 +1347,14 @@ async def upload_file_celery(
         logger.info(f"✅ [CELERY] Dispatched Celery task {task.id} for file ID {file_record_id}")
         logger.info(f"📊 [TASK_INFO] Task State: {task.state}, Routing: 'file_processing' queue, Timeout: 30 minutes")
 
+        # Store the Celery task_id in database so we can revoke it later if needed
+        async with get_db_connection() as conn:
+            await conn.execute(
+                "UPDATE file_uploads SET celery_task_id = $1 WHERE id = $2",
+                task.id, file_record_id
+            )
+        logger.info(f"💾 [TASK_TRACKING] Stored celery_task_id {task.id} in database for file {file_record_id}")
+
         # Return immediate response with pending status
         return {
             "success": True,
