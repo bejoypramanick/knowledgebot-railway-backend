@@ -4,14 +4,33 @@ Handles async file processing tasks
 """
 
 from celery import Celery
+from celery.signals import before_task_publish, task_prerun, task_postrun, task_failure, task_retry
+from shared.otel_logger import get_otel_logger
 import os
+import redis
 from knowledgebase_ingestion.core.config import settings
+
+logger = get_otel_logger("celery_app", "knowledgebase-ingestion")
 
 # Create Celery app
 celery_app = Celery(__name__)
 
 # Configure Celery with Redis broker
 redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+
+# Log Celery initialization
+logger.info(f"🚀 [CELERY_APP] Initializing Celery for Knowledgebase Ingestion Service")
+logger.info(f"📊 [REDIS] Broker URL: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")  # Log URL without credentials
+
+# Test Redis connection at startup
+try:
+    redis_client = redis.from_url(redis_url, decode_responses=True)
+    redis_client.ping()
+    logger.info("✅ [REDIS] Connection test successful - Redis is reachable")
+    redis_client.close()
+except Exception as e:
+    logger.error(f"❌ [REDIS] Connection test failed - {e}")
+
 celery_app.conf.update(
     broker_url=redis_url,
     result_backend=redis_url,
@@ -37,10 +56,60 @@ celery_app.conf.update(
     task_time_limit=1900,
 )
 
+logger.info(f"✅ [CELERY_APP] Configuration updated - Task timeout: 30 minutes, Queue: 'file_processing'")
+
 # Auto-discover tasks from tasks.py
 celery_app.autodiscover_tasks(['knowledgebase_ingestion'])
+
+# Signal handlers for task lifecycle monitoring
+@before_task_publish.connect(sender='knowledgebase_ingestion.tasks.process_file_upload_task')
+def before_task_publish_handler(sender=None, body=None, **kwargs):
+    """Log before task is published to Redis queue"""
+    try:
+        task_args = body.get('args', []) if isinstance(body, dict) else []
+        file_id = task_args[0] if task_args else 'unknown'
+        logger.info(f"📤 [TASK_PUBLISH] Before publishing: {sender} - File ID: {file_id}")
+    except Exception as e:
+        logger.error(f"❌ [TASK_PUBLISH] Error in pre-publish handler: {e}")
+
+@task_prerun.connect(sender='knowledgebase_ingestion.tasks.process_file_upload_task')
+def task_prerun_handler(sender=None, task_id=None, args=None, **kwargs):
+    """Log when task starts execution"""
+    try:
+        file_id = args[0] if args else 'unknown'
+        logger.info(f"⏱️  [TASK_PRERUN] Task starting execution - Task ID: {task_id}, File ID: {file_id}")
+    except Exception as e:
+        logger.error(f"❌ [TASK_PRERUN] Error in pre-run handler: {e}")
+
+@task_postrun.connect(sender='knowledgebase_ingestion.tasks.process_file_upload_task')
+def task_postrun_handler(sender=None, task_id=None, args=None, **kwargs):
+    """Log when task completes successfully"""
+    try:
+        file_id = args[0] if args else 'unknown'
+        logger.info(f"✅ [TASK_POSTRUN] Task completed successfully - Task ID: {task_id}, File ID: {file_id}")
+    except Exception as e:
+        logger.error(f"❌ [TASK_POSTRUN] Error in post-run handler: {e}")
+
+@task_failure.connect(sender='knowledgebase_ingestion.tasks.process_file_upload_task')
+def task_failure_handler(sender=None, task_id=None, args=None, exception=None, **kwargs):
+    """Log when task fails"""
+    try:
+        file_id = args[0] if args else 'unknown'
+        logger.error(f"❌ [TASK_FAILURE] Task failed - Task ID: {task_id}, File ID: {file_id}, Exception: {exception}")
+    except Exception as e:
+        logger.error(f"❌ [TASK_FAILURE] Error in failure handler: {e}")
+
+@task_retry.connect(sender='knowledgebase_ingestion.tasks.process_file_upload_task')
+def task_retry_handler(sender=None, task_id=None, args=None, reason=None, **kwargs):
+    """Log when task is retried"""
+    try:
+        file_id = args[0] if args else 'unknown'
+        logger.warning(f"🔄 [TASK_RETRY] Task retrying - Task ID: {task_id}, File ID: {file_id}, Reason: {reason}")
+    except Exception as e:
+        logger.error(f"❌ [TASK_RETRY] Error in retry handler: {e}")
 
 @celery_app.task(bind=True)
 def debug_task(self):
     """Debug task to verify Celery is working"""
+    logger.info(f"🧪 [DEBUG_TASK] Debug task invoked - Task ID: {self.request.id}")
     print(f'Request: {self.request!r}')

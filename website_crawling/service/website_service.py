@@ -1450,6 +1450,9 @@ async def scrape_website_celery(
 
         # Dispatch Celery task for actual scraping
         from website_crawling.tasks import scrape_website_task
+        from website_crawling.celery_app import celery_app
+
+        logger.info(f"📤 [TASK_DISPATCH] Preparing to dispatch task for website ID {website_record_id}, URL: {url}")
 
         task = scrape_website_task.delay(
             website_id=website_record_id,
@@ -1458,6 +1461,7 @@ async def scrape_website_celery(
         )
 
         logger.info(f"✅ [CELERY] Dispatched Celery task {task.id} for website ID {website_record_id}")
+        logger.info(f"📊 [TASK_INFO] Task State: {task.state}, Routing: 'web_crawling' queue, Timeout: 2 hours")
 
         # Return immediate response with pending status
         return {

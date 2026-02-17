@@ -1329,6 +1329,9 @@ async def upload_file_celery(
 
         # Dispatch Celery task for actual processing
         from knowledgebase_ingestion.tasks import process_file_upload_task
+        from knowledgebase_ingestion.celery_app import celery_app
+
+        logger.info(f"📤 [TASK_DISPATCH] Preparing to dispatch task for file ID {file_record_id}, filename: {original_filename}, size: {file_size} bytes, mime: {detected_mime_type}")
 
         task = process_file_upload_task.delay(
             file_id=file_record_id,
@@ -1342,6 +1345,7 @@ async def upload_file_celery(
         )
 
         logger.info(f"✅ [CELERY] Dispatched Celery task {task.id} for file ID {file_record_id}")
+        logger.info(f"📊 [TASK_INFO] Task State: {task.state}, Routing: 'file_processing' queue, Timeout: 30 minutes")
 
         # Return immediate response with pending status
         return {
