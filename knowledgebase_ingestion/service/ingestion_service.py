@@ -930,27 +930,53 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
             hierarchy_query = """
                 WITH RECURSIVE website_hierarchy AS (
                     -- Base case: parent page
-                    SELECT id, original_url, metadata, parent_id, depth, 0 as level
-                    FROM scraped_websites 
+                    SELECT id, original_url, metadata, parent_id, depth, celery_task_id, 0 as level
+                    FROM scraped_websites
                     WHERE id = $1
-                    
+
                     UNION ALL
-                    
+
                     -- Recursive case: all children
-                    SELECT w.id, w.original_url, w.metadata, w.parent_id, w.depth, wh.level + 1
+                    SELECT w.id, w.original_url, w.metadata, w.parent_id, w.depth, w.celery_task_id, wh.level + 1
                     FROM scraped_websites w
                     INNER JOIN website_hierarchy wh ON w.parent_id = wh.id
                 )
-                SELECT id, original_url, metadata, level
+                SELECT id, original_url, metadata, celery_task_id, level
                 FROM website_hierarchy
                 ORDER BY level, id;
             """
             # Convert website_id to int if it's numeric, otherwise keep as string
             website_id_param = int(website_id) if website_id and website_id.isdigit() else website_id
             hierarchy_records = await conn.fetch(hierarchy_query, website_id_param)
-            
+
             if not hierarchy_records:
                 return {"success": False, "error": "Website not found"}
+
+            # Step 0: Revoke any running Celery tasks for these websites
+            logger.info(f"🔴 Checking for running Celery tasks to revoke...")
+            celery_tasks_revoked = 0
+            celery_revoke_errors = []
+
+            for record in hierarchy_records:
+                celery_task_id = record.get("celery_task_id")
+                if celery_task_id:
+                    try:
+                        # Try to import and revoke from website_crawling service
+                        try:
+                            from website_crawling.celery_app import celery_app as website_celery_app
+                            website_celery_app.control.revoke(celery_task_id, terminate=True)
+                            celery_tasks_revoked += 1
+                            logger.info(f"🔴 Revoked website Celery task {celery_task_id} for page {record['id']}")
+                        except ImportError:
+                            # website_crawling app not available, try generic approach
+                            logger.warning(f"⚠️ Could not import website_crawling celery_app")
+                    except Exception as e:
+                        error_msg = f"Failed to revoke Celery task {celery_task_id}: {e}"
+                        logger.warning(f"⚠️ {error_msg}")
+                        celery_revoke_errors.append(error_msg)
+
+            if celery_tasks_revoked > 0:
+                logger.info(f"✅ Revoked {celery_tasks_revoked} Celery tasks before deletion")
             
             logger.info(f"🌳 Found {len(hierarchy_records)} pages in website hierarchy to delete")
             
