@@ -3,11 +3,11 @@ Consolidated Website Crawling Router
 All website crawling endpoints in one file for easier debugging
 """
 
-from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Request
 from typing import Dict, List, Any, Optional
 import logging
 
-from ..service.website_service import WebsiteService, scrape_website_async
+from ..service.website_service import WebsiteService, scrape_website_celery
 from ..service.ai_service import upload_content_to_gemini
 
 logger = logging.getLogger(__name__)
@@ -137,10 +137,10 @@ async def scrape_website(request: Request):
 
 
 @router.post("/async")
-async def scrape_website_async_endpoint(request: Request, background_tasks: BackgroundTasks):
+async def scrape_website_async_endpoint(request: Request):
     """
-    Async website scraping endpoint - returns immediately with pending status.
-    Actual processing happens in background. Frontend should poll /status/{id} to track progress.
+    Async website scraping endpoint with Celery - returns immediately with pending status.
+    Actual processing happens in Celery worker. Frontend should poll /status/{id} to track progress.
     """
     try:
         body = await request.json()
@@ -208,7 +208,7 @@ async def scrape_website_async_endpoint(request: Request, background_tasks: Back
                 }
 
                 # Queue for async processing
-                result = await scrape_website_async(url, options, background_tasks)
+                result = await scrape_website_celery(url, options)
                 all_results.append({
                     "url": url,
                     "type": url_type,

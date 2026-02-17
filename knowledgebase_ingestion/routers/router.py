@@ -3,7 +3,7 @@ Consolidated Knowledgebase Ingestion Router
 All knowledgebase ingestion endpoints in one file for easier debugging
 """
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from typing import Dict, List, Any, Optional
 import logging
 
@@ -14,8 +14,7 @@ from ..service.ingestion_service import (
     delete_file_logic,
     nuke_filestore_and_database,
     delete_website_hierarchy,
-    upload_file_async,
-    update_processing_status
+    upload_file_celery
 )
 
 logger = logging.getLogger(__name__)
@@ -211,12 +210,11 @@ async def upload_files_batch(request: Request):
 async def upload_file_async_endpoint(
     file: UploadFile = File(...),
     request: Request = None,
-    display_name: Optional[str] = Form(None),
-    background_tasks: BackgroundTasks = None
+    display_name: Optional[str] = Form(None)
 ):
     """
-    Async file upload endpoint - returns immediately with pending status.
-    Actual processing happens in background. Frontend should poll /status/{id} to track progress.
+    Async file upload endpoint with Celery - returns immediately with pending status.
+    Actual processing happens in Celery worker. Frontend should poll /status/{id} to track progress.
     """
     try:
         user_email, user_id = extract_user_from_request(request)
@@ -224,11 +222,10 @@ async def upload_file_async_endpoint(
         if not file.filename:
             raise HTTPException(status_code=400, detail="No file provided")
 
-        result = await upload_file_async(
+        result = await upload_file_celery(
             file=file,
             display_name=display_name,
-            user_email=user_email,
-            background_tasks=background_tasks
+            user_email=user_email
         )
 
         return result

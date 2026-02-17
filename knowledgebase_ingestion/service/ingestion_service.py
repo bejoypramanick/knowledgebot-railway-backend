@@ -1253,184 +1253,17 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
 
 
 # =============================================================================
-# ASYNC BACKGROUND PROCESSING TASKS
+# CELERY-BASED ASYNC PROCESSING
 # =============================================================================
-# These functions are executed by FastAPI BackgroundTasks to avoid blocking HTTP requests
 
-async def update_processing_status(file_id: int, status: str, error_message: str = None, table_name: str = "file_uploads"):
-    """Update the processing status of a file or website record."""
-    try:
-        from shared.db import get_db_connection
-
-        async with get_db_connection() as conn:
-            if error_message:
-                await conn.execute(
-                    f"UPDATE {table_name} SET processing_status = $1, error_message = $2, updated_at = NOW() WHERE id = $3",
-                    status, error_message, file_id
-                )
-            else:
-                await conn.execute(
-                    f"UPDATE {table_name} SET processing_status = $1, error_message = NULL, updated_at = NOW() WHERE id = $3",
-                    status, file_id
-                )
-            logger.info(f"✅ Updated {table_name} ID {file_id} status to: {status}")
-    except Exception as e:
-        logger.error(f"❌ Failed to update processing status for {table_name} ID {file_id}: {e}")
-
-
-async def process_file_upload_background(
-    file_id: int,
-    tmp_path: str,
-    original_filename: str,
-    file_display_name: str,
-    detected_mime_type: str,
-    user_email: str,
-    file_size: int,
-    sha256_hash: str
-):
-    """
-    Background task to process file upload asynchronously.
-    Updates the file_uploads record with processing_status as it progresses.
-    """
-    try:
-        await update_processing_status(file_id, "processing", table_name="file_uploads")
-
-        logger.info(f"🔄 [BACKGROUND] Starting async processing for file ID {file_id}: {original_filename}")
-
-        # Determine processing pipeline
-        markdown_tmp_path = None
-        docling_metadata = {}
-        processed_successfully = False
-
-        # 1. Route HTML files to HTML-specific pipeline
-        if detected_mime_type == 'text/html' or original_filename.lower().endswith(('.html', '.htm')):
-            logger.info(f"🌐 [BACKGROUND] Processing HTML file: {original_filename}")
-            try:
-                from shared.html_processor import extract_content_from_html
-                markdown_content, html_metadata = extract_content_from_html(tmp_path)
-
-                if markdown_content:
-                    markdown_tmp_path = await create_markdown_temp_file(markdown_content)
-                    tmp_path = markdown_tmp_path
-                    original_filename = original_filename.rsplit('.', 1)[0] + '.md'
-                    detected_mime_type = 'text/markdown'
-                    processed_successfully = True
-                    logger.info(f"✅ [HTML] Extracted HTML content")
-                else:
-                    error_msg = html_metadata.get("error", "HTML extraction failed")
-                    logger.error(f"❌ [HTML] Extraction failed: {error_msg}")
-                    await update_processing_status(file_id, "failed", error_msg, table_name="file_uploads")
-                    return
-            except Exception as e:
-                logger.error(f"❌ [HTML] Error: {e}")
-                await update_processing_status(file_id, "failed", str(e), table_name="file_uploads")
-                return
-
-        # 2. Route PDFs and other Docling-supported files
-        elif await should_use_docling_for_file(original_filename, detected_mime_type, file_size):
-            logger.info(f"📄 [BACKGROUND] Processing Docling file: {original_filename}")
-            try:
-                markdown_content, docling_metadata = await process_with_docling(
-                    tmp_path,
-                    original_filename,
-                    detected_mime_type
-                )
-
-                if markdown_content:
-                    markdown_tmp_path = await create_markdown_temp_file(markdown_content)
-                    tmp_path = markdown_tmp_path
-                    original_filename = original_filename.rsplit('.', 1)[0] + '.md'
-                    detected_mime_type = 'text/markdown'
-                    processed_successfully = True
-                    logger.info(f"✅ [DOCLING] Converted to markdown")
-                else:
-                    error_msg = docling_metadata.get("error", "Docling processing failed")
-                    logger.error(f"❌ [DOCLING] Failed: {error_msg}")
-                    await update_processing_status(file_id, "failed", error_msg, table_name="file_uploads")
-                    return
-            except Exception as e:
-                logger.error(f"❌ [DOCLING] Error: {e}")
-                await update_processing_status(file_id, "failed", str(e), table_name="file_uploads")
-                return
-        else:
-            # Skip special processing for txt, md, etc.
-            processed_successfully = True
-            logger.info(f"📝 [BACKGROUND] Skipping special processing for {detected_mime_type}")
-
-        # 3. Upload to Gemini
-        logger.info(f"🚀 [BACKGROUND] Uploading to Gemini for file ID {file_id}")
-        try:
-            uploaded_file, final_state, gemini_processed_at, file_search_metadata = await process_with_gemini(
-                tmp_path, file_display_name, original_filename, detected_mime_type, user_email
-            )
-
-            if final_state != "ACTIVE":
-                error_msg = f"Gemini upload failed - state: {final_state}"
-                logger.error(f"❌ [GEMINI] {error_msg}")
-                await update_processing_status(file_id, "failed", error_msg, table_name="file_uploads")
-                return
-
-            # 4. Update database with completed Gemini upload
-            from shared.db import get_db_connection
-            import json
-
-            file_service = get_file_service()
-            metadata_json = json.dumps(file_search_metadata or {})
-
-            async with get_db_connection() as conn:
-                await conn.execute(
-                    """UPDATE file_uploads SET
-                       gemini_file_name = $1,
-                       gemini_file_uri = $2,
-                       gemini_state = $3,
-                       metadata = $4::jsonb,
-                       processing_status = $5,
-                       error_message = NULL,
-                       updated_at = NOW()
-                       WHERE id = $6""",
-                    uploaded_file.name,
-                    getattr(uploaded_file, 'uri', None),
-                    final_state,
-                    metadata_json,
-                    "completed",
-                    file_id
-                )
-
-            logger.info(f"✅ [BACKGROUND] File ID {file_id} processing completed successfully")
-
-        except Exception as e:
-            error_msg = f"Gemini processing error: {str(e)}"
-            logger.error(f"❌ [GEMINI] {error_msg}")
-            await update_processing_status(file_id, "failed", error_msg, table_name="file_uploads")
-            return
-
-    except Exception as e:
-        logger.error(f"❌ [BACKGROUND] Unexpected error processing file ID {file_id}: {e}")
-        await update_processing_status(file_id, "failed", str(e), table_name="file_uploads")
-    finally:
-        # Cleanup temporary files
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.unlink(tmp_path)
-            except:
-                pass
-        if markdown_tmp_path and os.path.exists(markdown_tmp_path):
-            try:
-                os.unlink(markdown_tmp_path)
-            except:
-                pass
-
-
-async def upload_file_async(
+async def upload_file_celery(
     file: UploadFile,
     display_name: Optional[str] = None,
-    user_email: Optional[str] = None,
-    background_tasks = None
+    user_email: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Async wrapper that returns immediately after creating DB record with pending status.
-    Returns the file record with processing_status='pending' so frontend can start polling.
-    Actual processing happens in background via BackgroundTasks.
+    Celery-based async upload - returns immediately after creating DB record with pending status.
+    Actual processing is dispatched to Celery worker.
     """
     file_service = get_file_service()
     original_filename = sanitize_filename(file.filename or "unknown_file")
@@ -1463,7 +1296,7 @@ async def upload_file_async(
         sha256_hash = calculate_sha256(tmp_path)
         detected_mime_type = detect_mime_type_from_extension(original_filename, file.content_type, tmp_path)
 
-        logger.info(f"🔍 [ASYNC] Detected MIME: {detected_mime_type} for {original_filename}")
+        logger.info(f"🔍 [CELERY] Detected MIME: {detected_mime_type} for {original_filename}")
 
         # Check for duplicates
         duplicate_check = await file_service.handle_duplicate_check(sha256_hash, original_filename, False)
@@ -1492,24 +1325,23 @@ async def upload_file_async(
                 detected_mime_type, file_size, sha256_hash, "pending"
             )
 
-        logger.info(f"✅ [ASYNC] Created DB record ID {file_record_id} with status='pending'")
+        logger.info(f"✅ [CELERY] Created DB record ID {file_record_id} with status='pending'")
 
-        # Dispatch background task for actual processing
-        if background_tasks:
-            background_tasks.add_task(
-                process_file_upload_background,
-                file_id=file_record_id,
-                tmp_path=tmp_path,
-                original_filename=original_filename,
-                file_display_name=file_display_name,
-                detected_mime_type=detected_mime_type,
-                user_email=email,
-                file_size=file_size,
-                sha256_hash=sha256_hash
-            )
-            logger.info(f"✅ [ASYNC] Dispatched background task for file ID {file_record_id}")
-        else:
-            logger.warning(f"⚠️ [ASYNC] No background_tasks available - cannot dispatch background processing")
+        # Dispatch Celery task for actual processing
+        from knowledgebase_ingestion.tasks import process_file_upload_task
+
+        task = process_file_upload_task.delay(
+            file_id=file_record_id,
+            tmp_path=tmp_path,
+            original_filename=original_filename,
+            file_display_name=file_display_name,
+            detected_mime_type=detected_mime_type,
+            user_email=email,
+            file_size=file_size,
+            sha256_hash=sha256_hash
+        )
+
+        logger.info(f"✅ [CELERY] Dispatched Celery task {task.id} for file ID {file_record_id}")
 
         # Return immediate response with pending status
         return {
@@ -1523,13 +1355,14 @@ async def upload_file_async(
                 "mime_type": detected_mime_type,
                 "processing_status": "pending",
                 "created_at": datetime.utcnow().isoformat()
-            }
+            },
+            "task_id": task.id
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ [ASYNC] Error in upload_file_async: {e}")
+        logger.error(f"❌ [CELERY] Error in upload_file_celery: {e}")
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
