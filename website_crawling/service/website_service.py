@@ -1206,6 +1206,12 @@ class WebsiteService:
                         continue
 
                     idx += 1
+
+                    # ✅ CHECK FOR CANCELLATION AT START OF EACH LOOP ITERATION
+                    if await self._check_cancellation(celery_task_id):
+                        logger.warning(f"❌ [CANCEL] Task cancelled at sitemap loop iteration {idx}/{len(sorted_urls)}")
+                        break
+
                     # Depth will be determined by crawl4ai's native BFS discovery
                     logger.info(f"📄 [Sitemap {idx}/{len(sorted_urls)}] Scraping: {url}")
 
@@ -1475,6 +1481,11 @@ class WebsiteService:
 
                     # First phase: discover the actual depth of our target single_page
                     while discovery_urls and not target_url_found and len(scraped_urls) < max_pages:
+                        # ✅ CHECK FOR CANCELLATION AT START OF DISCOVERY LOOP
+                        if await self._check_cancellation(celery_task_id):
+                            logger.warning(f"❌ [CANCEL] Task cancelled during discovery phase")
+                            break
+
                         current_url, depth = discovery_urls.pop(0)
 
                         if current_url in scraped_urls:
@@ -1545,13 +1556,18 @@ class WebsiteService:
                 ) as crawler:
                     # BFS traversal: process all URLs at depth N before depth N+1
                     while urls_to_scrape and len(scraped_urls) < max_pages:
+                        # ✅ CHECK FOR CANCELLATION AT START OF BFS LOOP
+                        if await self._check_cancellation(celery_task_id):
+                            logger.warning(f"❌ [CANCEL] Task cancelled during BFS traversal")
+                            break
+
                         current_url, depth = urls_to_scrape.pop(0)
-    
+
                         if current_url in scraped_urls:
                             continue
-    
+
                         logger.info(f"📄 Scraping page {len(scraped_urls) + 1}/{max_pages}: {current_url} (depth={depth})")
-    
+
                         try:
                             # Apply concurrency limit
                             async with semaphore:
