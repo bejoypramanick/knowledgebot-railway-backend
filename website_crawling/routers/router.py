@@ -321,24 +321,35 @@ async def cancel_scraping_task(item_id: str):
                     detail=f"Cannot cancel website with status '{website_record['processing_status']}'"
                 )
 
-            # Revoke the Celery task if it exists
             celery_task_id = website_record['celery_task_id']
-            if celery_task_id:
+
+            # ATOMIC TRANSACTION: Either both succeed or both fail
+            async with conn.transaction():
+                # Step 1: Revoke the Celery task (if it exists)
+                if celery_task_id:
+                    try:
+                        from website_crawling.celery_app import celery_app
+                        celery_app.control.revoke(celery_task_id, terminate=True)
+                        logger.info(f"🔴 [CELERY_REVOKE] Revoked task {celery_task_id} from Redis queue")
+                    except Exception as e:
+                        # If revoke fails, raise exception to trigger transaction rollback
+                        logger.error(f"❌ [ATOMIC_TX] Revoke failed for task {celery_task_id}: {e}")
+                        raise HTTPException(status_code=500, detail=f"Failed to revoke task from queue: {e}")
+
+                # Step 2: Update database (same transaction)
                 try:
-                    from website_crawling.celery_app import celery_app
-                    celery_app.control.revoke(celery_task_id, terminate=True)
-                    logger.info(f"🔴 [CELERY_REVOKE] Revoked task {celery_task_id} from Redis queue")
+                    await conn.execute(
+                        "UPDATE scraped_websites SET processing_status = 'cancelled', task_revoked_at = NOW() WHERE id = $1",
+                        int(item_id)
+                    )
+                    logger.info(f"✅ [ATOMIC_TX] Updated DB: website {item_id} marked as cancelled")
                 except Exception as e:
-                    logger.error(f"⚠️  Failed to revoke task {celery_task_id}: {e}")
-                    # Don't fail the cancellation if revoke fails - still update the database
+                    # If DB update fails, transaction rolls back
+                    logger.error(f"❌ [ATOMIC_TX] DB update failed for website {item_id}: {e}")
+                    raise HTTPException(status_code=500, detail=f"Failed to update cancellation status: {e}")
 
-            # Update database with cancelled status and revoke timestamp
-            await conn.execute(
-                "UPDATE scraped_websites SET processing_status = 'cancelled', task_revoked_at = NOW() WHERE id = $1",
-                int(item_id)
-            )
-
-            logger.info(f"✅ Cancelled website scraping task: {item_id} (celery_task_id: {celery_task_id})")
+            # If we reach here, transaction is committed - both operations succeeded
+            logger.info(f"✅ [ATOMIC_COMMIT] Cancelled website scraping task: {item_id} (celery_task_id: {celery_task_id})")
             return {
                 "success": True,
                 "item_id": item_id,
@@ -364,41 +375,51 @@ async def cancel_all_scraping_tasks():
         from website_crawling.celery_app import celery_app
 
         async with get_db_connection() as conn:
-            # Get all pending/processing websites with task IDs
-            pending_websites = await conn.fetch(
-                """SELECT id, celery_task_id FROM scraped_websites
-                   WHERE processing_status IN ('pending', 'processing') AND celery_task_id IS NOT NULL"""
-            )
-
-            # Revoke all website tasks
-            websites_revoked = 0
-            for website_record in pending_websites:
+            # ATOMIC TRANSACTION: Either all tasks cancel or none cancel
+            async with conn.transaction():
                 try:
-                    celery_app.control.revoke(website_record['celery_task_id'], terminate=True)
-                    websites_revoked += 1
-                    logger.info(f"🔴 [CELERY_REVOKE] Revoked website task {website_record['celery_task_id']}")
-                except Exception as e:
-                    logger.error(f"⚠️  Failed to revoke website task {website_record['celery_task_id']}: {e}")
+                    # Get all pending/processing websites with task IDs
+                    pending_websites = await conn.fetch(
+                        """SELECT id, celery_task_id FROM scraped_websites
+                           WHERE processing_status IN ('pending', 'processing') AND celery_task_id IS NOT NULL"""
+                    )
 
-            # Cancel all pending/processing websites in database
-            result = await conn.execute(
-                """UPDATE scraped_websites
-                   SET processing_status = 'cancelled', task_revoked_at = NOW()
-                   WHERE processing_status IN ('pending', 'processing')"""
-            )
+                    # Step 1: Revoke all website tasks from queue
+                    websites_revoked = 0
+                    for website_record in pending_websites:
+                        try:
+                            celery_app.control.revoke(website_record['celery_task_id'], terminate=True)
+                            websites_revoked += 1
+                            logger.info(f"🔴 [CELERY_REVOKE] Revoked website task {website_record['celery_task_id']}")
+                        except Exception as e:
+                            logger.error(f"❌ [ATOMIC_TX] Failed to revoke website task {website_record['celery_task_id']}: {e}")
+                            raise HTTPException(status_code=500, detail=f"Failed to revoke website tasks: {e}")
 
-            # Parse result to get count
-            websites_cancelled = int(result.split()[-1]) if result else 0
+                    # Step 2: Update all websites in database (same transaction)
+                    try:
+                        result = await conn.execute(
+                            """UPDATE scraped_websites
+                               SET processing_status = 'cancelled', task_revoked_at = NOW()
+                               WHERE processing_status IN ('pending', 'processing')"""
+                        )
+                        websites_cancelled = int(result.split()[-1]) if result else 0
+                        logger.info(f"✅ [ATOMIC_TX] Updated DB: {websites_cancelled} websites marked as cancelled")
+                    except Exception as e:
+                        logger.error(f"❌ [ATOMIC_TX] Failed to update website statuses: {e}")
+                        raise HTTPException(status_code=500, detail=f"Failed to update website statuses: {e}")
 
-            logger.info(f"✅ Cancelled all scraping tasks: {websites_cancelled} websites (Revoked: {websites_revoked} tasks)")
+                    # If we reach here, transaction is committed - all operations succeeded
+                    logger.info(f"✅ [ATOMIC_COMMIT] Cancelled all scraping tasks: {websites_cancelled} websites (Revoked: {websites_revoked} tasks)")
 
-            return {
-                "success": True,
-                "message": "All pending scraping tasks cancelled successfully",
-                "websites_cancelled": websites_cancelled,
-                "websites_revoked": websites_revoked
-            }
+                    return {
+                        "success": True,
+                        "message": "All pending scraping tasks cancelled successfully",
+                        "websites_cancelled": websites_cancelled,
+                        "websites_revoked": websites_revoked
+                    }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error cancelling all scraping tasks: {e}")
         raise HTTPException(status_code=500, detail=str(e))
