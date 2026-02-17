@@ -790,7 +790,80 @@ class WebsiteService:
                     except Exception as e:
                         logger.error(f"❌ Failed to create root page record: {e}")
 
-                
+                # ✅ INTERLEAVED: Process all child pages (depth > 0)
+                logger.info(f"📤 Processing {len(scraped_data) - 1} child pages with INTERLEAVED uploads...")
+                for page_idx, page_data in enumerate(scraped_data, 1):
+                    if page_idx == 1 and page_data.get("depth", 0) == 0:
+                        # Skip root page - already processed above
+                        continue
+
+                    # ✅ CHECK FOR CANCELLATION
+                    if await self._check_cancellation(celery_task_id):
+                        logger.warning(f"❌ [CANCEL] Task cancelled during multi-page upload at page {page_idx}/{len(scraped_data)}")
+                        break
+
+                    page_url = page_data.get("url")
+                    page_text = page_data.get("text", "")
+                    page_depth = page_data.get("depth", 1)
+
+                    if not page_url:
+                        continue
+
+                    logger.info(f"📤 [INTERLEAVED] Uploading child page {page_idx}/{len(scraped_data)}: {page_url}")
+
+                    try:
+                        # Upload child page
+                        child_gemini_result = await upload_content_to_gemini(
+                            content=page_text,
+                            url=page_url,
+                            title=page_data.get("title", page_url),
+                            user_email=options.get("user_email"),
+                            page_depth=page_depth
+                        )
+
+                        # Record child page immediately
+                        logger.info(f"💾 [INTERLEAVED] Recording child page {page_idx}/{len(scraped_data)}: {page_url}")
+
+                        child_record_id = await record_scraped_metadata(
+                            url=page_url,
+                            domain=urlparse(page_url).netloc.replace('www.', ''),
+                            title=page_data.get("title", page_url),
+                            content_length=len(page_text),
+                            pages_scraped=1,
+                            gemini_file_name=child_gemini_result.get("file_name"),
+                            gemini_file_uri=child_gemini_result.get("file_uri"),
+                            gemini_state=child_gemini_result.get("state", "UNKNOWN"),
+                            scraped_urls=[page_url],
+                            scraping_config={
+                                "max_pages": max_pages,
+                                "max_depth": max_depth,
+                                "source": "regular_crawl",
+                                "parent_domain": urlparse(url).netloc,
+                                "include_patterns": include_patterns,
+                                "exclude_patterns": exclude_patterns
+                            },
+                            file_search_metadata=child_gemini_result.get("file_search_metadata"),
+                            parent_id=root_record_id,  # Link to root page
+                            depth=page_depth,
+                            crawl_session_id=crawl_session_id
+                        )
+
+                        if child_record_id:
+                            logger.info(f"✅ [INTERLEAVED] Child page {page_idx} uploaded and recorded: {child_record_id}")
+                            uploaded_files.append({
+                                "url": page_url,
+                                "file_name": child_gemini_result.get("file_name"),
+                                "record_id": child_record_id,
+                                "depth": page_depth
+                            })
+                            record_ids.append(child_record_id)
+                            url_to_record_id[page_url] = child_record_id
+                        else:
+                            logger.error(f"❌ [INTERLEAVED] Failed to record child page {page_idx}: {page_url}")
+
+                    except Exception as e:
+                        logger.error(f"❌ [INTERLEAVED] Failed to upload/record child page {page_idx} ({page_url}): {e}")
+
                 processing_time = time.perf_counter() - start_time
 
                 return {
@@ -805,7 +878,8 @@ class WebsiteService:
                     "record_ids": record_ids,
                     "processing_time_seconds": round(processing_time, 2),
                     "scraped_urls": all_child_urls,
-                    "parent_domain": urlparse(url).netloc
+                    "parent_domain": urlparse(url).netloc,
+                    "mode": "interleaved"
                 }
             else:
                 # Single page or multi-URL crawl
@@ -926,7 +1000,8 @@ class WebsiteService:
                         "gemini_state": gemini_result.get("state"),
                         "record_ids": record_ids,
                         "processing_time_seconds": round(processing_time, 2),
-                        "scraped_urls": discovered_urls
+                        "scraped_urls": discovered_urls,
+                        "mode": "interleaved"
                     }
 
                 else:
@@ -976,7 +1051,8 @@ class WebsiteService:
                         "gemini_state": gemini_result.get("state"),
                         "record_id": record_id,
                         "processing_time_seconds": round(processing_time, 2),
-                        "scraped_urls": [url]
+                        "scraped_urls": [url],
+                        "mode": "single_page"
                     }
 
     @staticmethod
