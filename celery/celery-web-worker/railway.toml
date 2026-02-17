@@ -1,5 +1,5 @@
 [build]
-dockerfilePath = "celery/Dockerfile"
+dockerfilePath = "celery/celery-web-worker/Dockerfile"
 rootDirectory = "."
 
 [deploy]

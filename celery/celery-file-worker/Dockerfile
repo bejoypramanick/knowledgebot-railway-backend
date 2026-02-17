@@ -1,7 +1,6 @@
-# Dockerfile for Celery Workers
-# Build image: docker build -f Dockerfile.celery -t knowledgebot-celery-worker .
-# Run file processing worker: docker run -e REDIS_URL=redis://redis:6379/0 knowledgebot-celery-worker celery -A knowledgebase_ingestion.celery_app worker -Q file_processing -l info
-# Run web crawling worker: docker run -e REDIS_URL=redis://redis:6379/1 knowledgebot-celery-worker celery -A website_crawling.celery_app worker -Q web_crawling -l info
+# Dockerfile for Celery File Processing Worker
+# Build image: docker build -t knowledgebot-celery-file-worker .
+# Run: docker run -e REDIS_URL=redis://redis:6379/0 knowledgebot-celery-file-worker
 
 FROM python:3.11-slim
 
@@ -37,5 +36,5 @@ ENV CELERY_RESULT_BACKEND=${REDIS_URL:-redis://localhost:6379/0}
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:5555/api/workers || exit 1
 
-# Default command - override with specific celery command
-CMD ["celery", "-A", "knowledgebase_ingestion.celery_app", "worker", "-l", "info"]
+# Default command - file processing worker
+CMD ["celery", "-A", "knowledgebase_ingestion.celery_app", "worker", "-Q", "file_processing", "-l", "info"]
