@@ -400,14 +400,16 @@ async def generic_proxy_handler(request: Request, path: str):
             logger.info(f"🔍 User data forwarded: {request.state.user}")
         
         # Make HTTP request to service
-        # Use longer timeout for batch operations (file uploads/deletes) and web crawling
+        # Use longer timeout for batch operations (file uploads/deletes)
+        # NOTE: webcrawl uses async Celery, returns immediately with task ID (no long timeout needed)
         request_timeout = 30.0
         if "batch" in backend_path or "batchupload" in backend_path or "delete/batch" in backend_path:
             request_timeout = 300.0  # 5 minutes for batch operations
             logger.info(f"⏱️  Using extended timeout {request_timeout}s for batch operation")
-        elif backend_path.startswith("webcrawl"):
-            request_timeout = 600.0  # 10 minutes for web crawling (large sitemaps)
-            logger.info(f"⏱️  Using extended timeout {request_timeout}s for web crawling")
+        # webcrawl/async returns immediately (task dispatched to Celery), no extended timeout needed
+        # if backend_path.startswith("webcrawl"):
+        #     request_timeout = 600.0  # Was for sync scraping - NO LONGER NEEDED
+        #     logger.info(f"⏱️  Using extended timeout {request_timeout}s for web crawling")
 
         async with httpx.AsyncClient(timeout=request_timeout, follow_redirects=False) as client:
             logger.info(f"🔍 About to make HTTP request to: {full_url} (timeout={request_timeout}s)")
