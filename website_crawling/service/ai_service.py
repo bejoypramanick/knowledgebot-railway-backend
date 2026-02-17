@@ -199,17 +199,18 @@ async def record_scraped_metadata(
         website_service = WebsiteService()
 
         # Get admin user_role_id (same logic as file uploads)
+        # NOTE: user_role_id is nullable in the database, so we can proceed without it
         admin_user_role_id = await get_admin_user_role_id()
         if not admin_user_role_id:
-            logger.error("❌ Failed to get admin user_role_id for scraped metadata")
-            return None
+            logger.warning("⚠️ Could not find admin user_role_id - scraped websites will have NULL user_role_id")
+            admin_user_role_id = None  # Allow NULL value
 
         # Extract targeting patterns from scraping config
         include_patterns = scraping_config.get("include_patterns", []) if scraping_config else []
         exclude_patterns = scraping_config.get("exclude_patterns", []) if scraping_config else []
 
         metadata = {
-            "user_role_id": admin_user_role_id,  # Use the admin user_role_id
+            "user_role_id": admin_user_role_id,  # Can be None (user_role_id is nullable)
             "url": url,
             "domain": domain,
             "title": title,
