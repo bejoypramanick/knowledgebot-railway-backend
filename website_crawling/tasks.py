@@ -25,7 +25,7 @@ async def update_website_processing_status(website_id: int, status: str, error_m
                 )
             else:
                 await conn.execute(
-                    "UPDATE scraped_websites SET processing_status = $1, error_message = NULL, updated_at = NOW() WHERE id = $3",
+                    "UPDATE scraped_websites SET processing_status = $1, error_message = NULL, updated_at = NOW() WHERE id = $2",
                     status, website_id
                 )
             logger.info(f"✅ Updated scraped_websites ID {website_id} status to: {status}")
