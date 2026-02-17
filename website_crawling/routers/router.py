@@ -89,7 +89,6 @@ async def scrape_website(request: Request):
                     "max_pages": max_pages,
                     "max_depth": min(crawl_depth, 5),   # Cap at depth 5
                     "replace_existing": replace_existing,
-                    "delay_between_requests": max(0, float(body.get("delay_between_requests", 0))),
                     "max_concurrent": min(int(body.get("max_concurrent", 10)), 50),
                     "extract_links": body.get("extract_links", True),
                     "extract_images": body.get("extract_images", False),
@@ -196,7 +195,6 @@ async def scrape_website_async_endpoint(request: Request):
                     "max_pages": max_pages,
                     "max_depth": min(crawl_depth, 5),
                     "replace_existing": replace_existing,
-                    "delay_between_requests": max(0, float(body.get("delay_between_requests", 0))),
                     "max_concurrent": min(int(body.get("max_concurrent", 10)), 50),
                     "extract_links": body.get("extract_links", True),
                     "extract_images": body.get("extract_images", False),
@@ -313,7 +311,6 @@ async def start_crawl_session(request: Request):
         options = {
             "max_depth": body.get("max_depth", 2),
             "max_pages_per_site": body.get("max_pages_per_site", 20),
-            "delay_between_requests": body.get("delay_between_requests", 1),
             "respect_robots_txt": body.get("respect_robots_txt", True),
             "user_agent": body.get("user_agent", "KnowledgeBot-Crawler/1.0")
         }
