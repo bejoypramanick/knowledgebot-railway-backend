@@ -1,0 +1,37 @@
+[build]
+dockerfilePath = "Dockerfile.celery"
+rootDirectory = ".."
+watchPaths = ["celery-web-worker/"]
+
+[deploy]
+# Celery worker for website scraping queue
+startCommand = "celery -A website_crawling.celery_app worker -Q web_crawling -l info -c 1 --max-tasks-per-child=100"
+
+# Restart policy for worker reliability
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Health check (Celery worker doesn't have HTTP endpoint, so we'll use a timeout-based check)
+healthcheckTimeout = 300
+
+# Worker configuration notes:
+# -Q web_crawling: Listen to web_crawling queue (Redis DB 1)
+# -l info: Log level INFO (shows task execution)
+# -c 1: 1 concurrent worker process (website scraping is resource-intensive, prevents overload)
+# --max-tasks-per-child=100: Restart worker process after 100 tasks (more frequent to manage memory)
+#
+# Environment variables needed (set in Railway dashboard):
+# - REDIS_URL=redis://redis.railway.internal:6379/1
+# - RAILWAY_POSTGRES_URL=postgresql://...
+# - GEMINI_API_KEY=...
+#
+# This worker processes:
+# - Website scraping (scrape_website_task)
+# - Website status: pending → processing → completed/failed
+# - Timeout: 2 hours (task_time_limit in website_crawling/celery_app.py)
+#
+# Notes on concurrency=1:
+# - Website scraping includes Crawl4AI, Docling, Gemini upload
+# - Large sitemaps can consume significant CPU/memory/network
+# - Single concurrency prevents timeouts and resource exhaustion
+# - If needed, can increase to 2 after monitoring performance
