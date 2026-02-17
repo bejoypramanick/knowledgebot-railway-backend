@@ -327,15 +327,16 @@ class FileService:
         """Get all uploaded files from the database."""
         try:
             from shared.db import get_db_connection
-            
+
             async with get_db_connection() as conn:
                 files = await conn.fetch(
-                    """SELECT id, original_filename, display_name, file_extension, mime_type, 
-                       file_size, sha256_hash, gemini_state, created_at, version
-                       FROM file_uploads 
+                    """SELECT id, original_filename, display_name, file_extension, mime_type,
+                       file_size, sha256_hash, gemini_state, created_at, version,
+                       celery_task_id, processing_status
+                       FROM file_uploads
                        ORDER BY created_at DESC"""
                 )
-                
+
                 # Convert to list of dicts
                 result = []
                 for file in files:
@@ -352,12 +353,14 @@ class FileService:
                         "processed_at": None,  # Not available in current schema
                         "created_at": file['created_at'].isoformat() if file['created_at'] else None,
                         "version": file.get('version', 1),
-                        "source": "upload"  # Add source field for frontend
+                        "source": "upload",  # Add source field for frontend
+                        "celery_task_id": file['celery_task_id'],  # Task ID for async processing
+                        "processing_status": file['processing_status']  # Current task status
                     })
-                
+
                 logger.info(f"Retrieved {len(result)} files from database")
                 return result
-                
+
         except Exception as e:
             logger.error(f"Error getting all files: {e}")
             return []
@@ -374,7 +377,8 @@ class FileService:
                 # Get all websites with hierarchy info, ordered by session and depth
                 websites = await conn.fetch(
                     """SELECT id, original_url, domain, title, description, pages_scraped,
-                              content_length, parent_id, depth, crawl_session_id, created_at
+                              content_length, parent_id, depth, crawl_session_id, created_at,
+                              celery_task_id, processing_status
                        FROM scraped_websites
                        ORDER BY crawl_session_id DESC NULLS LAST, depth, created_at DESC"""
                 )
@@ -424,7 +428,9 @@ class FileService:
                             "parent_id": website['parent_id'],
                             "crawl_session_id": session_id,
                             "children": [],  # Will be populated below
-                            "is_expanded": False  # Frontend can control this
+                            "is_expanded": False,  # Frontend can control this
+                            "celery_task_id": website['celery_task_id'],  # Task ID for async processing
+                            "processing_status": website['processing_status']  # Current task status
                         }
                         nodes[website['id']] = node
 
