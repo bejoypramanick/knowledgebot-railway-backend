@@ -48,6 +48,25 @@ class WebsiteService:
     def __init__(self):
         self.scraping_dao = ScrapingDAO()
 
+    async def _check_cancellation(self, celery_task_id: str) -> bool:
+        """Check if task has been marked for cancellation via Redis"""
+        if not celery_task_id:
+            return False
+
+        try:
+            import redis as redis_lib
+            redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/1')
+            redis_conn = redis_lib.from_url(redis_url)
+
+            cancelled_key = f"task_cancelled:{celery_task_id}"
+            result = redis_conn.exists(cancelled_key)
+            redis_conn.close()
+
+            return bool(result)
+        except Exception as e:
+            logger.warning(f"⚠️ Error checking cancellation status: {e}")
+            return False
+
     @staticmethod
     def get_parent_url(url: str) -> Optional[str]:
         """
@@ -408,9 +427,50 @@ class WebsiteService:
                 else:
                     urls_to_scrape = sitemap_urls[:max_pages]
 
-                # Scrape all URLs from sitemap (passing sitemap URL as parent)
+                # ✅ INTERLEAVED SITEMAP PROCESSING
+                # Step 1: Create sitemap parent record first
+                logger.info(f"📋 Creating sitemap parent record: {url}")
+                crawl_session_id = str(uuid.uuid4())
+                sitemap_record_id = await record_scraped_metadata(
+                    url=url,
+                    domain=urlparse(url).netloc.replace('www.', ''),
+                    title=result.get("title", url) if 'result' in locals() else url,
+                    content_length=0,  # Sitemap itself isn't counted
+                    pages_scraped=len(urls_to_scrape),
+                    gemini_file_name=None,
+                    gemini_file_uri=None,
+                    gemini_state="DISCOVERED",
+                    scraped_urls=[url],
+                    scraping_config={
+                        "max_pages": max_pages,
+                        "max_depth": max_depth,
+                        "source": "sitemap",
+                        "include_patterns": include_patterns,
+                        "exclude_patterns": exclude_patterns
+                    },
+                    file_search_metadata=None,
+                    parent_id=None,
+                    depth=0,
+                    crawl_session_id=crawl_session_id
+                )
+                logger.info(f"✅ Sitemap parent record created: {url} (id={sitemap_record_id})")
+
+                # Step 2: Scrape and process all URLs with INTERLEAVED uploads
+                logger.info(f"📤 Starting INTERLEAVED scraping, uploading, and recording for {len(urls_to_scrape)} URLs...")
                 result = await self._scrape_urls_from_sitemap(
-                    urls_to_scrape, timeout, max_concurrent, delay_between_requests, sitemap_url=url, celery_task_id=celery_task_id
+                    urls_to_scrape,
+                    timeout=timeout,
+                    max_concurrent=max_concurrent,
+                    delay_between_requests=delay_between_requests,
+                    sitemap_url=url,
+                    celery_task_id=celery_task_id,
+                    options=options,
+                    sitemap_record_id=sitemap_record_id,
+                    crawl_session_id=crawl_session_id,
+                    max_pages=max_pages,
+                    max_depth=max_depth,
+                    include_patterns=include_patterns,
+                    exclude_patterns=exclude_patterns
                 )
 
             except Exception as e:
@@ -493,11 +553,30 @@ class WebsiteService:
 
         from website_crawling.service.ai_service import upload_content_to_gemini, record_scraped_metadata
 
+        # Check if interleaved mode was used (all uploading/recording already done)
+        if result.get("interleaved_mode"):
+            logger.info(f"✅ Sitemap processed in INTERLEAVED mode - {len(result.get('record_ids', []))} pages uploaded and recorded")
+            processing_time = time.perf_counter() - start_time
+            return {
+                "success": result.get("success", False),
+                "job_id": f"job_{int(time.time())}",
+                "url": url,
+                "status": "completed",
+                "pages_scraped": len(result.get("record_ids", [])),
+                "content_length": len(result.get("content", "")),
+                "title": result.get("title"),
+                "uploaded_files": result.get("uploaded_files", []),
+                "record_ids": result.get("record_ids", []),
+                "processing_time_seconds": round(processing_time, 2),
+                "scraped_urls": result.get("scraped_urls", [url]),
+                "mode": "interleaved"
+            }
+
         # Check if this is a sitemap with individual pages to upload
         scraped_data = result.get("scraped_data", [])
         logger.info(f"🔍 [DEBUG] scraped_data from result: {len(scraped_data) if scraped_data else 0} pages available")
 
-        if scraped_data:
+        if scraped_data and not result.get("interleaved_mode"):
             # Sitemap: Upload each page separately with its own URL
             logger.info(f"📋 Sitemap detected: uploading {len(scraped_data)} pages individually")
 
@@ -933,12 +1012,18 @@ class WebsiteService:
         max_concurrent: int = 10,
         delay_between_requests: float = 0,
         sitemap_url: str = None,
-        celery_task_id: str = None
+        celery_task_id: str = None,
+        options: Dict[str, Any] = None,
+        sitemap_record_id: int = None,
+        crawl_session_id: str = None,
+        max_pages: int = 1,
+        max_depth: int = 2,
+        include_patterns: List[str] = None,
+        exclude_patterns: List[str] = None
     ) -> Dict[str, Any]:
         """
-        Scrape all URLs from a sitemap using crawl4ai's native BFS depth tracking.
-        Sorts URLs alphabetically first. All extracted URLs are depth=1 with
-        the sitemap itself as the parent (depth=0).
+        Scrape all URLs from a sitemap with INTERLEAVED uploading and recording.
+        Processes each page immediately after scraping: Scrape → Upload → Record → Next
 
         Args:
             urls: List of URLs to scrape from sitemap
@@ -946,14 +1031,28 @@ class WebsiteService:
             max_concurrent: Maximum concurrent requests
             delay_between_requests: Delay between requests in seconds
             sitemap_url: The sitemap URL (will be the parent, depth=0)
+            celery_task_id: Task ID for cancellation checking
+            options: Scraping options
+            sitemap_record_id: Database ID of sitemap parent record
+            crawl_session_id: Session ID for grouping all pages from this crawl
+            max_pages, max_depth: Crawl options
+            include_patterns, exclude_patterns: URL targeting patterns
 
         Returns:
-            Dict with scraped content and metadata with proper hierarchy
+            Dict with summary of uploaded/recorded pages
         """
+        from website_crawling.service.ai_service import upload_content_to_gemini, record_scraped_metadata
+
         scraped_data = []
+        uploaded_files = []
+        record_ids = []
         scraped_urls: Set[str] = set()
         title = "Sitemap Content"
         semaphore = asyncio.Semaphore(max_concurrent)
+
+        options = options or {}
+        include_patterns = include_patterns or []
+        exclude_patterns = exclude_patterns or []
 
         if not urls:
             return {
@@ -1054,7 +1153,7 @@ class WebsiteService:
                                     # Parent is the sitemap URL itself (depth=0)
                                     depth = 1  # All sitemap URLs are children of sitemap
                                     parent_url = sitemap_url
-                                    
+
                                     # Classify URL type based on crawl4ai depth
                                     url_type = self.classify_url_type(url, crawl4ai_depth=depth)
 
@@ -1069,6 +1168,67 @@ class WebsiteService:
 
                                     scraped_data.append(page_data)
                                     logger.info(f"✓ Successfully scraped sitemap URL: {url} (size={len(content)} bytes)")
+
+                                    # ✅ INTERLEAVED: Upload and record this page immediately
+                                    try:
+                                        # ✅ CHECK FOR CANCELLATION BEFORE UPLOAD
+                                        if await self._check_cancellation(celery_task_id):
+                                            logger.warning(f"❌ [CANCEL] Task cancelled during sitemap upload at URL: {url}")
+                                            break
+
+                                        logger.info(f"📤 [INTERLEAVED] Uploading sitemap page {idx}/{len(sorted_urls)}: {url}")
+
+                                        # Upload to Gemini
+                                        gemini_result = await upload_content_to_gemini(
+                                            content=content,
+                                            url=url,
+                                            title=page_title,
+                                            user_email=options.get("user_email"),
+                                            page_depth=depth
+                                        )
+
+                                        # Record immediately after upload
+                                        logger.info(f"💾 [INTERLEAVED] Recording page {idx}/{len(sorted_urls)}: {url}")
+
+                                        page_celery_task_id = celery_task_id if idx == 1 else None
+                                        record_id = await record_scraped_metadata(
+                                            url=url,
+                                            domain=urlparse(url).netloc.replace('www.', ''),
+                                            title=page_title or url,
+                                            content_length=len(content),
+                                            pages_scraped=1,
+                                            gemini_file_name=gemini_result.get("file_name"),
+                                            gemini_file_uri=gemini_result.get("file_uri"),
+                                            gemini_state=gemini_result.get("state", "UNKNOWN"),
+                                            scraped_urls=[url],
+                                            scraping_config={
+                                                "max_pages": max_pages,
+                                                "max_depth": max_depth,
+                                                "source": "sitemap",
+                                                "sitemap_url": sitemap_url,
+                                                "include_patterns": include_patterns,
+                                                "exclude_patterns": exclude_patterns
+                                            },
+                                            file_search_metadata=gemini_result.get("file_search_metadata"),
+                                            parent_id=sitemap_record_id,
+                                            depth=depth,
+                                            crawl_session_id=crawl_session_id,
+                                            celery_task_id=page_celery_task_id
+                                        )
+
+                                        if record_id:
+                                            logger.info(f"✅ [INTERLEAVED] Page {idx}/{len(sorted_urls)} uploaded and recorded: {record_id}")
+                                            uploaded_files.append({
+                                                "url": url,
+                                                "file_name": gemini_result.get("file_name"),
+                                                "record_id": record_id
+                                            })
+                                            record_ids.append(record_id)
+                                        else:
+                                            logger.error(f"❌ [INTERLEAVED] Failed to record page {idx}/{len(sorted_urls)}: {url}")
+
+                                    except Exception as upload_error:
+                                        logger.error(f"❌ [INTERLEAVED] Failed to upload/record page {idx}/{len(sorted_urls)} ({url}): {upload_error}")
                             else:
                                 logger.warning(f"⚠️ Failed to scrape sitemap URL {url}: {result.error_message}")
 
@@ -1108,7 +1268,10 @@ class WebsiteService:
                 "title": title,
                 "pages_scraped": len(scraped_urls),
                 "scraped_urls": list(scraped_urls),
-                "scraped_data": scraped_data  # Return individual page data with depth and parent info
+                "scraped_data": scraped_data,  # Return individual page data with depth and parent info
+                "uploaded_files": uploaded_files,  # Already uploaded and recorded via INTERLEAVED processing
+                "record_ids": record_ids,
+                "interleaved_mode": True  # Flag indicating processing was interleaved
             }
 
         except Exception as e:
