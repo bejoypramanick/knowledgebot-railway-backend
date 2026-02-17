@@ -1206,55 +1206,83 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
         try:
             from shared.db import get_db_connection
 
-            # Step 1: PURGE ALL CELERY QUEUES AND DISCARD ALL TASKS
-            logger.critical("🔴🔴🔴 PURGING ALL CELERY QUEUES AND DISCARDING ALL TASKS 🔴🔴🔴")
+            # Step 1: TERMINATE ALL RUNNING AND PENDING CELERY TASKS
+            logger.critical("🔴🔴🔴 TERMINATING ALL CELERY TASKS - RUNNING AND PENDING 🔴🔴🔴")
+            celery_tasks_terminated = 0
             try:
                 from knowledgebase_ingestion.celery_app import celery_app
                 import redis as redis_lib
 
-                # Method 1: Discard all tasks from all workers
-                logger.critical("🛑 [1/3] Discarding all tasks from all workers...")
+                # First: Get all active task IDs from all workers and TERMINATE them
+                logger.critical("🛑 [1/4] Terminating ALL RUNNING tasks from workers...")
                 try:
-                    celery_app.control.discard_all()
-                    logger.critical("✅ [1/3] All tasks discarded from workers")
+                    # Get active tasks from all workers
+                    active_tasks = celery_app.control.inspect().active()
+                    if active_tasks:
+                        for worker, tasks in active_tasks.items():
+                            for task_info in tasks:
+                                task_id = task_info.get('id')
+                                if task_id:
+                                    try:
+                                        # TERMINATE with SIGTERM signal
+                                        celery_app.control.revoke(task_id, terminate=True, signal='SIGTERM')
+                                        celery_tasks_terminated += 1
+                                        logger.critical(f"🛑 TERMINATED RUNNING TASK: {task_id}")
+                                    except Exception as e:
+                                        logger.error(f"❌ Failed to terminate task {task_id}: {e}")
+                    logger.critical(f"✅ [1/4] Terminated {celery_tasks_terminated} running tasks")
                 except Exception as e:
-                    logger.warning(f"⚠️ Could not discard all tasks: {e}")
+                    logger.warning(f"⚠️ Could not get active tasks: {e}")
 
-                # Method 2: Purge all queues (file_processing and web_crawling)
-                logger.critical("🛑 [2/3] Purging Redis queues...")
+                # Second: Revoke ALL tasks by ID from database
+                logger.critical("🛑 [2/4] Revoking ALL tasks from database...")
+                try:
+                    async with get_db_connection() as conn:
+                        file_tasks = await conn.fetch("SELECT celery_task_id FROM file_uploads WHERE celery_task_id IS NOT NULL")
+                        website_tasks = await conn.fetch("SELECT celery_task_id FROM scraped_websites WHERE celery_task_id IS NOT NULL")
+                        all_task_ids = [t['celery_task_id'] for t in file_tasks + website_tasks]
+
+                        for task_id in all_task_ids:
+                            try:
+                                celery_app.control.revoke(task_id, terminate=True, signal='SIGTERM')
+                                logger.critical(f"🛑 REVOKED TASK: {task_id}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Failed to revoke {task_id}: {e}")
+
+                        logger.critical(f"✅ [2/4] Revoked {len(all_task_ids)} tasks from database")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error revoking tasks from database: {e}")
+
+                # Third: Purge all pending queues
+                logger.critical("🛑 [3/4] Purging Redis queues...")
                 try:
                     celery_app.control.purge()
-                    logger.critical("✅ [2/3] All queues purged")
+                    logger.critical("✅ [3/4] All queues purged")
                 except Exception as e:
                     logger.warning(f"⚠️ Could not purge queues: {e}")
 
-                # Method 3: Direct Redis queue deletion for both databases
-                logger.critical("🛑 [3/3] Clearing Redis keys directly...")
+                # Fourth: Direct Redis cleanup
+                logger.critical("🛑 [4/4] Clearing Redis keys directly...")
                 try:
                     redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
                     redis_conn = redis_lib.from_url(redis_url)
 
-                    # Delete all Celery task keys
                     for key in redis_conn.scan_iter("celery*"):
                         redis_conn.delete(key)
-                        logger.info(f"   Deleted Redis key: {key}")
-
-                    # Also delete task result keys
                     for key in redis_conn.scan_iter("*task*"):
                         redis_conn.delete(key)
-                        logger.info(f"   Deleted Redis key: {key}")
 
                     redis_conn.close()
-                    logger.critical("✅ [3/3] Redis keys cleared")
+                    logger.critical("✅ [4/4] Redis keys cleared")
                 except Exception as e:
-                    logger.warning(f"⚠️ Could not clear Redis directly: {e}")
+                    logger.warning(f"⚠️ Could not clear Redis: {e}")
 
-                logger.critical("✅✅✅ ALL CELERY TASKS STOPPED - REDIS QUEUES PURGED ✅✅✅")
-                nuke_results["celery_purged"] = True
+                logger.critical("✅✅✅ ALL CELERY TASKS TERMINATED - REDIS PURGED ✅✅✅")
+                nuke_results["celery_terminated"] = celery_tasks_terminated
 
             except Exception as e:
-                logger.error(f"❌ Error purging Celery tasks: {e}")
-                nuke_results["celery_purge_error"] = str(e)
+                logger.error(f"❌ Error terminating Celery tasks: {e}")
+                nuke_results["celery_termination_error"] = str(e)
 
             # Step 2: Mark all tasks as cancelled in database before deletion
             # This ensures if any task continues running, it's marked as cancelled
