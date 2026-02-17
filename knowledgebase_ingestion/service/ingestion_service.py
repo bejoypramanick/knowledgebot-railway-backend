@@ -1083,21 +1083,23 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
             
             if len(filesearch_errors) > 0:
                 logger.warning(f"⚠️ Proceeding with database deletion despite {len(filesearch_errors)} FileSearch errors (success rate: {success_rate:.1%})")
-            
-            # Begin database transaction
+
+            # Begin ATOMIC database transaction for deletion
             async with get_db_connection() as conn:
-                # Delete all records in hierarchy
-                delete_query = """
-                    WITH RECURSIVE website_hierarchy AS (
-                        SELECT id FROM scraped_websites WHERE id = $1
-                        UNION ALL
-                        SELECT w.id FROM scraped_websites w
-                        INNER JOIN website_hierarchy wh ON w.parent_id = wh.id
-                    )
-                    DELETE FROM scraped_websites WHERE id IN (SELECT id FROM website_hierarchy)
-                """
-                result = await conn.execute(delete_query, website_id_param)
-                deleted_count = int(result.split()[-1]) if result else 0
+                async with conn.transaction():
+                    # Delete all records in hierarchy - ATOMIC OPERATION
+                    delete_query = """
+                        WITH RECURSIVE website_hierarchy AS (
+                            SELECT id FROM scraped_websites WHERE id = $1
+                            UNION ALL
+                            SELECT w.id FROM scraped_websites w
+                            INNER JOIN website_hierarchy wh ON w.parent_id = wh.id
+                        )
+                        DELETE FROM scraped_websites WHERE id IN (SELECT id FROM website_hierarchy)
+                    """
+                    result = await conn.execute(delete_query, website_id_param)
+                    deleted_count = int(result.split()[-1]) if result else 0
+                    logger.info(f"✅ [ATOMIC_TX] Deleted {deleted_count} website records from database")
             
             return {
                 "success": True, 
