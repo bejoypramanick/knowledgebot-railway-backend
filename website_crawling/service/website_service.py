@@ -481,6 +481,7 @@ class WebsiteService:
 
         # Check if this is a sitemap with individual pages to upload
         scraped_data = result.get("scraped_data", [])
+        logger.info(f"🔍 [DEBUG] scraped_data from result: {len(scraped_data) if scraped_data else 0} pages available")
 
         if scraped_data:
             # Sitemap: Upload each page separately with its own URL
@@ -520,7 +521,7 @@ class WebsiteService:
             url_to_record_id[url] = sitemap_record_id
             logger.info(f"✅ Created sitemap parent record: {url} (depth=0, id={sitemap_record_id})")
 
-            for page_data in scraped_data:
+            for page_idx, page_data in enumerate(scraped_data, 1):
                 page_url = page_data["url"]
                 page_text = page_data["text"]
                 page_domain = urlparse(page_url).netloc.replace('www.', '')
@@ -531,7 +532,7 @@ class WebsiteService:
                     first_line = page_text.split('\n')[0][:100]
                     page_title = first_line if first_line else page_domain
 
-                logger.info(f"📄 Uploading sitemap page: {page_url}")
+                logger.info(f"📄 [{page_idx}/{len(scraped_data)}] Uploading sitemap page: {page_url}")
 
                 try:
                     # Upload individual page
@@ -547,6 +548,7 @@ class WebsiteService:
                     parent_id = sitemap_record_id
 
                     # Record metadata for individual page
+                    logger.info(f"💾 Recording metadata for page {page_idx}/{len(scraped_data)}: {page_url}")
                     record_id = await record_scraped_metadata(
                         url=page_url,  # Individual page URL in database
                         domain=page_domain,
@@ -571,6 +573,11 @@ class WebsiteService:
                         crawl_session_id=crawl_session_id
                     )
 
+                    if record_id:
+                        logger.info(f"✅ Recorded page {page_idx}/{len(scraped_data)} to database with ID: {record_id}")
+                    else:
+                        logger.error(f"❌ Failed to record page {page_idx}/{len(scraped_data)}: record_id is None")
+
                     uploaded_files.append({
                         "url": page_url,
                         "file_name": gemini_result.get("file_name"),
@@ -580,7 +587,9 @@ class WebsiteService:
                     url_to_record_id[page_url] = record_id
 
                 except Exception as e:
-                    logger.error(f"❌ Failed to upload page {page_url}: {e}")
+                    logger.error(f"❌ Failed to upload/record page {page_idx}/{len(scraped_data)} ({page_url}): {e}")
+                    import traceback
+                    logger.error(f"Traceback: {traceback.format_exc()}")
 
             processing_time = time.perf_counter() - start_time
 
