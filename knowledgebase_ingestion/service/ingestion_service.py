@@ -1221,22 +1221,38 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                     # Revoke all tasks using knowledgebase_ingestion's celery_app
                     # Both services share the same Redis broker, so this works for all task types
                     from knowledgebase_ingestion.celery_app import celery_app
+
+                    logger.critical(f"🛑 IMMEDIATELY REVOKING {len(all_task_ids)} CELERY TASKS")
                     for task_id in all_task_ids:
                         try:
+                            # Revoke with terminate=True to forcefully stop the task
                             celery_app.control.revoke(task_id, terminate=True)
                             celery_tasks_revoked += 1
+                            logger.critical(f"🛑 TASK REVOKED: {task_id}")
                         except Exception as e:
-                            logger.warning(f"⚠️ Failed to revoke task {task_id}: {e}")
+                            logger.error(f"❌ FAILED TO REVOKE TASK {task_id}: {e}")
 
                 if celery_tasks_revoked > 0:
-                    logger.info(f"✅ Revoked {celery_tasks_revoked} Celery tasks before deletion")
+                    logger.critical(f"🛑 ✅ SUCCESSFULLY REVOKED {celery_tasks_revoked} CELERY TASKS - SHOULD STOP IMMEDIATELY")
                     nuke_results["celery_tasks_revoked"] = celery_tasks_revoked
+                else:
+                    logger.info(f"ℹ️ No running Celery tasks to revoke")
 
             except Exception as e:
                 logger.warning(f"⚠️ Error revoking Celery tasks: {e} - continuing with database deletion")
                 nuke_results["celery_revoke_error"] = str(e)
 
-            # Step 2: Delete from database
+            # Step 2: Mark all tasks as cancelled in database before deletion
+            # This ensures if any task continues running, it's marked as cancelled
+            try:
+                async with get_db_connection() as conn:
+                    await conn.execute("UPDATE file_uploads SET processing_status = 'cancelled' WHERE processing_status IN ('pending', 'processing')")
+                    await conn.execute("UPDATE scraped_websites SET processing_status = 'cancelled' WHERE processing_status IN ('pending', 'processing')")
+                    logger.warning("✅ Marked all pending/processing tasks as 'cancelled'")
+            except Exception as e:
+                logger.warning(f"⚠️ Could not mark tasks as cancelled: {e}")
+
+            # Step 3: Delete from database
             async with get_db_connection() as conn:
                 # Start explicit transaction for database deletion
                 async with conn.transaction():
