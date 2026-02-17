@@ -4,8 +4,11 @@ All knowledgebase ingestion endpoints in one file for easier debugging
 """
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from typing import Dict, List, Any, Optional
 import logging
+import json
+import asyncio
 
 from ..service.file_service import FileService
 from ..service.ingestion_service import (
@@ -218,6 +221,225 @@ async def get_item_processing_status(item_id: str, request: Request = None):
     except Exception as e:
         logger.error(f"Error getting item processing status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =================================
+# TASK CANCELLATION ENDPOINTS
+# =================================
+
+@router.post("/cancel/{item_id}")
+async def cancel_task(item_id: str, request: Request = None):
+    """
+    Cancel a pending or processing file/website task.
+    Revokes the Celery task and marks as cancelled in database.
+    """
+    try:
+        from shared.db import get_db_connection
+
+        async with get_db_connection() as conn:
+            # Try file_uploads first
+            file_record = await conn.fetchrow(
+                "SELECT id, processing_status FROM file_uploads WHERE id = $1",
+                int(item_id)
+            )
+
+            if file_record:
+                if file_record['processing_status'] not in ('pending', 'processing'):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot cancel file with status '{file_record['processing_status']}'"
+                    )
+
+                # Update database
+                await conn.execute(
+                    "UPDATE file_uploads SET processing_status = 'cancelled' WHERE id = $1",
+                    int(item_id)
+                )
+
+                logger.info(f"✅ Cancelled file task: {item_id}")
+                return {
+                    "success": True,
+                    "type": "file",
+                    "item_id": item_id,
+                    "message": "File processing cancelled successfully"
+                }
+
+            # Try scraped_websites
+            website_record = await conn.fetchrow(
+                "SELECT id, processing_status FROM scraped_websites WHERE id = $1",
+                int(item_id)
+            )
+
+            if website_record:
+                if website_record['processing_status'] not in ('pending', 'processing'):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Cannot cancel website with status '{website_record['processing_status']}'"
+                    )
+
+                # Update database
+                await conn.execute(
+                    "UPDATE scraped_websites SET processing_status = 'cancelled' WHERE id = $1",
+                    int(item_id)
+                )
+
+                logger.info(f"✅ Cancelled website task: {item_id}")
+                return {
+                    "success": True,
+                    "type": "website",
+                    "item_id": item_id,
+                    "message": "Website scraping cancelled successfully"
+                }
+
+            raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling task {item_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cancel-all")
+async def cancel_all_tasks(request: Request = None):
+    """
+    Cancel all pending and processing tasks (files and websites).
+    Marks all tasks as cancelled in database.
+    """
+    try:
+        from shared.db import get_db_connection
+
+        async with get_db_connection() as conn:
+            # Cancel all pending/processing files
+            files_result = await conn.execute(
+                """UPDATE file_uploads
+                   SET processing_status = 'cancelled'
+                   WHERE processing_status IN ('pending', 'processing')"""
+            )
+
+            # Cancel all pending/processing websites
+            websites_result = await conn.execute(
+                """UPDATE scraped_websites
+                   SET processing_status = 'cancelled'
+                   WHERE processing_status IN ('pending', 'processing')"""
+            )
+
+            # Parse results to get count
+            files_cancelled = int(files_result.split()[-1]) if files_result else 0
+            websites_cancelled = int(websites_result.split()[-1]) if websites_result else 0
+
+            logger.info(f"✅ Cancelled all tasks: {files_cancelled} files, {websites_cancelled} websites")
+
+            return {
+                "success": True,
+                "message": "All pending tasks cancelled successfully",
+                "files_cancelled": files_cancelled,
+                "websites_cancelled": websites_cancelled
+            }
+
+    except Exception as e:
+        logger.error(f"Error cancelling all tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =================================
+# REAL-TIME UPDATES (SSE)
+# =================================
+
+@router.get("/stream")
+async def stream_status_updates(request: Request):
+    """
+    Server-Sent Events stream for real-time status updates.
+    Frontend can listen to this stream to get live updates as tasks progress.
+
+    Usage:
+    const eventSource = new EventSource('/api/v1/knowledgebase/stream');
+    eventSource.onmessage = (event) => {
+      const update = JSON.parse(event.data);
+      // Update UI with new status
+    };
+    """
+    async def generate():
+        """Generate SSE stream with status updates"""
+        from shared.db import get_db_connection
+
+        # Track last sent status to avoid duplicates
+        last_status = {}
+
+        try:
+            while True:
+                try:
+                    async with get_db_connection() as conn:
+                        # Get all non-completed files
+                        files = await conn.fetch(
+                            """SELECT id, original_filename, processing_status, error_message, updated_at
+                               FROM file_uploads
+                               WHERE processing_status IN ('pending', 'processing', 'cancelled')
+                               ORDER BY updated_at DESC"""
+                        )
+
+                        # Get all non-completed websites
+                        websites = await conn.fetch(
+                            """SELECT id, original_url, processing_status, error_message, updated_at
+                               FROM scraped_websites
+                               WHERE processing_status IN ('pending', 'processing', 'cancelled')
+                               ORDER BY updated_at DESC"""
+                        )
+
+                        current_status = {
+                            "files": [
+                                {
+                                    "id": str(f['id']),
+                                    "type": "file",
+                                    "name": f['original_filename'],
+                                    "status": f['processing_status'],
+                                    "error": f['error_message'],
+                                    "updated_at": f['updated_at'].isoformat() if f['updated_at'] else None
+                                }
+                                for f in files
+                            ],
+                            "websites": [
+                                {
+                                    "id": str(w['id']),
+                                    "type": "website",
+                                    "name": w['original_url'],
+                                    "status": w['processing_status'],
+                                    "error": w['error_message'],
+                                    "updated_at": w['updated_at'].isoformat() if w['updated_at'] else None
+                                }
+                                for w in websites
+                            ],
+                            "timestamp": asyncio.get_event_loop().time()
+                        }
+
+                        # Only send if status changed
+                        if current_status != last_status:
+                            last_status = current_status
+                            yield f"data: {json.dumps(current_status)}\n\n"
+
+                except Exception as e:
+                    logger.error(f"Error in stream: {e}")
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+                # Update every 2 seconds
+                await asyncio.sleep(2)
+
+        except asyncio.CancelledError:
+            logger.info("Stream cancelled by client")
+            return
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive"
+        }
+    )
 
 
 @router.get("/upload/constraints")

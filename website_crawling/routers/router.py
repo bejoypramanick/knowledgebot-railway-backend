@@ -294,6 +294,87 @@ async def get_domain_analytics():
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
+# TASK CANCELLATION ENDPOINTS
+# =================================
+
+@router.post("/cancel/{item_id}")
+async def cancel_scraping_task(item_id: str):
+    """
+    Cancel a pending or processing website scraping task.
+    Marks as cancelled in database.
+    """
+    try:
+        from shared.db import get_db_connection
+
+        async with get_db_connection() as conn:
+            website_record = await conn.fetchrow(
+                "SELECT id, processing_status FROM scraped_websites WHERE id = $1",
+                int(item_id)
+            )
+
+            if not website_record:
+                raise HTTPException(status_code=404, detail=f"Website {item_id} not found")
+
+            if website_record['processing_status'] not in ('pending', 'processing'):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot cancel website with status '{website_record['processing_status']}'"
+                )
+
+            # Update database
+            await conn.execute(
+                "UPDATE scraped_websites SET processing_status = 'cancelled' WHERE id = $1",
+                int(item_id)
+            )
+
+            logger.info(f"✅ Cancelled website scraping task: {item_id}")
+            return {
+                "success": True,
+                "item_id": item_id,
+                "message": "Website scraping cancelled successfully"
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling scraping task {item_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cancel-all")
+async def cancel_all_scraping_tasks():
+    """
+    Cancel all pending and processing website scraping tasks.
+    Marks all as cancelled in database.
+    """
+    try:
+        from shared.db import get_db_connection
+
+        async with get_db_connection() as conn:
+            # Cancel all pending/processing websites
+            result = await conn.execute(
+                """UPDATE scraped_websites
+                   SET processing_status = 'cancelled'
+                   WHERE processing_status IN ('pending', 'processing')"""
+            )
+
+            # Parse result to get count
+            websites_cancelled = int(result.split()[-1]) if result else 0
+
+            logger.info(f"✅ Cancelled all scraping tasks: {websites_cancelled} websites")
+
+            return {
+                "success": True,
+                "message": "All pending scraping tasks cancelled successfully",
+                "websites_cancelled": websites_cancelled
+            }
+
+    except Exception as e:
+        logger.error(f"Error cancelling all scraping tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =================================
 # HEALTH ENDPOINTS
 # =================================
 
