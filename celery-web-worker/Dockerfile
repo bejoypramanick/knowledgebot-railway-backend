@@ -24,6 +24,9 @@ COPY website_crawling/requirements.txt /tmp/web-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/kb-requirements.txt && \
     pip install --no-cache-dir -r /tmp/web-requirements.txt
 
+# Install Playwright browsers (required for Crawl4AI)
+RUN playwright install chromium
+
 # Copy application code
 COPY . .
 
