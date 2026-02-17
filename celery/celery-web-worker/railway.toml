@@ -1,6 +1,6 @@
 [build]
-dockerfilePath = "Dockerfile.celery"
-rootDirectory = ".."
+dockerfilePath = "celery/Dockerfile"
+rootDirectory = "."
 
 [deploy]
 # Celery worker for website scraping queue
