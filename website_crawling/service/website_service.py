@@ -625,7 +625,7 @@ class WebsiteService:
 
             for page_idx, page_data in enumerate(scraped_data, 1):
                 # ✅ CHECK FOR CANCELLATION AT START OF EACH PAGE
-                if await check_cancellation():
+                if await self._check_cancellation(celery_task_id):
                     logger.warning(f"❌ [CANCEL] Task cancelled - stopping sitemap upload at page {page_idx}/{len(scraped_data)}")
                     break
 
