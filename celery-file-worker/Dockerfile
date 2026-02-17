@@ -29,8 +29,8 @@ COPY . .
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV CELERY_BROKER_URL=${REDIS_URL:-redis://localhost:6379/0}
-ENV CELERY_RESULT_BACKEND=${REDIS_URL:-redis://localhost:6379/0}
+# Note: REDIS_URL is set at runtime via Railway environment variables
+# Do NOT set CELERY_BROKER_URL/CELERY_RESULT_BACKEND here - let celery_app.py read REDIS_URL at runtime
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
