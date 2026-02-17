@@ -36,7 +36,8 @@ async def update_website_processing_status(website_id: int, status: str, error_m
 async def process_website_async(
     website_id: int,
     url: str,
-    options: Dict[str, Any]
+    options: Dict[str, Any],
+    celery_task_id: str = None
 ):
     """
     Async website scraping logic
@@ -51,7 +52,7 @@ async def process_website_async(
 
         # Create service and perform scraping
         service = WebsiteService()
-        result = await service.scrape_website(url, options)
+        result = await service.scrape_website(url, options, celery_task_id=celery_task_id)
 
         if result.get("success"):
             logger.info(f"✅ [CELERY] Website ID {website_id} scraped successfully")
@@ -81,13 +82,18 @@ def scrape_website_task(
     try:
         logger.info(f"📋 [TASK] Starting Celery task for website ID {website_id}: {url}")
 
+        # Get the current task ID from Celery
+        task_id = self.request.id
+        logger.info(f"🆔 [TASK_ID] Current task ID: {task_id}")
+
         # Run async function in event loop
         loop = asyncio.get_event_loop()
         loop.run_until_complete(
             process_website_async(
                 website_id=website_id,
                 url=url,
-                options=options
+                options=options,
+                celery_task_id=task_id
             )
         )
 

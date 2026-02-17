@@ -184,7 +184,8 @@ async def record_scraped_metadata(
     user_id: str = None,
     parent_id: Optional[int] = None,
     depth: int = 0,
-    crawl_session_id: Optional[str] = None
+    crawl_session_id: Optional[str] = None,
+    celery_task_id: Optional[str] = None
 ) -> Optional[str]:
     """
     Record scraped website metadata to database.
@@ -223,6 +224,7 @@ async def record_scraped_metadata(
             "parent_id": parent_id,
             "depth": depth,  # Use the parameter
             "crawl_session_id": crawl_session_id,
+            "celery_task_id": celery_task_id,  # Store Celery task ID for tracking
             # Targeting patterns used for this crawl
             "crawl_patterns": {
                 "include_patterns": include_patterns,

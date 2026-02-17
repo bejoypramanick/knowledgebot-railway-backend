@@ -58,8 +58,8 @@ class ScrapingDAO:
             INSERT INTO scraped_websites
             (user_role_id, original_url, domain, title, description, gemini_state,
              gemini_file_name, gemini_file_uri, pages_scraped, content_length, metadata,
-             parent_id, depth, crawl_session_id, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, NOW(), NOW())
+             parent_id, depth, crawl_session_id, celery_task_id, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14, $15, NOW(), NOW())
             RETURNING id
         """
 
@@ -81,7 +81,8 @@ class ScrapingDAO:
             metadata_json,
             metadata.get('parent_id'),
             metadata.get('depth', 0),
-            metadata.get('crawl_session_id')
+            metadata.get('crawl_session_id'),
+            metadata.get('celery_task_id')  # Store Celery task ID
         ]
         
         # DEBUG: Log parent_id value

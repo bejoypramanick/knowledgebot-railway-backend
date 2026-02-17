@@ -321,7 +321,7 @@ class WebsiteService:
             logger.warning(f"⚠️ Error classifying URL {url}: {e}, defaulting to website")
             return "website"
 
-    async def scrape_website(self, url: str, options: Dict[str, Any]) -> Dict[str, Any]:
+    async def scrape_website(self, url: str, options: Dict[str, Any], celery_task_id: str = None) -> Dict[str, Any]:
         """
         Scrape a website and optionally crawl linked pages.
 
@@ -396,7 +396,7 @@ class WebsiteService:
 
                 # Scrape all URLs from sitemap (passing sitemap URL as parent)
                 result = await self._scrape_urls_from_sitemap(
-                    urls_to_scrape, timeout, max_concurrent, delay_between_requests, sitemap_url=url
+                    urls_to_scrape, timeout, max_concurrent, delay_between_requests, sitemap_url=url, celery_task_id=celery_task_id
                 )
 
             except Exception as e:
@@ -549,6 +549,11 @@ class WebsiteService:
 
                     # Record metadata for individual page
                     logger.info(f"💾 Recording metadata for page {page_idx}/{len(scraped_data)}: {page_url}")
+
+                    # Get celery_task_id for this page's metadata (same task for all pages in sitemap)
+                    page_celery_task_id = celery_task_id if page_idx == 1 else None
+                    logger.info(f"🆔 Page {page_idx} - Celery Task ID: {page_celery_task_id}")
+
                     record_id = await record_scraped_metadata(
                         url=page_url,  # Individual page URL in database
                         domain=page_domain,
@@ -570,7 +575,8 @@ class WebsiteService:
                         file_search_metadata=gemini_result.get("file_search_metadata"),
                         parent_id=parent_id,  # Sitemap XML as parent
                         depth=1,  # All sitemap URLs are depth 1
-                        crawl_session_id=crawl_session_id
+                        crawl_session_id=crawl_session_id,
+                        celery_task_id=page_celery_task_id  # Store task ID for each page
                     )
 
                     if record_id:
@@ -902,7 +908,8 @@ class WebsiteService:
         timeout: int = 60,  # Increased from 30 to 60 seconds for better reliability
         max_concurrent: int = 10,
         delay_between_requests: float = 0,
-        sitemap_url: str = None
+        sitemap_url: str = None,
+        celery_task_id: str = None
     ) -> Dict[str, Any]:
         """
         Scrape all URLs from a sitemap using crawl4ai's native BFS depth tracking.
