@@ -1,7 +1,6 @@
 [build]
 dockerfilePath = "docling_service/Dockerfile"
 rootDirectory = ".."
-watchPaths = ["docling_service/", "shared/"]
 
 [deploy]
 restartPolicyType = "ON_FAILURE"
