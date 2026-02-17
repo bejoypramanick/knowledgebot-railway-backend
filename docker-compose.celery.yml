@@ -20,7 +20,7 @@ services:
   celery-file-worker:
     build:
       context: .
-      dockerfile: celery/celery-file-worker/Dockerfile
+      dockerfile: celery-file-worker/Dockerfile
     container_name: knowledgebot-celery-file-worker
     command: celery -A knowledgebase_ingestion.celery_app worker -Q file_processing -l info -c 2
     environment:
@@ -41,7 +41,7 @@ services:
   celery-web-worker:
     build:
       context: .
-      dockerfile: celery/celery-web-worker/Dockerfile
+      dockerfile: celery-web-worker/Dockerfile
     container_name: knowledgebot-celery-web-worker
     command: celery -A website_crawling.celery_app worker -Q web_crawling -l info -c 1
     environment:
