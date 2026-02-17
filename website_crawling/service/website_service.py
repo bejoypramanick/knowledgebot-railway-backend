@@ -651,6 +651,11 @@ class WebsiteService:
                         page_depth=1  # All sitemap URLs are depth 1 (direct children of sitemap)
                     )
 
+                    # ✅ CHECK FOR CANCELLATION AFTER PAGE UPLOAD
+                    if await self._check_cancellation(celery_task_id):
+                        logger.warning(f"❌ [CANCEL] Task cancelled after page upload: {page_url}")
+                        break
+
                     # All sitemap URLs have the sitemap.xml as parent (depth 1)
                     parent_id = sitemap_record_id
 
@@ -760,6 +765,14 @@ class WebsiteService:
                             page_depth=0
                         )
 
+                        # ✅ CHECK FOR CANCELLATION AFTER ROOT PAGE UPLOAD
+                        if await self._check_cancellation(celery_task_id):
+                            logger.warning(f"❌ [CANCEL] Task cancelled after root page upload: {root_url}")
+                            return {
+                                "success": False,
+                                "error": "Task cancelled by admin during upload"
+                            }
+
                         # Record root page metadata
                         root_record_id = await record_scraped_metadata(
                             url=root_url,
@@ -829,6 +842,11 @@ class WebsiteService:
                             user_email=options.get("user_email"),
                             page_depth=page_depth
                         )
+
+                        # ✅ CHECK FOR CANCELLATION AFTER CHILD PAGE UPLOAD
+                        if await self._check_cancellation(celery_task_id):
+                            logger.warning(f"❌ [CANCEL] Task cancelled after child page upload: {page_url}")
+                            break
 
                         # Record child page immediately
                         logger.info(f"💾 [INTERLEAVED] Recording child page {page_idx}/{len(scraped_data)}: {page_url}")
@@ -917,6 +935,14 @@ class WebsiteService:
                         page_depth=0
                     )
 
+                    # ✅ CHECK FOR CANCELLATION AFTER PARENT UPLOAD
+                    if await self._check_cancellation(celery_task_id):
+                        logger.warning(f"❌ [CANCEL] Task cancelled after parent URL upload: {url}")
+                        return {
+                            "success": False,
+                            "error": "Task cancelled by admin during upload"
+                        }
+
                     # Record parent
                     record_id = await record_scraped_metadata(
                         url=url,
@@ -953,7 +979,7 @@ class WebsiteService:
                     logger.info(f"📝 Recording {len(discovered_urls) - 1} child URLs discovered during crawl")
                     for child_url in discovered_urls:
                         # ✅ CHECK FOR CANCELLATION BEFORE RECORDING EACH CHILD
-                        if await check_cancellation():
+                        if await self._check_cancellation(celery_task_id):
                             logger.warning(f"❌ [CANCEL] Task cancelled - stopping child URL recording")
                             break
 
@@ -1022,6 +1048,14 @@ class WebsiteService:
                         user_email=options.get("user_email"),
                         page_depth=0  # Single page has depth 0
                     )
+
+                    # ✅ CHECK FOR CANCELLATION AFTER SINGLE PAGE UPLOAD
+                    if await self._check_cancellation(celery_task_id):
+                        logger.warning(f"❌ [CANCEL] Task cancelled after single page upload: {url}")
+                        return {
+                            "success": False,
+                            "error": "Task cancelled by admin during upload"
+                        }
 
                     # Record metadata to database
                     record_id = await record_scraped_metadata(
@@ -1279,6 +1313,11 @@ class WebsiteService:
                                             user_email=options.get("user_email"),
                                             page_depth=depth
                                         )
+
+                                        # ✅ CHECK FOR CANCELLATION AFTER UPLOAD COMPLETES
+                                        if await self._check_cancellation(celery_task_id):
+                                            logger.warning(f"❌ [CANCEL] Task cancelled after sitemap upload at URL: {url}")
+                                            break
 
                                         # Record immediately after upload
                                         logger.info(f"💾 [INTERLEAVED] Recording page {idx}/{len(sorted_urls)}: {url}")
@@ -1571,7 +1610,12 @@ class WebsiteService:
                                                 user_email=options.get("user_email"),
                                                 page_depth=depth
                                             )
-                                            
+
+                                            # ✅ CHECK FOR CANCELLATION AFTER PAGE UPLOAD
+                                            if await self._check_cancellation(celery_task_id):
+                                                logger.warning(f"❌ [CANCEL] Task cancelled after BFS page upload: {current_url}")
+                                                break
+
                                             # Determine parent relationship
                                             parent_id = None
                                             current_depth = depth
