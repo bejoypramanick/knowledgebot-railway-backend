@@ -432,6 +432,11 @@ async def cancel_all_tasks(request: Request = None):
                         "files_revoked": files_revoked,
                         "websites_revoked": websites_revoked
                     }
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    logger.error(f"❌ [ATOMIC_TX] Transaction failed: {e}")
+                    raise
 
     except HTTPException:
         raise

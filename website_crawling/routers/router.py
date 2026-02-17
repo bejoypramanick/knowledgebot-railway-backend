@@ -417,6 +417,11 @@ async def cancel_all_scraping_tasks():
                         "websites_cancelled": websites_cancelled,
                         "websites_revoked": websites_revoked
                     }
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    logger.error(f"❌ [ATOMIC_TX] Transaction failed: {e}")
+                    raise
 
     except HTTPException:
         raise
