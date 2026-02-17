@@ -396,13 +396,17 @@ class FileService:
                     session_root_nodes = []
 
                     for website in session_websites:
+                        # Detect if URL is a sitemap
+                        url = website['original_url'].lower()
+                        is_sitemap = url.endswith('sitemap.xml')
+
                         node = {
                             "id": str(website['id']),
                             "original_filename": website['original_url'],  # Use URL as filename for consistency
                             "display_name": website['title'] or website['domain'] or website['original_url'],
                             "file_extension": "URL",
                             "mime_type": "text/html",
-                            "file_type": "WEBSITE",
+                            "file_type": "SITEMAP" if is_sitemap else "WEBSITE",
                             "size_bytes": website['content_length'] or 0,  # Markdown file size in bytes
                             "sha256_hash": None,
                             "gemini_state": "completed",
