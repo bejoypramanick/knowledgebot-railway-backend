@@ -1207,6 +1207,39 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
         try:
             from shared.db import get_db_connection
 
+            # Step 1: Revoke all Celery tasks before deleting from database
+            logger.warning("🔴 Revoking all Celery tasks...")
+            celery_tasks_revoked = 0
+            try:
+                async with get_db_connection() as conn:
+                    # Get all celery task IDs from both file_uploads and scraped_websites
+                    file_tasks = await conn.fetch("SELECT celery_task_id FROM file_uploads WHERE celery_task_id IS NOT NULL")
+                    website_tasks = await conn.fetch("SELECT celery_task_id FROM scraped_websites WHERE celery_task_id IS NOT NULL")
+
+                    all_task_ids = [t['celery_task_id'] for t in file_tasks + website_tasks]
+                    logger.info(f"📊 Found {len(all_task_ids)} running Celery tasks to revoke")
+
+                    # Revoke all tasks
+                    try:
+                        from website_crawling.celery_app import celery_app as website_celery_app
+                        for task_id in all_task_ids:
+                            try:
+                                website_celery_app.control.revoke(task_id, terminate=True)
+                                celery_tasks_revoked += 1
+                            except Exception as e:
+                                logger.warning(f"⚠️ Failed to revoke task {task_id}: {e}")
+                    except ImportError:
+                        logger.warning(f"⚠️ Could not import website_crawling celery_app - some tasks may not be revoked")
+
+                if celery_tasks_revoked > 0:
+                    logger.info(f"✅ Revoked {celery_tasks_revoked} Celery tasks before deletion")
+                    nuke_results["celery_tasks_revoked"] = celery_tasks_revoked
+
+            except Exception as e:
+                logger.warning(f"⚠️ Error revoking Celery tasks: {e} - continuing with database deletion")
+                nuke_results["celery_revoke_error"] = str(e)
+
+            # Step 2: Delete from database
             async with get_db_connection() as conn:
                 # Start explicit transaction for database deletion
                 async with conn.transaction():
