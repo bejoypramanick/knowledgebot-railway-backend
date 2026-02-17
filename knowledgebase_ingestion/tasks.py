@@ -28,7 +28,7 @@ async def update_file_processing_status(file_id: int, status: str, error_message
                 )
             else:
                 await conn.execute(
-                    "UPDATE file_uploads SET processing_status = $1, error_message = NULL, updated_at = NOW() WHERE id = $3",
+                    "UPDATE file_uploads SET processing_status = $1, error_message = NULL, updated_at = NOW() WHERE id = $2",
                     status, file_id
                 )
             logger.info(f"✅ Updated file_uploads ID {file_id} status to: {status}")
