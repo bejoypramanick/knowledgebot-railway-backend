@@ -3,7 +3,7 @@ Consolidated Knowledgebase Ingestion Router
 All knowledgebase ingestion endpoints in one file for easier debugging
 """
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form, BackgroundTasks
 from typing import Dict, List, Any, Optional
 import logging
 
@@ -13,7 +13,9 @@ from ..service.ingestion_service import (
     process_single_file_delete,
     delete_file_logic,
     nuke_filestore_and_database,
-    delete_website_hierarchy
+    delete_website_hierarchy,
+    upload_file_async,
+    update_processing_status
 )
 
 logger = logging.getLogger(__name__)
@@ -202,6 +204,148 @@ async def upload_files_batch(request: Request):
         raise
     except Exception as e:
         logger.error(f"Error in batch upload: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/upload/async")
+async def upload_file_async_endpoint(
+    file: UploadFile = File(...),
+    request: Request = None,
+    display_name: Optional[str] = Form(None),
+    background_tasks: BackgroundTasks = None
+):
+    """
+    Async file upload endpoint - returns immediately with pending status.
+    Actual processing happens in background. Frontend should poll /status/{id} to track progress.
+    """
+    try:
+        user_email, user_id = extract_user_from_request(request)
+
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="No file provided")
+
+        result = await upload_file_async(
+            file=file,
+            display_name=display_name,
+            user_email=user_email,
+            background_tasks=background_tasks
+        )
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in async file upload: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/status")
+async def get_processing_status(request: Request = None):
+    """Get processing status for all pending/processing items (files and websites)"""
+    try:
+        from shared.db import get_db_connection
+
+        async with get_db_connection() as conn:
+            # Get all non-completed files
+            files = await conn.fetch(
+                """SELECT id, original_filename, processing_status, error_message, created_at, updated_at
+                   FROM file_uploads
+                   WHERE processing_status IN ('pending', 'processing')
+                   ORDER BY updated_at DESC"""
+            )
+
+            # Get all non-completed websites
+            websites = await conn.fetch(
+                """SELECT id, original_url, processing_status, error_message, created_at, updated_at
+                   FROM scraped_websites
+                   WHERE processing_status IN ('pending', 'processing')
+                   ORDER BY updated_at DESC"""
+            )
+
+            return {
+                "success": True,
+                "files": [
+                    {
+                        "id": str(f['id']),
+                        "type": "file",
+                        "name": f['original_filename'],
+                        "processing_status": f['processing_status'],
+                        "error_message": f['error_message'],
+                        "created_at": f['created_at'].isoformat() if f['created_at'] else None,
+                        "updated_at": f['updated_at'].isoformat() if f['updated_at'] else None
+                    }
+                    for f in files
+                ],
+                "websites": [
+                    {
+                        "id": str(w['id']),
+                        "type": "website",
+                        "name": w['original_url'],
+                        "processing_status": w['processing_status'],
+                        "error_message": w['error_message'],
+                        "created_at": w['created_at'].isoformat() if w['created_at'] else None,
+                        "updated_at": w['updated_at'].isoformat() if w['updated_at'] else None
+                    }
+                    for w in websites
+                ]
+            }
+    except Exception as e:
+        logger.error(f"Error getting processing status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/status/{item_id}")
+async def get_item_processing_status(item_id: str, request: Request = None):
+    """Get processing status for a single file or website"""
+    try:
+        from shared.db import get_db_connection
+
+        async with get_db_connection() as conn:
+            # Try to find in file_uploads first
+            file_record = await conn.fetchrow(
+                """SELECT id, original_filename, processing_status, error_message, created_at, updated_at
+                   FROM file_uploads WHERE id = $1""",
+                int(item_id)
+            )
+
+            if file_record:
+                return {
+                    "success": True,
+                    "type": "file",
+                    "id": str(file_record['id']),
+                    "name": file_record['original_filename'],
+                    "processing_status": file_record['processing_status'],
+                    "error_message": file_record['error_message'],
+                    "created_at": file_record['created_at'].isoformat() if file_record['created_at'] else None,
+                    "updated_at": file_record['updated_at'].isoformat() if file_record['updated_at'] else None
+                }
+
+            # Try to find in scraped_websites
+            website_record = await conn.fetchrow(
+                """SELECT id, original_url, processing_status, error_message, created_at, updated_at
+                   FROM scraped_websites WHERE id = $1""",
+                int(item_id)
+            )
+
+            if website_record:
+                return {
+                    "success": True,
+                    "type": "website",
+                    "id": str(website_record['id']),
+                    "name": website_record['original_url'],
+                    "processing_status": website_record['processing_status'],
+                    "error_message": website_record['error_message'],
+                    "created_at": website_record['created_at'].isoformat() if website_record['created_at'] else None,
+                    "updated_at": website_record['updated_at'].isoformat() if website_record['updated_at'] else None
+                }
+
+            raise HTTPException(status_code=404, detail=f"Item {item_id} not found")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting item processing status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

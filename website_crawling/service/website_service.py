@@ -1407,3 +1407,129 @@ class WebsiteService:
                 "error": str(e)
             }
 
+
+# =============================================================================
+# ASYNC BACKGROUND PROCESSING FOR WEBSITE SCRAPING
+# =============================================================================
+
+async def update_website_processing_status(website_id: int, status: str, error_message: str = None):
+    """Update the processing status of a website record."""
+    try:
+        from shared.db import get_db_connection
+
+        async with get_db_connection() as conn:
+            if error_message:
+                await conn.execute(
+                    "UPDATE scraped_websites SET processing_status = $1, error_message = $2, updated_at = NOW() WHERE id = $3",
+                    status, error_message, website_id
+                )
+            else:
+                await conn.execute(
+                    "UPDATE scraped_websites SET processing_status = $1, error_message = NULL, updated_at = NOW() WHERE id = $3",
+                    status, website_id
+                )
+            logger.info(f"✅ Updated scraped_websites ID {website_id} status to: {status}")
+    except Exception as e:
+        logger.error(f"❌ Failed to update website processing status for ID {website_id}: {e}")
+
+
+async def scrape_website_background(
+    website_id: int,
+    url: str,
+    options: Dict[str, Any]
+):
+    """
+    Background task to scrape website asynchronously.
+    Updates the scraped_websites record with processing_status as it progresses.
+    """
+    try:
+        await update_website_processing_status(website_id, "processing")
+
+        logger.info(f"🔄 [BACKGROUND] Starting async scraping for website ID {website_id}: {url}")
+
+        # Create a website service instance for scraping
+        service = WebsiteService()
+
+        # Perform the actual scraping
+        result = await service.scrape_website(url, options)
+
+        if result.get("success"):
+            logger.info(f"✅ [BACKGROUND] Website ID {website_id} scraped successfully")
+            await update_website_processing_status(website_id, "completed")
+        else:
+            error_msg = result.get("error", "Unknown scraping error")
+            logger.error(f"❌ [BACKGROUND] Website ID {website_id} scraping failed: {error_msg}")
+            await update_website_processing_status(website_id, "failed", error_msg)
+
+    except Exception as e:
+        error_msg = f"Background scraping error: {str(e)}"
+        logger.error(f"❌ [BACKGROUND] Unexpected error for website ID {website_id}: {e}")
+        await update_website_processing_status(website_id, "failed", error_msg)
+
+
+async def scrape_website_async(
+    url: str,
+    options: Dict[str, Any],
+    background_tasks=None
+) -> Dict[str, Any]:
+    """
+    Async wrapper that returns immediately after creating DB record with pending status.
+    Returns the website record with processing_status='pending' so frontend can start polling.
+    Actual processing happens in background via BackgroundTasks.
+    """
+    try:
+        service = WebsiteService()
+
+        # Check if URL already exists
+        existing = await service.scraping_dao.get_existing_website(url)
+        if existing and not options.get("replace_existing", False):
+            raise Exception("Website already exists. Set replace_existing=true to update.")
+
+        if existing and options.get("replace_existing", False):
+            logger.info(f"🔄 Replacing existing website: {url}")
+            await service.scraping_dao.delete_website_record(url)
+
+        # Create initial DB record with processing_status='pending'
+        from shared.db import get_db_connection
+        from urllib.parse import urlparse
+
+        website_record_id = None
+        async with get_db_connection() as conn:
+            website_record_id = await conn.fetchval(
+                """INSERT INTO scraped_websites (original_url, domain, processing_status, created_at)
+                   VALUES ($1, $2, $3, NOW()) RETURNING id""",
+                url,
+                urlparse(url).netloc.replace('www.', ''),
+                "pending"
+            )
+
+        logger.info(f"✅ [ASYNC] Created scraped_websites record ID {website_record_id} with status='pending'")
+
+        # Dispatch background task for actual scraping
+        if background_tasks:
+            background_tasks.add_task(
+                scrape_website_background,
+                website_id=website_record_id,
+                url=url,
+                options=options
+            )
+            logger.info(f"✅ [ASYNC] Dispatched background task for website ID {website_record_id}")
+        else:
+            logger.warning(f"⚠️ [ASYNC] No background_tasks available - cannot dispatch background scraping")
+
+        # Return immediate response with pending status
+        return {
+            "success": True,
+            "message": "Website scraping queued for processing",
+            "website": {
+                "id": str(website_record_id),
+                "url": url,
+                "processing_status": "pending",
+                "created_at": datetime.utcnow().isoformat()
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"❌ [ASYNC] Error in scrape_website_async: {e}")
+        raise
+

@@ -3,11 +3,11 @@ Consolidated Website Crawling Router
 All website crawling endpoints in one file for easier debugging
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, BackgroundTasks
 from typing import Dict, List, Any, Optional
 import logging
 
-from ..service.website_service import WebsiteService
+from ..service.website_service import WebsiteService, scrape_website_async
 from ..service.ai_service import upload_content_to_gemini
 
 logger = logging.getLogger(__name__)
@@ -134,6 +134,111 @@ async def scrape_website(request: Request):
     except Exception as e:
         logger.error(f"❌ Error in scrape endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/async")
+async def scrape_website_async_endpoint(request: Request, background_tasks: BackgroundTasks):
+    """
+    Async website scraping endpoint - returns immediately with pending status.
+    Actual processing happens in background. Frontend should poll /status/{id} to track progress.
+    """
+    try:
+        body = await request.json()
+
+        # Support both single URL and multiple URLs
+        url_input = body.get("url") or body.get("urls") or ""
+        if not url_input:
+            raise HTTPException(status_code=400, detail="URL or URLs parameter is required")
+
+        # Parse URLs - handle both single URL and comma-separated list
+        if isinstance(url_input, list):
+            urls = url_input
+        else:
+            urls = [u.strip() for u in str(url_input).split(",") if u.strip()]
+
+        if not urls:
+            raise HTTPException(status_code=400, detail="At least one valid URL is required")
+
+        # Validate URLs
+        for url in urls:
+            if not url.startswith(("http://", "https://")):
+                raise HTTPException(status_code=400, detail=f"Invalid URL format: {url}")
+
+        # Get crawling parameters from frontend
+        max_depth = body.get("max_depth", 2)
+        replace_existing = body.get("replace_existing", False)
+        include_patterns = body.get("include_patterns", []) or []
+        exclude_patterns = body.get("exclude_patterns", []) or []
+
+        logger.info(f"🎯 Starting async batch scrape for {len(urls)} URL(s)")
+        all_results = []
+
+        # Process each URL
+        for idx, url in enumerate(urls, 1):
+            try:
+                url_type = WebsiteService.classify_url_type(url)
+                logger.info(f"[{idx}/{len(urls)}] Queueing {url_type}: {url}")
+
+                # Determine crawl depth based on URL type
+                if url_type == 'sitemap':
+                    crawl_depth = 1
+                elif url_type == 'single_page':
+                    crawl_depth = max(0, max_depth)
+                else:  # website
+                    crawl_depth = max_depth
+
+                # Use generous internal page cap
+                max_pages = 1000
+
+                # Scrape options
+                options = {
+                    "url": url,
+                    "max_pages": max_pages,
+                    "max_depth": min(crawl_depth, 5),
+                    "replace_existing": replace_existing,
+                    "delay_between_requests": max(0, float(body.get("delay_between_requests", 0))),
+                    "max_concurrent": min(int(body.get("max_concurrent", 10)), 50),
+                    "extract_links": body.get("extract_links", True),
+                    "extract_images": body.get("extract_images", False),
+                    "respect_robots_txt": body.get("respect_robots_txt", True),
+                    "user_agent": body.get("user_agent", "KnowledgeBot-Crawler/1.0"),
+                    "timeout": body.get("timeout", 30),
+                    "include_patterns": include_patterns,
+                    "exclude_patterns": exclude_patterns
+                }
+
+                # Queue for async processing
+                result = await scrape_website_async(url, options, background_tasks)
+                all_results.append({
+                    "url": url,
+                    "type": url_type,
+                    "success": result.get("success", True),
+                    "result": result
+                })
+
+            except Exception as e:
+                logger.error(f"❌ Error queueing {url}: {e}")
+                all_results.append({
+                    "url": url,
+                    "type": "unknown",
+                    "success": False,
+                    "error": str(e)
+                })
+
+        logger.info(f"✅ Async batch scrape queued: {len([r for r in all_results if r.get('success')])}/{len(urls)} accepted")
+
+        return {
+            "success": True,
+            "data": all_results,
+            "message": f"Queued {len(urls)} URL(s) for scraping"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error in async scrape endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/jobs")
 async def get_scraping_jobs():

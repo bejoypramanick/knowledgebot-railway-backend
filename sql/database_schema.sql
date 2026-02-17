@@ -636,15 +636,21 @@ CREATE TABLE public.file_uploads (
 	original_mime_type varchar(100),
 	docling_images_extracted int4 DEFAULT 0,
 	docling_images_with_ocr int4 DEFAULT 0,
+	-- Async processing status columns
+	processing_status varchar(20) DEFAULT 'pending'::character varying NULL,
+	error_message text NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	CONSTRAINT file_uploads_pkey PRIMARY KEY (id),
-	CONSTRAINT file_uploads_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL
+	CONSTRAINT file_uploads_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL,
+	CONSTRAINT valid_processing_status CHECK ((processing_status::text = ANY (ARRAY[('pending'::character varying)::text, ('processing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text])))
 );
 CREATE INDEX idx_file_uploads_created_at ON public.file_uploads USING btree (created_at DESC);
 CREATE INDEX idx_file_uploads_gemini_file_name ON public.file_uploads USING btree (gemini_file_name);
 CREATE INDEX idx_file_uploads_gemini_state ON public.file_uploads USING btree (gemini_state);
 CREATE INDEX idx_file_uploads_user_role_id ON public.file_uploads USING btree (user_role_id);
+CREATE INDEX idx_file_uploads_processing_status ON public.file_uploads USING btree (processing_status);
+CREATE INDEX idx_file_uploads_processing_pending ON public.file_uploads(processing_status) WHERE processing_status IN ('pending', 'processing');
 CREATE INDEX idx_file_uploads_processed_by_docling ON public.file_uploads(processed_by_docling) WHERE processed_by_docling = true;
 CREATE INDEX idx_file_uploads_docling_processing_time ON public.file_uploads(docling_processing_time_ms) WHERE processed_by_docling = true;
 COMMENT ON TABLE public.file_uploads IS 'Uploaded files with Gemini FileSearch integration and Docling processing';
@@ -670,15 +676,21 @@ CREATE TABLE public.scraped_websites (
 	gemini_file_uri text NULL,
 	metadata jsonb DEFAULT '{}'::jsonb NULL,
 	"version" int4 DEFAULT 1 NULL,
+	-- Async processing status columns
+	processing_status varchar(20) DEFAULT 'pending'::character varying NULL,
+	error_message text NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	CONSTRAINT scraped_websites_pkey PRIMARY KEY (id),
-	CONSTRAINT scraped_websites_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL
+	CONSTRAINT scraped_websites_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL,
+	CONSTRAINT valid_processing_status_websites CHECK ((processing_status::text = ANY (ARRAY[('pending'::character varying)::text, ('processing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text])))
 );
 CREATE INDEX idx_scraped_websites_domain ON public.scraped_websites USING btree (domain);
 CREATE INDEX idx_scraped_websites_gemini_state ON public.scraped_websites USING btree (gemini_state);
 CREATE INDEX idx_scraped_websites_original_url ON public.scraped_websites USING btree (original_url);
 CREATE INDEX idx_scraped_websites_user_role_id ON public.scraped_websites USING btree (user_role_id);
+CREATE INDEX idx_scraped_websites_processing_status ON public.scraped_websites USING btree (processing_status);
+CREATE INDEX idx_scraped_websites_processing_pending ON public.scraped_websites(processing_status) WHERE processing_status IN ('pending', 'processing');
 COMMENT ON TABLE public.scraped_websites IS 'Scraped website content for knowledge base';
 
 ALTER TABLE public.scraped_websites OWNER TO postgres;
