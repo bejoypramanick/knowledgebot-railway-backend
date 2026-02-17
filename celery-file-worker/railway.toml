@@ -1,7 +1,6 @@
 [build]
 dockerfilePath = "Dockerfile.celery"
 rootDirectory = ".."
-watchPaths = ["celery-file-worker/"]
 
 [deploy]
 # Celery worker for file processing queue

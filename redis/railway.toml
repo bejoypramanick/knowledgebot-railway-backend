@@ -1,7 +1,6 @@
 [build]
 dockerfilePath = "redis/Dockerfile"
 rootDirectory = "."
-watchPaths = ["redis/"]
 
 [deploy]
 # Redis service is stateful, restart on failure
