@@ -28,7 +28,7 @@ The health monitoring service is deployed on Railway but has three critical issu
 
 1. **DATABASE_URL Not Configured** (CRITICAL)
    - Error: "Database URL not configured - health checks will not be persisted"
-   - Root Cause: Environment variable `DATABASE_URL` or `RAILWAY_POSTGRES_URL` not set in Railway
+   - Root Cause: Environment variable `DATABASE_URL` or `DATABASE_URL` not set in Railway
    - Impact: Health checks run every 5 minutes but are NOT stored in database
    - Fix: See Railway Setup Instructions below
 

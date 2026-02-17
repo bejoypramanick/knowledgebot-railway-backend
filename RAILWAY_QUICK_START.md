@@ -76,7 +76,7 @@ Then set **3 environment variables** on each worker.
 **Get these values first:**
 
 From **api_gateway** service (Variables tab):
-- Copy: `RAILWAY_POSTGRES_URL`
+- Copy: `DATABASE_URL`
 - Copy: `GEMINI_API_KEY`
 
 ---
@@ -90,7 +90,7 @@ Add these **3 variables:**
 | Key | Value |
 |-----|-------|
 | `REDIS_URL` | `redis://redis.railway.internal:6379/0` |
-| `RAILWAY_POSTGRES_URL` | (paste from api_gateway) |
+| `DATABASE_URL` | (paste from api_gateway) |
 | `GEMINI_API_KEY` | (paste from api_gateway) |
 
 💾 **Save** → Service auto-restarts
@@ -106,7 +106,7 @@ Add these **3 variables:**
 | Key | Value |
 |-----|-------|
 | `REDIS_URL` | `redis://redis.railway.internal:6379/1` ← **DB 1!** |
-| `RAILWAY_POSTGRES_URL` | (paste from api_gateway) |
+| `DATABASE_URL` | (paste from api_gateway) |
 | `GEMINI_API_KEY` | (paste from api_gateway) |
 
 💾 **Save** → Service auto-restarts
@@ -211,7 +211,7 @@ For more help → See `RAILWAY_DETAILED_SETUP.md`
 ```
 REDIS_URL (File Worker) = redis://redis.railway.internal:6379/0
 REDIS_URL (Web Worker)  = redis://redis.railway.internal:6379/1
-RAILWAY_POSTGRES_URL    = postgresql://user:pass@host:5432/db?sslmode=require
+DATABASE_URL    = postgresql://user:pass@host:5432/db?sslmode=require
 GEMINI_API_KEY          = AIzaSyD... (your actual key)
 ```
 

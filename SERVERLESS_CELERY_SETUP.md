@@ -152,7 +152,7 @@ REDIS_URL=redis://default:xxxxx@us1-yyyyy.upstash.io:6379/1
 
 ```
 REDIS_URL=redis://default:xxxxx@us1-yyyyy.upstash.io:6379/0
-RAILWAY_POSTGRES_URL=(your postgres url)
+DATABASE_URL=(your postgres url)
 GEMINI_API_KEY=(your gemini key)
 ```
 
@@ -160,7 +160,7 @@ GEMINI_API_KEY=(your gemini key)
 
 ```
 REDIS_URL=redis://default:xxxxx@us1-yyyyy.upstash.io:6379/1
-RAILWAY_POSTGRES_URL=(your postgres url)
+DATABASE_URL=(your postgres url)
 GEMINI_API_KEY=(your gemini key)
 ```
 

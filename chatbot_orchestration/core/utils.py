@@ -321,7 +321,7 @@ def validate_environment() -> None:
     
     # Check for database URL using the centralized settings
     if not settings.railway_postgres_url and not settings.database_url:
-        required_vars.append('DATABASE_URL or RAILWAY_POSTGRES_URL')
+        required_vars.append('DATABASE_URL')
     
     # Check for Gemini API key
     if not settings.gemini_api_key:

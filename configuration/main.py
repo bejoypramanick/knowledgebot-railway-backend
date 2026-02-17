@@ -59,7 +59,7 @@ logger.info(f"Working directory: {os.getcwd()}")
 logger.info(f"Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'development')}")
 
 # Check critical environment variables early
-db_url = os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+db_url = os.getenv("DATABASE_URL")
 gemini_key = os.getenv("GEMINI_API_KEY")
 
 logger.info(f"🔍 Database URL configured: {'✅' if db_url else '❌'}")
@@ -94,11 +94,7 @@ async def lifespan(app: FastAPI):
         logger.info("✅ LIFESPAN: Railway network ready")
 
         # Store database URL for lazy initialization
-        database_url = (
-            os.getenv("DATABASE_URL") or
-            os.getenv("RAILWAY_POSTGRES_URL") or
-            os.getenv("POSTGRES_URL")
-        )
+        database_url = os.getenv("DATABASE_URL")
         logger.info(f"🔍 LIFESPAN: Database URL configured: {'✅' if database_url else '❌'}")
 
         if database_url:

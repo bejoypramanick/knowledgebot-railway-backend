@@ -72,7 +72,7 @@ Set these in Railway dashboard for the service:
 
 ```
 REDIS_URL=redis://redis.railway.internal:6379/1
-RAILWAY_POSTGRES_URL=postgresql://...
+DATABASE_URL=postgresql://...
 GEMINI_API_KEY=your-api-key
 DOCLING_ENABLED=true
 ```
@@ -251,7 +251,7 @@ redis-cli -n 1 ping
 
 **Check 2: Database connection**
 ```bash
-psql $RAILWAY_POSTGRES_URL -c "SELECT 1"
+psql $DATABASE_URL -c "SELECT 1"
 # Should return: 1
 ```
 

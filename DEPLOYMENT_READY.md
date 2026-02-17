@@ -92,14 +92,14 @@ railway up --name celery-web-worker
 **For celery-file-worker:**
 ```
 REDIS_URL=redis://redis.railway.internal:6379/0
-RAILWAY_POSTGRES_URL=<your-postgres-url>
+DATABASE_URL=<your-postgres-url>
 GEMINI_API_KEY=<your-api-key>
 ```
 
 **For celery-web-worker:**
 ```
 REDIS_URL=redis://redis.railway.internal:6379/1
-RAILWAY_POSTGRES_URL=<your-postgres-url>
+DATABASE_URL=<your-postgres-url>
 GEMINI_API_KEY=<your-api-key>
 ```
 

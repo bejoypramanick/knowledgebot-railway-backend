@@ -39,7 +39,7 @@ class DatabaseInitializer:
             
         try:
             # Use provided URL or get from environment
-            db_url = database_url or os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+            db_url = database_url or os.getenv("DATABASE_URL")
             
             if not db_url:
                 logger.error("❌ No database URL provided and none found in environment")
@@ -71,7 +71,7 @@ class DatabaseInitializer:
             import asyncpg
 
             # Use provided URL or get from environment
-            db_url = database_url or os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+            db_url = database_url or os.getenv("DATABASE_URL")
             
             if not db_url:
                 logger.error("❌ No database URL provided for schema validation")

@@ -108,7 +108,7 @@ For each worker service on Railway dashboard:
 
 ```
 REDIS_URL=redis://redis.railway.internal:6379/0
-RAILWAY_POSTGRES_URL=<same as other services>
+DATABASE_URL=<same as other services>
 GEMINI_API_KEY=<your-api-key>
 ```
 
@@ -116,7 +116,7 @@ GEMINI_API_KEY=<your-api-key>
 
 ```
 REDIS_URL=redis://redis.railway.internal:6379/1
-RAILWAY_POSTGRES_URL=<same as other services>
+DATABASE_URL=<same as other services>
 GEMINI_API_KEY=<your-api-key>
 ```
 

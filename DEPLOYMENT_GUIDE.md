@@ -63,7 +63,7 @@ Expected output:
 ```bash
 # Database
 DATABASE_URL="postgresql://user:password@host:5432/dbname"
-RAILWAY_POSTGRES_URL="postgresql://user:password@host:5432/dbname"
+DATABASE_URL="postgresql://user:password@host:5432/dbname"
 
 # Gemini/AI
 GEMINI_API_KEY="your_gemini_api_key"

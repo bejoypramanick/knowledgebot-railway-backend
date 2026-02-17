@@ -19,7 +19,7 @@ class DatabaseManager:
 
     def __init__(self, connection_url: Optional[str] = None):
         self._pool: Optional[asyncpg.Pool] = None
-        self._connection_url = connection_url or os.getenv("DATABASE_URL") or os.getenv("RAILWAY_POSTGRES_URL") or os.getenv("POSTGRES_URL")
+        self._connection_url = connection_url or os.getenv("DATABASE_URL")
         
         # Ensure SSL mode is properly configured for Railway
         if self._connection_url and 'sslmode=' not in self._connection_url:

@@ -320,9 +320,9 @@ def validate_environment() -> None:
     required_vars = []
     
     # Check for database URL
-    if not os.getenv('RAILWAY_POSTGRES_URL') and not os.getenv('DATABASE_URL'):
-        required_vars.append('DATABASE_URL or RAILWAY_POSTGRES_URL')
-    
+    if not os.getenv('DATABASE_URL'):
+        required_vars.append('DATABASE_URL')
+
     # Check for Gemini API key
     if not os.getenv('GEMINI_API_KEY'):
         required_vars.append('GEMINI_API_KEY')
@@ -332,7 +332,7 @@ def validate_environment() -> None:
 
     # Log configuration status
     gemini_configured = os.getenv('GEMINI_API_KEY') is not None
-    db_configured = os.getenv('RAILWAY_POSTGRES_URL') or os.getenv('DATABASE_URL')
+    db_configured = os.getenv('DATABASE_URL')
     logger.info(f"INFO:main:GEMINI_API_KEY configured: {'YES' if gemini_configured else 'NO'}")
     logger.info(f"INFO:main:DATABASE_URL configured: {'YES' if db_configured else 'NO'}")
 

@@ -367,7 +367,7 @@ railway up --name celery-web-worker
 
 Both workers need:
 - `REDIS_URL` - Connection to Redis
-- `DATABASE_URL` or `RAILWAY_POSTGRES_URL` - Connection to PostgreSQL
+- `DATABASE_URL` or `DATABASE_URL` - Connection to PostgreSQL
 - `GEMINI_API_KEY` - For Gemini integration
 
 ---

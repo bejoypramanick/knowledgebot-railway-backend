@@ -36,7 +36,7 @@ Before starting, have these ready:
 3. **Find Your PostgreSQL URL**
    - Click on any service (e.g., api_gateway)
    - Click "Variables" tab
-   - Look for: `RAILWAY_POSTGRES_URL` or `DATABASE_URL`
+   - Look for: `DATABASE_URL` or `DATABASE_URL`
    - **Copy this value** - you'll need it later
    - Example: `postgresql://user:password@host:port/dbname?sslmode=require`
 
@@ -216,7 +216,7 @@ This is **CRITICAL** - the workers won't work without proper environment variabl
    - Click "Add"
 
    **Variable 2:**
-   - Key: `RAILWAY_POSTGRES_URL`
+   - Key: `DATABASE_URL`
    - Value: (paste the URL you copied earlier from api_gateway)
    - Example: `postgresql://user:pass@host:5432/db?sslmode=require`
    - Click "Add"
@@ -246,7 +246,7 @@ Repeat the same process for web worker:
    - Click "Add"
 
    **Variable 2:**
-   - Key: `RAILWAY_POSTGRES_URL`
+   - Key: `DATABASE_URL`
    - Value: (same as file worker)
    - Click "Add"
 
@@ -656,14 +656,14 @@ Look for: "Task timeout" or "deadline exceeded"
 ### File Worker (celery-file-worker)
 ```
 REDIS_URL=redis://redis.railway.internal:6379/0
-RAILWAY_POSTGRES_URL=(copy from api_gateway Variables)
+DATABASE_URL=(copy from api_gateway Variables)
 GEMINI_API_KEY=(your gemini api key)
 ```
 
 ### Web Worker (celery-web-worker)
 ```
 REDIS_URL=redis://redis.railway.internal:6379/1
-RAILWAY_POSTGRES_URL=(copy from api_gateway Variables)
+DATABASE_URL=(copy from api_gateway Variables)
 GEMINI_API_KEY=(your gemini api key)
 ```
 
