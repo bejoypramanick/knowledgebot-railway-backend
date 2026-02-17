@@ -7,6 +7,9 @@ watchPaths = ["celery-file-worker/"]
 # Celery worker for file processing queue
 startCommand = "celery -A knowledgebase_ingestion.celery_app worker -Q file_processing -l info -c 2 --max-tasks-per-child=1000"
 
+# Make this a serverless function (pay per invocation)
+function = true
+
 # Restart policy for worker reliability
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10

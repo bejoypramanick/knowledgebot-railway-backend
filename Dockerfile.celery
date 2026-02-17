@@ -20,12 +20,14 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements files
 COPY knowledgebase_ingestion/requirements.txt /tmp/kb-requirements.txt
 COPY website_crawling/requirements.txt /tmp/web-requirements.txt
-COPY shared/requirements.txt /tmp/shared-requirements.txt 2>/dev/null || echo "No shared requirements"
+
+# Try to copy shared requirements if it exists
+COPY shared/requirements.txt /tmp/shared-requirements.txt || true
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r /tmp/kb-requirements.txt && \
     pip install --no-cache-dir -r /tmp/web-requirements.txt && \
-    pip install --no-cache-dir -r /tmp/shared-requirements.txt 2>/dev/null || true
+    (pip install --no-cache-dir -r /tmp/shared-requirements.txt || true)
 
 # Copy application code
 COPY . .
