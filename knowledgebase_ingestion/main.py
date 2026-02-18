@@ -83,31 +83,8 @@ async def lifespan(app: FastAPI):
         except Exception as lookup_error:
             logger.error(f"❌ Error looking up FileSearch store: {lookup_error}")
 
-        # Start background result handler to listen for Redis messages
-        logger.info("🚀 Starting Redis result handler...")
-        from knowledgebase_ingestion.service.result_handler import start_result_handler, stop_result_handler
-        result_handler_task = None
-        try:
-            result_handler_task = asyncio.create_task(start_result_handler())
-            logger.info("✅ Redis result handler started")
-        except Exception as handler_error:
-            logger.error(f"❌ Failed to start result handler: {handler_error}")
-
         logger.info("🚀 Knowledgebase ingestion service started successfully")
         yield
-
-        # Stop result handler
-        if result_handler_task:
-            try:
-                await stop_result_handler()
-                result_handler_task.cancel()
-                try:
-                    await result_handler_task
-                except asyncio.CancelledError:
-                    pass
-                logger.info("✅ Result handler stopped")
-            except Exception as e:
-                logger.warning(f"⚠️ Error stopping result handler: {e}")
 
         await close_databases()
         logger.info("🛑 Knowledgebase ingestion service shutdown complete")
