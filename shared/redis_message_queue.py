@@ -18,10 +18,6 @@ class RedisMessageQueue:
 
     # Queue names
     FILE_TASK_QUEUE = "file_processing_tasks"  # knowledgebase → file-worker
-    FILE_RESULT_QUEUE = "file_processing_results"  # file-worker → knowledgebase
-
-    WEB_TASK_QUEUE = "web_processing_tasks"  # knowledgebase → web-worker
-    WEB_RESULT_QUEUE = "web_processing_results"  # web-worker → knowledgebase
 
     def __init__(self):
         """Initialize Redis connection"""
