@@ -2,6 +2,7 @@
 Internal API endpoints for file worker service
 These endpoints are only accessible by other Railway services
 """
+import os
 from fastapi import APIRouter, HTTPException
 from ..celery_app import celery_app
 from shared.otel_logger import get_otel_logger
@@ -11,27 +12,75 @@ router = APIRouter(prefix="/internal", tags=["internal"])
 
 @router.post("/dispatch-file")
 async def dispatch_file_task(**kwargs):
-    """Dispatch a file processing task"""
+    """
+    Dispatch a file processing task with file bytes.
+    Worker will create DB record and handle all processing.
+    """
     try:
+        import base64
+        import tempfile
         from tasks import process_file_upload_task
         from ..service.file_service import FileService
-        
+
         file_service = FileService()
-        
-        # Create file record first
-        file_record_id = await file_service.create_file_record(kwargs)
-        
-        if file_record_id:
-            task = process_file_upload_task.delay(file_id=file_record_id, **kwargs)
+
+        # Extract parameters
+        original_filename = kwargs.get('original_filename')
+        file_display_name = kwargs.get('file_display_name')
+        file_bytes_b64 = kwargs.get('file_bytes_b64')
+        file_size = kwargs.get('file_size')
+        user_email = kwargs.get('user_email', 'admin')
+
+        if not all([original_filename, file_bytes_b64, file_size]):
+            raise HTTPException(status_code=400, detail="Missing required parameters")
+
+        # Decode file bytes
+        try:
+            file_bytes = base64.b64decode(file_bytes_b64)
+            logger.info(f"✅ Decoded file bytes for {original_filename} ({len(file_bytes)} bytes)")
+        except Exception as e:
+            logger.error(f"❌ Failed to decode file bytes: {e}")
+            raise HTTPException(status_code=400, detail="Invalid file bytes encoding")
+
+        # Write to temp file
+        temp_file = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{original_filename}") as tmp:
+                tmp.write(file_bytes)
+                temp_file = tmp.name
+            logger.info(f"✅ Wrote file to temp location: {temp_file}")
+        except Exception as e:
+            logger.error(f"❌ Failed to write temp file: {e}")
+            raise HTTPException(status_code=500, detail="Failed to create temp file")
+
+        # Dispatch Celery task with temp file path
+        # Task will handle: validation, DB record creation, processing
+        try:
+            task = process_file_upload_task.delay(
+                original_filename=original_filename,
+                file_display_name=file_display_name,
+                tmp_path=temp_file,
+                file_size=file_size,
+                user_email=user_email
+            )
             logger.info(f"✅ Dispatched file task: {task.id}")
             return {
-                "success": True, 
+                "success": True,
                 "task_id": task.id,
                 "message": f"File task dispatched successfully: {task.id}"
             }
-        else:
-            logger.error("❌ Failed to create file record")
-            raise HTTPException(status_code=500, detail="Failed to create file record")
+        except Exception as e:
+            logger.error(f"❌ Failed to queue Celery task: {e}")
+            # Clean up temp file on failure
+            if temp_file and os.path.exists(temp_file):
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+            raise HTTPException(status_code=500, detail=f"Failed to queue task: {e}")
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ Failed to dispatch file task: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to dispatch file task: {e}")

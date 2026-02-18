@@ -1407,100 +1407,57 @@ async def upload_file_celery(
         if not mime_valid:
             raise HTTPException(status_code=400, detail=mime_error)
 
-        # Stream to temp file
-        tmp_path, file_size = await stream_to_temp_file(file, original_filename)
-
-        # Validate file size
-        size_valid, size_error = validate_file_size(file_size)
-        if not size_valid:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            raise HTTPException(status_code=413, detail=size_error)
-
-        # Calculate hash and detect MIME type
-        sha256_hash = calculate_sha256(tmp_path)
-        detected_mime_type = detect_mime_type_from_extension(original_filename, file.content_type, tmp_path)
-
-        logger.info(f"🔍 [CELERY] Detected MIME: {detected_mime_type} for {original_filename}")
-
-        # Check for duplicates
-        duplicate_check = await file_service.handle_duplicate_check(sha256_hash, original_filename, False)
-        if not duplicate_check.get("allow", True):
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            raise HTTPException(status_code=409, detail=duplicate_check.get("detail", "File already exists"))
-
-        # Create initial DB record with processing_status='pending'
-        from shared.db import get_db_connection
-
-        user_role_id = await file_service.get_admin_user_role_id(email)
-        if user_role_id is None:
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            raise HTTPException(status_code=403, detail="User does not have admin privileges")
-
-        file_record_id = None
-        async with get_db_connection() as conn:
-            file_record_id = await conn.fetchval(
-                """INSERT INTO file_uploads (user_role_id, original_filename, display_name, file_extension,
-                   mime_type, file_size, sha256_hash, processing_status, created_at)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW()) RETURNING id""",
-                user_role_id, original_filename, file_display_name,
-                original_filename.rsplit('.', 1)[-1] if '.' in original_filename else '',
-                detected_mime_type, file_size, sha256_hash, "pending"
-            )
-
-        logger.info(f"✅ [CELERY] Created DB record ID {file_record_id} with status='pending'")
-
-        # Dispatch Celery task for actual processing
-        from shared.service_client import service_client
-        
-        logger.info(f"📤 [TASK_DISPATCH] Preparing to dispatch task for file ID {file_record_id}, filename: {original_filename}, size: {file_size} bytes, mime: {detected_mime_type}")
-        
-        # Call worker service via HTTP to dispatch task
+        # Read file into bytes and dispatch to worker (worker will create DB record + process)
         try:
+            import base64
+
+            file_bytes = await file.read()
+            file_size = len(file_bytes)
+
+            # Quick size validation
+            size_valid, size_error = validate_file_size(file_size)
+            if not size_valid:
+                raise HTTPException(status_code=413, detail=size_error)
+
+            logger.info(f"📤 [DISPATCH] Dispatching file {original_filename} ({file_size} bytes) to celery-file-worker")
+
+            # Encode file bytes as base64 for JSON transport
+            file_bytes_b64 = base64.b64encode(file_bytes).decode('utf-8')
+
+            # Dispatch to worker with file bytes - worker will handle:
+            # - Validation
+            # - DB record creation
+            # - All processing (Gemini, Docling, etc.)
+            # - DB record updates
+            from shared.service_client import service_client
+
             result = await service_client.dispatch_file_task(
                 'celery_file_worker',
-                file_id=file_record_id,
-                tmp_path=tmp_path,
                 original_filename=original_filename,
                 file_display_name=file_display_name,
-                detected_mime_type=detected_mime_type,
-                user_email=user_email,
+                file_bytes_b64=file_bytes_b64,
                 file_size=file_size,
-                sha256_hash=sha256_hash
+                user_email=user_email
             )
-            
+
             if result.get('success'):
                 task_id = result.get('task_id')
-                logger.info(f"✅ [TASK_DISPATCH] File task dispatched successfully: {task_id}")
+                logger.info(f"✅ File task dispatched successfully: {task_id}")
                 return {
                     "success": True,
                     "message": "File processing task dispatched successfully",
-                    "task_id": task_id,
-                    "file": {
-                        "id": str(file_record_id),
-                        "original_filename": original_filename,
-                        "file_display_name": file_display_name,
-                        "size_bytes": file_size,
-                        "mime_type": detected_mime_type,
-                        "processing_status": "pending"
-                    }
+                    "task_id": task_id
                 }
             else:
                 error_msg = result.get('error', 'Unknown error')
-                logger.error(f"❌ [TASK_DISPATCH] Failed to dispatch file task: {error_msg}")
-                return {
-                    "success": False,
-                    "error": f"Failed to dispatch file task: {error_msg}"
-                }
-                
+                logger.error(f"❌ Failed to dispatch file task: {error_msg}")
+                raise HTTPException(status_code=500, detail=error_msg)
+
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"❌ [TASK_DISPATCH] Error calling worker service: {e}")
-            return {
-                "success": False,
-                "error": f"Error dispatching file task: {str(e)}"
-            }
+            logger.error(f"❌ Error dispatching file task: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
     except HTTPException:
         raise
