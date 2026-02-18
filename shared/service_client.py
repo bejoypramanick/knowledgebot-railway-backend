@@ -16,8 +16,9 @@ class ServiceClient:
         self.timeout = httpx.Timeout(30.0, connect=5.0)
         self.base_urls = {
             'knowledgebase_ingestion': os.getenv('KNOWLEDGEBASE_INGESTION_URL', 'http://knowledge-base.railway.internal:8080'),
-            'website_crawling': os.getenv('WEBSITE_CRAWLING_URL', 'http://web-crawling.railway.internal:8080'),
             'chatbot_orchestration': os.getenv('CHATBOT_ORCHESTRATION_URL', 'http://chatbot.railway.internal:8080'),
+            'celery_web_worker': os.getenv('CELERY_WEB_WORKER_URL', 'http://celery-web-worker.railway.internal:8080'),
+            'celery_file_worker': os.getenv('CELERY_FILE_WORKER_URL', 'http://celery-file-worker.railway.internal:8080'),
         }
     
     async def _make_request(self, service: str, method: str, endpoint: str, 

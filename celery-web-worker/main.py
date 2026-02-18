@@ -10,9 +10,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from shared.otel_logger import get_otel_logger
 from shared.middleware import CorrelationIDMiddleware
 
-# Import internal router
-from internal import router
-
 logger = get_otel_logger("celery-web-worker", "celery-web-worker")
 
 @asynccontextmanager

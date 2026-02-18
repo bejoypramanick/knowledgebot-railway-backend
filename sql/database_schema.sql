@@ -643,7 +643,7 @@ CREATE TABLE public.file_uploads (
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	CONSTRAINT file_uploads_pkey PRIMARY KEY (id),
 	CONSTRAINT file_uploads_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL,
-	CONSTRAINT valid_processing_status CHECK ((processing_status::text = ANY (ARRAY[('pending'::character varying)::text, ('processing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text])))
+	CONSTRAINT valid_processing_status CHECK ((processing_status::text = ANY (ARRAY[('pending'::character varying)::text, ('processing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('cancelled'::character varying)::text])))
 );
 CREATE INDEX idx_file_uploads_created_at ON public.file_uploads USING btree (created_at DESC);
 CREATE INDEX idx_file_uploads_gemini_file_name ON public.file_uploads USING btree (gemini_file_name);
@@ -683,7 +683,7 @@ CREATE TABLE public.scraped_websites (
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	CONSTRAINT scraped_websites_pkey PRIMARY KEY (id),
 	CONSTRAINT scraped_websites_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL,
-	CONSTRAINT valid_processing_status_websites CHECK ((processing_status::text = ANY (ARRAY[('pending'::character varying)::text, ('processing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text])))
+	CONSTRAINT valid_processing_status_websites CHECK ((processing_status::text = ANY (ARRAY[('pending'::character varying)::text, ('processing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('cancelled'::character varying)::text])))
 );
 CREATE INDEX idx_scraped_websites_domain ON public.scraped_websites USING btree (domain);
 CREATE INDEX idx_scraped_websites_gemini_state ON public.scraped_websites USING btree (gemini_state);

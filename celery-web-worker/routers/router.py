@@ -14,48 +14,40 @@ async def dispatch_website_task(**kwargs):
     """Dispatch a website scraping task"""
     try:
         from tasks import scrape_website_task
-        from ..service.website_service import WebsiteService
-        
-        website_service = WebsiteService()
-        
-        # Create website record first
-        website_record_id = await website_service.create_website_record(kwargs)
-        
-        if website_record_id:
-            task = scrape_website_task.delay(website_id=website_record_id, **kwargs)
+
+        website_id = kwargs.get('website_id')
+        url = kwargs.get('url')
+
+        # If website_id is passed, record already exists - just queue the task
+        if website_id:
+            logger.info(f"Queueing task for existing website record ID {website_id}")
+            task = scrape_website_task.delay(website_id=website_id, url=url, **{k: v for k, v in kwargs.items() if k not in ['website_id', 'url']})
             logger.info(f"✅ Dispatched website task: {task.id}")
             return {
-                "success": True, 
+                "success": True,
                 "task_id": task.id,
                 "message": f"Website task dispatched successfully: {task.id}"
             }
         else:
-            logger.error("❌ Failed to create website record")
-            raise HTTPException(status_code=500, detail="Failed to create website record")
+            # Fallback: Create record if needed (legacy support)
+            from ..service.website_service import WebsiteService
+            website_service = WebsiteService()
+            website_record_id = await website_service.create_website_record(kwargs)
+
+            if website_record_id:
+                task = scrape_website_task.delay(website_id=website_record_id, **kwargs)
+                logger.info(f"✅ Dispatched website task: {task.id}")
+                return {
+                    "success": True,
+                    "task_id": task.id,
+                    "message": f"Website task dispatched successfully: {task.id}"
+                }
+            else:
+                logger.error("❌ Failed to create website record")
+                raise HTTPException(status_code=500, detail="Failed to create website record")
     except Exception as e:
         logger.error(f"❌ Failed to dispatch website task: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to dispatch website task: {e}")
-
-@router.post("/cancel-all")
-async def cancel_all_tasks():
-    """Cancel all tasks and mark them as cancelled in database"""
-    try:
-        from shared.db import get_db_connection
-        
-        # Mark all pending/processing tasks as cancelled
-        async with get_db_connection() as conn:
-            await conn.execute(
-                "UPDATE file_uploads SET processing_status = 'cancelled' WHERE processing_status IN ('pending', 'processing')"
-            )
-        
-        # Purge queue
-        celery_app.control.purge()
-        
-        logger.info("✅ Cancelled all file processing tasks")
-        return {"success": True, "message": "All tasks cancelled successfully"}
-    except Exception as e:
-        logger.error(f"❌ Failed to cancel all tasks: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to cancel all tasks: {e}")
 
 @router.get("/status")
 async def worker_status():
@@ -84,6 +76,8 @@ async def worker_status():
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "service": "celery-web-worker"}
+
+@router.post("/celery/purge")
 async def purge_celery_queue():
     """Purge all pending tasks from the Celery queue"""
     try:

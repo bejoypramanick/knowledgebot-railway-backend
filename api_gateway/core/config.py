@@ -31,7 +31,6 @@ class Settings(BaseSettings):
     configuration_service_url: str = os.getenv("CONFIGURATION_SERVICE_URL", "http://localhost:8000")
     chatbot_orchestration_url: str = os.getenv("CHATBOT_ORCHESTRATION_URL", "http://chatbot-orchestration.railway.internal:8080")
     knowledgebase_ingestion_url: str = os.getenv("KNOWLEDGEBASE_INGESTION_URL", "http://knowledge-base.railway.internal:8080")
-    website_crawling_url: str = os.getenv("WEBSITE_CRAWLING_URL", "http://website-crawling.railway.internal:8080")
     admin_service_url: str = os.getenv("ADMIN_SERVICE_URL", "http://localhost:8000")
     
     # Firebase Configuration

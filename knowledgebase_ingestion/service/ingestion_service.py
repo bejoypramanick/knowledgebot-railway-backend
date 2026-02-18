@@ -1269,16 +1269,16 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                 except Exception as e:
                     logger.warning(f"⚠️ Could not purge file queue (DB0): {e}")
                 try:
-                    # Use HTTP client to purge website crawling queue
+                    # Use HTTP client to purge web worker queue
                     from shared.service_client import service_client
-                    
-                    success = await service_client.purge_celery_queue('website_crawling')
+
+                    success = await service_client.purge_celery_queue('celery_web_worker')
                     if success:
-                        logger.critical("✅ [2/3b] Website crawling queue (DB1) purged via HTTP")
+                        logger.critical("✅ [2/3b] Web worker queue (DB1) purged via HTTP")
                     else:
-                        logger.warning("⚠️ Could not purge website queue (DB1) via HTTP")
+                        logger.warning("⚠️ Could not purge web worker queue (DB1) via HTTP")
                 except Exception as e:
-                    logger.warning(f"⚠️ Error during website queue purge via HTTP: {e}")
+                    logger.warning(f"⚠️ Error during web worker queue purge via HTTP: {e}")
 
                 # Third: Revoke all tasks to stop pending ones
                 logger.critical("🛑 [3/3] Revoking pending tasks...")
@@ -1460,6 +1460,7 @@ async def upload_file_celery(
         # Call worker service via HTTP to dispatch task
         try:
             result = await service_client.dispatch_file_task(
+                'celery_file_worker',
                 file_id=file_record_id,
                 tmp_path=tmp_path,
                 original_filename=original_filename,
@@ -1467,8 +1468,7 @@ async def upload_file_celery(
                 detected_mime_type=detected_mime_type,
                 user_email=user_email,
                 file_size=file_size,
-                sha256_hash=sha256_hash,
-                celery_task_id=None  # Removed celery_task_id as it's not needed
+                sha256_hash=sha256_hash
             )
             
             if result.get('success'):

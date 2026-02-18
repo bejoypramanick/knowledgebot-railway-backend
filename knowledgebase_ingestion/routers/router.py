@@ -235,7 +235,7 @@ async def cancel_task(item_id: str, request: Request = None):
     """
     try:
         from shared.db import get_db_connection
-        from knowledgebase_ingestion.celery_app import celery_app
+        from shared.service_client import service_client
 
         async with get_db_connection() as conn:
             # Try file_uploads first
@@ -255,41 +255,33 @@ async def cancel_task(item_id: str, request: Request = None):
 
                 # ATOMIC TRANSACTION: Either both succeed or both fail
                 async with conn.transaction():
-                    # Step 1: Revoke the Celery task (if it exists)
+                    # Step 1: Revoke the Celery task via HTTP (if it exists)
                     if celery_task_id:
                         try:
-                            celery_app.control.revoke(celery_task_id, terminate=True)
-                            logger.info(f"🔴 [CELERY_REVOKE] Revoked task {celery_task_id} from Redis queue")
+                            success = await service_client.revoke_celery_task('celery_file_worker', celery_task_id)
+                            if success:
+                                logger.info(f"🔴 [CELERY_REVOKE] Revoked task {celery_task_id} from celery_file_worker")
+                            else:
+                                logger.warning(f"⚠️ Failed to revoke task {celery_task_id} from celery_file_worker")
                         except Exception as e:
                             # If revoke fails, raise exception to trigger transaction rollback
-                            logger.error(f" [ATOMIC_TX] Revoke failed for task {celery_task_id}: {e}")
+                            logger.error(f"❌ [ATOMIC_TX] Revoke failed for task {celery_task_id}: {e}")
                             raise HTTPException(status_code=500, detail=f"Failed to revoke task from queue: {e}")
 
-                    # Step 2: Mark all tasks as cancelled in database before deletion
-                    try:
-                        from ..dao.file_dao import FileDAO
-                        
-                        file_dao = FileDAO()
-                        await file_dao.update_all_files_status(from_status="pending", to_status="cancelled")
-                        await file_dao.update_all_files_status(from_status="processing", to_status="cancelled")
-                        logger.warning(" Marked all pending/processing tasks as 'cancelled'")
-                    except Exception as e:
-                        logger.warning(f" Could not mark tasks as cancelled: {e}")
-
-                    # Step 3: Update database (same transaction)
+                    # Step 2: Update database (same transaction)
                     try:
                         await conn.execute(
-                            "UPDATE file_uploads SET processing_status = 'cancelled', task_revoked_at = NOW() WHERE id = $1",
+                            "UPDATE file_uploads SET processing_status = 'cancelled' WHERE id = $1",
                             int(item_id)
                         )
-                        logger.info(f" [ATOMIC_TX] Updated DB: file {item_id} marked as cancelled")
+                        logger.info(f"✅ [ATOMIC_TX] Updated DB: file {item_id} marked as cancelled")
                     except Exception as e:
-                        # If DB update fails, transaction rolls back (revoke is undone in terms of intent)
-                        logger.error(f" [ATOMIC_TX] DB update failed for file {item_id}: {e}")
+                        # If DB update fails, transaction rolls back
+                        logger.error(f"❌ [ATOMIC_TX] DB update failed for file {item_id}: {e}")
                         raise HTTPException(status_code=500, detail=f"Failed to update cancellation status: {e}")
 
                 # If we reach here, transaction is committed - both operations succeeded
-                logger.info(f" [ATOMIC_COMMIT] Cancelled file task: {item_id} (celery_task_id: {celery_task_id})")
+                logger.info(f"✅ [ATOMIC_COMMIT] Cancelled file task: {item_id} (celery_task_id: {celery_task_id})")
                 return {
                     "success": True,
                     "type": "file",
@@ -315,16 +307,14 @@ async def cancel_task(item_id: str, request: Request = None):
 
                 # ATOMIC TRANSACTION: Either both succeed or both fail
                 async with conn.transaction():
-                    # Step 1: Revoke the Celery task (if it exists)
+                    # Step 1: Revoke the Celery task via HTTP (if it exists)
                     if celery_task_id:
                         try:
-                            from shared.service_client import service_client
-                            
-                            success = await service_client.revoke_celery_task('website_crawling', celery_task_id)
+                            success = await service_client.revoke_celery_task('celery_web_worker', celery_task_id)
                             if success:
-                                logger.info(f"🔴 [CELERY_REVOKE] Revoked task {celery_task_id} via HTTP")
+                                logger.info(f"🔴 [CELERY_REVOKE] Revoked task {celery_task_id} from celery_web_worker")
                             else:
-                                logger.warning(f"⚠️ Failed to revoke task {celery_task_id} via HTTP")
+                                logger.warning(f"⚠️ Failed to revoke task {celery_task_id} from celery_web_worker")
                         except Exception as e:
                             # If revoke fails, raise exception to trigger transaction rollback
                             logger.error(f"❌ [ATOMIC_TX] Revoke failed for task {celery_task_id}: {e}")
@@ -333,12 +323,12 @@ async def cancel_task(item_id: str, request: Request = None):
                     # Step 2: Update database (same transaction)
                     try:
                         await conn.execute(
-                            "UPDATE scraped_websites SET processing_status = 'cancelled', task_revoked_at = NOW() WHERE id = $1::int",
+                            "UPDATE scraped_websites SET processing_status = 'cancelled' WHERE id = $1::int",
                             int(item_id)
                         )
                         logger.info(f"✅ [ATOMIC_TX] Updated DB: website {item_id} marked as cancelled")
                     except Exception as e:
-                        # If DB update fails, transaction rolls back (revoke is undone in terms of intent)
+                        # If DB update fails, transaction rolls back
                         logger.error(f"❌ [ATOMIC_TX] DB update failed for website {item_id}: {e}")
                         raise HTTPException(status_code=500, detail=f"Failed to update cancellation status: {e}")
 
@@ -369,7 +359,6 @@ async def cancel_all_tasks(request: Request = None):
     """
     try:
         from shared.db import get_db_connection
-        from knowledgebase_ingestion.celery_app import celery_app as kb_celery
         from shared.service_client import service_client
 
         async with get_db_connection() as conn:
@@ -379,7 +368,7 @@ async def cancel_all_tasks(request: Request = None):
                 try:
                     files_result = await conn.execute(
                         """UPDATE file_uploads
-                           SET processing_status = 'cancelled', task_revoked_at = NOW()
+                           SET processing_status = 'cancelled'
                            WHERE processing_status IN ('pending', 'processing')"""
                     )
                     files_cancelled = int(files_result.split()[-1]) if files_result else 0
@@ -391,7 +380,7 @@ async def cancel_all_tasks(request: Request = None):
                 try:
                     websites_result = await conn.execute(
                         """UPDATE scraped_websites
-                           SET processing_status = 'cancelled', task_revoked_at = NOW()
+                           SET processing_status = 'cancelled'
                            WHERE processing_status IN ('pending', 'processing')"""
                     )
                     websites_cancelled = int(websites_result.split()[-1]) if websites_result else 0
@@ -402,27 +391,42 @@ async def cancel_all_tasks(request: Request = None):
 
                 # Step 2: Purge all pending queues to clear queued tasks
                 try:
-                    kb_celery.control.purge()  # Purges DB0 (file upload queue)
-                    logger.critical("✅ [2/3a] File upload queue (DB0) purged")
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not purge file queue (DB0): {e}")
-                
-                try:
-                    # Use HTTP client to purge website crawling queue
-                    success = await service_client.purge_celery_queue('website_crawling')
+                    success = await service_client.purge_celery_queue('celery_file_worker')
                     if success:
-                        logger.critical("✅ [2/3b] Website crawling queue (DB1) purged via HTTP")
+                        logger.critical("✅ [2/3a] File worker queue (DB0) purged via HTTP")
                     else:
-                        logger.warning("⚠️ Could not purge website queue (DB1) via HTTP")
+                        logger.warning("⚠️ Could not purge file worker queue (DB0) via HTTP")
                 except Exception as e:
-                    logger.warning(f"⚠️ Error during website queue purge via HTTP: {e}")
+                    logger.warning(f"⚠️ Error during file worker queue purge: {e}")
 
-                # Step 3: Revoke all tasks to stop pending ones
                 try:
-                    kb_celery.control.revoke('*', terminate=False)  # Don't send SIGTERM, just revoke
-                    logger.critical("✅ [3/3] All pending tasks revoked")
+                    # Use HTTP client to purge web worker queue
+                    success = await service_client.purge_celery_queue('celery_web_worker')
+                    if success:
+                        logger.critical("✅ [2/3b] Web worker queue (DB1) purged via HTTP")
+                    else:
+                        logger.warning("⚠️ Could not purge web worker queue (DB1) via HTTP")
                 except Exception as e:
-                    logger.warning(f"⚠️ Could not revoke tasks: {e}")
+                    logger.warning(f"⚠️ Error during web worker queue purge: {e}")
+
+                # Step 3: Revoke all tasks via HTTP
+                try:
+                    success = await service_client.cancel_all_tasks('celery_file_worker')
+                    if success:
+                        logger.critical("✅ [3/3a] All file worker tasks revoked via HTTP")
+                    else:
+                        logger.warning("⚠️ Could not revoke file worker tasks via HTTP")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error revoking file worker tasks: {e}")
+
+                try:
+                    success = await service_client.cancel_all_tasks('celery_web_worker')
+                    if success:
+                        logger.critical("✅ [3/3b] All web worker tasks revoked via HTTP")
+                    else:
+                        logger.warning("⚠️ Could not revoke web worker tasks via HTTP")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error revoking web worker tasks: {e}")
 
                 logger.critical("✅✅✅ ALL CELERY TASKS MARKED FOR CANCELLATION ✅✅✅")
 
@@ -678,6 +682,204 @@ async def delete_website_hierarchy_deprecated(website_id: str, request: Request 
     except Exception as e:
         logger.error(f"Error deleting website hierarchy: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# =================================
+# WEBSITE SCRAPING ENDPOINTS
+# =================================
+
+@router.post("/webcrawl/async")
+async def scrape_website_async_endpoint(request: Request = None):
+    """
+    Async website scraping endpoint with Celery - returns immediately with pending status.
+    Actual processing happens in Celery worker. Frontend should poll /status/{id} to track progress.
+
+    Mirrors the old website_crawling endpoint exactly so frontend doesn't break.
+    """
+    try:
+        body = await request.json() if request else {}
+
+        # Support both single URL and multiple URLs
+        url_input = body.get("url") or body.get("urls") or ""
+        if not url_input:
+            raise HTTPException(status_code=400, detail="URL or URLs parameter is required")
+
+        # Parse URLs - handle both single URL and comma-separated list
+        if isinstance(url_input, list):
+            urls = url_input
+        else:
+            urls = [u.strip() for u in str(url_input).split(",") if u.strip()]
+
+        if not urls:
+            raise HTTPException(status_code=400, detail="At least one valid URL is required")
+
+        # Validate URLs
+        for url in urls:
+            if not url.startswith(("http://", "https://")):
+                raise HTTPException(status_code=400, detail=f"Invalid URL format: {url}")
+
+        # Get crawling parameters from frontend
+        max_depth = body.get("max_depth", 2)
+        replace_existing = body.get("replace_existing", False)
+        include_patterns = body.get("include_patterns", []) or []
+        exclude_patterns = body.get("exclude_patterns", []) or []
+
+        logger.info(f"🎯 Starting async batch scrape for {len(urls)} URL(s)")
+        all_results = []
+        from shared.db import get_db_connection
+        from shared.service_client import service_client
+
+        # Process each URL
+        for idx, url in enumerate(urls, 1):
+            try:
+                # Classify URL type
+                if url.endswith("sitemap.xml"):
+                    url_type = "sitemap"
+                    crawl_depth = 1
+                elif url.count("/") <= 3:  # Simple heuristic: single page if few slashes
+                    url_type = "single_page"
+                    crawl_depth = max(0, max_depth)
+                else:
+                    url_type = "website"
+                    crawl_depth = max_depth
+
+                logger.info(f"[{idx}/{len(urls)}] Queueing {url_type}: {url}")
+
+                # Use generous internal page cap
+                max_pages = 1000
+
+                # Scrape options
+                options = {
+                    "url": url,
+                    "max_pages": max_pages,
+                    "max_depth": min(crawl_depth, 5),
+                    "replace_existing": replace_existing,
+                    "max_concurrent": min(int(body.get("max_concurrent", 10)), 50),
+                    "extract_links": body.get("extract_links", True),
+                    "extract_images": body.get("extract_images", False),
+                    "respect_robots_txt": body.get("respect_robots_txt", True),
+                    "user_agent": body.get("user_agent", "KnowledgeBot-Crawler/1.0"),
+                    "timeout": body.get("timeout", 30),
+                    "include_patterns": include_patterns,
+                    "exclude_patterns": exclude_patterns
+                }
+
+                # Check for duplicate URL in database
+                async with get_db_connection() as conn:
+                    existing = await conn.fetchrow(
+                        "SELECT id, processing_status FROM scraped_websites WHERE original_url = $1",
+                        url
+                    )
+
+                    if existing:
+                        logger.warning(f"⚠️ URL already exists: {url} (ID: {existing['id']}, Status: {existing['processing_status']})")
+                        all_results.append({
+                            "url": url,
+                            "type": url_type,
+                            "success": False,
+                            "duplicate": True,
+                            "where_exists": ["scraped_websites"],
+                            "existing_id": existing['id'],
+                            "existing_status": existing['processing_status'],
+                            "error": f"URL already exists with status '{existing['processing_status']}'"
+                        })
+                        continue
+
+                    # Create website record with status='pending'
+                    website_record = await conn.fetchval(
+                        """INSERT INTO scraped_websites
+                           (original_url, processing_status, created_at, updated_at)
+                           VALUES ($1, 'pending', NOW(), NOW())
+                           RETURNING id""",
+                        url
+                    )
+
+                    website_id = website_record if website_record else None
+
+                    if not website_id:
+                        logger.error(f"Failed to create website record for {url}")
+                        all_results.append({
+                            "url": url,
+                            "type": url_type,
+                            "success": False,
+                            "error": "Failed to create website record in database"
+                        })
+                        continue
+
+                    logger.info(f"✅ Created website record ID {website_id} for {url}")
+
+                    # Dispatch task to celery-web-worker
+                    try:
+                        result = await service_client.dispatch_website_task(
+                            'celery_web_worker',
+                            website_id=website_id,
+                            url=url,
+                            **options
+                        )
+
+                        if result.get('success'):
+                            task_id = result.get('task_id')
+                            logger.info(f"✅ Dispatched website task: {task_id}")
+
+                            # Update database with task ID
+                            await conn.execute(
+                                "UPDATE scraped_websites SET celery_task_id = $1 WHERE id = $2",
+                                task_id,
+                                website_id
+                            )
+
+                            all_results.append({
+                                "url": url,
+                                "type": url_type,
+                                "success": True,
+                                "duplicate": False,
+                                "website_id": website_id,
+                                "task_id": task_id
+                            })
+                        else:
+                            error_msg = result.get('error', 'Unknown error')
+                            logger.error(f"Failed to dispatch task for {url}: {error_msg}")
+                            all_results.append({
+                                "url": url,
+                                "type": url_type,
+                                "success": False,
+                                "error": error_msg
+                            })
+                    except Exception as e:
+                        logger.error(f"Error dispatching task for {url}: {e}")
+                        all_results.append({
+                            "url": url,
+                            "type": url_type,
+                            "success": False,
+                            "error": str(e)
+                        })
+
+            except Exception as e:
+                logger.error(f"❌ Error queueing {url}: {e}")
+                all_results.append({
+                    "url": url,
+                    "type": "unknown",
+                    "success": False,
+                    "error": str(e)
+                })
+
+        queued = [r for r in all_results if r.get("success")]
+        failed = [r for r in all_results if not r.get("success")]
+        logger.info(f"✅ Async batch scrape queued: {len(queued)}/{len(urls)} accepted, {len(failed)} failed")
+
+        return {
+            "success": len(queued) > 0 or len(failed) == 0,
+            "data": all_results,
+            "queued_count": len(queued),
+            "failed_count": len(failed),
+            "message": f"Queued {len(queued)} URL(s) for scraping" + (f", {len(failed)} failed" if failed else "")
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error in async scrape endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/delete-all")
 async def delete_all_files(request: Request = None):
