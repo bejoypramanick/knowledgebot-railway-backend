@@ -59,9 +59,12 @@ async def process_website_async(
 
         logger.info(f"🔄 [CELERY] Starting scraping for website ID {website_id}: {url}")
 
-        # Create service and perform scraping
+        # Use service layer for processing
+        from .service.website_service import WebsiteService
+        
+        website_service = WebsiteService()
         result = await website_service.scrape_website(url, options, celery_task_id=celery_task_id, website_id=website_id)
-
+        
         if result.get("success"):
             logger.info(f"✅ [CELERY] Website ID {website_id} scraped successfully")
             await website_service.update_website_status(website_id, "completed")
@@ -73,8 +76,6 @@ async def process_website_async(
     except Exception as e:
         error_msg = f"Scraping error: {str(e)}"
         logger.error(f"❌ [CELERY] Unexpected error for website ID {website_id}: {e}")
-        from .service.website_service import WebsiteService
-        website_service = WebsiteService()
         await website_service.update_website_status(website_id, "failed", error_msg)
 
 
