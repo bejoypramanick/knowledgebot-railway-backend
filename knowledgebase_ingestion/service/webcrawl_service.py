@@ -3,7 +3,6 @@ Web Crawl Service Layer
 Handles business logic for website scraping operations
 """
 import asyncio
-import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -12,6 +11,7 @@ from fastapi import HTTPException
 from shared.otel_logger import get_otel_logger
 from knowledgebase_ingestion.dao.webcrawl_dao import WebCrawlDAO
 from shared.redis_message_queue import RedisMessageQueue
+from shared.celery_dispatcher import web_celery
 
 logger = get_otel_logger("webcrawl_service", "knowledgebase-ingestion")
 
@@ -79,42 +79,63 @@ async def update_website_status(website_id: int, status: str, error_message: str
         return False
 
 
-async def queue_website_for_scraping(url: str, user_email: str) -> Dict[str, Any]:
+async def queue_website_for_scraping(
+    url: str,
+    user_email: str,
+    max_depth: int = 2,
+    max_pages: int = 100,
+    max_concurrent: int = 10,
+    delay_between_requests: float = 0.0
+) -> Dict[str, Any]:
     """
-    Queue website for scraping via Redis.
+    Queue website for scraping via Celery.
+    Flow: create DB record → dispatch to Celery with website_id → update DB with real task_id.
     """
     try:
-        # Generate task ID
-        task_id = str(uuid.uuid4())
-        
-        # Create website record with Queued status
-        website_id = await create_website_record(url, user_email, task_id)
-        
+        import uuid
+
+        # Build options dict for the Celery task
+        options = {
+            'max_depth': max_depth,
+            'max_pages': max_pages,
+            'max_concurrent': max_concurrent,
+            'delay_between_requests': delay_between_requests,
+            'user_email': user_email
+        }
+
+        # Create DB record first with a placeholder task_id so we get the website_id
+        placeholder_task_id = str(uuid.uuid4())
+        website_id = await create_website_record(url, user_email, placeholder_task_id)
+
         if not website_id:
             return {
                 "success": False,
                 "error": "Failed to create website record"
             }
-        
-        # Queue scraping task
-        redis_queue = RedisMessageQueue()
-        success = redis_queue.publish_web_task(celery_task_id=task_id)
-        
-        if success:
-            logger.info(f"✅ Queued website scraping task: {task_id}")
-            return {
-                "success": True,
-                "message": "Website scraping started successfully",
-                "task_id": task_id,
-                "website_id": str(website_id),
-                "url": url,
-                "status": "Queued"
-            }
-        else:
-            return {
-                "success": False,
-                "error": "Failed to queue scraping task"
-            }
+
+        # Dispatch to Celery worker with the real website_id — Celery assigns the task ID
+        logger.info(f"📤 [CELERY] Dispatching website scraping task for URL: {url}, website_id: {website_id}")
+        result = web_celery.send_task(
+            'tasks.scrape_website_task',
+            args=[website_id, url, options],
+            queue='web_crawling'
+        )
+        task_id = result.id
+
+        # Update DB record with the real Celery task ID
+        dao = get_webcrawl_dao()
+        await dao.update_celery_task_id(website_id, task_id)
+
+        logger.info(f"✅ Queued website scraping task: {task_id} for website ID: {website_id}")
+        return {
+            "success": True,
+            "message": "Website scraping started successfully",
+            "task_id": task_id,
+            "website_id": str(website_id),
+            "url": url,
+            "status": "Queued"
+        }
+
     except Exception as e:
         logger.error(f"❌ Error queuing website for scraping: {e}")
         return {

@@ -1,5 +1,5 @@
 """
-Celery application configuration for Knowledgebase Ingestion Service
+Celery application configuration for File Processing Worker
 Handles async file processing tasks
 """
 
@@ -8,19 +8,18 @@ from celery.signals import before_task_publish, task_prerun, task_postrun, task_
 from shared.otel_logger import get_otel_logger
 import os
 import redis
-from knowledgebase_ingestion.core.config import settings
 
-logger = get_otel_logger("celery_app", "knowledgebase-ingestion")
+logger = get_otel_logger("celery_app", "celery-file-worker")
+
+# Configure Celery with Redis broker (DB 0)
+redis_url = os.getenv('FILE_REDIS_URL', os.getenv('REDIS_URL', 'redis://localhost:6379/0'))
 
 # Create Celery app
-celery_app = Celery(__name__)
-
-# Configure Celery with Redis broker
-redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+celery_app = Celery('celery_file_worker')
 
 # Log Celery initialization
-logger.info(f"🚀 [CELERY_APP] Initializing Celery for Knowledgebase Ingestion Service")
-logger.info(f"📊 [REDIS] Broker URL: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")  # Log URL without credentials
+logger.info("🚀 [CELERY_APP] Initializing Celery for File Processing Worker")
+logger.info(f"📊 [REDIS] Broker URL: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
 
 # Test Redis connection at startup
 try:
@@ -41,13 +40,13 @@ celery_app.conf.update(
     timezone='UTC',
     enable_utc=True,
     # Performance tuning for heavy workloads
-    worker_prefetch_multiplier=4,
+    worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     # Task routing
     task_routes={
-        'knowledgebase_ingestion.tasks.process_file_upload_task': {'queue': 'file_processing'},
+        'tasks.process_file_upload_task': {'queue': 'file_processing'},
     },
     # Result backend configuration
     result_expires=3600,  # Results expire after 1 hour
@@ -56,57 +55,63 @@ celery_app.conf.update(
     task_time_limit=1900,
 )
 
-logger.info(f"✅ [CELERY_APP] Configuration updated - Task timeout: 30 minutes, Queue: 'file_processing'")
+logger.info("✅ [CELERY_APP] Configuration updated - Task timeout: 30 minutes, Queue: 'file_processing'")
 
-# Auto-discover tasks from tasks.py
-celery_app.autodiscover_tasks(['knowledgebase_ingestion'])
+# Auto-discover tasks from tasks.py in the current directory
+celery_app.autodiscover_tasks(['tasks'])
+
 
 # Signal handlers for task lifecycle monitoring
-@before_task_publish.connect(sender='knowledgebase_ingestion.tasks.process_file_upload_task')
+@before_task_publish.connect(sender='tasks.process_file_upload_task')
 def before_task_publish_handler(sender=None, body=None, **kwargs):
     """Log before task is published to Redis queue"""
     try:
         task_args = body.get('args', []) if isinstance(body, dict) else []
-        file_id = task_args[0] if task_args else 'unknown'
-        logger.info(f"📤 [TASK_PUBLISH] Before publishing: {sender} - File ID: {file_id}")
+        filename = task_args[0] if task_args else 'unknown'
+        logger.info(f"📤 [TASK_PUBLISH] Before publishing: {sender} - File: {filename}")
     except Exception as e:
         logger.error(f"❌ [TASK_PUBLISH] Error in pre-publish handler: {e}")
 
-@task_prerun.connect(sender='knowledgebase_ingestion.tasks.process_file_upload_task')
+
+@task_prerun.connect(sender='tasks.process_file_upload_task')
 def task_prerun_handler(sender=None, task_id=None, args=None, **kwargs):
     """Log when task starts execution"""
     try:
-        file_id = args[0] if args else 'unknown'
-        logger.info(f"⏱️  [TASK_PRERUN] Task starting execution - Task ID: {task_id}, File ID: {file_id}")
+        filename = args[0] if args else 'unknown'
+        logger.info(f"⏱️  [TASK_PRERUN] Task starting execution - Task ID: {task_id}, File: {filename}")
     except Exception as e:
         logger.error(f"❌ [TASK_PRERUN] Error in pre-run handler: {e}")
 
-@task_postrun.connect(sender='knowledgebase_ingestion.tasks.process_file_upload_task')
+
+@task_postrun.connect(sender='tasks.process_file_upload_task')
 def task_postrun_handler(sender=None, task_id=None, args=None, **kwargs):
     """Log when task completes successfully"""
     try:
-        file_id = args[0] if args else 'unknown'
-        logger.info(f"✅ [TASK_POSTRUN] Task completed successfully - Task ID: {task_id}, File ID: {file_id}")
+        filename = args[0] if args else 'unknown'
+        logger.info(f"✅ [TASK_POSTRUN] Task completed successfully - Task ID: {task_id}, File: {filename}")
     except Exception as e:
         logger.error(f"❌ [TASK_POSTRUN] Error in post-run handler: {e}")
 
-@task_failure.connect(sender='knowledgebase_ingestion.tasks.process_file_upload_task')
+
+@task_failure.connect(sender='tasks.process_file_upload_task')
 def task_failure_handler(sender=None, task_id=None, args=None, exception=None, **kwargs):
     """Log when task fails"""
     try:
-        file_id = args[0] if args else 'unknown'
-        logger.error(f"❌ [TASK_FAILURE] Task failed - Task ID: {task_id}, File ID: {file_id}, Exception: {exception}")
+        filename = args[0] if args else 'unknown'
+        logger.error(f"❌ [TASK_FAILURE] Task failed - Task ID: {task_id}, File: {filename}, Exception: {exception}")
     except Exception as e:
         logger.error(f"❌ [TASK_FAILURE] Error in failure handler: {e}")
 
-@task_retry.connect(sender='knowledgebase_ingestion.tasks.process_file_upload_task')
+
+@task_retry.connect(sender='tasks.process_file_upload_task')
 def task_retry_handler(sender=None, task_id=None, args=None, reason=None, **kwargs):
     """Log when task is retried"""
     try:
-        file_id = args[0] if args else 'unknown'
-        logger.warning(f"🔄 [TASK_RETRY] Task retrying - Task ID: {task_id}, File ID: {file_id}, Reason: {reason}")
+        filename = args[0] if args else 'unknown'
+        logger.warning(f"🔄 [TASK_RETRY] Task retrying - Task ID: {task_id}, File: {filename}, Reason: {reason}")
     except Exception as e:
         logger.error(f"❌ [TASK_RETRY] Error in retry handler: {e}")
+
 
 @celery_app.task(bind=True)
 def debug_task(self):

@@ -17,7 +17,10 @@ class RedisMessageQueue:
     """Redis-based message queue for inter-service communication"""
 
     # Queue names
-    FILE_TASK_QUEUE = "file_processing_tasks"  # knowledgebase → file-worker
+    FILE_TASK_QUEUE = "file_processing_tasks"      # knowledgebase → file-worker
+    FILE_RESULT_QUEUE = "file_processing_results"  # file-worker → knowledgebase
+    WEB_TASK_QUEUE = "web_crawling_tasks"          # knowledgebase → web-worker
+    WEB_RESULT_QUEUE = "web_crawling_results"      # web-worker → knowledgebase
 
     def __init__(self):
         """Initialize Redis connection"""
@@ -147,9 +150,20 @@ class RedisMessageQueue:
 
     # ========== WEBSITE PROCESSING MESSAGES ==========
 
-    def publish_web_task(self, celery_task_id: str) -> bool:
+    def publish_web_task(
+        self,
+        celery_task_id: str,
+        website_id: int = None,
+        url: str = None,
+        max_depth: int = 2,
+        max_pages: int = 100,
+        max_concurrent: int = 10,
+        delay_between_requests: float = 0.0,
+        user_email: str = "admin",
+        options: dict = None
+    ) -> bool:
         """
-        Publish website scraping task to queue
+        Publish website scraping task to queue with full task data.
         Called by: knowledgebase_ingestion
         Read by: celery-web-worker
         """
@@ -160,13 +174,21 @@ class RedisMessageQueue:
         try:
             message = {
                 "type": "WEB_SCRAPE",
-                "celery_task_id": celery_task_id
+                "celery_task_id": celery_task_id,
+                "website_id": website_id,
+                "url": url,
+                "max_depth": max_depth,
+                "max_pages": max_pages,
+                "max_concurrent": max_concurrent,
+                "delay_between_requests": delay_between_requests,
+                "user_email": user_email,
+                "options": options or {}
             }
 
             message_json = json.dumps(message)
             self._connection.rpush(self.WEB_TASK_QUEUE, message_json)
 
-            logger.info(f"📤 [WEB] Published task: {celery_task_id}")
+            logger.info(f"📤 [WEB] Published task: {celery_task_id} for {url}")
             return True
 
         except Exception as e:

@@ -33,12 +33,11 @@ COPY . .
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
+# PYTHONPATH includes /app so 'shared.*' imports work from /app/celery-web-worker/
+ENV PYTHONPATH="/app"
 # Note: REDIS_URL is set at runtime via Railway environment variables
 # Do NOT set CELERY_BROKER_URL/CELERY_RESULT_BACKEND here - let celery_app.py read REDIS_URL at runtime
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
-
-# Default command - FastAPI server with Redis polling loop
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Change to service directory and start Celery worker for web_crawling queue
+WORKDIR /app/celery-web-worker
+CMD ["celery", "-A", "celery_app", "worker", "-Q", "web_crawling", "-l", "info", "-c", "1", "--max-tasks-per-child=100"]

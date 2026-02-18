@@ -2,7 +2,6 @@
 File Upload Router
 Handles all file upload related endpoints
 """
-import uuid
 from fastapi import APIRouter, HTTPException, Request, UploadFile, Form
 from fastapi.responses import JSONResponse
 from typing import Optional, Dict, Any
@@ -10,12 +9,13 @@ from typing import Optional, Dict, Any
 from knowledgebase_ingestion.utils.auth import extract_user_from_request
 from knowledgebase_ingestion.utils.logging import get_otel_logger
 from knowledgebase_ingestion.service.fileupload_service import (
-    get_fileupload_dao, get_pending_files, get_file_by_id, 
+    get_fileupload_dao, get_pending_files, get_file_by_id,
     cancel_files, update_file_status, queue_file_for_deletion,
     validate_file_upload
 )
 from knowledgebase_ingestion.service.file_service import get_file_service
 from shared.redis_message_queue import RedisMessageQueue
+from shared.celery_dispatcher import file_celery
 
 logger = get_otel_logger("fileupload_router", "knowledgebase-ingestion")
 
@@ -129,26 +129,27 @@ async def cancel_file_task(item_id: str, request: Request = None):
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
         
-        # Initialize Redis message queue
+        # Revoke queued Celery task (stops it before it starts)
+        file_celery.control.revoke(item_id, terminate=False)
+        logger.info(f"✅ Revoked Celery task {item_id} from queue")
+
+        # Set Redis cancellation flag for in-progress tasks
         redis_queue = RedisMessageQueue()
-        
-        # Set cancellation flag in Redis
-        cancellation_key = f"task_cancelled:{item_id}"
-        success = redis_queue._connection.set(cancellation_key, "1", ex=3600)  # 1 hour expiry
-        
+        success = redis_queue.set_task_cancelled(item_id)
+
         if success:
             logger.info(f"✅ Set cancellation flag for file task {item_id}")
-            
+
             # Update database status to cancelled
             files_cancelled = await cancel_files()
-            
+
             if files_cancelled > 0:
                 logger.info(f"✅ Marked {files_cancelled} file tasks as cancelled in database")
             else:
                 logger.warning(f"⚠️ File task {item_id} not found or already completed")
         else:
             logger.error(f"❌ Failed to set cancellation flag for file task {item_id}")
-            
+
         return {
             "success": success,
             "message": "File task cancellation requested" if success else "Failed to cancel file task",
@@ -170,22 +171,27 @@ async def cancel_all_file_tasks(request: Request = None):
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
         
-        # Initialize Redis message queue
+        # Purge all queued Celery tasks (prevents pending tasks from being picked up)
+        file_celery.control.purge()
+        logger.info("✅ Purged Celery file_processing queue")
+
+        # Also clear any legacy Redis queue keys
         redis_queue = RedisMessageQueue()
-        
-        # Get all pending/processing tasks
-        cancelled_count = 0
+        redis_queue.clear_file_task_queue()
+        logger.info("✅ Cleared file task queue in Redis")
+
+        # Mark all pending/processing tasks as cancelled in database
         files_cancelled = await cancel_files()
-        
+
         if files_cancelled > 0:
             logger.info(f"✅ Marked {files_cancelled} file tasks as cancelled in database")
-            
+
         return {
-            "success": files_cancelled > 0,
+            "success": True,
             "message": f"Cancelled {files_cancelled} file tasks",
             "cancelled_count": files_cancelled
         }
-        
+
     except Exception as e:
         logger.error(f"Error cancelling all file tasks: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -264,10 +270,24 @@ async def upload_file_async(
             s3_key = s3_result
             logger.info(f"✅ [S3] File uploaded successfully: {s3_key}")
 
-            # Generate task ID locally
-            celery_task_id = str(uuid.uuid4())
+            # Dispatch to Celery worker — Celery assigns the task ID
+            logger.info(f"📤 [CELERY] Dispatching file task to Celery")
+            result = file_celery.send_task(
+                'tasks.process_file_upload_task',
+                args=[
+                    validation_result['original_filename'],
+                    file_display_name or validation_result['filename'],
+                    s3_key,
+                    file_size,
+                    user_email
+                ],
+                queue='file_processing'
+            )
+            celery_task_id = result.id
 
-            # Create file record in database
+            logger.info(f"✅ File task dispatched to Celery: {celery_task_id}")
+
+            # Create file record in database with the Celery task ID
             record_data = {
                 'user_id': user_id,
                 'original_filename': validation_result['original_filename'],
@@ -277,7 +297,8 @@ async def upload_file_async(
                 'processing_status': 'pending',
                 'source': 'upload',
                 'sha256_hash': await calculate_file_hash(file_bytes),
-                's3_key': s3_key
+                's3_key': s3_key,
+                'celery_task_id': celery_task_id
             }
 
             from knowledgebase_ingestion.service.fileupload_service import create_file_record
@@ -285,17 +306,6 @@ async def upload_file_async(
 
             if not file_id:
                 raise HTTPException(status_code=500, detail="Failed to create file record")
-
-            # Dispatch to worker via Redis message queue
-            logger.info(f"📤 [REDIS] Queuing file task: {celery_task_id}")
-            redis_queue = RedisMessageQueue()
-            success = redis_queue.publish_file_task(celery_task_id=celery_task_id)
-
-            if not success:
-                logger.error(f"❌ Failed to queue file task to Redis")
-                raise HTTPException(status_code=500, detail="Failed to queue file processing task")
-
-            logger.info(f"✅ File task queued to Redis: {celery_task_id}")
 
             return {
                 "success": True,

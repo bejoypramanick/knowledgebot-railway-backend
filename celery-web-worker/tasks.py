@@ -1,19 +1,18 @@
 """
-Celery tasks for website crawling service
+Celery tasks for website crawling worker
 Handles async website scraping and crawling with database status tracking
 """
 
 import asyncio
 from typing import Dict, Any
-import os
 
-from celery import shared_task
+from celery_app import celery_app
 from shared.otel_logger import get_otel_logger
 
-logger = get_otel_logger("celery_tasks", "website-crawling")
+logger = get_otel_logger("celery_tasks", "celery-web-worker")
 
 
-@shared_task(bind=True, max_retries=2)
+@celery_app.task(bind=True, max_retries=2)
 def scrape_website_task(
     self,
     website_id: int,
@@ -21,24 +20,19 @@ def scrape_website_task(
     options: Dict[str, Any]
 ):
     """
-    Celery task for async website scraping
-    Retries up to 2 times on failure
+    Celery task for async website scraping.
+    Retries up to 2 times on failure with exponential backoff (60s, 120s).
     """
+    task_id = self.request.id
+    logger.info(f"📋 [TASK] Starting website scraping task: {task_id}")
+    logger.info(f"🌐 [WEBSITE] ID: {website_id}, URL: {url}")
+
     try:
-        logger.info(f"📋 [TASK] Starting Celery task for website ID {website_id}")
+        from service.website_service import WebsiteService
 
-        # Get current task ID from Celery
-        task_id = self.request.id
-        logger.info(f"🆔 [TASK_ID] Current task ID: {task_id}")
-
-        # Use service layer for processing
-        from .service.website_service import WebsiteService
-        
         website_service = WebsiteService()
-        
-        # Run async function in event loop
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(
+
+        asyncio.run(
             website_service.process_website_async(
                 website_id=website_id,
                 url=url,
@@ -47,18 +41,20 @@ def scrape_website_task(
             )
         )
 
-        logger.info(f"✅ [TASK] Celery task completed for website ID {website_id}")
+        logger.info(f"✅ [TASK] Website scraping completed: {task_id} for website ID {website_id}")
 
     except Exception as e:
-        logger.error(f"❌ [TASK] Error in Celery task for website ID {website_id}: {e}")
+        logger.error(f"❌ [TASK] Error in website scraping task {task_id} for website ID {website_id}: {e}", exc_info=True)
 
-        # Retry with exponential backoff
+        # Retry with exponential backoff (60s, then 120s)
         try:
             raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-        except Exception as retry_error:
-            logger.error(f"❌ [TASK] Max retries exceeded for website ID {website_id}: {retry_error}")
+        except Exception:
+            logger.error(f"❌ [TASK] Max retries exceeded for website ID {website_id}")
             # Update status to failed after max retries
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(
-                update_website_processing_status(website_id, "failed", f"Processing failed after retries: {str(e)}")
-            )
+            try:
+                from dao.scraping_dao import ScrapingDAO
+                dao = ScrapingDAO()
+                asyncio.run(dao.update_website_status(website_id, "failed", f"Processing failed after retries: {str(e)}"))
+            except Exception as dao_err:
+                logger.error(f"❌ [TASK] Failed to update website status to failed: {dao_err}")

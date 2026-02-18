@@ -9,11 +9,12 @@ from typing import Dict, Any
 from knowledgebase_ingestion.utils.auth import extract_user_from_request
 from knowledgebase_ingestion.utils.logging import get_otel_logger
 from knowledgebase_ingestion.service.webcrawl_service import (
-    get_webcrawl_dao, get_pending_websites, get_website_by_id, 
+    get_webcrawl_dao, get_pending_websites, get_website_by_id,
     cancel_websites, update_website_status, queue_website_for_scraping,
     queue_website_for_deletion, validate_scraping_request
 )
 from shared.redis_message_queue import RedisMessageQueue
+from shared.celery_dispatcher import web_celery
 
 logger = get_otel_logger("webcrawl_router", "knowledgebase-ingestion")
 
@@ -97,26 +98,27 @@ async def cancel_web_task(item_id: str, request: Request = None):
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
         
-        # Initialize Redis message queue
+        # Revoke queued Celery task (stops it before it starts)
+        web_celery.control.revoke(item_id, terminate=False)
+        logger.info(f"✅ Revoked Celery task {item_id} from queue")
+
+        # Set Redis cancellation flag for in-progress tasks
         redis_queue = RedisMessageQueue()
-        
-        # Set cancellation flag in Redis
-        cancellation_key = f"task_cancelled:{item_id}"
-        success = redis_queue._connection.set(cancellation_key, "1", ex=3600)  # 1 hour expiry
-        
+        success = redis_queue.set_task_cancelled(item_id)
+
         if success:
             logger.info(f"✅ Set cancellation flag for website task {item_id}")
-            
+
             # Update database status to cancelled
             websites_cancelled = await cancel_websites()
-            
+
             if websites_cancelled > 0:
                 logger.info(f"✅ Marked {websites_cancelled} website tasks as cancelled in database")
             else:
                 logger.warning(f"⚠️ Website task {item_id} not found or already completed")
         else:
             logger.error(f"❌ Failed to set cancellation flag for website task {item_id}")
-            
+
         return {
             "success": success,
             "message": "Website task cancellation requested" if success else "Failed to cancel website task",
@@ -138,22 +140,27 @@ async def cancel_all_web_tasks(request: Request = None):
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
         
-        # Initialize Redis message queue
+        # Purge all queued Celery tasks (prevents pending tasks from being picked up)
+        web_celery.control.purge()
+        logger.info("✅ Purged Celery web_crawling queue")
+
+        # Also clear any legacy Redis queue keys
         redis_queue = RedisMessageQueue()
-        
-        # Get all pending/processing tasks
-        cancelled_count = 0
+        redis_queue.clear_web_task_queue()
+        logger.info("✅ Cleared web task queue in Redis")
+
+        # Mark all pending/processing tasks as cancelled in database
         websites_cancelled = await cancel_websites()
-        
+
         if websites_cancelled > 0:
             logger.info(f"✅ Marked {websites_cancelled} website tasks as cancelled in database")
-            
+
         return {
-            "success": websites_cancelled > 0,
+            "success": True,
             "message": f"Cancelled {websites_cancelled} website tasks",
             "cancelled_count": websites_cancelled
         }
-        
+
     except Exception as e:
         logger.error(f"Error cancelling all website tasks: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -209,10 +216,14 @@ async def scrape_website_async_endpoint(request: Request = None):
         if not validation_result['valid']:
             raise HTTPException(status_code=400, detail=validation_result['error'])
         
-        # Queue website for scraping
+        # Queue website for scraping with all validated params
         result = await queue_website_for_scraping(
-            validation_result['url'], 
-            user_email
+            url=validation_result['url'],
+            user_email=user_email,
+            max_depth=validation_result.get('max_depth', 2),
+            max_pages=validation_result.get('max_pages', 100),
+            max_concurrent=validation_result.get('max_concurrent', 10),
+            delay_between_requests=validation_result.get('delay_between_requests', 0.0)
         )
         
         if result.get('success'):

@@ -1,5 +1,5 @@
 """
-Celery application configuration for Website Crawling Service
+Celery application configuration for Website Crawling Worker
 Handles async website scraping and crawling tasks
 """
 
@@ -9,17 +9,17 @@ from shared.otel_logger import get_otel_logger
 import os
 import redis
 
-logger = get_otel_logger("celery_app", "website-crawling")
+logger = get_otel_logger("celery_app", "celery-web-worker")
+
+# Configure Celery with Redis broker (DB 1)
+redis_url = os.getenv('WEB_REDIS_URL', os.getenv('REDIS_URL', 'redis://localhost:6379/1'))
 
 # Create Celery app
-celery_app = Celery(__name__)
-
-# Configure Celery with Redis broker
-redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/1')
+celery_app = Celery('celery_web_worker')
 
 # Log Celery initialization
-logger.info(f"🚀 [CELERY_APP] Initializing Celery for Website Crawling Service")
-logger.info(f"📊 [REDIS] Broker URL: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")  # Log URL without credentials
+logger.info("🚀 [CELERY_APP] Initializing Celery for Website Crawling Worker")
+logger.info(f"📊 [REDIS] Broker URL: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
 
 # Test Redis connection at startup
 try:
@@ -39,14 +39,14 @@ celery_app.conf.update(
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
-    # Performance tuning for heavy workloads (web crawling)
-    worker_prefetch_multiplier=2,  # Lower prefetch for web crawling
-    worker_max_tasks_per_child=100,  # Restart worker after 100 tasks
+    # Performance tuning for web crawling (lower prefetch, fewer concurrent)
+    worker_prefetch_multiplier=1,
+    worker_max_tasks_per_child=100,
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     # Task routing
     task_routes={
-        'website_crawling.tasks.scrape_website_task': {'queue': 'web_crawling'},
+        'tasks.scrape_website_task': {'queue': 'web_crawling'},
     },
     # Result backend configuration
     result_expires=3600,  # Results expire after 1 hour
@@ -55,13 +55,14 @@ celery_app.conf.update(
     task_time_limit=7300,
 )
 
-logger.info(f"✅ [CELERY_APP] Configuration updated - Task timeout: 2 hours, Queue: 'web_crawling'")
+logger.info("✅ [CELERY_APP] Configuration updated - Task timeout: 2 hours, Queue: 'web_crawling'")
 
-# Auto-discover tasks from tasks.py
-celery_app.autodiscover_tasks(['website_crawling'])
+# Auto-discover tasks from tasks.py in the current directory
+celery_app.autodiscover_tasks(['tasks'])
+
 
 # Signal handlers for task lifecycle monitoring
-@before_task_publish.connect(sender='website_crawling.tasks.scrape_website_task')
+@before_task_publish.connect(sender='tasks.scrape_website_task')
 def before_task_publish_handler(sender=None, body=None, **kwargs):
     """Log before task is published to Redis queue"""
     try:
@@ -71,7 +72,8 @@ def before_task_publish_handler(sender=None, body=None, **kwargs):
     except Exception as e:
         logger.error(f"❌ [TASK_PUBLISH] Error in pre-publish handler: {e}")
 
-@task_prerun.connect(sender='website_crawling.tasks.scrape_website_task')
+
+@task_prerun.connect(sender='tasks.scrape_website_task')
 def task_prerun_handler(sender=None, task_id=None, args=None, **kwargs):
     """Log when task starts execution"""
     try:
@@ -80,7 +82,8 @@ def task_prerun_handler(sender=None, task_id=None, args=None, **kwargs):
     except Exception as e:
         logger.error(f"❌ [TASK_PRERUN] Error in pre-run handler: {e}")
 
-@task_postrun.connect(sender='website_crawling.tasks.scrape_website_task')
+
+@task_postrun.connect(sender='tasks.scrape_website_task')
 def task_postrun_handler(sender=None, task_id=None, args=None, **kwargs):
     """Log when task completes successfully"""
     try:
@@ -89,7 +92,8 @@ def task_postrun_handler(sender=None, task_id=None, args=None, **kwargs):
     except Exception as e:
         logger.error(f"❌ [TASK_POSTRUN] Error in post-run handler: {e}")
 
-@task_failure.connect(sender='website_crawling.tasks.scrape_website_task')
+
+@task_failure.connect(sender='tasks.scrape_website_task')
 def task_failure_handler(sender=None, task_id=None, args=None, exception=None, **kwargs):
     """Log when task fails"""
     try:
@@ -98,7 +102,8 @@ def task_failure_handler(sender=None, task_id=None, args=None, exception=None, *
     except Exception as e:
         logger.error(f"❌ [TASK_FAILURE] Error in failure handler: {e}")
 
-@task_retry.connect(sender='website_crawling.tasks.scrape_website_task')
+
+@task_retry.connect(sender='tasks.scrape_website_task')
 def task_retry_handler(sender=None, task_id=None, args=None, reason=None, **kwargs):
     """Log when task is retried"""
     try:
@@ -106,6 +111,7 @@ def task_retry_handler(sender=None, task_id=None, args=None, reason=None, **kwar
         logger.warning(f"🔄 [TASK_RETRY] Task retrying - Task ID: {task_id}, Website ID: {website_id}, Reason: {reason}")
     except Exception as e:
         logger.error(f"❌ [TASK_RETRY] Error in retry handler: {e}")
+
 
 @celery_app.task(bind=True)
 def debug_task(self):

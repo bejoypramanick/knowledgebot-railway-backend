@@ -142,6 +142,24 @@ class WebCrawlDAO:
             logger.log_db_query(query, params, error=e)
             return False
 
+    async def update_celery_task_id(self, website_id: int, task_id: str) -> bool:
+        """Update celery_task_id for a website record."""
+        query = """
+            UPDATE scraped_websites
+            SET celery_task_id = $2, updated_at = NOW()
+            WHERE id = $1
+        """
+        params = [website_id, task_id]
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, website_id, task_id)
+                logger.log_db_query(query, params, result)
+                return result != "UPDATE 0"
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return False
+
     async def get_website_details_by_task_id(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Get website details by celery_task_id for worker processing."""
         query = """

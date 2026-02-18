@@ -1,21 +1,18 @@
 """
-Celery tasks for knowledgebase ingestion service
+Celery tasks for file processing worker
 Handles async file processing with database status tracking
 """
 
 import asyncio
-import os
-import json
-from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
-from celery import shared_task
+from celery_app import celery_app
 from shared.otel_logger import get_otel_logger
 
-logger = get_otel_logger("celery_tasks", "knowledgebase-ingestion")
+logger = get_otel_logger("celery_tasks", "celery-file-worker")
 
 
-@shared_task(bind=True, max_retries=2)
+@celery_app.task(bind=True, max_retries=2)
 def process_file_upload_task(
     self,
     original_filename: str,
@@ -25,10 +22,10 @@ def process_file_upload_task(
     user_email: str
 ):
     """
-    Celery task for async file processing
-    Retries up to 2 times on failure
+    Celery task for async file processing.
+    Retries up to 2 times on failure with exponential backoff (60s, 120s).
 
-    Worker creates DB record and handles all processing:
+    Handles:
     - Download file from S3
     - File validation (extension, MIME type, size)
     - Duplicate detection (by SHA256 hash)
@@ -37,21 +34,17 @@ def process_file_upload_task(
     - Database metadata recording
     - Delete from S3
     """
-    try:
-        # Get current task ID from Celery
-        task_id = self.request.id
-        logger.info(f"🚀 [TASK] Starting file processing task: {task_id}")
-        logger.info(f"📄 [FILE] {original_filename} (display: {file_display_name}, size: {file_size} bytes)")
-        logger.info(f"   S3 Key: {s3_key}")
+    task_id = self.request.id
+    logger.info(f"🚀 [TASK] Starting file processing task: {task_id}")
+    logger.info(f"📄 [FILE] {original_filename} (display: {file_display_name}, size: {file_size} bytes)")
+    logger.info(f"   S3 Key: {s3_key}")
 
-        # Use processing service for all file logic
-        from .service.processing_service import ProcessingService
+    try:
+        from service.processing_service import ProcessingService
 
         processing_service = ProcessingService()
 
-        # Run async function in event loop
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(
+        result = asyncio.run(
             processing_service.process_file_content(
                 original_filename=original_filename,
                 file_display_name=file_display_name,
@@ -63,20 +56,23 @@ def process_file_upload_task(
         )
 
         logger.info(f"✅ [TASK] File processing completed: {task_id}")
-        logger.info(f"📊 [RESULT] File ID: {result.get('file_id')}, Status: {result.get('status')}, Time: {result.get('processing_time_seconds')}s")
+        logger.info(
+            f"📊 [RESULT] File ID: {result.get('file_id')}, "
+            f"Status: {result.get('status')}, "
+            f"Time: {result.get('processing_time_seconds')}s"
+        )
 
         return result
 
     except Exception as e:
         logger.error(f"❌ [TASK] Error in file processing task {task_id}: {e}", exc_info=True)
 
-        # Retry with exponential backoff
+        # Retry with exponential backoff (60s, then 120s)
         try:
             raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-        except Exception as retry_error:
-            logger.error(f"❌ [TASK] Max retries exceeded for file {original_filename}: {retry_error}")
-            # Return failure result
+        except Exception:
+            logger.error(f"❌ [TASK] Max retries exceeded for file {original_filename}")
             return {
                 "success": False,
-                "error": f"Processing failed after {self.request.retries} retries: {str(e)}"
+                "error": f"Processing failed after {self.max_retries} retries: {str(e)}"
             }
