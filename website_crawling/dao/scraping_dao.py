@@ -100,3 +100,92 @@ class ScrapingDAO:
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
+
+    async def update_website_status(self, website_id: int, status: str, error_message: str = None):
+        """Update website processing status."""
+        query = """
+            UPDATE scraped_websites 
+            SET processing_status = $1::text, error_message = $2::text, updated_at = NOW() 
+            WHERE id = $3::int
+        """
+        params = [status, error_message, website_id]
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, params, result)
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+
+    async def update_celery_task_id(self, website_id: int, celery_task_id: str):
+        """Update Celery task ID for website."""
+        query = """
+            UPDATE scraped_websites 
+            SET celery_task_id = $1::text, updated_at = NOW() 
+            WHERE id = $2::int
+        """
+        params = [celery_task_id, website_id]
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, params, result)
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+
+    async def get_website_by_id(self, website_id: int) -> Optional[Dict[str, Any]]:
+        """Get website record by ID."""
+        query = "SELECT * FROM scraped_websites WHERE id = $1::int"
+        params = {"website_id": website_id}
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.fetchrow(query, website_id)
+                logger.log_db_query(query, params, result)
+                return dict(result) if result else None
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return None
+
+    async def get_all_websites(self) -> List[Dict[str, Any]]:
+        """Get all website records."""
+        query = "SELECT * FROM scraped_websites ORDER BY created_at DESC"
+        try:
+            logger.log_db_operation(query, {})
+            async with get_db_connection() as conn:
+                result = await conn.fetch(query)
+                logger.log_db_query(query, {}, result)
+                return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.log_db_query(query, {}, error=e)
+            return []
+
+    async def get_websites_by_status(self, status: str) -> List[Dict[str, Any]]:
+        """Get websites by processing status."""
+        query = "SELECT * FROM scraped_websites WHERE processing_status = $1::text ORDER BY created_at DESC"
+        params = {"status": status}
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.fetch(status, params)
+                logger.log_db_query(query, params, result)
+                return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return []
+
+    async def update_all_websites_status(self, from_status: str, to_status: str):
+        """Update all websites with given status to new status."""
+        query = """
+            UPDATE scraped_websites 
+            SET processing_status = $1::text, updated_at = NOW() 
+            WHERE processing_status = $2::text
+        """
+        params = [to_status, from_status]
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, params, result)
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)

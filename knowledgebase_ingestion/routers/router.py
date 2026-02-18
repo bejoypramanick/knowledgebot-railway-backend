@@ -262,23 +262,34 @@ async def cancel_task(item_id: str, request: Request = None):
                             logger.info(f"🔴 [CELERY_REVOKE] Revoked task {celery_task_id} from Redis queue")
                         except Exception as e:
                             # If revoke fails, raise exception to trigger transaction rollback
-                            logger.error(f"❌ [ATOMIC_TX] Revoke failed for task {celery_task_id}: {e}")
+                            logger.error(f" [ATOMIC_TX] Revoke failed for task {celery_task_id}: {e}")
                             raise HTTPException(status_code=500, detail=f"Failed to revoke task from queue: {e}")
 
-                    # Step 2: Update database (same transaction)
+                    # Step 2: Mark all tasks as cancelled in database before deletion
+                    try:
+                        from ..dao.file_dao import FileDAO
+                        
+                        file_dao = FileDAO()
+                        await file_dao.update_all_files_status(from_status="pending", to_status="cancelled")
+                        await file_dao.update_all_files_status(from_status="processing", to_status="cancelled")
+                        logger.warning(" Marked all pending/processing tasks as 'cancelled'")
+                    except Exception as e:
+                        logger.warning(f" Could not mark tasks as cancelled: {e}")
+
+                    # Step 3: Update database (same transaction)
                     try:
                         await conn.execute(
                             "UPDATE file_uploads SET processing_status = 'cancelled', task_revoked_at = NOW() WHERE id = $1",
                             int(item_id)
                         )
-                        logger.info(f"✅ [ATOMIC_TX] Updated DB: file {item_id} marked as cancelled")
+                        logger.info(f" [ATOMIC_TX] Updated DB: file {item_id} marked as cancelled")
                     except Exception as e:
                         # If DB update fails, transaction rolls back (revoke is undone in terms of intent)
-                        logger.error(f"❌ [ATOMIC_TX] DB update failed for file {item_id}: {e}")
+                        logger.error(f" [ATOMIC_TX] DB update failed for file {item_id}: {e}")
                         raise HTTPException(status_code=500, detail=f"Failed to update cancellation status: {e}")
 
                 # If we reach here, transaction is committed - both operations succeeded
-                logger.info(f"✅ [ATOMIC_COMMIT] Cancelled file task: {item_id} (celery_task_id: {celery_task_id})")
+                logger.info(f" [ATOMIC_COMMIT] Cancelled file task: {item_id} (celery_task_id: {celery_task_id})")
                 return {
                     "success": True,
                     "type": "file",
@@ -318,7 +329,7 @@ async def cancel_task(item_id: str, request: Request = None):
                     # Step 2: Update database (same transaction)
                     try:
                         await conn.execute(
-                            "UPDATE scraped_websites SET processing_status = 'cancelled', task_revoked_at = NOW() WHERE id = $1",
+                            "UPDATE scraped_websites SET processing_status = 'cancelled', task_revoked_at = NOW() WHERE id = $1::int",
                             int(item_id)
                         )
                         logger.info(f"✅ [ATOMIC_TX] Updated DB: website {item_id} marked as cancelled")

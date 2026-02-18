@@ -1819,22 +1819,21 @@ async def scrape_website_celery(
 
         if existing and options.get("replace_existing", False):
             logger.info(f"🔄 Replacing existing website: {url}")
-            await service.scraping_dao.delete_website_record(url)
+            await scraping_dao.delete_website_record(url)
 
         # Create initial DB record with processing_status='pending'
-        from shared.db import get_db_connection
+        from website_crawling.dao.scraping_dao import ScrapingDAO
         from urllib.parse import urlparse
-
-        website_record_id = None
-        async with get_db_connection() as conn:
-            website_record_id = await conn.fetchval(
-                """INSERT INTO scraped_websites (original_url, domain, processing_status, created_at)
-                   VALUES ($1, $2, $3, NOW()) RETURNING id""",
-                url,
-                urlparse(url).netloc.replace('www.', ''),
-                "pending"
-            )
-
+        
+        scraping_dao = ScrapingDAO()
+        website_record_id = await scraping_dao.record_scraped_metadata({
+            "user_role_id": options.get("user_role_id"),
+            "url": url,
+            "domain": urlparse(url).netloc.replace('www.', ''),
+            "status": "pending",
+            "created_at": "NOW()"
+        })
+        
         logger.info(f"✅ [CELERY] Created scraped_websites record ID {website_record_id} with status='pending'")
 
         # Dispatch Celery task for actual scraping
@@ -1852,13 +1851,11 @@ async def scrape_website_celery(
         logger.info(f"✅ [CELERY] Dispatched Celery task {task.id} for website ID {website_record_id}")
         logger.info(f"📊 [TASK_INFO] Task State: {task.state}, Routing: 'web_crawling' queue, Timeout: 2 hours")
 
-        # Store the Celery task_id in database so we can revoke it later if needed
-        from shared.db import get_db_connection
-        async with get_db_connection() as conn:
-            await conn.execute(
-                "UPDATE scraped_websites SET celery_task_id = $1 WHERE id = $2",
-                task.id, website_record_id
-            )
+        # Store Celery task_id in database so we can revoke it later if needed
+        from website_crawling.dao.scraping_dao import ScrapingDAO
+        
+        scraping_dao = ScrapingDAO()
+        await scraping_dao.update_celery_task_id(website_record_id, task.id)
         logger.info(f"💾 [TASK_TRACKING] Stored celery_task_id {task.id} in database for website {website_record_id}")
 
         # Return immediate response with pending status

@@ -222,8 +222,10 @@ async def record_metadata(
 async def delete_existing_file_record(file_id: str):
     """Delete existing file record from database."""
     try:
-        file_service = get_file_service()
-        await file_service.delete_existing_file_record(file_id)
+        from ..dao.file_dao import FileDAO
+        
+        file_dao = FileDAO()
+        await file_dao.delete_file_record(file_id)
         logger.info(f"🗑️ Deleted file record: {file_id}")
         return {"success": True, "message": f"File record {file_id} deleted successfully"}
     except Exception as e:

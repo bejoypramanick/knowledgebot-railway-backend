@@ -36,20 +36,12 @@ async def is_task_cancelled(celery_task_id: str) -> bool:
 async def update_website_processing_status(website_id: int, status: str, error_message: str = None):
     """Update website processing status in database"""
     try:
+        from website_crawling.dao.scraping_dao import ScrapingDAO
         from shared.db import get_db_connection
-
-        async with get_db_connection() as conn:
-            if error_message:
-                await conn.execute(
-                    "UPDATE scraped_websites SET processing_status = $1, error_message = $2, updated_at = NOW() WHERE id = $3",
-                    status, error_message, website_id
-                )
-            else:
-                await conn.execute(
-                    "UPDATE scraped_websites SET processing_status = $1, error_message = NULL, updated_at = NOW() WHERE id = $2",
-                    status, website_id
-                )
-            logger.info(f"✅ Updated scraped_websites ID {website_id} status to: {status}")
+        
+        scraping_dao = ScrapingDAO()
+        await scraping_dao.update_website_status(website_id, status, error_message)
+        logger.info(f"✅ Updated scraped_websites ID {website_id} status to: {status}")
     except Exception as e:
         logger.error(f"❌ Failed to update website processing status for ID {website_id}: {e}")
 

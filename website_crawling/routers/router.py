@@ -345,9 +345,13 @@ async def cancel_scraping_task(item_id: str):
 
                 # Step 2: Update database (same transaction)
                 try:
-                    await conn.execute(
-                        "UPDATE scraped_websites SET processing_status = 'cancelled', task_revoked_at = NOW() WHERE id = $1",
-                        int(item_id)
+                    from website_crawling.dao.scraping_dao import ScrapingDAO
+                    
+                    scraping_dao = ScrapingDAO()
+                    await scraping_dao.update_website_status(
+                        website_id=int(item_id),
+                        status="cancelled",
+                        error_message=f"Task cancelled by admin (celery_task_id: {celery_task_id})"
                     )
                     logger.info(f"✅ [ATOMIC_TX] Updated DB: website {item_id} marked as cancelled")
                 except Exception as e:

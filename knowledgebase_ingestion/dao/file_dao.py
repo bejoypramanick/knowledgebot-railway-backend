@@ -98,32 +98,99 @@ class FileDAO:
     async def insert_file_record(self, record_data: Dict[str, Any]) -> str:
         """Insert new file metadata record."""
         query = """
-            INSERT INTO file_uploads 
-            (user_role_id, original_filename, file_size, mime_type, gemini_file_id, 
-             gemini_state, gemini_display_name, version, sha256_hash, upload_timestamp)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-            RETURNING id
+            INSERT INTO file_uploads (
+                user_id, original_filename, file_display_name, size_bytes, 
+                mime_type, processing_status, gemini_file_name, gemini_file_uri, 
+                gemini_state, gemini_processed_at, source, sha256_hash, 
+                file_search_metadata, created_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
+            ) RETURNING id
         """
         params = [
-            record_data.get('user_role_id'),
-            record_data['original_filename'],
-            record_data['file_size'],
-            record_data['mime_type'],
-            record_data['gemini_file_id'],
-            record_data['gemini_state'],
-            record_data['gemini_display_name'],
-            record_data['version'],
-            record_data['sha256_hash']
+            record_data.get('user_id'),
+            record_data.get('original_filename'),
+            record_data.get('file_display_name'),
+            record_data.get('size_bytes'),
+            record_data.get('mime_type'),
+            record_data.get('processing_status'),
+            record_data.get('gemini_file_name'),
+            record_data.get('gemini_file_uri'),
+            record_data.get('gemini_state'),
+            record_data.get('gemini_processed_at'),
+            record_data.get('source'),
+            record_data.get('sha256_hash'),
+            record_data.get('file_search_metadata'),
         ]
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, *params)
                 logger.log_db_query(query, params, result)
-                return result
+                return str(result) if result else None
         except Exception as e:
             logger.log_db_query(query, params, error=e)
-            raise
+            return None
+
+    async def update_file_status(self, file_id: str, status: str, error_message: str = None):
+        """Update file processing status."""
+        query = """
+            UPDATE file_uploads 
+            SET processing_status = $1::text, error_message = $2::text, updated_at = NOW() 
+            WHERE id = $3::text
+        """
+        params = [status, error_message, file_id]
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, params, result)
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+
+    async def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
+        """Get file record by ID."""
+        query = "SELECT * FROM file_uploads WHERE id = $1::text"
+        params = {"file_id": file_id}
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.fetchrow(query, file_id)
+                logger.log_db_query(query, params, result)
+                return dict(result) if result else None
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return None
+
+    async def get_files_by_status(self, status: str) -> List[Dict[str, Any]]:
+        """Get files by processing status."""
+        query = "SELECT * FROM file_uploads WHERE processing_status = $1::text ORDER BY created_at DESC"
+        params = {"status": status}
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.fetch(query, status)
+                logger.log_db_query(query, params, result)
+                return [dict(row) for row in result] if result else []
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return []
+
+    async def update_all_files_status(self, from_status: str, to_status: str):
+        """Update all files with given status to new status."""
+        query = """
+            UPDATE file_uploads 
+            SET processing_status = $1::text, updated_at = NOW() 
+            WHERE processing_status = $2::text
+        """
+        params = [to_status, from_status]
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, *params)
+                logger.log_db_query(query, params, result)
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
 
     async def record_metric(self, metric_data: Dict[str, Any]):
         """Log a metric record."""
