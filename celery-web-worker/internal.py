@@ -5,7 +5,7 @@ These endpoints are only accessible by other Railway services
 from fastapi import APIRouter, HTTPException
 from website_crawling.celery_app import celery_app
 from shared.otel_logger import get_otel_logger
-
+from ..dao.scraping_dao import ScrapingDAO
 logger = get_otel_logger("internal_router", "website-crawling")
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -14,14 +14,23 @@ async def dispatch_website_task(**kwargs):
     """Dispatch a website scraping task"""
     try:
         from tasks import scrape_website_task
+        from ..dao.scraping_dao import ScrapingDAO
         
-        task = scrape_website_task.delay(**kwargs)
-        logger.info(f"✅ Dispatched website task: {task.id}")
-        return {
-            "success": True, 
-            "task_id": task.id,
-            "message": f"Website task dispatched successfully: {task.id}"
-        }
+        # Create website record first
+        scraping_dao = ScrapingDAO()
+        website_record_id = await scraping_dao.record_scraped_metadata(kwargs)
+        
+        if website_record_id:
+            task = scrape_website_task.delay(website_id=website_record_id, **kwargs)
+            logger.info(f"✅ Dispatched website task: {task.id}")
+            return {
+                "success": True, 
+                "task_id": task.id,
+                "message": f"Website task dispatched successfully: {task.id}"
+            }
+        else:
+            logger.error("❌ Failed to create website record")
+            raise HTTPException(status_code=500, detail="Failed to create website record")
     except Exception as e:
         logger.error(f"❌ Failed to dispatch website task: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to dispatch website task: {e}")
@@ -100,6 +109,7 @@ async def cancel_all_tasks():
     """Cancel all tasks and mark them as cancelled in database"""
     try:
         from shared.db import get_db_connection
+        from ..dao.scraping_dao import ScrapingDAO
         
         # Mark all pending/processing tasks as cancelled
         async with get_db_connection() as conn:

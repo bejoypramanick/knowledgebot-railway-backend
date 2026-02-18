@@ -5,6 +5,7 @@ These endpoints are only accessible by other Railway services
 from fastapi import APIRouter, HTTPException
 from celery_app import celery_app
 from shared.otel_logger import get_otel_logger
+from ..dao.file_dao import FileDAO
 
 logger = get_otel_logger("internal_router", "celery-file-worker")
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -14,14 +15,24 @@ async def dispatch_file_task(**kwargs):
     """Dispatch a file processing task"""
     try:
         from tasks import process_file_upload_task
+        from ..dao.file_dao import FileDAO
         
-        task = process_file_upload_task.delay(**kwargs)
-        logger.info(f"✅ Dispatched file task: {task.id}")
-        return {
-            "success": True, 
-            "task_id": task.id,
-            "message": f"File task dispatched successfully: {task.id}"
-        }
+        file_dao = FileDAO()
+        
+        # Create file record first
+        file_record_id = await file_dao.insert_file_record(kwargs)
+        
+        if file_record_id:
+            task = process_file_upload_task.delay(file_id=file_record_id, **kwargs)
+            logger.info(f"✅ Dispatched file task: {task.id}")
+            return {
+                "success": True, 
+                "task_id": task.id,
+                "message": f"File task dispatched successfully: {task.id}"
+            }
+        else:
+            logger.error("❌ Failed to create file record")
+            raise HTTPException(status_code=500, detail="Failed to create file record")
     except Exception as e:
         logger.error(f"❌ Failed to dispatch file task: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to dispatch file task: {e}")
