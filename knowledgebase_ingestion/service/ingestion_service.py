@@ -891,11 +891,9 @@ async def upload_file_celery(
             celery_task_id = str(uuid.uuid4())
 
             # Dispatch to worker via Redis message queue
-            logger.info(f" [REDIS] Queuing file task: {celery_task_id}")
+            logger.info(f"📤 [REDIS] Queuing file task: {celery_task_id}")
 
             success = redis_message_queue.publish_file_task(
-                file_size=file_size,
-                user_email=email,
                 celery_task_id=celery_task_id
             )
 
