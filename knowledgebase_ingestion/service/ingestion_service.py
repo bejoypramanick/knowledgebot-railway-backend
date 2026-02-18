@@ -32,6 +32,108 @@ def get_file_service() -> FileService:
     return _file_service
 
 
+async def create_website_record(url: str, user_email: str, task_id: str) -> Optional[int]:
+    """
+    Create website record with Queued status.
+    Delegates to DAO layer for database operations.
+    """
+    try:
+        from ..dao.file_dao import FileDAO
+        file_dao = FileDAO()
+        return await file_dao.create_website_record(url, user_email, task_id)
+    except Exception as e:
+        logger.error(f"❌ Error creating website record: {e}")
+        return None
+
+
+async def get_pending_files() -> List[Dict[str, Any]]:
+    """Get all files with pending or processing status."""
+    try:
+        from ..dao.file_dao import FileDAO
+        file_dao = FileDAO()
+        return await file_dao.get_pending_files()
+    except Exception as e:
+        logger.error(f"❌ Error getting pending files: {e}")
+        return []
+
+
+async def get_pending_websites() -> List[Dict[str, Any]]:
+    """Get all websites with pending or processing status."""
+    try:
+        from ..dao.file_dao import FileDAO
+        file_dao = FileDAO()
+        return await file_dao.get_pending_websites()
+    except Exception as e:
+        logger.error(f"❌ Error getting pending websites: {e}")
+        return []
+
+
+async def get_file_by_id(file_id: int) -> Optional[Dict[str, Any]]:
+    """Get file record by ID."""
+    try:
+        from ..dao.file_dao import FileDAO
+        file_dao = FileDAO()
+        return await file_dao.get_file_by_id(file_id)
+    except Exception as e:
+        logger.error(f"❌ Error getting file by ID: {e}")
+        return None
+
+
+async def get_website_by_id(website_id: int) -> Optional[Dict[str, Any]]:
+    """Get website record by ID."""
+    try:
+        from ..dao.file_dao import FileDAO
+        file_dao = FileDAO()
+        return await file_dao.get_website_by_id(website_id)
+    except Exception as e:
+        logger.error(f"❌ Error getting website by ID: {e}")
+        return None
+
+
+async def cancel_files() -> int:
+    """Cancel all pending/processing files."""
+    try:
+        from ..dao.file_dao import FileDAO
+        file_dao = FileDAO()
+        return await file_dao.cancel_files()
+    except Exception as e:
+        logger.error(f"❌ Error cancelling files: {e}")
+        return 0
+
+
+async def cancel_websites() -> int:
+    """Cancel all pending/processing websites."""
+    try:
+        from ..dao.file_dao import FileDAO
+        file_dao = FileDAO()
+        return await file_dao.cancel_websites()
+    except Exception as e:
+        logger.error(f"❌ Error cancelling websites: {e}")
+        return 0
+
+
+async def update_file_status(file_id: int, status: str, error_message: str = None) -> bool:
+    """Update file processing status."""
+    try:
+        from ..dao.file_dao import FileDAO
+        file_dao = FileDAO()
+        return await file_dao.update_file_status(file_id, status, error_message)
+    except Exception as e:
+        logger.error(f"❌ Error updating file status: {e}")
+        return False
+
+
+async def update_website_status(website_id: int, status: str, error_message: str = None) -> bool:
+    """Update website processing status."""
+    try:
+        from ..dao.file_dao import FileDAO
+        file_dao = FileDAO()
+        return await file_dao.update_website_status(website_id, status, error_message)
+    except Exception as e:
+        logger.error(f"❌ Error updating website status: {e}")
+        return False
+
+
 async def query_gemini_file_existence(
     gemini_file_name: str,
     file_search_metadata: Optional[Dict[str, Any]]

@@ -15,7 +15,6 @@ from datetime import datetime
 
 from ..service.file_service import FileService
 from ..service.ingestion_service import IngestionService
-from ..dao.file_dao import FileDAO
 from ..utils.auth import extract_user_from_request
 from ..utils.logging import get_otel_logger
 from shared.redis_message_queue import RedisMessageQueue
@@ -117,10 +116,10 @@ async def get_processing_status(request: Request = None):
         user_email, user_id = extract_user_from_request(request)
         
         # Get all files and websites with their current status
-        file_dao = FileDAO()
+        from ..service.ingestion_service import get_pending_files, get_pending_websites
         
-        files = await file_dao.get_pending_files()
-        websites = await file_dao.get_pending_websites()
+        files = await get_pending_files()
+        websites = await get_pending_websites()
 
         return {
             "success": True,
@@ -161,10 +160,10 @@ async def get_item_processing_status(item_id: str, request: Request = None):
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
         
-        file_dao = FileDAO()
+        from ..service.ingestion_service import get_file_by_id, get_website_by_id
         
         # Try file_uploads first
-        file_record = await file_dao.get_file_by_id(int(item_id))
+        file_record = await get_file_by_id(int(item_id))
         if file_record:
             return {
                 "success": True,
@@ -225,12 +224,12 @@ async def cancel_task(item_id: str, request: Request = None):
             logger.info(f"✅ Set cancellation flag for task {item_id}")
             
             # Update database status to cancelled
-            file_dao = FileDAO()
+            from ..service.ingestion_service import cancel_files, cancel_websites
             
             # Try file_uploads first
-            files_cancelled = await file_dao.cancel_files()
+            files_cancelled = await cancel_files()
             # Try scraped_websites
-            websites_cancelled = await file_dao.cancel_websites()
+            websites_cancelled = await cancel_websites()
             
             total_cancelled = files_cancelled + websites_cancelled
             if total_cancelled > 0:
@@ -265,12 +264,12 @@ async def cancel_all_tasks(request: Request = None):
         redis_queue = RedisMessageQueue()
         
         # Get all pending/processing tasks
-        file_dao = FileDAO()
+        from ..service.ingestion_service import cancel_files, cancel_websites
         
         # Set cancellation flags for all tasks
         cancelled_count = 0
-        files_cancelled = await file_dao.cancel_files()
-        websites_cancelled = await file_dao.cancel_websites()
+        files_cancelled = await cancel_files()
+        websites_cancelled = await cancel_websites()
         total_cancelled = files_cancelled + websites_cancelled
         
         if total_cancelled > 0:
@@ -304,9 +303,9 @@ async def delete_file(file_id: str, request: Request = None):
         redis_queue = RedisMessageQueue()
         
         # Get file details first
-        file_dao = FileDAO()
+        from ..service.ingestion_service import get_file_by_id, update_file_status
         
-        file_record = await file_dao.get_file_by_id(int(file_id))
+        file_record = await get_file_by_id(int(file_id))
         if not file_record:
             raise HTTPException(status_code=404, detail="File not found")
 
@@ -316,7 +315,7 @@ async def delete_file(file_id: str, request: Request = None):
             celery_task_id = str(uuid.uuid4())
             
             # Update file status to queued for deletion
-            await file_dao.update_file_status(int(file_id), 'queued_for_deletion')
+            await update_file_status(int(file_id), 'queued_for_deletion')
             
             # Queue deletion task
             success = redis_queue.publish_file_task(celery_task_id=celery_task_id)
@@ -365,9 +364,9 @@ async def delete_web_item(website_id: str, request: Request = None):
         redis_queue = RedisMessageQueue()
         
         # Get website details first
-        file_dao = FileDAO()
+        from ..service.ingestion_service import get_website_by_id, update_website_status
         
-        website_record = await file_dao.get_website_by_id(int(website_id))
+        website_record = await get_website_by_id(int(website_id))
         if not website_record:
             raise HTTPException(status_code=404, detail="Website not found")
 
@@ -377,14 +376,10 @@ async def delete_web_item(website_id: str, request: Request = None):
             celery_task_id = str(uuid.uuid4())
             
             # Update website status to queued for deletion
-            await file_dao.update_website_status(int(website_id), 'queued_for_deletion')
+            await update_website_status(int(website_id), 'queued_for_deletion')
             
             # Queue deletion task
-            success = redis_queue.publish_web_task(
-                website_id=int(website_id),
-                url=website_record['original_url'],
-                celery_task_id=celery_task_id
-            )
+            success = redis_queue.publish_web_task(celery_task_id=celery_task_id)
             
             if success:
                 logger.info(f"✅ Queued website {website_id} for deletion")
@@ -445,10 +440,8 @@ async def scrape_website_async_endpoint(request: Request = None):
         task_id = str(uuid.uuid4())
         
         # Create website record with pending status
-        file_dao = FileDAO()
-        
-        # Insert website record
-        website_id = await file_dao.create_website_record(url, user_email, task_id)
+        from ..service.ingestion_service import create_website_record
+        website_id = await create_website_record(url, user_email, task_id)
         
         if not website_id:
             raise HTTPException(status_code=500, detail="Failed to create website record")
