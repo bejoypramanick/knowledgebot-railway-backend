@@ -8,17 +8,6 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("file_service", "knowledgebase-ingestion")
 
-# Singleton instance
-_file_service = None
-
-def get_file_service() -> FileService:
-    """Get singleton FileService instance."""
-    global _file_service
-    if _file_service is None:
-        _file_service = FileService()
-    return _file_service
-
-
 class FileService:
     """Service layer for file operations"""
     
@@ -608,3 +597,11 @@ class FileService:
             return {"allow": False, "reason": "error"}
 
 # Singleton instance
+_file_service = None
+
+def get_file_service() -> FileService:
+    """Get singleton FileService instance."""
+    global _file_service
+    if _file_service is None:
+        _file_service = FileService()
+    return _file_service
