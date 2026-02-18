@@ -24,7 +24,7 @@ markdownify>=0.11.0
 html2text>=2024.1.0
 pillow>=10.0.0
 requests>=2.31.0
-# OpenTelemetry packages
+# OpenTelemetry
 opentelemetry-api>=1.20.0
 opentelemetry-sdk>=1.20.0
 opentelemetry-instrumentation-logging>=0.41b0
@@ -32,5 +32,4 @@ opentelemetry-instrumentation-fastapi>=0.41b0
 opentelemetry-exporter-otlp>=1.20.0
 opentelemetry-instrumentation-httpx>=0.41b0
 opentelemetry-propagator-jaeger>=1.20.0
-opentelemetry-sdk-extension-asyncpg>=0.42b0
 opentelemetry-semantic-conventions>=0.42b0
