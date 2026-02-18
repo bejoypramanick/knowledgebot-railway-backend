@@ -1,7 +1,7 @@
 """
 Logging utilities for knowledgebase ingestion
 """
-from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger as _get_shared_otel_logger
 
 # Re-export the shared logger for backward compatibility
 def get_otel_logger(name: str, service_name: str = None):
@@ -15,4 +15,4 @@ def get_otel_logger(name: str, service_name: str = None):
     Returns:
         Configured logger instance
     """
-    return get_otel_logger(name, service_name)
+    return _get_shared_otel_logger(name, service_name)
