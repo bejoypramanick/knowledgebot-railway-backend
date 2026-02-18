@@ -25,9 +25,9 @@ COPY shared/requirements-otel.txt /tmp/otel-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/web-requirements.txt && \
     pip install --no-cache-dir -r /tmp/otel-requirements.txt
 
-# Install Playwright browsers (required for Crawl4AI)
-# Use pip to run playwright install to ensure it's found
-RUN pip install playwright && python -m playwright install chromium --with-deps
+# Install Playwright (required for Crawl4AI)
+# Note: Not using --with-deps since chromium and system dependencies are already installed via apt-get
+RUN pip install playwright && python -m playwright install chromium
 
 # Copy application code
 COPY . .

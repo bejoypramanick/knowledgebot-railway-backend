@@ -25,8 +25,9 @@ COPY shared/requirements-otel.txt /tmp/otel-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/kb-requirements.txt && \
     pip install --no-cache-dir -r /tmp/otel-requirements.txt
 
-# Install Playwright browsers (may be needed by docling or other services)
-RUN pip install playwright && python -m playwright install chromium --with-deps
+# Install Playwright (may be needed by docling or other services)
+# Note: Not using --with-deps since chromium and system dependencies are already installed via apt-get
+RUN pip install playwright && python -m playwright install chromium
 
 # Copy application code
 COPY . .
