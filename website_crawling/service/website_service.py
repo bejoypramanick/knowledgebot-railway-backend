@@ -390,10 +390,23 @@ class WebsiteService:
         if not website_id:
             existing = await self.scraping_dao.get_existing_website(url)
             if existing and not replace_existing:
-                logger.info(f"⚠️ Website already exists: {url}")
+                where_exists = ["database"]
+                try:
+                    import json
+                    meta = existing['metadata']
+                    if isinstance(meta, str):
+                        meta = json.loads(meta)
+                    if meta and meta.get('file_search_metadata'):
+                        where_exists.append("FileSearch")
+                except Exception:
+                    pass
+                location = " and ".join(where_exists)
+                logger.info(f"⚠️ Website already exists in {location}: {url}")
                 return {
                     "success": False,
-                    "error": "Website already exists. Set replace_existing=true to update.",
+                    "duplicate": True,
+                    "error": f"URL already exists in {location}. Delete it first or enable Replace Existing.",
+                    "where_exists": where_exists,
                     "existing_record": dict(existing)
                 }
 
@@ -1783,26 +1796,17 @@ async def scrape_website_celery(
         # Check if URL already exists (only active records: pending/processing/completed)
         existing = await service.scraping_dao.get_existing_website(url)
         if existing and not options.get("replace_existing", False):
-            # Also check if it exists in Gemini FileSearch
-            in_filesearch = False
+            # Check if it also exists in Gemini FileSearch by inspecting stored metadata
+            where_exists = ["database"]
             try:
-                from knowledgebase_ingestion.core.config import settings as kb_settings
-                from shared.genai_client import get_genai_client
-                from shared.file_search import get_file_search_store_by_display_name
-                genai_client = get_genai_client()
-                if genai_client:
-                    store_name = get_file_search_store_by_display_name(
-                        genai_client,
-                        display_name=kb_settings.gemini_file_search_store_name
-                    )
-                    in_filesearch = store_name is not None
+                import json
+                meta = existing['metadata']
+                if isinstance(meta, str):
+                    meta = json.loads(meta)
+                if meta and meta.get('file_search_metadata'):
+                    where_exists.append("FileSearch")
             except Exception:
                 pass
-
-            where_exists = []
-            where_exists.append("database")
-            if in_filesearch:
-                where_exists.append("FileSearch")
 
             logger.info(f"⚠️ [DUPLICATE] Website already exists in {', '.join(where_exists)}: {url}")
             return {

@@ -16,7 +16,8 @@ class ScrapingDAO:
         """Get existing website record that is active (not cancelled/failed)"""
         query = """
             SELECT id, original_url as url, domain, title, description, gemini_state,
-                   pages_scraped, content_length, processing_status, created_at, updated_at
+                   pages_scraped, content_length, processing_status, created_at, updated_at,
+                   metadata
             FROM scraped_websites
             WHERE original_url = $1
               AND processing_status NOT IN ('cancelled', 'failed')
