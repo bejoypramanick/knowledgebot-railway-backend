@@ -73,5 +73,5 @@ def process_file_upload_task(
             # Update status to failed after max retries
             loop = asyncio.get_event_loop()
             loop.run_until_complete(
-                update_file_processing_status(file_id, "failed", f"Processing failed after retries: {str(e)}")
+                file_service.update_file_status(file_id, "failed", f"Processing failed after retries: {str(e)}")
             )
