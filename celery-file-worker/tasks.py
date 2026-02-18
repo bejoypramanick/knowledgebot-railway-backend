@@ -15,26 +15,6 @@ from shared.otel_logger import get_otel_logger
 logger = get_otel_logger("celery_tasks", "knowledgebase-ingestion")
 
 
-async def is_task_cancelled(celery_task_id: str) -> bool:
-    """Check if task has been marked for cancellation via Redis"""
-    from .service.file_service import FileService
-    
-    file_service = FileService()
-    return await file_service.is_task_cancelled(celery_task_id)
-
-
-async def update_file_processing_status(file_id: int, status: str, error_message: str = None):
-    """Update file processing status using service layer"""
-    try:
-        from .service.file_service import FileService
-        
-        file_service = FileService()
-        await file_service.update_file_status(str(file_id), status, error_message)
-        logger.info(f"✅ Updated file_uploads ID {file_id} status to: {status}")
-    except Exception as e:
-        logger.error(f"❌ Failed to update file processing status for ID {file_id}: {e}")
-
-
 @shared_task(bind=True, max_retries=2)
 def process_file_upload_task(
     self,
@@ -52,11 +32,11 @@ def process_file_upload_task(
     Retries up to 2 times on failure
     """
     try:
-        logger.info(f"📋 [TASK] Starting Celery task for file ID {file_id}")
+        logger.info(f" [TASK] Starting Celery task for file ID {file_id}")
 
         # Get current task ID from Celery
         task_id = self.request.id
-        logger.info(f"🆔 [TASK_ID] Current task ID: {task_id}")
+        logger.info(f" [TASK_ID] Current task ID: {task_id}")
 
         # Use service layer for processing
         from .service.file_service import FileService
@@ -72,12 +52,14 @@ def process_file_upload_task(
                 original_filename=original_filename,
                 file_display_name=file_display_name,
                 detected_mime_type=detected_mime_type,
+                user_email=user_email,
                 file_size=file_size,
                 sha256_hash=sha256_hash,
                 celery_task_id=task_id
             )
         )
 
+        logger.info(f" [TASK] Celery task completed for file ID {file_id}")
         logger.info(f"✅ [TASK] Celery task completed for file ID {file_id}")
 
     except Exception as e:
