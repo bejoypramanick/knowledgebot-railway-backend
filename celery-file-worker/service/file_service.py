@@ -76,90 +76,126 @@ class FileService:
             logger.warning(f"⚠️ Error checking cancellation status: {e}")
             return False
 
-    async def process_file_content(self, file_id: int, tmp_path: str, original_filename: str, 
-                              detected_mime_type: str, celery_task_id: str = None):
-        """Process file content - moved from tasks.py"""
+    async def handle_duplicate_check(self, sha256_hash: str, original_filename: str, replace_existing: bool = False) -> Dict[str, Any]:
+        """
+        Check for duplicate files by hash.
+        Returns: {"allow": bool, "reason": str, "detail": str}
+        """
         try:
-            from knowledgebase_ingestion.service.ingestion_service import process_with_gemini
-            from knowledgebase_ingestion.service.docling_integration import (
-                process_with_docling, should_use_docling_for_file, create_markdown_temp_file
-            )
-            from shared.html_processor import extract_content_from_html
+            # Check if file with same hash exists
+            duplicate = await self.check_duplicate_file(sha256_hash)
 
-            markdown_tmp_path = None
-            docling_metadata = {}
+            if duplicate:
+                if replace_existing:
+                    logger.info(f"🔄 Replacing existing duplicate: {original_filename}")
+                    return {"allow": True, "reason": "replaced", "detail": "File will replace existing duplicate"}
+                else:
+                    logger.warning(f"⚠️ Duplicate file detected: {original_filename}")
+                    return {"allow": False, "reason": "duplicate", "detail": f"File with same content already exists"}
 
-            # 1. Route HTML files
-            if detected_mime_type == 'text/html' or original_filename.lower().endswith(('.html', '.htm')):
-                logger.info(f"🌐 [CELERY] Processing HTML file: {original_filename}")
-                try:
-                    markdown_content, html_metadata = extract_content_from_html(tmp_path)
-                    
-                    if markdown_content:
-                        markdown_tmp_path = await create_markdown_temp_file(markdown_content)
-                        tmp_path = markdown_tmp_path
-                        original_filename = original_filename.rsplit('.', 1)[0] + '.md'
-                        detected_mime_type = 'text/markdown'
-                        docling_metadata = html_metadata
-                        
-                        logger.info(f"✅ [CELERY] HTML converted to markdown: {markdown_tmp_path}")
-                except Exception as e:
-                    logger.error(f"❌ [CELERY] HTML processing failed: {e}")
-                    await self.update_file_status(str(file_id), "failed", f"HTML processing error: {str(e)}")
-                    return {"success": False, "error": f"HTML processing error: {str(e)}"}
-
-            # 2. Route to Docling for PDF/DOCX/DOC files
-            elif should_use_docling_for_file(detected_mime_type, original_filename):
-                logger.info(f"📄 [CELERY] Processing with Docling: {original_filename}")
-                try:
-                    docling_result = await process_with_docling(tmp_path, original_filename)
-                    
-                    if docling_result.get("success"):
-                        markdown_tmp_path = docling_result.get("markdown_path")
-                        docling_metadata = docling_result.get("metadata", {})
-                        tmp_path = markdown_tmp_path
-                        original_filename = original_filename.rsplit('.', 1)[0] + '.md'
-                        detected_mime_type = 'text/markdown'
-                        
-                        logger.info(f"✅ [CELERY] Docling processed: {markdown_tmp_path}")
-                except Exception as e:
-                    logger.error(f"❌ [CELERY] Docling processing failed: {e}")
-                    await self.update_file_status(str(file_id), "failed", f"Docling processing error: {str(e)}")
-                    return {"success": False, "error": f"Docling processing error: {str(e)}"}
-
-            # 3. Route to Gemini for all processed content
-            if markdown_tmp_path:
-                logger.info(f"🤖 [CELERY] Uploading to Gemini: {original_filename}")
-                try:
-                    gemini_result = await process_with_gemini(
-                        file_id=str(file_id),
-                        tmp_path=markdown_tmp_path,
-                        original_filename=original_filename,
-                        detected_mime_type=detected_mime_type,
-                        user_email=None,  # Will be passed separately
-                        file_size=0,  # Will be calculated separately
-                        sha256_hash="",  # Will be calculated separately
-                        celery_task_id=celery_task_id
-                    )
-                    
-                    if gemini_result.get("success"):
-                        logger.info(f"✅ [CELERY] Gemini upload successful: {original_filename}")
-                        return {"success": True, "gemini_result": gemini_result}
-                    else:
-                        error_msg = gemini_result.get("error", "Unknown Gemini error")
-                        logger.error(f"❌ [CELERY] Gemini upload failed: {error_msg}")
-                        await self.update_file_status(str(file_id), "failed", error_msg)
-                        return {"success": False, "error": error_msg}
-                except Exception as e:
-                    logger.error(f"❌ [CELERY] Gemini upload error: {e}")
-                    await self.update_file_status(str(file_id), "failed", f"Gemini upload error: {str(e)}")
-                    return {"success": False, "error": f"Gemini upload error: {str(e)}"}
-            else:
-                logger.error(f"❌ [CELERY] No processed content for: {original_filename}")
-                await self.update_file_status(str(file_id), "failed", "No processed content available")
-                return {"success": False, "error": "No processed content available"}
-                
+            return {"allow": True, "reason": "new", "detail": "File is new"}
         except Exception as e:
-            logger.error(f"❌ [CELERY] Unexpected processing error: {e}")
-            await self.update_file_status(str(file_id), "failed", f"Processing error: {str(e)}")
-            return {"success": False, "error": f"Processing error: {str(e)}"}
+            logger.error(f"❌ Error checking duplicates: {e}")
+            raise
+
+    async def check_duplicate_file(self, sha256_hash: str) -> Optional[Dict[str, Any]]:
+        """Check if file with same hash exists in database."""
+        try:
+            from shared.db import get_db_connection
+
+            async with get_db_connection() as conn:
+                record = await conn.fetchrow(
+                    "SELECT id, original_filename FROM file_uploads WHERE sha256_hash = $1 LIMIT 1",
+                    sha256_hash
+                )
+                return record
+        except Exception as e:
+            logger.error(f"❌ Error checking duplicate: {e}")
+            return None
+
+    async def get_admin_user_role_id(self, user_email: str = None) -> Optional[str]:
+        """Get admin user role ID from database."""
+        try:
+            from shared.db import get_db_connection
+
+            async with get_db_connection() as conn:
+                # Get admin role first
+                admin_role = await conn.fetchval(
+                    "SELECT id FROM roles WHERE role_name = 'admin' LIMIT 1"
+                )
+
+                if not admin_role:
+                    logger.warning("⚠️ Admin role not found in database")
+                    return None
+
+                # Get user role mapping for this email
+                user_role = await conn.fetchval(
+                    "SELECT user_role_id FROM user_role_mapping WHERE email = $1 AND role_id = $2 LIMIT 1",
+                    user_email or 'admin', admin_role
+                )
+
+                return user_role
+        except Exception as e:
+            logger.warning(f"⚠️ Error getting admin user role: {e}")
+            return None
+
+    async def delete_existing_file_record(self, file_id: str) -> bool:
+        """Delete a file record from the database."""
+        try:
+            await self.delete_file_record(file_id)
+            logger.info(f"✅ Deleted file record: {file_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error deleting file record: {e}")
+            return False
+
+    async def record_metadata(
+        self,
+        user_email: str,
+        original_filename: str,
+        file_display_name: str,
+        file_ext: str,
+        uploaded_file: Any,
+        file_size: int,
+        sha256_hash: str,
+        final_state: str,
+        gemini_processed_at: Any,
+        mime_type: str,
+        file_search_metadata: Optional[Dict[str, Any]] = None
+    ) -> Optional[int]:
+        """
+        Record file metadata to database.
+        Returns: file_id or None on failure
+        """
+        try:
+            from shared.db import get_db_connection
+
+            # Get admin user role ID
+            user_role_id = await self.get_admin_user_role_id(user_email)
+
+            async with get_db_connection() as conn:
+                file_id = await conn.fetchval(
+                    """INSERT INTO file_uploads
+                       (user_role_id, original_filename, display_name, file_extension,
+                        mime_type, file_size, sha256_hash, gemini_file_name, processing_status,
+                        gemini_processed_at, metadata, created_at)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+                       RETURNING id""",
+                    user_role_id,
+                    original_filename,
+                    file_display_name,
+                    file_ext,
+                    mime_type,
+                    file_size,
+                    sha256_hash,
+                    uploaded_file.name,
+                    final_state,
+                    gemini_processed_at,
+                    json.dumps(file_search_metadata) if file_search_metadata else None
+                )
+
+                logger.info(f"✅ Recorded metadata for {original_filename}, DB ID: {file_id}")
+                return file_id
+        except Exception as e:
+            logger.error(f"❌ Error recording metadata: {e}")
+            raise
