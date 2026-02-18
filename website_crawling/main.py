@@ -27,6 +27,7 @@ from website_crawling.core.utils import (register_fastapi_exception_handlers,
                           log_endpoint_request)
 from website_crawling.core.ai import get_genai_client
 from website_crawling.routers import router
+from website_crawling.routers.internal import router as internal_router
 from website_crawling.utils.middleware import log_requests_middleware
 from shared.middleware import CorrelationIDMiddleware
 from shared.file_search import get_file_search_store_by_display_name
@@ -126,6 +127,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 # Routers
 app.include_router(router, prefix="/api/v1/webcrawl")  # Service name as root
+app.include_router(internal_router)  # Internal endpoints for service-to-service communication
 
 @app.get("/")
 async def root():
