@@ -50,7 +50,7 @@ app.add_middleware(
 )
 
 # Include internal router
-from routers.internal import router
+from routers.router import router
 app.include_router(router)
 
 @app.get("/")
