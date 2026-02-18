@@ -181,6 +181,12 @@ class RedisMessageQueue:
         try:
             message = {
                 "type": "WEB_SCRAPE",
+                "website_id": website_id,
+                "url": url,
+                "max_depth": max_depth,
+                "max_pages": max_pages,
+                "max_concurrent": max_concurrent,
+                "delay_between_requests": delay_between_requests,
                 "celery_task_id": celery_task_id
             }
 
