@@ -1194,15 +1194,13 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
         logger.warning("⚠️ Gemini client not available - skipping FileSearch deletion")
 
     # Phase 2: Delete all records from database within a transaction
-    # Only proceed if FileStore deletion succeeded or had no errors
+    # Always proceed with database deletion even if FileStore deletion had errors
+    # (user wants everything deleted; FileSearch errors should not block DB cleanup)
     if nuke_results["filestore_errors"]:
-        # FileStore deletion had errors - abort database deletion
-        logger.error(f"❌ [TRANSACTION ABORTED] FileStore deletion had errors. Aborting database deletion to maintain consistency.")
-        logger.error(f"   FileStore errors: {nuke_results['filestore_errors']}")
-        nuke_results["database_errors"].append("Aborted: FileStore deletion failed. Database unchanged.")
-        nuke_results["transaction_status"] = "aborted"
-    else:
-        # FileStore deletion succeeded, was skipped, or was already deleted - proceed with database deletion in transaction
+        logger.warning(f"⚠️ FileStore deletion had errors but proceeding with database deletion anyway.")
+        logger.warning(f"   FileStore errors: {nuke_results['filestore_errors']}")
+
+    if True:  # Always run database deletion
         try:
             from shared.db import get_db_connection
 
@@ -1332,32 +1330,24 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
     logger.warning("⚠️⚠️⚠️ NUCLEAR DELETE COMPLETED ⚠️⚠️⚠️")
 
     if transaction_status == "committed":
-        # Complete success - both FileStore and database cleared
-        logger.warning(f"✅ SUCCESS: FileStore and database fully cleared")
+        # Database cleared successfully (FileStore may have had errors but DB is clean)
+        fs_note = f" (FileStore errors: {nuke_results['filestore_errors'][0]})" if nuke_results["filestore_errors"] else ""
+        logger.warning(f"✅ SUCCESS: Database fully cleared{fs_note}")
         logger.warning(f"📊 Deleted: {nuke_results['database_files_deleted']} files, {nuke_results['database_scrapes_deleted']} scrapes")
         return {
             "success": True,
-            "message": f"Nuclear delete successful: Deleted {nuke_results['database_files_deleted']} uploaded files and {nuke_results['database_scrapes_deleted']} scraped websites from database. FileStore cleared.",
+            "message": f"Nuclear delete successful: Deleted {nuke_results['database_files_deleted']} uploaded files and {nuke_results['database_scrapes_deleted']} scraped websites from database. FileStore cleared.{fs_note}",
             "details": nuke_results,
             "transaction_status": "committed"
         }
     elif transaction_status == "rolled_back":
-        # Database transaction failed - rolled back, but FileStore may have been modified
-        logger.error(f"❌ PARTIAL FAILURE: FileStore was cleared but database deletion rolled back")
+        # Database transaction failed - rolled back
+        logger.error(f"❌ PARTIAL FAILURE: Database deletion rolled back")
         return {
             "success": False,
-            "message": f"Nuclear delete FAILED: FileStore was cleared but database deletion failed and was rolled back. Please contact support. Error: {nuke_results['database_errors'][0] if nuke_results['database_errors'] else 'Unknown'}",
+            "message": f"Nuclear delete FAILED: Database deletion failed and was rolled back. Error: {nuke_results['database_errors'][0] if nuke_results['database_errors'] else 'Unknown'}",
             "details": nuke_results,
             "transaction_status": "rolled_back"
-        }
-    elif transaction_status == "aborted":
-        # FileStore deletion failed, database was not touched
-        logger.error(f"❌ FAILURE: FileStore deletion failed, database remains unchanged")
-        return {
-            "success": False,
-            "message": f"Nuclear delete FAILED: FileStore deletion failed. Database unchanged. Please contact support. Error: {nuke_results['filestore_errors'][0] if nuke_results['filestore_errors'] else 'Unknown'}",
-            "details": nuke_results,
-            "transaction_status": "aborted"
         }
     else:
         # Unknown state
