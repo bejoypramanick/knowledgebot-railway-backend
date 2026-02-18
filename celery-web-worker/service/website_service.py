@@ -2,6 +2,7 @@
 Website Service for Celery Website Crawling Worker
 Handles business logic for website crawling operations
 """
+import os
 from typing import Dict, List, Any, Optional
 from ..dao.scraping_dao import ScrapingDAO
 from shared.otel_logger import get_otel_logger
@@ -54,9 +55,9 @@ class WebsiteService:
             logger.error(f"❌ Error creating website record: {e}")
             return None
 
-    async def process_website_async(self, website_id: int, url: str, options: Dict[str, Any], 
+    async def process_website_async(self, website_id: int, url: str, options: Dict[str, Any],
                               celery_task_id: str = None):
-        """Process website content - moved from tasks.py"""
+        """Process website content - delegates to processing service"""
         try:
             # ✅ CHECK FOR CANCELLATION BEFORE STARTING
             if await self.is_task_cancelled(celery_task_id):
@@ -68,20 +69,34 @@ class WebsiteService:
 
             logger.info(f"🔄 [CELERY] Starting scraping for website ID {website_id}: {url}")
 
-            # Create service and perform scraping
-            result = await self.scrape_website(url, options, celery_task_id=celery_task_id, website_id=website_id)
-            
+            # Use processing service for all website logic
+            from .processing_service import ProcessingService
+            processing_service = ProcessingService()
+
+            result = await processing_service.process_website_content(
+                website_id=website_id,
+                url=url,
+                celery_task_id=celery_task_id,
+                max_depth=options.get("max_depth", 2),
+                max_pages=options.get("max_pages", 100),
+                max_concurrent=options.get("max_concurrent", 10),
+                delay_between_requests=options.get("delay_between_requests", 0.0),
+                replace_existing=options.get("replace_existing", False),
+                user_email=options.get("user_email", "admin"),
+                **options
+            )
+
             if result.get("success"):
-                logger.info(f"✅ [CELERY] Website ID {website_id} scraped successfully")
+                logger.info(f"✅ [CELERY] Website ID {website_id} processed successfully")
                 await self.update_website_status(website_id, "completed")
             else:
-                error_msg = result.get("error", "Unknown scraping error")
-                logger.error(f"❌ [CELERY] Website ID {website_id} scraping failed: {error_msg}")
+                error_msg = result.get("error", "Unknown processing error")
+                logger.error(f"❌ [CELERY] Website ID {website_id} processing failed: {error_msg}")
                 await self.update_website_status(website_id, "failed", error_msg)
 
         except Exception as e:
-            error_msg = f"Scraping error: {str(e)}"
-            logger.error(f"❌ [CELERY] Unexpected error for website ID {website_id}: {e}")
+            error_msg = f"Processing error: {str(e)}"
+            logger.error(f"❌ [CELERY] Unexpected error for website ID {website_id}: {e}", exc_info=True)
             await self.update_website_status(website_id, "failed", error_msg)
 
     async def is_task_cancelled(self, celery_task_id: str) -> bool:
