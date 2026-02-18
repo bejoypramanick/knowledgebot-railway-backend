@@ -3,7 +3,7 @@ Internal API endpoints for file worker service
 These endpoints are only accessible by other Railway services
 """
 from fastapi import APIRouter, HTTPException
-from celery_app import celery_app
+from ..celery_app import celery_app
 from shared.otel_logger import get_otel_logger
 from ..service.file_service import FileService
 logger = get_otel_logger("internal_router", "celery-file-worker")

@@ -3,7 +3,7 @@ Internal API endpoints for service-to-service communication
 These endpoints are only accessible by other Railway services
 """
 from fastapi import APIRouter, HTTPException
-from website_crawling.celery_app import celery_app
+from ..celery_app import celery_app
 from shared.otel_logger import get_otel_logger
 from ..service.website_service import WebsiteService
 logger = get_otel_logger("internal_router", "website-crawling")
