@@ -386,19 +386,20 @@ class WebsiteService:
         if include_patterns or exclude_patterns:
             logger.info(f"🎯 URL targeting - include: {len(include_patterns)} patterns, exclude: {len(exclude_patterns)} patterns")
 
-        # Check for existing record
-        existing = await self.scraping_dao.get_existing_website(url)
-        if existing and not replace_existing:
-            logger.info(f"⚠️ Website already exists: {url}")
-            return {
-                "success": False,
-                "error": "Website already exists. Set replace_existing=true to update.",
-                "existing_record": dict(existing)
-            }
+        # Check for existing record - skip if called from Celery task (website_id already provided)
+        if not website_id:
+            existing = await self.scraping_dao.get_existing_website(url)
+            if existing and not replace_existing:
+                logger.info(f"⚠️ Website already exists: {url}")
+                return {
+                    "success": False,
+                    "error": "Website already exists. Set replace_existing=true to update.",
+                    "existing_record": dict(existing)
+                }
 
-        if existing and replace_existing:
-            logger.info(f"🔄 Replacing existing website: {url}")
-            await self.scraping_dao.delete_website_record(url)
+            if existing and replace_existing:
+                logger.info(f"🔄 Replacing existing website: {url}")
+                await self.scraping_dao.delete_website_record(url)
 
         # Check if this is a sitemap URL
         from website_crawling.utils.sitemap_parser import is_sitemap_url, fetch_and_parse_sitemap

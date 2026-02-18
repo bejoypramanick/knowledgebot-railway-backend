@@ -13,12 +13,13 @@ class ScrapingDAO:
         pass  # No connection parameter - DAO manages its own connection
 
     async def get_existing_website(self, url: str) -> Optional[Dict[str, Any]]:
-        """Get existing website record"""
+        """Get existing website record that is active (not cancelled/failed)"""
         query = """
             SELECT id, original_url as url, domain, title, description, gemini_state,
-                   pages_scraped, content_length, created_at, updated_at
+                   pages_scraped, content_length, processing_status, created_at, updated_at
             FROM scraped_websites
             WHERE original_url = $1
+              AND processing_status NOT IN ('cancelled', 'failed')
             ORDER BY created_at DESC
             LIMIT 1
         """
