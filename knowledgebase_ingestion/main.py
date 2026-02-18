@@ -22,7 +22,7 @@ if not hasattr(logging, '_otel_initialized_for_kb'):
 logger = logging.getLogger("knowledgebase_ingestion")
 
 from knowledgebase_ingestion.core.ai import get_genai_client
-from knowledgebase_ingestion.routers import router
+from knowledgebase_ingestion.routers import router, fileupload_router, webcrawl_router
 from knowledgebase_ingestion.utils.middleware import log_requests_middleware
 from shared.db import close_databases
 from knowledgebase_ingestion.core.config import settings
@@ -125,6 +125,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 # Routers
 app.include_router(router, prefix="/api/v1/knowledgebase")  # Service name as root
+app.include_router(fileupload_router, prefix="/api/v1/knowledgebase")
+app.include_router(webcrawl_router, prefix="/api/v1/knowledgebase")
 
 @app.get("/")
 async def root():
