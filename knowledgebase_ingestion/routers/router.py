@@ -13,10 +13,11 @@ import uuid
 import logging
 from datetime import datetime
 
-from .service.file_service import FileService
-from .service.ingestion_service import IngestionService
-from .utils.auth import extract_user_from_request
-from .utils.logging import get_otel_logger
+from ..service.file_service import FileService
+from ..service.ingestion_service import IngestionService
+from ..dao.file_dao import FileDAO
+from ..utils.auth import extract_user_from_request
+from ..utils.logging import get_otel_logger
 from shared.redis_message_queue import RedisMessageQueue
 
 logger = get_otel_logger("router", "knowledgebase_ingestion")
@@ -303,7 +304,6 @@ async def delete_file(file_id: str, request: Request = None):
         redis_queue = RedisMessageQueue()
         
         # Get file details first
-        from .dao.file_dao import FileDAO
         file_dao = FileDAO()
         
         file_record = await file_dao.get_file_by_id(int(file_id))
@@ -365,7 +365,6 @@ async def delete_web_item(website_id: str, request: Request = None):
         redis_queue = RedisMessageQueue()
         
         # Get website details first
-        from .dao.file_dao import FileDAO
         file_dao = FileDAO()
         
         website_record = await file_dao.get_website_by_id(int(website_id))
@@ -446,7 +445,6 @@ async def scrape_website_async_endpoint(request: Request = None):
         task_id = str(uuid.uuid4())
         
         # Create website record with pending status
-        from .dao.file_dao import FileDAO
         file_dao = FileDAO()
         
         # Insert website record
