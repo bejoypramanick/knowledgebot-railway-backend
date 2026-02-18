@@ -191,6 +191,8 @@ class WebCrawlDAO:
         Get all websites with hierarchical structure (parent-child relationships).
         Returns only root-level websites (parent_id IS NULL) with their children recursively populated.
         """
+        logger.info("🌳 [TREE_START] get_hierarchical_websites() called")
+
         query = """
             SELECT
                 id,
@@ -212,21 +214,33 @@ class WebCrawlDAO:
             ORDER BY depth ASC, created_at DESC
         """
         try:
+            logger.info(f"📋 [TREE_QUERY] Fetching root websites (parent_id IS NULL)")
             logger.log_db_operation(query)
+
             async with get_db_connection() as conn:
                 root_websites = await conn.fetch(query)
+                logger.info(f"✅ [TREE_RESULTS] Found {len(root_websites)} root websites")
                 logger.log_db_query(query, result=root_websites)
 
                 # Build hierarchy by fetching children for each root
                 hierarchical_websites = []
-                for root in root_websites:
+                for idx, root in enumerate(root_websites, 1):
+                    logger.info(f"🔄 [TREE_BUILD] Processing root {idx}/{len(root_websites)}: ID={root['id']}, URL={root['original_url']}")
+
                     website_dict = self._format_website_record(root)
+                    logger.info(f"📝 [TREE_FORMAT] Formatted root website: {website_dict.get('id')} -> {website_dict.get('url')}")
+
                     children = await self._get_website_children(conn, root['id'])
+                    logger.info(f"👶 [TREE_CHILDREN] Fetched {len(children)} children for root ID={root['id']}")
+
                     website_dict['children'] = children
                     hierarchical_websites.append(website_dict)
 
+                logger.info(f"✨ [TREE_COMPLETE] Built complete hierarchy with {len(hierarchical_websites)} roots")
                 return hierarchical_websites
+
         except Exception as e:
+            logger.error(f"❌ [TREE_ERROR] Error building hierarchical websites: {e}", exc_info=True)
             logger.log_db_query(query, error=e)
             return []
 

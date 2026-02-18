@@ -251,24 +251,48 @@ async def upload_file_async(
     request: Request = None
 ):
     """
-    Async file upload endpoint with Redis task queue - returns immediately with pending status.
+    Async file upload endpoint with Celery task queue - returns immediately with pending status.
     """
+    logger.info("=" * 80)
+    logger.info("📥 [UPLOAD_START] New file upload request received")
+    logger.info("=" * 80)
+
     try:
         # Extract authenticated user information
+        logger.info("🔐 [AUTH] Extracting user information from request")
         user_email, user_id = extract_user_from_request(request)
-        
+        logger.info(f"   User Email: {user_email}")
+        logger.info(f"   User ID: {user_id}")
+
         # Validate file
-        validation_result = await validate_file_upload(file, await get_file_size(file))
+        logger.info(f"✔️  [VALIDATION] Validating file: {file.filename}")
+        file_size_initial = await get_file_size(file)
+        logger.info(f"   File Size: {file_size_initial} bytes")
+
+        validation_result = await validate_file_upload(file, file_size_initial)
         if not validation_result['valid']:
+            logger.error(f"❌ [VALIDATION_FAILED] {validation_result['error']}")
             raise HTTPException(status_code=400, detail=validation_result['error'])
+
+        logger.info(f"✅ [VALIDATION_SUCCESS] File validation passed")
+        logger.info(f"   Original Name: {validation_result['original_filename']}")
+        logger.info(f"   Display Name: {file_display_name}")
+        logger.info(f"   MIME Type: {validation_result['mime_type']}")
+        logger.info(f"   File Extension: {validation_result.get('file_extension', 'unknown')}")
 
         # Read file into bytes and upload to S3, then dispatch to worker
         try:
+            logger.info("📖 [FILE_READ] Reading file into memory")
             file_bytes = await file.read()
             file_size = len(file_bytes)
+            logger.info(f"✅ [FILE_READ_SUCCESS] File read: {file_size} bytes")
 
             # Upload to S3
-            logger.info(f"☁️ [S3] Uploading file {validation_result['filename']} ({file_size} bytes) to S3")
+            logger.info(f"☁️  [S3_UPLOAD_START] Uploading to S3 storage")
+            logger.info(f"   Filename: {validation_result['filename']}")
+            logger.info(f"   Size: {file_size} bytes")
+            logger.info(f"   Type: upload")
+
             from shared.s3_file_storage import s3_file_storage
 
             success, s3_result = await s3_file_storage.upload_file(
@@ -278,14 +302,18 @@ async def upload_file_async(
             )
 
             if not success:
-                logger.error(f"❌ S3 upload failed: {s3_result}")
+                logger.error(f"❌ [S3_UPLOAD_FAILED] {s3_result}")
                 raise HTTPException(status_code=500, detail=f"File upload to S3 failed: {s3_result}")
 
             s3_key = s3_result
-            logger.info(f"✅ [S3] File uploaded successfully: {s3_key}")
+            logger.info(f"✅ [S3_UPLOAD_SUCCESS] File uploaded to S3")
+            logger.info(f"   S3 Key: {s3_key}")
 
             # Dispatch to Celery worker — Celery assigns the task ID
-            logger.info(f"📤 [CELERY] Dispatching file task to Celery")
+            logger.info(f"📤 [CELERY_DISPATCH_START] Dispatching file task to Celery worker")
+            logger.info(f"   Queue: file_processing")
+            logger.info(f"   Task: tasks.process_file_upload_task")
+
             result = file_celery.send_task(
                 'tasks.process_file_upload_task',
                 args=[
@@ -299,9 +327,21 @@ async def upload_file_async(
             )
             celery_task_id = result.id
 
-            logger.info(f"✅ File task dispatched to Celery: {celery_task_id}")
+            logger.info(f"✅ [CELERY_DISPATCH_SUCCESS] Task dispatched to Celery")
+            logger.info(f"   Celery Task ID: {celery_task_id}")
+            logger.info(f"   Args:")
+            logger.info(f"     - original_filename: {validation_result['original_filename']}")
+            logger.info(f"     - file_display_name: {file_display_name or validation_result['filename']}")
+            logger.info(f"     - s3_key: {s3_key}")
+            logger.info(f"     - file_size: {file_size}")
+            logger.info(f"     - user_email: {user_email}")
 
             # Create file record in database with the Celery task ID
+            logger.info(f"💾 [DB_INSERT_START] Creating file record in database")
+
+            file_sha256 = await calculate_file_hash(file_bytes)
+            logger.info(f"   SHA256 Hash: {file_sha256}")
+
             record_data = {
                 'user_id': user_id,
                 'original_filename': validation_result['original_filename'],
@@ -310,16 +350,35 @@ async def upload_file_async(
                 'mime_type': validation_result['mime_type'],
                 'processing_status': 'pending',
                 'source': 'upload',
-                'sha256_hash': await calculate_file_hash(file_bytes),
+                'sha256_hash': file_sha256,
                 's3_key': s3_key,
                 'celery_task_id': celery_task_id
             }
+
+            logger.info(f"📝 [DB_INSERT_DATA] Record data:")
+            logger.info(f"   user_id: {record_data['user_id']}")
+            logger.info(f"   original_filename: {record_data['original_filename']}")
+            logger.info(f"   file_display_name: {record_data['file_display_name']}")
+            logger.info(f"   size_bytes: {record_data['size_bytes']}")
+            logger.info(f"   mime_type: {record_data['mime_type']}")
+            logger.info(f"   processing_status: {record_data['processing_status']}")
+            logger.info(f"   source: {record_data['source']}")
+            logger.info(f"   s3_key: {record_data['s3_key']}")
+            logger.info(f"   celery_task_id: {record_data['celery_task_id']}")
 
             from knowledgebase_ingestion.service.fileupload_service import create_file_record
             file_id = await create_file_record(record_data)
 
             if not file_id:
+                logger.error(f"❌ [DB_INSERT_FAILED] Failed to create file record in database")
                 raise HTTPException(status_code=500, detail="Failed to create file record")
+
+            logger.info(f"✅ [DB_INSERT_SUCCESS] File record created in database")
+            logger.info(f"   File ID: {file_id}")
+
+            logger.info("=" * 80)
+            logger.info("✨ [UPLOAD_COMPLETE] File upload process completed successfully")
+            logger.info("=" * 80)
 
             return {
                 "success": True,
