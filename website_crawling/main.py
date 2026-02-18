@@ -43,13 +43,10 @@ if '_resolved_store_id' not in globals():
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     try:
-        # Initialize Celery for async task processing
-        try:
-            from website_crawling.celery_app import celery_app
-            logger.info(f"✅ Celery application initialized - Ready to dispatch website scraping tasks")
-        except Exception as celery_error:
-            logger.error(f"❌ Failed to initialize Celery: {celery_error}")
-
+        # Note: Celery worker is now a separate service (celery-web-worker)
+        # This web service only handles HTTP requests, no Celery initialization needed
+        logger.info("✅ Web service started - Celery worker is separate service")
+        
         # Initialize database using centralized initializer
         if settings.railway_postgres_url:
             from website_crawling.core.database_initializer import database_initializer

@@ -43,12 +43,12 @@ async def update_file_processing_status(file_id: int, status: str, error_message
         async with get_db_connection() as conn:
             if error_message:
                 await conn.execute(
-                    "UPDATE file_uploads SET processing_status = $1, error_message = $2, updated_at = NOW() WHERE id = $3",
+                    "UPDATE file_uploads SET processing_status = $1::text, error_message = $2::text, updated_at = NOW() WHERE id = $3::int",
                     status, error_message, file_id
                 )
             else:
                 await conn.execute(
-                    "UPDATE file_uploads SET processing_status = $1, error_message = NULL, updated_at = NOW() WHERE id = $2",
+                    "UPDATE file_uploads SET processing_status = $1::text, error_message = NULL, updated_at = NOW() WHERE id = $2::int",
                     status, file_id
                 )
             logger.info(f"✅ Updated file_uploads ID {file_id} status to: {status}")
