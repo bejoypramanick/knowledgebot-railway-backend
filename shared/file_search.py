@@ -21,39 +21,41 @@ def get_file_search_store_by_display_name(
         display_name: Display name of the store to find
 
     Returns:
-        Full store ID (e.g., "fileSearchStores/xyz123") if found, None otherwise
+        Full store ID (e.g., "fileSearchStores/xyz123") if found, None if store
+        genuinely does not exist.
+
+    Raises:
+        Exception: If the Gemini API call fails (network error, timeout, permission
+        error, etc.). Callers must distinguish API errors from "not found" — if this
+        raises, the store existence is UNKNOWN and callers should NOT assume it is
+        absent or proceed with dependent operations.
     """
-    try:
-        logger.info(f"🔍 Looking up FileSearch store by display_name: '{display_name}'")
+    logger.info(f"🔍 Looking up FileSearch store by display_name: '{display_name}'")
 
-        # Check if client has file_search_stores API
-        if not hasattr(client, 'file_search_stores'):
-            logger.error(f"❌ Client does not have 'file_search_stores' API!")
-            return None
+    # Check if client has file_search_stores API
+    if not hasattr(client, 'file_search_stores'):
+        raise RuntimeError("Gemini client does not have 'file_search_stores' API")
 
-        # List all FileSearch stores
-        logger.info("📋 Listing FileSearch stores...")
-        stores = list(client.file_search_stores.list())
-        logger.info(f"📋 Found {len(stores)} FileSearch store(s)")
+    # List all FileSearch stores — let exceptions propagate so callers know the
+    # lookup itself failed (rather than silently treating it as "not found").
+    logger.info("📋 Listing FileSearch stores...")
+    stores = list(client.file_search_stores.list())
+    logger.info(f"📋 Found {len(stores)} FileSearch store(s)")
 
-        if not stores:
-            logger.warning(f"⚠️ No FileSearch stores found")
-            return None
-
-        # Search for store with matching display_name
-        for idx, store in enumerate(stores):
-            store_display_name = getattr(store, 'display_name', None)
-            store_id = getattr(store, 'name', 'N/A')
-            logger.info(f"   [{idx+1}] {store_id} - display_name: '{store_display_name}'")
-
-            if store_display_name == display_name:
-                logger.info(f"✅ Found store: {store_id}")
-                return store_id
-
-        # Store not found
-        logger.error(f"❌ FileSearch store NOT FOUND with display_name: '{display_name}'")
+    if not stores:
+        logger.warning(f"⚠️ No FileSearch stores found")
         return None
 
-    except Exception as e:
-        logger.error(f"❌ Error looking up FileSearch store: {e}")
-        return None
+    # Search for store with matching display_name
+    for idx, store in enumerate(stores):
+        store_display_name = getattr(store, 'display_name', None)
+        store_id = getattr(store, 'name', 'N/A')
+        logger.info(f"   [{idx+1}] {store_id} - display_name: '{store_display_name}'")
+
+        if store_display_name == display_name:
+            logger.info(f"✅ Found store: {store_id}")
+            return store_id
+
+    # Store genuinely not found in the list
+    logger.warning(f"⚠️ FileSearch store NOT FOUND with display_name: '{display_name}'")
+    return None
