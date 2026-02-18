@@ -465,7 +465,8 @@ async def scrape_website_async_endpoint(request: Request = None):
                 "message": "Website scraping started successfully",
                 "task_id": task_id,
                 "website_id": str(website_id),
-                "url": url
+                "url": url,
+                "status": "Queued"
             }
         else:
             raise HTTPException(status_code=500, detail="Failed to queue scraping task")

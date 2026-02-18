@@ -201,10 +201,10 @@ class FileDAO:
             return None
 
     async def create_website_record(self, url: str, user_email: str, task_id: str) -> Optional[int]:
-        """Create website record with pending status."""
+        """Create website record with Queued status."""
         query = """
             INSERT INTO scraped_websites (original_url, processing_status, user_email, celery_task_id, created_at, updated_at)
-            VALUES ($1, 'pending', $2, $3, $4, NOW(), NOW())
+            VALUES ($1, 'Queued', $2, $3, NOW(), NOW())
             RETURNING id
         """
         params = [url, user_email, task_id]
