@@ -4,7 +4,8 @@ rootDirectory = "."
 
 [deploy]
 # Celery worker for web crawling queue
-startCommand = "cd /app/celery-web-worker && celery -A celery_app worker -Q web_crawling -l info -c 1 --max-tasks-per-child=100"
+# Note: WORKDIR in Dockerfile is /app/celery-web-worker, so no need for cd
+startCommand = "celery -A celery_app worker -Q web_crawling -l info -c 1 --max-tasks-per-child=100"
 
 # Restart policy for worker reliability
 restartPolicyType = "ON_FAILURE"
