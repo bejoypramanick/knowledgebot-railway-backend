@@ -34,13 +34,12 @@ async def is_task_cancelled(celery_task_id: str) -> bool:
 
 
 async def update_website_processing_status(website_id: int, status: str, error_message: str = None):
-    """Update website processing status in database"""
+    """Update website processing status using service layer"""
     try:
-        from website_crawling.dao.scraping_dao import ScrapingDAO
-        from shared.db import get_db_connection
+        from .service.website_service import WebsiteService
         
-        scraping_dao = ScrapingDAO()
-        await scraping_dao.update_website_status(website_id, status, error_message)
+        website_service = WebsiteService()
+        await website_service.update_website_status(website_id, status, error_message)
         logger.info(f"✅ Updated scraped_websites ID {website_id} status to: {status}")
     except Exception as e:
         logger.error(f"❌ Failed to update website processing status for ID {website_id}: {e}")
