@@ -46,7 +46,7 @@ async def revoke_celery_task(task_id: str):
         return {"success": True, "message": f"Task {task_id} revoked successfully"}
     except Exception as e:
         logger.error(f"❌ Failed to revoke task {task_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to revoke task: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to revoke task: {task_id}")
 
 @router.post("/cancel-all")
 async def cancel_all_tasks():
@@ -68,3 +68,31 @@ async def cancel_all_tasks():
     except Exception as e:
         logger.error(f"❌ Failed to cancel all tasks: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to cancel all tasks: {e}")
+
+@router.get("/status")
+async def worker_status():
+    """Worker status endpoint for health checks"""
+    try:
+        from celery_app import celery_app
+        inspect = celery_app.control.inspect()
+        stats = inspect.stats()
+        active = inspect.active()
+        
+        return {
+            "status": "healthy",
+            "service": "celery-file-worker",
+            "stats": stats,
+            "active_tasks": len(active) if active else 0
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting worker status: {e}")
+        return {
+            "status": "unhealthy",
+            "service": "celery-file-worker",
+            "error": str(e)
+        }
+
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "service": "celery-file-worker"}

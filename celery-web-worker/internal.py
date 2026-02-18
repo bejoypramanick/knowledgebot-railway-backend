@@ -26,7 +26,54 @@ async def dispatch_website_task(**kwargs):
         logger.error(f"❌ Failed to dispatch website task: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to dispatch website task: {e}")
 
-@router.post("/celery/purge")
+@router.post("/cancel-all")
+async def cancel_all_tasks():
+    """Cancel all tasks and mark them as cancelled in database"""
+    try:
+        from shared.db import get_db_connection
+        
+        # Mark all pending/processing tasks as cancelled
+        async with get_db_connection() as conn:
+            await conn.execute(
+                "UPDATE file_uploads SET processing_status = 'cancelled' WHERE processing_status IN ('pending', 'processing')"
+            )
+        
+        # Purge queue
+        celery_app.control.purge()
+        
+        logger.info("✅ Cancelled all file processing tasks")
+        return {"success": True, "message": "All tasks cancelled successfully"}
+    except Exception as e:
+        logger.error(f"❌ Failed to cancel all tasks: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cancel all tasks: {e}")
+
+@router.get("/status")
+async def worker_status():
+    """Worker status endpoint for health checks"""
+    try:
+        from celery_app import celery_app
+        inspect = celery_app.control.inspect()
+        stats = inspect.stats()
+        active = inspect.active()
+        
+        return {
+            "status": "healthy",
+            "service": "celery-web-worker",
+            "stats": stats,
+            "active_tasks": len(active) if active else 0
+        }
+    except Exception as e:
+        logger.error(f"❌ Error getting worker status: {e}")
+        return {
+            "status": "unhealthy",
+            "service": "celery-web-worker",
+            "error": str(e)
+        }
+
+@router.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "service": "celery-web-worker"}
 async def purge_celery_queue():
     """Purge all pending tasks from the Celery queue"""
     try:
