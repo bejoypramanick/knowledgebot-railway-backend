@@ -91,7 +91,7 @@ def scrape_website_task(
     Retries up to 2 times on failure
     """
     try:
-        logger.info(f"📋 [TASK] Starting Celery task for website ID {website_id}: {url}")
+        logger.info(f"📋 [TASK] Starting Celery task for website ID {website_id}")
 
         # Get current task ID from Celery
         task_id = self.request.id
