@@ -14,6 +14,24 @@ class FileService:
     def __init__(self):
         pass  # No DAO needed - using direct database calls
 
+    def _normalize_error_message(self, error_message, metadata=None) -> str:
+        """Normalize old generic error messages to include location info."""
+        if not error_message:
+            return error_message
+        # Old generic message stored before per-location tracking was added
+        if 'Website already exists' in error_message or 'Set replace_existing=true to update' in error_message:
+            try:
+                import json
+                meta = metadata
+                if isinstance(meta, str):
+                    meta = json.loads(meta)
+                in_filesearch = bool(meta and meta.get('file_search_metadata'))
+            except Exception:
+                in_filesearch = False
+            location = "database and FileSearch" if in_filesearch else "database"
+            return f"URL already existed in {location} when this task ran (duplicate detected)"
+        return error_message
+
     async def check_duplicate_file(self, sha256_hash: str, original_filename: str) -> Optional[Dict[str, Any]]:
         """Check if a file with the same hash or name already exists."""
         try:
@@ -356,7 +374,7 @@ class FileService:
                         "source": "upload",  # Add source field for frontend
                         "celery_task_id": file['celery_task_id'],  # Task ID for async processing
                         "processing_status": file['processing_status'],  # Current task status
-                        "error_message": file['error_message']  # Failure reason if failed
+                        "error_message": self._normalize_error_message(file['error_message'])  # Failure reason if failed
                     })
 
                 logger.info(f"Retrieved {len(result)} files from database")
@@ -432,7 +450,7 @@ class FileService:
                             "is_expanded": False,  # Frontend can control this
                             "celery_task_id": website['celery_task_id'],  # Task ID for async processing
                             "processing_status": website['processing_status'],  # Current task status
-                            "error_message": website['error_message']  # Failure reason if failed
+                            "error_message": self._normalize_error_message(website['error_message'], website['metadata'])  # Failure reason if failed
                         }
                         nodes[website['id']] = node
 

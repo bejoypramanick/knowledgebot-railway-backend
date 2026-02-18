@@ -1216,41 +1216,62 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                 # First: Mark all task IDs from database with cancellation flags
                 logger.critical("🛑 [1/3] Setting Redis cancellation flags for all tasks...")
                 try:
-                    redis_url_db0 = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-                    redis_url_db1 = os.getenv('REDIS_URL', 'redis://localhost:6379/1')
+                    # Build DB-0 and DB-1 URLs from base REDIS_URL
+                    base_redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')
+                    # Strip any existing /N suffix then append /0 and /1
+                    base_redis_url_stripped = base_redis_url.rsplit('/', 1)[0] if base_redis_url.count('/') >= 3 else base_redis_url
+                    redis_url_db0 = f"{base_redis_url_stripped}/0"
+                    redis_url_db1 = f"{base_redis_url_stripped}/1"
 
-                    # Connect to both Redis databases for file and website tasks
-                    redis_conn = redis_lib.from_url(redis_url_db0)
+                    # Connect to BOTH Redis databases (DB0=file tasks, DB1=website tasks)
+                    redis_conn_db0 = redis_lib.from_url(redis_url_db0)
+                    redis_conn_db1 = redis_lib.from_url(redis_url_db1)
 
                     async with get_db_connection() as conn:
                         # Get all task IDs from file_uploads
                         file_tasks = await conn.fetch("SELECT celery_task_id FROM file_uploads WHERE celery_task_id IS NOT NULL")
                         website_tasks = await conn.fetch("SELECT celery_task_id FROM scraped_websites WHERE celery_task_id IS NOT NULL")
-                        all_task_ids = [t['celery_task_id'] for t in file_tasks + website_tasks]
 
-                        # Set Redis cancellation flags for each task (they expire in 1 hour)
-                        for task_id in all_task_ids:
+                        # Set cancellation flags on DB0 for file tasks
+                        for t in file_tasks:
                             try:
-                                cancelled_key = f"task_cancelled:{task_id}"
-                                redis_conn.setex(cancelled_key, 3600, "1")  # Expires in 1 hour
+                                cancelled_key = f"task_cancelled:{t['celery_task_id']}"
+                                redis_conn_db0.setex(cancelled_key, 3600, "1")
                                 celery_tasks_marked += 1
-                                logger.critical(f"🛑 MARKED FOR CANCELLATION: {task_id}")
+                                logger.critical(f"🛑 [DB0] MARKED FOR CANCELLATION: {t['celery_task_id']}")
                             except Exception as e:
-                                logger.warning(f"⚠️ Failed to mark {task_id} for cancellation: {e}")
+                                logger.warning(f"⚠️ Failed to mark file task {t['celery_task_id']}: {e}")
 
-                        redis_conn.close()
-                        logger.critical(f"✅ [1/3] Marked {celery_tasks_marked} tasks for cancellation via Redis")
+                        # Set cancellation flags on DB1 for website tasks
+                        for t in website_tasks:
+                            try:
+                                cancelled_key = f"task_cancelled:{t['celery_task_id']}"
+                                redis_conn_db1.setex(cancelled_key, 3600, "1")
+                                celery_tasks_marked += 1
+                                logger.critical(f"🛑 [DB1] MARKED FOR CANCELLATION: {t['celery_task_id']}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Failed to mark website task {t['celery_task_id']}: {e}")
+
+                    redis_conn_db0.close()
+                    redis_conn_db1.close()
+                    logger.critical(f"✅ [1/3] Marked {celery_tasks_marked} tasks for cancellation on DB0+DB1")
 
                 except Exception as e:
                     logger.warning(f"⚠️ Error marking tasks for cancellation: {e}")
 
-                # Second: Purge all pending queues to clear queued tasks
-                logger.critical("🛑 [2/3] Purging Redis queues...")
+                # Second: Purge all pending queues to clear queued tasks (both DB0 and DB1)
+                logger.critical("🛑 [2/3] Purging Redis queues (DB0 file + DB1 website)...")
                 try:
-                    celery_app.control.purge()
-                    logger.critical("✅ [2/3] All queues purged")
+                    celery_app.control.purge()  # Purges DB0 (file upload queue)
+                    logger.critical("✅ [2/3a] File upload queue (DB0) purged")
                 except Exception as e:
-                    logger.warning(f"⚠️ Could not purge queues: {e}")
+                    logger.warning(f"⚠️ Could not purge file queue (DB0): {e}")
+                try:
+                    from website_crawling.celery_app import celery_app as website_celery_app
+                    website_celery_app.control.purge()  # Purges DB1 (website crawling queue)
+                    logger.critical("✅ [2/3b] Website crawling queue (DB1) purged")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not purge website queue (DB1): {e}")
 
                 # Third: Revoke all tasks to stop pending ones
                 logger.critical("🛑 [3/3] Revoking pending tasks...")
