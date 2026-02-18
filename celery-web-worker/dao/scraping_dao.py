@@ -59,21 +59,33 @@ class ScrapingDAO:
             return []
 
     async def record_scraped_metadata(self, record_data: Dict[str, Any]) -> Optional[int]:
-        """Record scraped website metadata."""
+        """
+        Record scraped website metadata.
+        Stores scraping_config in metadata JSONB for UI tree detection.
+        """
+        import json
+
+        # Prepare metadata with scraping_config for UI tree detection
+        metadata = {
+            "scraping_config": {
+                "source": record_data.get('url_type', 'single'),  # 'sitemap', 'website', 'single'
+            }
+        }
+
         query = """
             INSERT INTO scraped_websites (
-                user_id, original_url, url_type, processing_status, 
+                user_role_id, original_url, processing_status, metadata,
                 created_at, updated_at
             ) VALUES (
-                $1::text, $2::text, $3::text, $4::text, 
+                $1, $2, $3, $4::jsonb,
                 NOW(), NOW()
             ) RETURNING id
         """
         params = [
-            record_data.get('user_id'),
+            record_data.get('user_role_id'),
             record_data.get('original_url'),
-            record_data.get('url_type', 'single_page'),
-            record_data.get('processing_status', 'pending')
+            record_data.get('processing_status', 'pending'),
+            json.dumps(metadata)
         ]
         try:
             logger.log_db_operation(query, params)
