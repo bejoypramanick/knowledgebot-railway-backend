@@ -30,14 +30,16 @@ class FileUploadDAO:
 
     async def create_file_record(self, record_data: Dict[str, Any]) -> Optional[str]:
         """Insert new file metadata record."""
+        logger.info("💾 [FILE_DAO_INSERT] Creating file record in database")
+
         query = """
             INSERT INTO file_uploads (
-                user_id, original_filename, file_display_name, size_bytes, 
-                mime_type, processing_status, gemini_file_name, gemini_file_uri, 
-                gemini_state, gemini_processed_at, source, sha256_hash, 
+                user_id, original_filename, file_display_name, size_bytes,
+                mime_type, processing_status, gemini_file_name, gemini_file_uri,
+                gemini_state, gemini_processed_at, source, sha256_hash,
                 file_search_metadata, created_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW()
             ) RETURNING id
         """
         params = [
@@ -55,13 +57,39 @@ class FileUploadDAO:
             record_data.get('sha256_hash'),
             record_data.get('file_search_metadata'),
         ]
+
+        logger.info(f"📝 [FILE_DAO_SQL] SQL Query:")
+        logger.info(f"    {query}")
+        logger.info(f"📊 [FILE_DAO_PARAMS] Parameters:")
+        logger.info(f"    $1 (user_id): {params[0]}")
+        logger.info(f"    $2 (original_filename): {params[1]}")
+        logger.info(f"    $3 (file_display_name): {params[2]}")
+        logger.info(f"    $4 (size_bytes): {params[3]}")
+        logger.info(f"    $5 (mime_type): {params[4]}")
+        logger.info(f"    $6 (processing_status): {params[5]}")
+        logger.info(f"    $7 (gemini_file_name): {params[6]}")
+        logger.info(f"    $8 (gemini_file_uri): {params[7]}")
+        logger.info(f"    $9 (gemini_state): {params[8]}")
+        logger.info(f"    $10 (gemini_processed_at): {params[9]}")
+        logger.info(f"    $11 (source): {params[10]}")
+        logger.info(f"    $12 (sha256_hash): {params[11]}")
+        logger.info(f"    $13 (file_search_metadata): {params[12]}")
+
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchval(query, *params)
                 logger.log_db_query(query, params, result)
-                return str(result) if result else None
+
+                if result:
+                    logger.info(f"✅ [FILE_DAO_INSERT_SUCCESS] File record created with ID: {result}")
+                    return str(result)
+                else:
+                    logger.error(f"❌ [FILE_DAO_INSERT_FAILED] No ID returned from INSERT")
+                    return None
+
         except Exception as e:
+            logger.error(f"❌ [FILE_DAO_INSERT_ERROR] Failed to insert file record: {e}", exc_info=True)
             logger.log_db_query(query, params, error=e)
             return None
 
@@ -128,36 +156,75 @@ class FileUploadDAO:
 
     async def update_file_status(self, file_id: int, status: str, error_message: str = None) -> bool:
         """Update file processing status."""
+        logger.info(f"💾 [FILE_DAO_UPDATE] Updating file status for ID: {file_id}")
+
         query = """
-            UPDATE file_uploads 
+            UPDATE file_uploads
             SET processing_status = $2, error_message = $3, updated_at = NOW()
             WHERE id = $1
         """
-        params = [status, error_message, file_id]
+        params = [file_id, status, error_message]
+
+        logger.info(f"📝 [FILE_DAO_SQL] SQL Query:")
+        logger.info(f"    {query}")
+        logger.info(f"📊 [FILE_DAO_PARAMS] Parameters:")
+        logger.info(f"    $1 (id): {params[0]}")
+        logger.info(f"    $2 (processing_status): {params[1]}")
+        logger.info(f"    $3 (error_message): {params[2]}")
+
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                result = await conn.execute(query, status, error_message, file_id)
+                result = await conn.execute(query, file_id, status, error_message)
                 logger.log_db_query(query, params, result)
-                return result != "UPDATE 0"
+
+                if result != "UPDATE 0":
+                    logger.info(f"✅ [FILE_DAO_UPDATE_SUCCESS] Status updated to: {status}")
+                    return True
+                else:
+                    logger.warning(f"⚠️  [FILE_DAO_UPDATE_NO_ROWS] No rows updated (file_id {file_id} may not exist)")
+                    return False
+
         except Exception as e:
+            logger.error(f"❌ [FILE_DAO_UPDATE_ERROR] Failed to update file status: {e}", exc_info=True)
             logger.log_db_query(query, params, error=e)
             return False
 
     async def cancel_files(self) -> int:
         """Cancel all pending/processing files."""
+        logger.info("💾 [FILE_DAO_CANCEL_ALL] Cancelling all pending/processing files")
+
         query = """
-            UPDATE file_uploads 
+            UPDATE file_uploads
             SET processing_status = 'cancelled', updated_at = NOW()
             WHERE processing_status IN ('pending', 'processing')
         """
+
+        logger.info(f"📝 [FILE_DAO_SQL] SQL Query:")
+        logger.info(f"    {query}")
+        logger.info(f"📊 [FILE_DAO_FILTER] Target statuses: ['pending', 'processing']")
+
         try:
             logger.log_db_operation(query)
             async with get_db_connection() as conn:
                 result = await conn.execute(query)
                 logger.log_db_query(query, result=result)
-                return result
+
+                if result and result.startswith("UPDATE"):
+                    # Extract number of rows from "UPDATE n"
+                    try:
+                        affected_rows = int(result.split()[-1])
+                        logger.info(f"✅ [FILE_DAO_CANCEL_SUCCESS] Files cancelled: {affected_rows}")
+                        return affected_rows
+                    except:
+                        logger.info(f"✅ [FILE_DAO_CANCEL_SUCCESS] Database update completed")
+                        return result
+                else:
+                    logger.warning(f"⚠️  [FILE_DAO_CANCEL_NO_ROWS] No files to cancel")
+                    return 0
+
         except Exception as e:
+            logger.error(f"❌ [FILE_DAO_CANCEL_ERROR] Failed to cancel files: {e}", exc_info=True)
             logger.log_db_query(query, error=e)
             return 0
 

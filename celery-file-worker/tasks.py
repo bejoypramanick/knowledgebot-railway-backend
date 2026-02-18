@@ -35,15 +35,27 @@ def process_file_upload_task(
     - Delete from S3
     """
     task_id = self.request.id
-    logger.info(f"🚀 [TASK] Starting file processing task: {task_id}")
-    logger.info(f"📄 [FILE] {original_filename} (display: {file_display_name}, size: {file_size} bytes)")
-    logger.info(f"   S3 Key: {s3_key}")
+    retry_count = self.request.retries
+
+    logger.info("=" * 80)
+    logger.info("🚀 [CELERY_TASK_START] File processing task started")
+    logger.info("=" * 80)
+    logger.info(f"📋 [TASK_ID] Celery Task ID: {task_id}")
+    logger.info(f"🔄 [RETRY_INFO] Retry Count: {retry_count}, Max Retries: {self.max_retries}")
+    logger.info(f"📄 [FILE_PARAMS] Original Filename: {original_filename}")
+    logger.info(f"📄 [FILE_PARAMS] Display Name: {file_display_name}")
+    logger.info(f"📄 [FILE_PARAMS] Size: {file_size} bytes")
+    logger.info(f"📄 [FILE_PARAMS] S3 Key: {s3_key}")
+    logger.info(f"👤 [USER_INFO] Email: {user_email}")
 
     try:
+        logger.info("🔍 [PROCESSING] Loading ProcessingService...")
         from service.processing_service import ProcessingService
 
         processing_service = ProcessingService()
+        logger.info("✅ [PROCESSING] ProcessingService loaded successfully")
 
+        logger.info("⚙️  [PROCESSING] Calling process_file_content() with all parameters...")
         result = asyncio.run(
             processing_service.process_file_content(
                 original_filename=original_filename,
@@ -55,23 +67,38 @@ def process_file_upload_task(
             )
         )
 
-        logger.info(f"✅ [TASK] File processing completed: {task_id}")
-        logger.info(
-            f"📊 [RESULT] File ID: {result.get('file_id')}, "
-            f"Status: {result.get('status')}, "
-            f"Time: {result.get('processing_time_seconds')}s"
-        )
+        logger.info("=" * 80)
+        logger.info("✅ [CELERY_TASK_COMPLETE] File processing completed successfully")
+        logger.info("=" * 80)
+        logger.info(f"📊 [RESULT] File ID: {result.get('file_id')}")
+        logger.info(f"📊 [RESULT] Status: {result.get('status')}")
+        logger.info(f"📊 [RESULT] Processing Time: {result.get('processing_time_seconds')}s")
+        logger.info(f"📊 [RESULT] Success: {result.get('success')}")
 
         return result
 
     except Exception as e:
-        logger.error(f"❌ [TASK] Error in file processing task {task_id}: {e}", exc_info=True)
+        logger.error("=" * 80)
+        logger.error(f"❌ [CELERY_TASK_ERROR] Error in file processing task {task_id}")
+        logger.error("=" * 80)
+        logger.error(f"📄 [FILE] {original_filename}")
+        logger.error(f"🚨 [ERROR] {type(e).__name__}: {str(e)}")
+        logger.error(f"🔄 [RETRY_INFO] Current Attempt: {retry_count + 1}, Max Retries: {self.max_retries}")
+        logger.error(f"⏱️  [BACKOFF] Next retry in: {60 * (2 ** retry_count)}s (exponential backoff)", exc_info=True)
 
         # Retry with exponential backoff (60s, then 120s)
         try:
-            raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
-        except Exception:
-            logger.error(f"❌ [TASK] Max retries exceeded for file {original_filename}")
+            countdown = 60 * (2 ** self.request.retries)
+            logger.info(f"🔁 [RETRY] Retrying task {task_id} in {countdown}s...")
+            raise self.retry(exc=e, countdown=countdown)
+        except Exception as retry_exc:
+            logger.error("=" * 80)
+            logger.error(f"❌ [MAX_RETRIES_EXCEEDED] Failed to process file {original_filename}")
+            logger.error("=" * 80)
+            logger.error(f"📄 [FILE] {original_filename}")
+            logger.error(f"🚨 [ERROR] {type(e).__name__}: {str(e)}")
+            logger.error(f"🔄 [RETRY_INFO] Max retries exceeded after {self.max_retries} attempts")
+
             return {
                 "success": False,
                 "error": f"Processing failed after {self.max_retries} retries: {str(e)}"
