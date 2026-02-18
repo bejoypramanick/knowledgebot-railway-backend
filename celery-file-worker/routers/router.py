@@ -13,53 +13,33 @@ router = APIRouter(prefix="/internal", tags=["internal"])
 @router.post("/dispatch-file")
 async def dispatch_file_task(**kwargs):
     """
-    Dispatch a file processing task with file bytes.
-    Worker will create DB record and handle all processing.
+    Dispatch a file processing task with S3 file reference.
+    Worker will download from S3, create DB record, process, and cleanup.
     """
     try:
-        import base64
-        import tempfile
         from tasks import process_file_upload_task
-        from ..service.file_service import FileService
-
-        file_service = FileService()
 
         # Extract parameters
         original_filename = kwargs.get('original_filename')
         file_display_name = kwargs.get('file_display_name')
-        file_bytes_b64 = kwargs.get('file_bytes_b64')
+        s3_key = kwargs.get('s3_key')  # S3 object key instead of base64 bytes
         file_size = kwargs.get('file_size')
         user_email = kwargs.get('user_email', 'admin')
 
-        if not all([original_filename, file_bytes_b64, file_size]):
-            raise HTTPException(status_code=400, detail="Missing required parameters")
+        if not all([original_filename, s3_key, file_size]):
+            raise HTTPException(status_code=400, detail="Missing required parameters (original_filename, s3_key, file_size)")
 
-        # Decode file bytes
-        try:
-            file_bytes = base64.b64decode(file_bytes_b64)
-            logger.info(f"✅ Decoded file bytes for {original_filename} ({len(file_bytes)} bytes)")
-        except Exception as e:
-            logger.error(f"❌ Failed to decode file bytes: {e}")
-            raise HTTPException(status_code=400, detail="Invalid file bytes encoding")
+        logger.info(f"📋 Dispatching file task: {original_filename}")
+        logger.info(f"   S3 Key: {s3_key}")
+        logger.info(f"   Size: {file_size} bytes")
 
-        # Write to temp file
-        temp_file = None
-        try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{original_filename}") as tmp:
-                tmp.write(file_bytes)
-                temp_file = tmp.name
-            logger.info(f"✅ Wrote file to temp location: {temp_file}")
-        except Exception as e:
-            logger.error(f"❌ Failed to write temp file: {e}")
-            raise HTTPException(status_code=500, detail="Failed to create temp file")
-
-        # Dispatch Celery task with temp file path
-        # Task will handle: validation, DB record creation, processing
+        # Dispatch Celery task with S3 key
+        # Task will handle: download from S3, validation, DB record creation, processing, cleanup
         try:
             task = process_file_upload_task.delay(
                 original_filename=original_filename,
                 file_display_name=file_display_name,
-                tmp_path=temp_file,
+                s3_key=s3_key,
                 file_size=file_size,
                 user_email=user_email
             )
@@ -71,12 +51,6 @@ async def dispatch_file_task(**kwargs):
             }
         except Exception as e:
             logger.error(f"❌ Failed to queue Celery task: {e}")
-            # Clean up temp file on failure
-            if temp_file and os.path.exists(temp_file):
-                try:
-                    os.unlink(temp_file)
-                except:
-                    pass
             raise HTTPException(status_code=500, detail=f"Failed to queue task: {e}")
 
     except HTTPException:

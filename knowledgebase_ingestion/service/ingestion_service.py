@@ -872,10 +872,8 @@ async def upload_file_celery(
         if not mime_valid:
             raise HTTPException(status_code=400, detail=mime_error)
 
-        # Read file into bytes and dispatch to worker (worker will create DB record + process)
+        # Read file into bytes and upload to S3, then dispatch to worker
         try:
-            import base64
-
             file_bytes = await file.read()
             file_size = len(file_bytes)
 
@@ -884,23 +882,38 @@ async def upload_file_celery(
             if not size_valid:
                 raise HTTPException(status_code=413, detail=size_error)
 
-            logger.info(f"📤 [DISPATCH] Dispatching file {original_filename} ({file_size} bytes) to celery-file-worker")
+            # Upload to S3
+            logger.info(f"☁️ [S3] Uploading file {original_filename} ({file_size} bytes) to S3")
+            from shared.s3_file_storage import s3_file_storage
 
-            # Encode file bytes as base64 for JSON transport
-            file_bytes_b64 = base64.b64encode(file_bytes).decode('utf-8')
+            success, s3_result = await s3_file_storage.upload_file(
+                file_data=file_bytes,
+                original_filename=original_filename,
+                file_type="upload"
+            )
 
-            # Dispatch to worker with file bytes - worker will handle:
+            if not success:
+                logger.error(f"❌ S3 upload failed: {s3_result}")
+                raise HTTPException(status_code=500, detail=f"File upload to S3 failed: {s3_result}")
+
+            s3_key = s3_result
+            logger.info(f"✅ [S3] File uploaded successfully: {s3_key}")
+
+            # Dispatch to worker with S3 key - worker will handle:
+            # - Download from S3
             # - Validation
             # - DB record creation
             # - All processing (Gemini, Docling, etc.)
             # - DB record updates
+            # - Delete from S3
+            logger.info(f"📤 [DISPATCH] Dispatching file {original_filename} to celery-file-worker")
             from shared.service_client import service_client
 
             result = await service_client.dispatch_file_task(
                 'celery_file_worker',
                 original_filename=original_filename,
                 file_display_name=file_display_name,
-                file_bytes_b64=file_bytes_b64,
+                s3_key=s3_key,
                 file_size=file_size,
                 user_email=email
             )

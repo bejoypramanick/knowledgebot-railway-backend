@@ -221,24 +221,47 @@ async def query_gemini_file_existence(
 async def process_file_content(
     original_filename: str,
     file_display_name: str,
-    tmp_path: str,
+    s3_key: str,
     file_size: int,
     user_email: str = "admin",
     celery_task_id: str = None
 ) -> Dict[str, Any]:
     """
     Complete file processing pipeline:
-    1. Validation (extension, MIME, size, duplicates)
-    2. Format conversion (HTML→Markdown, PDF→Markdown via Docling)
-    3. Gemini upload
-    4. Database record creation
+    1. Download from S3
+    2. Validation (extension, MIME, size, duplicates)
+    3. Format conversion (HTML→Markdown, PDF→Markdown via Docling)
+    4. Gemini upload
+    5. Database record creation
+    6. Delete from S3
 
     Called directly from Celery task.
     """
     file_service = FileService()
     start_time = time.perf_counter()
+    tmp_path = None
+    markdown_tmp_path = None
 
     try:
+        # S3 DOWNLOAD PHASE
+        logger.info(f"📥 [S3] Downloading file from S3: {s3_key}")
+        from shared.s3_file_storage import s3_file_storage
+
+        success, result = await s3_file_storage.download_file(s3_key)
+        if not success:
+            logger.error(f"❌ [S3] Download failed: {result}")
+            raise Exception(f"S3 download failed: {result}")
+
+        file_bytes = result
+        logger.info(f"✅ [S3] Downloaded {len(file_bytes)} bytes from S3")
+
+        # Create temp file from downloaded bytes
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{original_filename}") as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+        logger.info(f"✅ Created temp file: {tmp_path}")
+
         # VALIDATION PHASE
         logger.info(f"🔍 [VALIDATION] Starting file validation for {original_filename}")
 
@@ -378,15 +401,32 @@ async def process_file_content(
         logger.error(f"❌ Error processing file {original_filename}: {e}", exc_info=True)
         raise
     finally:
-        # Cleanup temporary files
+        # Cleanup: Delete from S3 and remove temporary files
+        logger.info(f"🧹 [CLEANUP] Cleaning up S3 and temp files for {original_filename}")
+
+        # Delete from S3
+        try:
+            from shared.s3_file_storage import s3_file_storage
+            deleted = await s3_file_storage.delete_file(s3_key)
+            if deleted:
+                logger.info(f"✅ [S3] Deleted file from S3: {s3_key}")
+            else:
+                logger.warning(f"⚠️ [S3] Failed to delete from S3, but processing succeeded: {s3_key}")
+        except Exception as cleanup_error:
+            logger.warning(f"⚠️ [S3] Error during S3 cleanup: {cleanup_error}")
+
+        # Delete temporary files
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.unlink(tmp_path)
+                logger.debug(f"✅ Deleted temp file: {tmp_path}")
             except:
                 pass
+
         if markdown_tmp_path and os.path.exists(markdown_tmp_path):
             try:
                 os.unlink(markdown_tmp_path)
+                logger.debug(f"✅ Deleted markdown temp file: {markdown_tmp_path}")
             except:
                 pass
 

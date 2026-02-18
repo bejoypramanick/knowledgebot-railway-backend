@@ -20,7 +20,7 @@ def process_file_upload_task(
     self,
     original_filename: str,
     file_display_name: str,
-    tmp_path: str,
+    s3_key: str,
     file_size: int,
     user_email: str
 ):
@@ -29,17 +29,20 @@ def process_file_upload_task(
     Retries up to 2 times on failure
 
     Worker creates DB record and handles all processing:
+    - Download file from S3
     - File validation (extension, MIME type, size)
     - Duplicate detection (by SHA256 hash)
     - Format conversion (HTML→Markdown, PDF→Markdown)
     - Gemini FileSearch upload
     - Database metadata recording
+    - Delete from S3
     """
     try:
         # Get current task ID from Celery
         task_id = self.request.id
         logger.info(f"🚀 [TASK] Starting file processing task: {task_id}")
         logger.info(f"📄 [FILE] {original_filename} (display: {file_display_name}, size: {file_size} bytes)")
+        logger.info(f"   S3 Key: {s3_key}")
 
         # Use processing service for all file logic
         from .service.processing_service import ProcessingService
@@ -52,7 +55,7 @@ def process_file_upload_task(
             processing_service.process_file_content(
                 original_filename=original_filename,
                 file_display_name=file_display_name,
-                tmp_path=tmp_path,
+                s3_key=s3_key,
                 file_size=file_size,
                 user_email=user_email,
                 celery_task_id=task_id
