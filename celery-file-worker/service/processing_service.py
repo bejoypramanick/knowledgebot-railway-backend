@@ -389,7 +389,8 @@ async def process_file_content(
         logger.info(f"   📊 Size: {file_size} bytes")
         logger.info(f"   🔐 Hash: {sha256_hash}")
 
-        return {
+        # SUCCESS: Publish result to Redis
+        result = {
             "success": True,
             "message": "File processing completed",
             "file_id": file_record_id,
@@ -397,8 +398,34 @@ async def process_file_content(
             "processing_time": processing_time
         }
 
+        try:
+            from shared.redis_message_queue import redis_message_queue
+            redis_message_queue.publish_file_result(
+                file_id=file_record_id,
+                celery_task_id=celery_task_id,
+                status="completed",
+                result=result
+            )
+        except Exception as redis_error:
+            logger.warning(f"⚠️ Failed to publish result to Redis: {redis_error}")
+
+        return result
+
     except Exception as e:
         logger.error(f"❌ Error processing file {original_filename}: {e}", exc_info=True)
+
+        # FAILURE: Publish error result to Redis
+        try:
+            from shared.redis_message_queue import redis_message_queue
+            redis_message_queue.publish_file_result(
+                file_id=None,  # We don't have file_id if processing failed early
+                celery_task_id=celery_task_id,
+                status="failed",
+                error=str(e)
+            )
+        except Exception as redis_error:
+            logger.warning(f"⚠️ Failed to publish error to Redis: {redis_error}")
+
         raise
     finally:
         # Cleanup: Delete from S3 and remove temporary files

@@ -163,7 +163,8 @@ class ProcessingService:
             logger.info(f"   Pages: {len(processed_pages)}")
             logger.info(f"   Time: {processing_time:.1f}s")
 
-            return {
+            # SUCCESS: Publish result to Redis
+            result = {
                 "success": True,
                 "message": f"Website processed successfully: {len(processed_pages)} pages",
                 "website_id": website_id,
@@ -173,8 +174,34 @@ class ProcessingService:
                 "file_search_metadata": file_search_result.get("file_search_metadata")
             }
 
+            try:
+                from shared.redis_message_queue import redis_message_queue
+                redis_message_queue.publish_web_result(
+                    website_id=website_id,
+                    celery_task_id=celery_task_id,
+                    status="completed",
+                    result=result
+                )
+            except Exception as redis_error:
+                logger.warning(f"⚠️ Failed to publish result to Redis: {redis_error}")
+
+            return result
+
         except Exception as e:
             logger.error(f"❌ Unexpected error processing website {website_id}: {e}", exc_info=True)
+
+            # FAILURE: Publish error result to Redis
+            try:
+                from shared.redis_message_queue import redis_message_queue
+                redis_message_queue.publish_web_result(
+                    website_id=website_id,
+                    celery_task_id=celery_task_id,
+                    status="failed",
+                    error=str(e)
+                )
+            except Exception as redis_error:
+                logger.warning(f"⚠️ Failed to publish error to Redis: {redis_error}")
+
             return {
                 "success": False,
                 "error": f"Processing error: {str(e)}",

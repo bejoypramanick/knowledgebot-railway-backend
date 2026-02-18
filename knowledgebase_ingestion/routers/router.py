@@ -231,11 +231,11 @@ async def get_item_processing_status(item_id: str, request: Request = None):
 async def cancel_task(item_id: str, request: Request = None):
     """
     Cancel a pending or processing file/website task.
-    Revokes the Celery task and marks as cancelled in database.
+    Sets Redis cancellation flag and marks as cancelled in database.
     """
     try:
         from shared.db import get_db_connection
-        from shared.service_client import service_client
+        from shared.redis_message_queue import redis_message_queue
 
         async with get_db_connection() as conn:
             # Try file_uploads first
@@ -255,18 +255,15 @@ async def cancel_task(item_id: str, request: Request = None):
 
                 # ATOMIC TRANSACTION: Either both succeed or both fail
                 async with conn.transaction():
-                    # Step 1: Revoke the Celery task via HTTP (if it exists)
+                    # Step 1: Set Redis cancellation flag (if it exists)
                     if celery_task_id:
                         try:
-                            success = await service_client.revoke_celery_task('celery_file_worker', celery_task_id)
-                            if success:
-                                logger.info(f"🔴 [CELERY_REVOKE] Revoked task {celery_task_id} from celery_file_worker")
-                            else:
-                                logger.warning(f"⚠️ Failed to revoke task {celery_task_id} from celery_file_worker")
+                            redis_message_queue.set_task_cancelled(celery_task_id)
+                            logger.info(f"🔴 [REDIS_CANCEL] Set cancellation flag for task {celery_task_id}")
                         except Exception as e:
-                            # If revoke fails, raise exception to trigger transaction rollback
-                            logger.error(f"❌ [ATOMIC_TX] Revoke failed for task {celery_task_id}: {e}")
-                            raise HTTPException(status_code=500, detail=f"Failed to revoke task from queue: {e}")
+                            # If flag setting fails, raise exception to trigger transaction rollback
+                            logger.error(f"❌ [ATOMIC_TX] Cancel flag failed for task {celery_task_id}: {e}")
+                            raise HTTPException(status_code=500, detail=f"Failed to set cancellation flag: {e}")
 
                     # Step 2: Update database (same transaction)
                     try:
@@ -307,18 +304,15 @@ async def cancel_task(item_id: str, request: Request = None):
 
                 # ATOMIC TRANSACTION: Either both succeed or both fail
                 async with conn.transaction():
-                    # Step 1: Revoke the Celery task via HTTP (if it exists)
+                    # Step 1: Set Redis cancellation flag (if it exists)
                     if celery_task_id:
                         try:
-                            success = await service_client.revoke_celery_task('celery_web_worker', celery_task_id)
-                            if success:
-                                logger.info(f"🔴 [CELERY_REVOKE] Revoked task {celery_task_id} from celery_web_worker")
-                            else:
-                                logger.warning(f"⚠️ Failed to revoke task {celery_task_id} from celery_web_worker")
+                            redis_message_queue.set_task_cancelled(celery_task_id)
+                            logger.info(f"🔴 [REDIS_CANCEL] Set cancellation flag for task {celery_task_id}")
                         except Exception as e:
-                            # If revoke fails, raise exception to trigger transaction rollback
-                            logger.error(f"❌ [ATOMIC_TX] Revoke failed for task {celery_task_id}: {e}")
-                            raise HTTPException(status_code=500, detail=f"Failed to revoke task from queue: {e}")
+                            # If flag setting fails, raise exception to trigger transaction rollback
+                            logger.error(f"❌ [ATOMIC_TX] Cancel flag failed for task {celery_task_id}: {e}")
+                            raise HTTPException(status_code=500, detail=f"Failed to set cancellation flag: {e}")
 
                     # Step 2: Update database (same transaction)
                     try:
@@ -355,16 +349,43 @@ async def cancel_task(item_id: str, request: Request = None):
 async def cancel_all_tasks(request: Request = None):
     """
     Cancel all pending and processing tasks (files and websites).
-    Revokes tasks from Redis queue and marks as cancelled in database.
+    Clears Redis queues and sets cancellation flags for all in-flight tasks.
     """
     try:
         from shared.db import get_db_connection
-        from shared.service_client import service_client
+        from shared.redis_message_queue import redis_message_queue
 
         async with get_db_connection() as conn:
             # ATOMIC TRANSACTION: Either all tasks cancel or none cancel
             async with conn.transaction():
-                # Step 1: Mark all pending/processing tasks as cancelled in database
+                # Step 1: Get all pending/processing tasks to set cancellation flags
+                try:
+                    file_tasks = await conn.fetch(
+                        "SELECT celery_task_id FROM file_uploads WHERE processing_status IN ('pending', 'processing')"
+                    )
+                    tasks_flagged = 0
+                    for task in file_tasks:
+                        if task['celery_task_id']:
+                            redis_message_queue.set_task_cancelled(task['celery_task_id'])
+                            tasks_flagged += 1
+                    logger.info(f"✅ [REDIS_CANCEL] Set cancellation flags for {tasks_flagged} file tasks")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error setting file task cancellation flags: {e}")
+
+                try:
+                    website_tasks = await conn.fetch(
+                        "SELECT celery_task_id FROM scraped_websites WHERE processing_status IN ('pending', 'processing')"
+                    )
+                    tasks_flagged = 0
+                    for task in website_tasks:
+                        if task['celery_task_id']:
+                            redis_message_queue.set_task_cancelled(task['celery_task_id'])
+                            tasks_flagged += 1
+                    logger.info(f"✅ [REDIS_CANCEL] Set cancellation flags for {tasks_flagged} web tasks")
+                except Exception as e:
+                    logger.warning(f"⚠️ Error setting web task cancellation flags: {e}")
+
+                # Step 2: Mark all pending/processing tasks as cancelled in database
                 try:
                     files_result = await conn.execute(
                         """UPDATE file_uploads
@@ -389,46 +410,20 @@ async def cancel_all_tasks(request: Request = None):
                     logger.error(f"❌ [ATOMIC_TX] Failed to update website statuses: {e}")
                     raise HTTPException(status_code=500, detail=f"Failed to update website statuses: {e}")
 
-                # Step 2: Purge all pending queues to clear queued tasks
+                # Step 3: Purge all pending queues to clear queued tasks
                 try:
-                    success = await service_client.purge_celery_queue('celery_file_worker')
-                    if success:
-                        logger.critical("✅ [2/3a] File worker queue (DB0) purged via HTTP")
-                    else:
-                        logger.warning("⚠️ Could not purge file worker queue (DB0) via HTTP")
+                    redis_message_queue.clear_file_task_queue()
+                    logger.critical("✅ [2/2a] File task queue purged")
                 except Exception as e:
-                    logger.warning(f"⚠️ Error during file worker queue purge: {e}")
+                    logger.warning(f"⚠️ Error purging file task queue: {e}")
 
                 try:
-                    # Use HTTP client to purge web worker queue
-                    success = await service_client.purge_celery_queue('celery_web_worker')
-                    if success:
-                        logger.critical("✅ [2/3b] Web worker queue (DB1) purged via HTTP")
-                    else:
-                        logger.warning("⚠️ Could not purge web worker queue (DB1) via HTTP")
+                    redis_message_queue.clear_web_task_queue()
+                    logger.critical("✅ [2/2b] Web task queue purged")
                 except Exception as e:
-                    logger.warning(f"⚠️ Error during web worker queue purge: {e}")
+                    logger.warning(f"⚠️ Error purging web task queue: {e}")
 
-                # Step 3: Revoke all tasks via HTTP
-                try:
-                    success = await service_client.cancel_all_tasks('celery_file_worker')
-                    if success:
-                        logger.critical("✅ [3/3a] All file worker tasks revoked via HTTP")
-                    else:
-                        logger.warning("⚠️ Could not revoke file worker tasks via HTTP")
-                except Exception as e:
-                    logger.warning(f"⚠️ Error revoking file worker tasks: {e}")
-
-                try:
-                    success = await service_client.cancel_all_tasks('celery_web_worker')
-                    if success:
-                        logger.critical("✅ [3/3b] All web worker tasks revoked via HTTP")
-                    else:
-                        logger.warning("⚠️ Could not revoke web worker tasks via HTTP")
-                except Exception as e:
-                    logger.warning(f"⚠️ Error revoking web worker tasks: {e}")
-
-                logger.critical("✅✅✅ ALL CELERY TASKS MARKED FOR CANCELLATION ✅✅✅")
+                logger.critical("✅✅✅ ALL TASKS MARKED FOR CANCELLATION ✅✅✅")
 
                 # If we reach here, transaction is committed - all operations succeeded
                 return {
@@ -807,18 +802,29 @@ async def scrape_website_async_endpoint(request: Request = None):
 
                     logger.info(f"✅ Created website record ID {website_id} for {url}")
 
-                    # Dispatch task to celery-web-worker
+                    # Queue task via Redis message queue
                     try:
-                        result = await service_client.dispatch_website_task(
-                            'celery_web_worker',
+                        import uuid
+                        from shared.redis_message_queue import redis_message_queue
+
+                        # Generate task ID locally
+                        task_id = str(uuid.uuid4())
+
+                        # Publish to Redis message queue
+                        success = redis_message_queue.publish_web_task(
                             website_id=website_id,
                             url=url,
-                            **options
+                            max_depth=options.get('max_depth', 2),
+                            max_pages=options.get('max_pages', 100),
+                            max_concurrent=options.get('max_concurrent', 10),
+                            delay_between_requests=options.get('delay_between_requests', 0.0),
+                            user_email=options.get('user_email', 'admin'),
+                            celery_task_id=task_id,
+                            **{k: v for k, v in options.items() if k not in ['max_depth', 'max_pages', 'max_concurrent', 'delay_between_requests', 'user_email']}
                         )
 
-                        if result.get('success'):
-                            task_id = result.get('task_id')
-                            logger.info(f"✅ Dispatched website task: {task_id}")
+                        if success:
+                            logger.info(f"✅ Queued website task to Redis: {task_id}")
 
                             # Update database with task ID
                             await conn.execute(
@@ -836,8 +842,8 @@ async def scrape_website_async_endpoint(request: Request = None):
                                 "task_id": task_id
                             })
                         else:
-                            error_msg = result.get('error', 'Unknown error')
-                            logger.error(f"Failed to dispatch task for {url}: {error_msg}")
+                            error_msg = "Failed to queue task to Redis"
+                            logger.error(f"Failed to queue task for {url}: {error_msg}")
                             all_results.append({
                                 "url": url,
                                 "type": url_type,
@@ -845,7 +851,7 @@ async def scrape_website_async_endpoint(request: Request = None):
                                 "error": error_msg
                             })
                     except Exception as e:
-                        logger.error(f"Error dispatching task for {url}: {e}")
+                        logger.error(f"Error queueing task for {url}: {e}")
                         all_results.append({
                             "url": url,
                             "type": url_type,

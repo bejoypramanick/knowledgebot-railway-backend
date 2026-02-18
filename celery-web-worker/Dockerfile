@@ -37,7 +37,7 @@ ENV PYTHONUNBUFFERED=1
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:5555/api/workers || exit 1
+    CMD curl -f http://localhost:8080/health || exit 1
 
-# Default command - web crawling worker
-CMD ["celery", "-A", "website_crawling.celery_app", "worker", "-Q", "web_crawling", "-l", "info"]
+# Default command - FastAPI server with Redis polling loop
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

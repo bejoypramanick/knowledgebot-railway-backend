@@ -428,28 +428,28 @@ async def delete_website_hierarchy(website_id: str) -> Dict[str, Any]:
             if not hierarchy_records:
                 return {"success": False, "error": "Website not found"}
 
-            # Step 0: Revoke any running Celery tasks for these websites
-            logger.info(f"🔴 Checking for running Celery tasks to revoke...")
-            celery_tasks_revoked = 0
-            celery_revoke_errors = []
+            # Step 0: Set cancellation flags for any running tasks
+            logger.info(f"🔴 Checking for running tasks to cancel...")
+            from shared.redis_message_queue import redis_message_queue
+
+            tasks_cancelled = 0
+            cancel_errors = []
 
             for record in hierarchy_records:
                 celery_task_id = record.get("celery_task_id")
                 if celery_task_id:
                     try:
-                        # Revoke task using knowledgebase_ingestion's celery_app
-                        # Both services share the same Redis broker, so this works for all task types
-                        from knowledgebase_ingestion.celery_app import celery_app
-                        celery_app.control.revoke(celery_task_id, terminate=True)
-                        celery_tasks_revoked += 1
-                        logger.info(f"🔴 Revoked Celery task {celery_task_id} for page {record['id']}")
+                        # Set Redis cancellation flag
+                        redis_message_queue.set_task_cancelled(celery_task_id)
+                        tasks_cancelled += 1
+                        logger.info(f"🔴 Cancellation flag set for task {celery_task_id} for page {record['id']}")
                     except Exception as e:
-                        error_msg = f"Failed to revoke Celery task {celery_task_id}: {e}"
+                        error_msg = f"Failed to set cancellation flag for task {celery_task_id}: {e}"
                         logger.warning(f"⚠️ {error_msg}")
-                        celery_revoke_errors.append(error_msg)
+                        cancel_errors.append(error_msg)
 
-            if celery_tasks_revoked > 0:
-                logger.info(f"✅ Revoked {celery_tasks_revoked} Celery tasks before deletion")
+            if tasks_cancelled > 0:
+                logger.info(f"✅ Cancellation flags set for {tasks_cancelled} tasks before deletion")
 
             logger.info(f"🌳 Found {len(hierarchy_records)} pages in website hierarchy to delete")
 
@@ -681,10 +681,9 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
             from shared.db import get_db_connection
 
             # Step 1: MARK ALL TASKS FOR CANCELLATION VIA REDIS FLAGS
-            logger.critical("🔴🔴🔴 MARKING ALL CELERY TASKS FOR CANCELLATION 🔴🔴🔴")
+            logger.critical("🔴🔴🔴 MARKING ALL TASKS FOR CANCELLATION 🔴🔴🔴")
             celery_tasks_marked = 0
             try:
-                from knowledgebase_ingestion.celery_app import celery_app
                 import redis as redis_lib
 
                 # First: Mark all task IDs from database with cancellation flags
@@ -733,32 +732,18 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                 except Exception as e:
                     logger.warning(f"⚠️ Error marking tasks for cancellation: {e}")
 
-                # Second: Purge all pending queues to clear queued tasks (both DB0 and DB1)
-                logger.critical("🛑 [2/3] Purging Redis queues (DB0 file + DB1 website)...")
+                # Second: Purge all pending queues to clear queued tasks (both file and web)
+                logger.critical("🛑 [2/3] Purging Redis queues (file and web tasks)...")
                 try:
-                    celery_app.control.purge()  # Purges DB0 (file upload queue)
-                    logger.critical("✅ [2/3a] File upload queue (DB0) purged")
+                    redis_message_queue.clear_file_task_queue()
+                    logger.critical("✅ [2/3a] File task queue purged")
                 except Exception as e:
-                    logger.warning(f"⚠️ Could not purge file queue (DB0): {e}")
+                    logger.warning(f"⚠️ Could not purge file task queue: {e}")
                 try:
-                    # Use HTTP client to purge web worker queue
-                    from shared.service_client import service_client
-
-                    success = await service_client.purge_celery_queue('celery_web_worker')
-                    if success:
-                        logger.critical("✅ [2/3b] Web worker queue (DB1) purged via HTTP")
-                    else:
-                        logger.warning("⚠️ Could not purge web worker queue (DB1) via HTTP")
+                    redis_message_queue.clear_web_task_queue()
+                    logger.critical("✅ [2/3b] Web task queue purged")
                 except Exception as e:
-                    logger.warning(f"⚠️ Error during web worker queue purge via HTTP: {e}")
-
-                # Third: Revoke all tasks to stop pending ones
-                logger.critical("🛑 [3/3] Revoking pending tasks...")
-                try:
-                    celery_app.control.revoke('*', terminate=False)  # Don't send SIGTERM, just revoke
-                    logger.critical("✅ [3/3] All pending tasks revoked")
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not revoke tasks: {e}")
+                    logger.warning(f"⚠️ Could not purge web task queue: {e}")
 
                 logger.critical("✅✅✅ ALL CELERY TASKS MARKED FOR CANCELLATION ✅✅✅")
                 nuke_results["celery_marked_for_cancellation"] = celery_tasks_marked
@@ -855,9 +840,12 @@ async def upload_file_celery(
     user_email: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Celery-based async upload - returns immediately after dispatching to worker.
-    Worker handles: validation, DB record creation, processing, Gemini upload.
+    Redis-based async upload - returns immediately after queuing to Redis.
+    Worker polls Redis, downloads from S3, creates DB record, processes, and publishes result.
     """
+    import uuid
+    from shared.redis_message_queue import redis_message_queue
+
     original_filename = sanitize_filename(file.filename or "unknown_file")
     file_display_name = display_name or original_filename
     email = user_email or "admin"
@@ -899,46 +887,43 @@ async def upload_file_celery(
             s3_key = s3_result
             logger.info(f"✅ [S3] File uploaded successfully: {s3_key}")
 
-            # Dispatch to worker with S3 key - worker will handle:
-            # - Download from S3
-            # - Validation
-            # - DB record creation
-            # - All processing (Gemini, Docling, etc.)
-            # - DB record updates
-            # - Delete from S3
-            logger.info(f"📤 [DISPATCH] Dispatching file {original_filename} to celery-file-worker")
-            from shared.service_client import service_client
+            # Generate task ID locally
+            celery_task_id = str(uuid.uuid4())
 
-            result = await service_client.dispatch_file_task(
-                'celery_file_worker',
+            # Dispatch to worker via Redis message queue
+            # Worker will handle: download from S3, validation, DB record creation,
+            # all processing (Gemini, Docling, etc.), DB updates, S3 cleanup, and result publishing
+            logger.info(f"📤 [REDIS] Queuing file task: {celery_task_id}")
+
+            success = redis_message_queue.publish_file_task(
+                s3_key=s3_key,
                 original_filename=original_filename,
                 file_display_name=file_display_name,
-                s3_key=s3_key,
                 file_size=file_size,
-                user_email=email
+                user_email=email,
+                celery_task_id=celery_task_id
             )
 
-            if result.get('success'):
-                task_id = result.get('task_id')
-                logger.info(f"✅ File task dispatched successfully: {task_id}")
-                return {
-                    "success": True,
-                    "message": "File processing task dispatched successfully",
-                    "task_id": task_id
-                }
-            else:
-                error_msg = result.get('error', 'Unknown error')
-                logger.error(f"❌ Failed to dispatch file task: {error_msg}")
-                raise HTTPException(status_code=500, detail=error_msg)
+            if not success:
+                logger.error(f"❌ Failed to queue file task to Redis")
+                raise HTTPException(status_code=500, detail="Failed to queue file processing task")
+
+            logger.info(f"✅ File task queued to Redis: {celery_task_id}")
+
+            return {
+                "success": True,
+                "message": "File processing task queued successfully",
+                "task_id": celery_task_id
+            }
 
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"❌ Error dispatching file task: {e}")
+            logger.error(f"❌ Error queuing file task: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ [CELERY] Error in upload_file_celery: {e}")
+        logger.error(f"❌ [REDIS] Error in upload_file_celery: {e}")
         raise HTTPException(status_code=500, detail=str(e))
