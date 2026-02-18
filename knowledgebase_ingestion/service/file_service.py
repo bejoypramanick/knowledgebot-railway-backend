@@ -332,7 +332,7 @@ class FileService:
                 files = await conn.fetch(
                     """SELECT id, original_filename, display_name, file_extension, mime_type,
                        file_size, sha256_hash, gemini_state, created_at, version,
-                       celery_task_id, processing_status
+                       celery_task_id, processing_status, error_message
                        FROM file_uploads
                        ORDER BY created_at DESC"""
                 )
@@ -355,7 +355,8 @@ class FileService:
                         "version": file.get('version', 1),
                         "source": "upload",  # Add source field for frontend
                         "celery_task_id": file['celery_task_id'],  # Task ID for async processing
-                        "processing_status": file['processing_status']  # Current task status
+                        "processing_status": file['processing_status'],  # Current task status
+                        "error_message": file['error_message']  # Failure reason if failed
                     })
 
                 logger.info(f"Retrieved {len(result)} files from database")
@@ -378,7 +379,7 @@ class FileService:
                 websites = await conn.fetch(
                     """SELECT id, original_url, domain, title, description, pages_scraped,
                               content_length, parent_id, depth, crawl_session_id, created_at,
-                              celery_task_id, processing_status
+                              celery_task_id, processing_status, error_message
                        FROM scraped_websites
                        ORDER BY crawl_session_id DESC NULLS LAST, depth, created_at DESC"""
                 )
@@ -430,7 +431,8 @@ class FileService:
                             "children": [],  # Will be populated below
                             "is_expanded": False,  # Frontend can control this
                             "celery_task_id": website['celery_task_id'],  # Task ID for async processing
-                            "processing_status": website['processing_status']  # Current task status
+                            "processing_status": website['processing_status'],  # Current task status
+                            "error_message": website['error_message']  # Failure reason if failed
                         }
                         nodes[website['id']] = node
 
