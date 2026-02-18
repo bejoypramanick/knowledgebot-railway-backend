@@ -17,22 +17,10 @@ logger = get_otel_logger("celery_tasks", "knowledgebase-ingestion")
 
 async def is_task_cancelled(celery_task_id: str) -> bool:
     """Check if task has been marked for cancellation via Redis"""
-    if not celery_task_id:
-        return False
-
-    try:
-        import redis as redis_lib
-        redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-        redis_conn = redis_lib.from_url(redis_url)
-
-        cancelled_key = f"task_cancelled:{celery_task_id}"
-        result = redis_conn.exists(cancelled_key)
-        redis_conn.close()
-
-        return bool(result)
-    except Exception as e:
-        logger.warning(f"⚠️ Error checking cancellation status: {e}")
-        return False
+    from .service.file_service import FileService
+    
+    file_service = FileService()
+    return await file_service.is_task_cancelled(celery_task_id)
 
 
 async def update_file_processing_status(file_id: int, status: str, error_message: str = None):
