@@ -414,21 +414,7 @@ async def process_file_content(
     except Exception as e:
         logger.error(f"❌ Error processing file {original_filename}: {e}", exc_info=True)
 
-        # FAILURE: Publish error result to Redis
-        try:
-            from shared.redis_message_queue import redis_message_queue
-            redis_message_queue.publish_file_result(
-                file_id=None,  # We don't have file_id if processing failed early
-                celery_task_id=celery_task_id,
-                status="failed",
-                error=str(e)
-            )
-        except Exception as redis_error:
-            logger.warning(f"⚠️ Failed to publish error to Redis: {redis_error}")
-
-        raise
-    finally:
-        # Cleanup: Delete from S3 and remove temporary files
+        # FAILURE: Log error (no Redis publish - UI will see DB updates)
         logger.info(f"🧹 [CLEANUP] Cleaning up S3 and temp files for {original_filename}")
 
         # Delete from S3
@@ -574,6 +560,7 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
     db_success = deletion_results["postgres"].get("success", False)
     all_operations_succeeded = db_success and (deletion_results["file_search"].get("success", False) or deletion_results["gemini"].get("success", False) or table_name == "gemini_only")
 
+    # SUCCESS: Log completion (no Redis publish - UI will see DB updates)
     if all_operations_succeeded:
         logger.info(f"✅ File {original_filename} completely removed from all locations")
         return {
