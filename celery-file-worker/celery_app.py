@@ -57,8 +57,12 @@ celery_app.conf.update(
 
 logger.info("✅ [CELERY_APP] Configuration updated - Task timeout: 30 minutes, Queue: 'file_processing'")
 
-# Auto-discover tasks from tasks.py in the current directory
-celery_app.autodiscover_tasks(['tasks'])
+# Import tasks module to register task definitions
+try:
+    from . import tasks  # noqa: F401
+    logger.info("✅ [CELERY_APP] Tasks module loaded successfully")
+except ImportError as e:
+    logger.error(f"❌ [CELERY_APP] Failed to load tasks module: {e}")
 
 
 # Signal handlers for task lifecycle monitoring
