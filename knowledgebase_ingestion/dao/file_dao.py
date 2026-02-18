@@ -148,49 +148,215 @@ class FileDAO:
         except Exception as e:
             logger.log_db_query(query, params, error=e)
 
-    async def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
+    async def get_file_by_id(self, file_id: int) -> Optional[Dict[str, Any]]:
         """Get file record by ID."""
-        query = "SELECT * FROM file_uploads WHERE id = $1::text"
+        query = """
+            SELECT id, original_filename, processing_status, error_message, created_at, updated_at
+            FROM file_uploads WHERE id = $1
+        """
         params = {"file_id": file_id}
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 result = await conn.fetchrow(query, file_id)
                 logger.log_db_query(query, params, result)
-                return dict(result) if result else None
+                if result:
+                    return {
+                        "id": str(result['id']),
+                        "original_filename": result['original_filename'],
+                        "processing_status": result['processing_status'],
+                        "error_message": result['error_message'],
+                        "created_at": result['created_at'],
+                        "updated_at": result['updated_at']
+                    }
+                return None
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return None
 
-    async def get_files_by_status(self, status: str) -> List[Dict[str, Any]]:
-        """Get files by processing status."""
-        query = "SELECT * FROM file_uploads WHERE processing_status = $1::text ORDER BY created_at DESC"
-        params = {"status": status}
+    async def get_website_by_id(self, website_id: int) -> Optional[Dict[str, Any]]:
+        """Get website record by ID."""
+        query = """
+            SELECT id, original_url, processing_status, error_message, created_at, updated_at
+            FROM scraped_websites WHERE id = $1
+        """
+        params = {"website_id": website_id}
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                result = await conn.fetch(query, status)
+                result = await conn.fetchrow(query, website_id)
                 logger.log_db_query(query, params, result)
-                return [dict(row) for row in result] if result else []
+                if result:
+                    return {
+                        "id": str(result['id']),
+                        "original_url": result['original_url'],
+                        "processing_status": result['processing_status'],
+                        "error_message": result['error_message'],
+                        "created_at": result['created_at'],
+                        "updated_at": result['updated_at']
+                    }
+                return None
         except Exception as e:
             logger.log_db_query(query, params, error=e)
+            return None
+
+    async def create_website_record(self, url: str, user_email: str, task_id: str) -> Optional[int]:
+        """Create website record with pending status."""
+        query = """
+            INSERT INTO scraped_websites (original_url, processing_status, user_email, celery_task_id, created_at, updated_at)
+            VALUES ($1, 'pending', $2, $3, $4, NOW(), NOW())
+            RETURNING id
+        """
+        params = [url, user_email, task_id]
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.fetchval(query, url, user_email, task_id)
+                logger.log_db_query(query, params, result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return None
+
+    async def get_all_files(self) -> List[Dict[str, Any]]:
+        """Get all files with their status."""
+        query = """
+            SELECT id, original_filename, processing_status, error_message, created_at, updated_at
+            FROM file_uploads
+            ORDER BY updated_at DESC
+        """
+        try:
+            logger.log_db_operation(query)
+            async with get_db_connection() as conn:
+                result = await conn.fetch(query)
+                logger.log_db_query(query, result=result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, error=e)
             return []
 
-    async def update_all_files_status(self, from_status: str, to_status: str):
-        """Update all files with given status to new status."""
+    async def get_all_websites(self) -> List[Dict[str, Any]]:
+        """Get all websites with their status."""
+        query = """
+            SELECT id, original_url, processing_status, error_message, created_at, updated_at
+            FROM scraped_websites
+            ORDER BY updated_at DESC
+        """
+        try:
+            logger.log_db_operation(query)
+            async with get_db_connection() as conn:
+                result = await conn.fetch(query)
+                logger.log_db_query(query, result=result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, error=e)
+            return []
+
+    async def get_pending_files(self) -> List[Dict[str, Any]]:
+        """Get all files with pending or processing status."""
+        query = """
+            SELECT id, original_filename, processing_status, error_message, created_at, updated_at
+            FROM file_uploads
+            WHERE processing_status IN ('pending', 'processing')
+            ORDER BY updated_at DESC
+        """
+        try:
+            logger.log_db_operation(query)
+            async with get_db_connection() as conn:
+                result = await conn.fetch(query)
+                logger.log_db_query(query, result=result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, error=e)
+            return []
+
+    async def get_pending_websites(self) -> List[Dict[str, Any]]:
+        """Get all websites with pending or processing status."""
+        query = """
+            SELECT id, original_url, processing_status, error_message, created_at, updated_at
+            FROM scraped_websites
+            WHERE processing_status IN ('pending', 'processing')
+            ORDER BY updated_at DESC
+        """
+        try:
+            logger.log_db_operation(query)
+            async with get_db_connection() as conn:
+                result = await conn.fetch(query)
+                logger.log_db_query(query, result=result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, error=e)
+            return []
+
+    async def update_file_status(self, file_id: int, status: str, error_message: str = None) -> bool:
+        """Update file processing status."""
         query = """
             UPDATE file_uploads 
-            SET processing_status = $1::text, updated_at = NOW() 
-            WHERE processing_status = $2::text
+            SET processing_status = $2, error_message = $3, updated_at = NOW()
+            WHERE id = $1
         """
-        params = [to_status, from_status]
+        params = [status, error_message, file_id]
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                result = await conn.execute(query, *params)
+                result = await conn.execute(query, status, error_message, file_id)
                 logger.log_db_query(query, params, result)
+                return result != "UPDATE 0"
         except Exception as e:
             logger.log_db_query(query, params, error=e)
+            return False
+
+    async def update_website_status(self, website_id: int, status: str, error_message: str = None) -> bool:
+        """Update website processing status."""
+        query = """
+            UPDATE scraped_websites 
+            SET processing_status = $2, error_message = $3, updated_at = NOW()
+            WHERE id = $1
+        """
+        params = [status, error_message, website_id]
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, status, error_message, website_id)
+                logger.log_db_query(query, params, result)
+                return result != "UPDATE 0"
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return False
+
+    async def cancel_files(self) -> int:
+        """Cancel all pending/processing files."""
+        query = """
+            UPDATE file_uploads 
+            SET processing_status = 'cancelled', updated_at = NOW()
+            WHERE processing_status IN ('pending', 'processing')
+        """
+        try:
+            logger.log_db_operation(query)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query)
+                logger.log_db_query(query, result=result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, error=e)
+            return 0
+
+    async def cancel_websites(self) -> int:
+        """Cancel all pending/processing websites."""
+        query = """
+            UPDATE scraped_websites 
+            SET processing_status = 'cancelled', updated_at = NOW()
+            WHERE processing_status IN ('pending', 'processing')
+        """
+        try:
+            logger.log_db_operation(query)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query)
+                logger.log_db_query(query, result=result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, error=e)
+            return 0
 
     async def record_metric(self, metric_data: Dict[str, Any]):
         """Log a metric record."""
