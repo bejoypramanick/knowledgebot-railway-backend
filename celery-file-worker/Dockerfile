@@ -1,6 +1,7 @@
 # Dockerfile for Celery File Processing Worker
 # Build image: docker build -t knowledgebot-celery-file-worker .
 # Run: docker run -e REDIS_URL=redis://redis:6379/0 knowledgebot-celery-file-worker
+# Build: 2025-02-18 - Celery worker with asyncio.run() fix
 
 FROM python:3.11-slim
 

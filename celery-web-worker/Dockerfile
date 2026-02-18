@@ -1,6 +1,7 @@
 # Dockerfile for Celery Website Crawling Worker
 # Build image: docker build -t knowledgebot-celery-web-worker .
 # Run: docker run -e REDIS_URL=redis://redis:6379/1 knowledgebot-celery-web-worker
+# Build: 2025-02-18 - Celery worker with asyncio.run() fix
 
 FROM python:3.11-slim
 
