@@ -164,7 +164,7 @@ class WebCrawlDAO:
         """Get website details by celery_task_id for worker processing."""
         query = """
             SELECT id, original_url, processing_status, user_email, celery_task_id
-            FROM scraped_websites 
+            FROM scraped_websites
             WHERE celery_task_id = $1
         """
         params = {"task_id": task_id}
@@ -185,3 +185,109 @@ class WebCrawlDAO:
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return None
+
+    async def get_hierarchical_websites(self) -> List[Dict[str, Any]]:
+        """
+        Get all websites with hierarchical structure (parent-child relationships).
+        Returns only root-level websites (parent_id IS NULL) with their children recursively populated.
+        """
+        query = """
+            SELECT
+                id,
+                original_url,
+                depth,
+                parent_id,
+                domain,
+                title,
+                pages_scraped,
+                content_length,
+                metadata,
+                processing_status,
+                error_message,
+                created_at,
+                updated_at,
+                celery_task_id
+            FROM scraped_websites
+            WHERE parent_id IS NULL
+            ORDER BY depth ASC, created_at DESC
+        """
+        try:
+            logger.log_db_operation(query)
+            async with get_db_connection() as conn:
+                root_websites = await conn.fetch(query)
+                logger.log_db_query(query, result=root_websites)
+
+                # Build hierarchy by fetching children for each root
+                hierarchical_websites = []
+                for root in root_websites:
+                    website_dict = self._format_website_record(root)
+                    children = await self._get_website_children(conn, root['id'])
+                    website_dict['children'] = children
+                    hierarchical_websites.append(website_dict)
+
+                return hierarchical_websites
+        except Exception as e:
+            logger.log_db_query(query, error=e)
+            return []
+
+    async def _get_website_children(self, conn, parent_id: int, level: int = 0) -> List[Dict[str, Any]]:
+        """
+        Recursively fetch all children of a website.
+        """
+        query = """
+            SELECT
+                id,
+                original_url,
+                depth,
+                parent_id,
+                domain,
+                title,
+                pages_scraped,
+                content_length,
+                metadata,
+                processing_status,
+                error_message,
+                created_at,
+                updated_at,
+                celery_task_id
+            FROM scraped_websites
+            WHERE parent_id = $1
+            ORDER BY depth ASC, created_at ASC
+        """
+        try:
+            children = await conn.fetch(query, parent_id)
+
+            # Recursively fetch children of children
+            result = []
+            for child in children:
+                child_dict = self._format_website_record(child)
+                grandchildren = await self._get_website_children(conn, child['id'], level + 1)
+                child_dict['children'] = grandchildren
+                result.append(child_dict)
+
+            return result
+        except Exception as e:
+            logger.error(f"Error fetching children for parent_id {parent_id}: {e}")
+            return []
+
+    def _format_website_record(self, record) -> Dict[str, Any]:
+        """Format a website record for API response."""
+        metadata = record['metadata'] if record['metadata'] else {}
+
+        return {
+            "id": record['id'],
+            "url": record['original_url'],
+            "depth": record['depth'] or 0,
+            "parent_id": record['parent_id'],
+            "domain": record['domain'],
+            "title": record['title'],
+            "pages_scraped": record['pages_scraped'] or 0,
+            "size_bytes": record['content_length'] or 0,
+            "processing_status": record['processing_status'],
+            "error_message": record['error_message'],
+            "created_at": record['created_at'].isoformat() if record['created_at'] else None,
+            "updated_at": record['updated_at'].isoformat() if record['updated_at'] else None,
+            "celery_task_id": record['celery_task_id'],
+            "scraping_config": metadata.get('scraping_config'),
+            "children": []  # Will be populated by caller
+        }

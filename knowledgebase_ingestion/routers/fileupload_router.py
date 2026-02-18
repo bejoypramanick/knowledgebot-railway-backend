@@ -14,6 +14,7 @@ from knowledgebase_ingestion.service.fileupload_service import (
     validate_file_upload
 )
 from knowledgebase_ingestion.service.file_service import get_file_service
+from knowledgebase_ingestion.dao.webcrawl_dao import WebCrawlDAO
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import file_celery
 
@@ -27,28 +28,41 @@ router = APIRouter(prefix="/api/v1/gateway/knowledgebase", tags=["file-upload"])
 
 @router.get("/files")
 async def get_all_files(request: Request = None):
-    """Get all files and websites with their current status"""
+    """Get all files and websites with their current status and hierarchical structure"""
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
-        # Get all files with their current status
+
+        # Get all uploaded files with their current status
         files = await get_pending_files()
+
+        # Get all hierarchical websites (NEW)
+        webcrawl_dao = WebCrawlDAO()
+        websites = await webcrawl_dao.get_hierarchical_websites()
+
+        # Format files for response
+        files_list = [
+            {
+                "id": str(f['id']),
+                "type": "file",
+                "name": f['original_filename'],
+                "processing_status": f['processing_status'],
+                "error_message": f['error_message'],
+                "created_at": f['created_at'].isoformat() if f['created_at'] else None,
+                "updated_at": f['updated_at'].isoformat() if f['updated_at'] else None
+            }
+            for f in files
+        ]
 
         return {
             "success": True,
-            "files": [
-                {
-                    "id": str(f['id']),
-                    "type": "file",
-                    "name": f['original_filename'],
-                    "processing_status": f['processing_status'],
-                    "error_message": f['error_message'],
-                    "created_at": f['created_at'].isoformat() if f['created_at'] else None,
-                    "updated_at": f['updated_at'].isoformat() if f['updated_at'] else None
-                }
-                for f in files
-            ]
+            "files": files_list,
+            "websites": websites,  # NEW: hierarchical website tree
+            "count": len(files_list),
+            "sources": {
+                "upload": len(files_list),
+                "scrape": len(websites)  # Count of root-level websites
+            }
         }
     except Exception as e:
         logger.error(f"Error getting files: {e}")
