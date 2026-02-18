@@ -33,18 +33,6 @@ async def is_task_cancelled(celery_task_id: str) -> bool:
         return False
 
 
-async def update_website_processing_status(website_id: int, status: str, error_message: str = None):
-    """Update website processing status using service layer"""
-    try:
-        from .service.website_service import WebsiteService
-        
-        website_service = WebsiteService()
-        await website_service.update_website_status(website_id, status, error_message)
-        logger.info(f"✅ Updated scraped_websites ID {website_id} status to: {status}")
-    except Exception as e:
-        logger.error(f"❌ Failed to update website processing status for ID {website_id}: {e}")
-
-
 async def process_website_async(
     website_id: int,
     url: str,
@@ -57,34 +45,37 @@ async def process_website_async(
     Checks for cancellation flags before executing
     """
     try:
-        # ✅ CHECK FOR CANCELLATION BEFORE STARTING
+        # CHECK FOR CANCELLATION BEFORE STARTING
         if await is_task_cancelled(celery_task_id):
             logger.warning(f"❌ [CELERY] Task {celery_task_id} was marked for cancellation - aborting")
-            await update_website_processing_status(website_id, "cancelled", "Task cancelled by admin")
+            from .service.website_service import WebsiteService
+            website_service = WebsiteService()
+            await website_service.update_website_status(website_id, "cancelled", "Task cancelled by admin")
             return
 
-        await update_website_processing_status(website_id, "processing")
+        from .service.website_service import WebsiteService
+        website_service = WebsiteService()
+        await website_service.update_website_status(website_id, "processing")
 
         logger.info(f"🔄 [CELERY] Starting scraping for website ID {website_id}: {url}")
 
-        from website_crawling.service.website_service import WebsiteService
-
         # Create service and perform scraping
-        service = WebsiteService()
-        result = await service.scrape_website(url, options, celery_task_id=celery_task_id, website_id=website_id)
+        result = await website_service.scrape_website(url, options, celery_task_id=celery_task_id, website_id=website_id)
 
         if result.get("success"):
             logger.info(f"✅ [CELERY] Website ID {website_id} scraped successfully")
-            await update_website_processing_status(website_id, "completed")
+            await website_service.update_website_status(website_id, "completed")
         else:
             error_msg = result.get("error", "Unknown scraping error")
             logger.error(f"❌ [CELERY] Website ID {website_id} scraping failed: {error_msg}")
-            await update_website_processing_status(website_id, "failed", error_msg)
+            await website_service.update_website_status(website_id, "failed", error_msg)
 
     except Exception as e:
         error_msg = f"Scraping error: {str(e)}"
         logger.error(f"❌ [CELERY] Unexpected error for website ID {website_id}: {e}")
-        await update_website_processing_status(website_id, "failed", error_msg)
+        from .service.website_service import WebsiteService
+        website_service = WebsiteService()
+        await website_service.update_website_status(website_id, "failed", error_msg)
 
 
 @shared_task(bind=True, max_retries=2)
@@ -101,7 +92,7 @@ def scrape_website_task(
     try:
         logger.info(f"📋 [TASK] Starting Celery task for website ID {website_id}: {url}")
 
-        # Get the current task ID from Celery
+        # Get current task ID from Celery
         task_id = self.request.id
         logger.info(f"🆔 [TASK_ID] Current task ID: {task_id}")
 
