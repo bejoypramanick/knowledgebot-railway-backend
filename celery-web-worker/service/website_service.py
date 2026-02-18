@@ -53,3 +53,52 @@ class WebsiteService:
         except Exception as e:
             logger.error(f"❌ Error creating website record: {e}")
             return None
+
+    async def process_website_async(self, website_id: int, url: str, options: Dict[str, Any], 
+                              celery_task_id: str = None):
+        """Process website content - moved from tasks.py"""
+        try:
+            # ✅ CHECK FOR CANCELLATION BEFORE STARTING
+            if await self.is_task_cancelled(celery_task_id):
+                logger.warning(f"❌ [CELERY] Task {celery_task_id} was marked for cancellation - aborting")
+                await self.update_website_status(website_id, "cancelled", "Task cancelled by admin")
+                return
+
+            await self.update_website_status(website_id, "processing")
+
+            logger.info(f"🔄 [CELERY] Starting scraping for website ID {website_id}: {url}")
+
+            # Create service and perform scraping
+            result = await self.scrape_website(url, options, celery_task_id=celery_task_id, website_id=website_id)
+            
+            if result.get("success"):
+                logger.info(f"✅ [CELERY] Website ID {website_id} scraped successfully")
+                await self.update_website_status(website_id, "completed")
+            else:
+                error_msg = result.get("error", "Unknown scraping error")
+                logger.error(f"❌ [CELERY] Website ID {website_id} scraping failed: {error_msg}")
+                await self.update_website_status(website_id, "failed", error_msg)
+
+        except Exception as e:
+            error_msg = f"Scraping error: {str(e)}"
+            logger.error(f"❌ [CELERY] Unexpected error for website ID {website_id}: {e}")
+            await self.update_website_status(website_id, "failed", error_msg)
+
+    async def is_task_cancelled(self, celery_task_id: str) -> bool:
+        """Check if task has been marked for cancellation via Redis"""
+        if not celery_task_id:
+            return False
+
+        try:
+            import redis as redis_lib
+            redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+            redis_conn = redis_lib.from_url(redis_url)
+
+            cancelled_key = f"task_cancelled:{celery_task_id}"
+            result = redis_conn.exists(cancelled_key)
+            redis_conn.close()
+
+            return bool(result)
+        except Exception as e:
+            logger.warning(f"⚠️ Error checking cancellation status: {e}")
+            return False
