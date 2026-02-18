@@ -891,14 +891,9 @@ async def upload_file_celery(
             celery_task_id = str(uuid.uuid4())
 
             # Dispatch to worker via Redis message queue
-            # Worker will handle: download from S3, validation, DB record creation,
-            # all processing (Gemini, Docling, etc.), DB updates, S3 cleanup, and result publishing
-            logger.info(f"📤 [REDIS] Queuing file task: {celery_task_id}")
+            logger.info(f" [REDIS] Queuing file task: {celery_task_id}")
 
             success = redis_message_queue.publish_file_task(
-                s3_key=s3_key,
-                original_filename=original_filename,
-                file_display_name=file_display_name,
                 file_size=file_size,
                 user_email=email,
                 celery_task_id=celery_task_id
