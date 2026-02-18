@@ -397,7 +397,7 @@ class FileService:
                 websites = await conn.fetch(
                     """SELECT id, original_url, domain, title, description, pages_scraped,
                               content_length, parent_id, depth, crawl_session_id, created_at,
-                              celery_task_id, processing_status, error_message
+                              celery_task_id, processing_status, error_message, metadata
                        FROM scraped_websites
                        ORDER BY crawl_session_id DESC NULLS LAST, depth, created_at DESC"""
                 )
