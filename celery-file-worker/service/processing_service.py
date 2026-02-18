@@ -242,15 +242,63 @@ async def process_file_content(
     tmp_path = None
     markdown_tmp_path = None
 
+    async def get_file_details_by_task_id(celery_task_id: str) -> Optional[Dict[str, Any]]:
+        """Query database to get file details using celery_task_id"""
+        try:
+            from shared.db import get_db_connection
+            async with get_db_connection() as conn:
+                record = await conn.fetchrow(
+                    "SELECT id, original_filename, file_display_name, s3_key, file_size, user_email "
+                    "FROM file_uploads WHERE celery_task_id = $1",
+                    celery_task_id
+                )
+                if record:
+                    return {
+                        "file_id": str(record["id"]),
+                        "original_filename": record["original_filename"],
+                        "file_display_name": record["file_display_name"],
+                        "s3_key": record["s3_key"],
+                        "file_size": record["file_size"],
+                        "user_email": record["user_email"]
+                    }
+                return None
+        except Exception as e:
+            logger.error(f"❌ Error querying file details by task_id: {e}")
+            return None
+
     try:
-        # S3 DOWNLOAD PHASE
+        # STEP 1: Query database with celery_task_id to get file details
+        logger.info(f"🔍 [DB_QUERY] Getting file details for task_id: {celery_task_id}")
+        file_details = await get_file_details_by_task_id(celery_task_id)
+        
+        if not file_details:
+            logger.error(f"❌ [DB_QUERY] No file found for task_id: {celery_task_id}")
+            return {
+                "success": False,
+                "error": f"No file found for task_id: {celery_task_id}"
+            }
+        
+        # Extract file details from database record
+        file_id = file_details.get("file_id")
+        original_filename = file_details.get("original_filename", original_filename)
+        file_display_name = file_details.get("file_display_name", file_display_name)
+        s3_key = file_details.get("s3_key", s3_key)
+        file_size = file_details.get("file_size", file_size)
+        user_email = file_details.get("user_email", user_email)
+        
+        logger.info(f"📋 [FILE_DETAILS] Retrieved: file_id={file_id}, filename={original_filename}, s3_key={s3_key}")
+
+        # STEP 2: S3 DOWNLOAD PHASE
         logger.info(f"📥 [S3] Downloading file from S3: {s3_key}")
         from shared.s3_file_storage import s3_file_storage
 
         success, result = await s3_file_storage.download_file(s3_key)
         if not success:
             logger.error(f"❌ [S3] Download failed: {result}")
-            raise Exception(f"S3 download failed: {result}")
+            return {
+                "success": False,
+                "error": f"S3 download failed: {result}"
+            }
 
         file_bytes = result
         logger.info(f"✅ [S3] Downloaded {len(file_bytes)} bytes from S3")
@@ -262,40 +310,58 @@ async def process_file_content(
             tmp_path = tmp.name
         logger.info(f"✅ Created temp file: {tmp_path}")
 
-        # VALIDATION PHASE
+        # STEP 3: VALIDATION PHASE
         logger.info(f"🔍 [VALIDATION] Starting file validation for {original_filename}")
 
         # Validate file extension
         ext_valid, ext_error = validate_file_extension(original_filename)
         if not ext_valid:
-            logger.error(f"❌ [VALIDATION] Extension invalid: {ext_error}")
-            raise Exception(f"Extension validation failed: {ext_error}")
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            return {
+                "success": False,
+                "error": f"Extension validation failed: {ext_error}"
+            }
 
         # Validate MIME type
         mime_valid, mime_error = validate_mime_type("", original_filename)
         if not mime_valid:
-            logger.error(f"❌ [VALIDATION] MIME type invalid: {mime_error}")
-            raise Exception(f"MIME validation failed: {mime_error}")
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            return {
+                "success": False,
+                "error": f"MIME validation failed: {mime_error}"
+            }
 
         # Validate file size
         size_valid, size_error = validate_file_size(file_size)
         if not size_valid:
-            logger.error(f"❌ [VALIDATION] File size invalid: {size_error}")
-            raise Exception(f"Size validation failed: {size_error}")
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            return {
+                "success": False,
+                "error": f"Size validation failed: {size_error}"
+            }
 
         # Calculate hash and detect MIME type
         sha256_hash = calculate_sha256(tmp_path)
         detected_mime_type = detect_mime_type_from_extension(original_filename, "", tmp_path)
-
+        
         logger.info(f"🔍 [ROUTING] Detected MIME: {detected_mime_type} for {original_filename}")
 
-        # Check for duplicates
+        # STEP 4: Check for duplicates
         duplicate_check = await file_service.handle_duplicate_check(sha256_hash, original_filename, False)
         if not duplicate_check.get("allow", True):
-            logger.error(f"❌ [VALIDATION] Duplicate file detected")
-            raise Exception(f"Duplicate file: {duplicate_check.get('detail', 'File already exists')}")
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+            return {
+                "success": False,
+                "error": f"Duplicate file: {duplicate_check.get('detail', 'File already exists')}"
+            }
 
-        # FORMAT CONVERSION PHASE
+        replaced = duplicate_check.get("reason") == "replaced"
+
+        # STEP 5: FORMAT CONVERSION PHASE
         markdown_tmp_path = None
         processed_successfully = False
 
@@ -303,10 +369,12 @@ async def process_file_content(
         if detected_mime_type == 'text/html' or original_filename.lower().endswith(('.html', '.htm')):
             logger.info(f"🌐 [ROUTING] Routing {original_filename} to HTML-specific pipeline")
             try:
+                from shared.html_processor import extract_content_from_html
                 markdown_content, html_metadata = extract_content_from_html(tmp_path)
-
+                
                 if markdown_content:
                     markdown_tmp_path = await create_markdown_temp_file(markdown_content)
+                    # Switch to markdown artifact
                     original_tmp_path = tmp_path
                     tmp_path = markdown_tmp_path
                     original_filename = original_filename.rsplit('.', 1)[0] + '.md'
@@ -316,14 +384,34 @@ async def process_file_content(
                 else:
                     error_msg = html_metadata.get("error", "HTML extraction failed")
                     logger.error(f"❌ [HTML] Extraction failed for {original_filename}: {error_msg}")
-                    raise Exception(f"HTML extraction failed: {error_msg}")
+                    # HARD FAILURE: Do not return 200, stop processing
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                    return {
+                        "success": False,
+                        "error": f"HTML extraction failed: {error_msg}"
+                    }
             except Exception as e:
-                logger.error(f"❌ [HTML] Unexpected error: {e}")
-                raise
+                logger.error(f"❌ [HTML] Unexpected error processing HTML: {e}")
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                return {
+                    "success": False,
+                    "error": f"HTML processing error: {str(e)}"
+                }
 
         # 2. Route PDFs and other Docling-supported files
-        elif await should_use_docling_for_file(original_filename, detected_mime_type, file_size):
-            logger.info(f"📄 [ROUTING] Routing {original_filename} to Docling pipeline")
+        elif should_use_docling_for_file(original_filename, detected_mime_type, file_size):
+            logger.info(f"📄 [ROUTING] Routing {original_filename} to Docling (PDF/DOCX) pipeline")
+            # Strict check: Never send HTML to Docling
+            if detected_mime_type == 'text/html' or original_filename.lower().endswith(('.html', '.htm')):
+                logger.error(f"🚫 [ROUTING] Refusing to send HTML to Docling for {original_filename}")
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                return {
+                    "success": False,
+                    "error": "HTML files must use HTML pipeline, not Docling"
+                }
 
             try:
                 markdown_content, docling_metadata = await process_with_docling(
@@ -334,6 +422,7 @@ async def process_file_content(
 
                 if markdown_content:
                     markdown_tmp_path = await create_markdown_temp_file(markdown_content)
+                    # Switch to markdown artifact
                     original_tmp_path = tmp_path
                     tmp_path = markdown_tmp_path
                     original_filename = original_filename.rsplit('.', 1)[0] + '.md'
@@ -342,74 +431,188 @@ async def process_file_content(
                     logger.info(f"✅ [DOCLING] Converted {original_filename} to markdown")
                 else:
                     error_msg = docling_metadata.get("error", "Docling processing failed")
-                    logger.error(f"❌ [DOCLING] Processing failed: {error_msg}")
-                    raise Exception(f"Document conversion failed: {error_msg}")
+                    logger.error(f"❌ [DOCLING] Processing failed for {original_filename}: {error_msg}")
+                    
+                    # HARD FAILURE (no fallback to raw if it's a PDF/DOCX that failed)
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.unlink(tmp_path)
+                    return {
+                        "success": False,
+                        "error": f"Document conversion failed: {error_msg}"
+                    }
             except Exception as e:
-                logger.error(f"❌ [DOCLING] Error: {e}")
-                raise
+                logger.error(f"❌ [DOCLING] Unexpected error in Docling pipeline: {e}")
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                return {
+                    "success": False,
+                    "error": f"Docling processing error: {str(e)}"
+                }
         else:
+            # For types that skip docling (txt, md, etc.), we mark as processed successfully
             logger.info(f"📝 [ROUTING] Skipping special processing for {detected_mime_type}")
             processed_successfully = True
 
-        # GEMINI UPLOAD PHASE
-        logger.info(f"🚀 [GEMINI] Initiating upload for {original_filename}")
-        uploaded_file, final_state, gemini_processed_at, file_search_metadata = await process_with_gemini(
-            tmp_path, file_display_name, original_filename, detected_mime_type, user_email
-        )
+        # STEP 6: GEMINI UPLOAD PHASE
+        if processed_successfully or detected_mime_type == 'text/markdown':
+            logger.info(f"🤖 [GEMINI] Uploading to FileSearch - Display: {file_display_name}, Original: {original_filename}, MIME: {detected_mime_type}...")
+            try:
+                from knowledgebase_ingestion.core.ai import get_genai_client
+                genai_client = get_genai_client()
+                if not genai_client:
+                    logger.error("❌ Gemini client not available")
+                    raise Exception("Gemini client not configured")
 
-        if final_state != "ACTIVE":
-            logger.error(f"❌ Gemini upload failed: {final_state}")
-            raise Exception(f"Gemini upload failed: Final state={final_state}")
+                # Detect proper MIME type - use magic bytes from file path
+                final_mime_type = detect_mime_type_from_extension(original_filename, detected_mime_type, tmp_path)
 
-        # DATABASE PHASE
-        logger.info(f"💾 [DATABASE] Creating database record")
-        file_record_id = await file_service.record_metadata(
-            user_email=user_email,
-            original_filename=original_filename,
-            file_display_name=file_display_name,
-            file_ext=original_filename.rsplit('.', 1)[-1] if '.' in original_filename else '',
-            uploaded_file=uploaded_file,
-            file_size=file_size,
-            sha256_hash=sha256_hash,
-            final_state=final_state,
-            gemini_processed_at=gemini_processed_at,
-            mime_type=detected_mime_type,
-            file_search_metadata=file_search_metadata
-        )
+                # Create display name
+                if file_display_name != original_filename:
+                    gemini_display_name = f"{file_display_name} | {original_filename}"
+                else:
+                    gemini_display_name = original_filename
 
-        if not file_record_id:
-            logger.error(f"❌ Database record creation failed")
-            raise Exception("Database metadata recording failed")
+                logger.info(f"📦 Looking up FileSearch store: {settings.gemini_file_search_store_name}")
 
-        processing_time = time.perf_counter() - start_time
-        logger.info(f"✅ [SUCCESS] Upload completed for {original_filename}")
-        logger.info(f"   📁 Gemini File ID: {uploaded_file.name}")
-        logger.info(f"   🗄️  Database ID: {file_record_id}")
-        logger.info(f"   ⏱️  Time: {processing_time:.2f}s")
-        logger.info(f"   📊 Size: {file_size} bytes")
-        logger.info(f"   🔐 Hash: {sha256_hash}")
+                # Look up store by display name
+                from shared.file_search import get_file_search_store_by_display_name
+                file_search_store_name = get_file_search_store_by_display_name(
+                    genai_client,
+                    display_name=settings.gemini_file_search_store_name
+                )
 
-        # SUCCESS: Publish result to Redis
-        result = {
-            "success": True,
-            "message": "File processing completed",
-            "file_id": file_record_id,
-            "gemini_file_id": uploaded_file.name,
-            "processing_time": processing_time
-        }
+                if not file_search_store_name:
+                    logger.error(f"❌ FileSearch store '{settings.gemini_file_search_store_name}' not found")
+                    raise Exception(f"FileSearch store '{settings.gemini_file_search_store_name}' not found")
 
-        try:
-            from shared.redis_message_queue import redis_message_queue
-            redis_message_queue.publish_file_result(
-                file_id=file_record_id,
-                celery_task_id=celery_task_id,
-                status="completed",
-                result=result
-            )
-        except Exception as redis_error:
-            logger.warning(f"⚠️ Failed to publish result to Redis: {redis_error}")
+                logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
+                operation = genai_client.file_search_stores.upload_to_file_search_store(
+                    file=tmp_path,
+                    file_search_store_name=file_search_store_name,
+                    config={
+                        'display_name': gemini_display_name,
+                        'custom_metadata': [
+                            {'key': 'original_filename', 'string_value': original_filename},
+                            {'key': 'user_email', 'string_value': user_email or 'admin'},
+                            {'key': 'celery_task_id', 'string_value': celery_task_id}
+                        ]
+                    }
+                )
 
-        return result
+                if not operation:
+                    logger.error(f"❌ [GEMINI] Failed to create upload operation")
+                    raise Exception("Gemini operation creation failed")
+
+                # Wait for the upload operation to complete
+                start_time = time.time()
+                max_wait_time = 300  # 5 minutes
+                document_name = None
+                final_state = "PENDING"
+                gemini_processed_at = None
+
+                while not operation.done:
+                    elapsed = time.time() - start_time
+                    if elapsed > max_wait_time:
+                        logger.error(f"❌ Timeout waiting for file upload to complete")
+                        raise Exception("File upload timeout")
+
+                    await asyncio.sleep(5)
+                    operation = genai_client.operations.get(operation)
+
+                # FileSearch upload returns result in response.document_name
+                if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
+                    document_name = operation.response.document_name
+                    final_state = "ACTIVE"
+                    gemini_processed_at = datetime.utcnow()
+
+                    # Create a placeholder file object with the document name
+                    class FileSearchDocument:
+                        def __init__(self, name):
+                            self.name = name
+                            self.uri = None
+
+                    uploaded_file = FileSearchDocument(document_name)
+                    file_search_metadata = {
+                        'type': 'file_search',
+                        'file_search_store_name': file_search_store_name,
+                        'document_name': document_name,
+                        'uploaded_at': gemini_processed_at.isoformat()
+                    }
+
+                    logger.info(f"✅ [GEMINI] Upload complete to FileSearch store. Document: {document_name}")
+                    logger.info(f"� [METADATA] Stored FileSearch info: store={file_search_store_name}, document={document_name}")
+                else:
+                    logger.error(f"❌ [GEMINI] Upload failed - no document_name in response: {operation}")
+                    raise Exception("FileSearch upload failed - no document returned")
+
+            except Exception as e:
+                logger.error(f"❌ [GEMINI] Error uploading to FileSearch: {e}")
+                raise
+
+            # STEP 7: DATABASE RECORD PHASE
+            try:
+                file_record_id = await file_service.record_metadata(
+                    user_email=user_email,
+                    original_filename=original_filename,
+                    file_display_name=file_display_name,
+                    file_ext=original_filename.rsplit('.', 1)[-1] if '.' in original_filename else '',
+                    uploaded_file=uploaded_file,
+                    file_size=file_size,
+                    sha256_hash=sha256_hash,
+                    final_state=final_state,
+                    gemini_processed_at=gemini_processed_at,
+                    mime_type=detected_mime_type,
+                    file_search_metadata=file_search_metadata
+                )
+
+                if not file_record_id:
+                    logger.error(f"❌ [DB_ERROR] Database returned no ID for {original_filename}")
+                    logger.error(f"⚠️ File is in Gemini (ID: {uploaded_file.name}) but NOT in database!")
+                    raise Exception("Database metadata recording failed - file orphaned in Gemini")
+
+                logger.info(f"✅ [DB_RECORD] Recorded metadata for {original_filename}, DB ID: {file_record_id}")
+
+                # STEP 8: S3 CLEANUP PHASE
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                if markdown_tmp_path and os.path.exists(markdown_tmp_path):
+                    os.unlink(markdown_tmp_path)
+
+                processing_time = time.perf_counter() - start_time
+                logger.info(f"✅ [SUCCESS] File processing completed: {original_filename}")
+                logger.info(f"   📁 Gemini File ID: {uploaded_file.name}")
+                logger.info(f"   🗄️  Database ID: {file_record_id}")
+                logger.info(f"   ⏱️  Time: {processing_time:.2f}s")
+                logger.info(f"   📊 Size: {file_size} bytes")
+                logger.info(f"   🔐 Hash: {sha256_hash}")
+
+                return {
+                    "success": True,
+                    "file_id": str(file_record_id),
+                    "status": final_state,
+                    "processing_time_seconds": processing_time,
+                    "gemini_file_id": uploaded_file.name,
+                    "original_filename": original_filename,
+                    "file_display_name": file_display_name,
+                    "file_size": file_size,
+                    "mime_type": detected_mime_type,
+                    "sha256_hash": sha256_hash
+                }
+
+            except Exception as e:
+                logger.error(f"❌ [PROCESSING_ERROR] Error processing file {original_filename}: {e}", exc_info=True)
+
+                # Cleanup on failure
+                if tmp_path and os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                if markdown_tmp_path and os.path.exists(markdown_tmp_path):
+                    os.unlink(markdown_tmp_path)
+
+                return {
+                    "success": False,
+                    "error": f"Processing error: {str(e)}",
+                    "celery_task_id": celery_task_id
+                }
 
     except Exception as e:
         logger.error(f"❌ Error processing file {original_filename}: {e}", exc_info=True)
