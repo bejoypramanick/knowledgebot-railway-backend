@@ -58,6 +58,33 @@ class ScrapingDAO:
             logger.log_db_query(query, {}, error=e)
             return []
 
+    async def record_scraped_metadata(self, record_data: Dict[str, Any]) -> Optional[int]:
+        """Record scraped website metadata."""
+        query = """
+            INSERT INTO scraped_websites (
+                user_id, original_url, url_type, processing_status, 
+                created_at, updated_at
+            ) VALUES (
+                $1::text, $2::text, $3::text, $4::text, 
+                NOW(), NOW()
+            ) RETURNING id
+        """
+        params = [
+            record_data.get('user_id'),
+            record_data.get('original_url'),
+            record_data.get('url_type', 'single_page'),
+            record_data.get('processing_status', 'pending')
+        ]
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.fetchval(query, *params)
+                logger.log_db_query(query, params, result)
+                return int(result) if result else None
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return None
+
     async def delete_website_record(self, url: str):
         """Delete website record from database."""
         query = "DELETE FROM scraped_websites WHERE original_url = $1::text"

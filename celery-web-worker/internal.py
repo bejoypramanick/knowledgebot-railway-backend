@@ -5,7 +5,7 @@ These endpoints are only accessible by other Railway services
 from fastapi import APIRouter, HTTPException
 from website_crawling.celery_app import celery_app
 from shared.otel_logger import get_otel_logger
-from ..dao.scraping_dao import ScrapingDAO
+from ..service.website_service import WebsiteService
 logger = get_otel_logger("internal_router", "website-crawling")
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -14,11 +14,12 @@ async def dispatch_website_task(**kwargs):
     """Dispatch a website scraping task"""
     try:
         from tasks import scrape_website_task
-        from ..dao.scraping_dao import ScrapingDAO
+        from ..service.website_service import WebsiteService
+        
+        website_service = WebsiteService()
         
         # Create website record first
-        scraping_dao = ScrapingDAO()
-        website_record_id = await scraping_dao.record_scraped_metadata(kwargs)
+        website_record_id = await website_service.create_website_record(kwargs)
         
         if website_record_id:
             task = scrape_website_task.delay(website_id=website_record_id, **kwargs)

@@ -5,8 +5,7 @@ These endpoints are only accessible by other Railway services
 from fastapi import APIRouter, HTTPException
 from celery_app import celery_app
 from shared.otel_logger import get_otel_logger
-from ..dao.file_dao import FileDAO
-
+from ..service.file_service import FileService
 logger = get_otel_logger("internal_router", "celery-file-worker")
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -15,12 +14,12 @@ async def dispatch_file_task(**kwargs):
     """Dispatch a file processing task"""
     try:
         from tasks import process_file_upload_task
-        from ..dao.file_dao import FileDAO
+        from ..service.file_service import FileService
         
-        file_dao = FileDAO()
+        file_service = FileService()
         
         # Create file record first
-        file_record_id = await file_dao.insert_file_record(kwargs)
+        file_record_id = await file_service.create_file_record(kwargs)
         
         if file_record_id:
             task = process_file_upload_task.delay(file_id=file_record_id, **kwargs)
