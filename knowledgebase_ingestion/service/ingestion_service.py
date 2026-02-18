@@ -1269,11 +1269,19 @@ async def nuke_filestore_and_database() -> Dict[str, Any]:
                 except Exception as e:
                     logger.warning(f"⚠️ Could not purge file queue (DB0): {e}")
                 try:
-                    from website_crawling.celery_app import celery_app as website_celery_app
-                    website_celery_app.control.purge()  # Purges DB1 (website crawling queue)
-                    logger.critical("✅ [2/3b] Website crawling queue (DB1) purged")
+                    # Try to import website crawling celery app to purge its queue
+                    # This may fail if running in a different service context
+                    try:
+                        from website_crawling.celery_app import celery_app as website_celery_app
+                        website_celery_app.control.purge()  # Purges DB1 (website crawling queue)
+                        logger.critical("✅ [2/3b] Website crawling queue (DB1) purged")
+                    except ImportError as import_error:
+                        logger.warning(f"⚠️ Could not import website_crawling module: {import_error}")
+                        logger.warning("⚠️ Website queue purge skipped - module not available in this service context")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not purge website queue (DB1): {e}")
                 except Exception as e:
-                    logger.warning(f"⚠️ Could not purge website queue (DB1): {e}")
+                    logger.warning(f"⚠️ Error during website queue purge: {e}")
 
                 # Third: Revoke all tasks to stop pending ones
                 logger.critical("🛑 [3/3] Revoking pending tasks...")
