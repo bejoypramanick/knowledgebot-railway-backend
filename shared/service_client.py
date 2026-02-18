@@ -92,5 +92,23 @@ class ServiceClient:
             logger.warning(f"Health check failed for {service}: {e}")
             return False
 
+    async def dispatch_file_task(self, service: str, **kwargs) -> Dict[str, Any]:
+        """Dispatch a file processing task to worker service"""
+        try:
+            result = await self._make_request(service, 'POST', '/internal/dispatch-file', data=kwargs)
+            return result
+        except Exception as e:
+            logger.error(f"Failed to dispatch file task to {service}: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def dispatch_website_task(self, service: str, **kwargs) -> Dict[str, Any]:
+        """Dispatch a website scraping task to worker service"""
+        try:
+            result = await self._make_request(service, 'POST', '/internal/dispatch-website', data=kwargs)
+            return result
+        except Exception as e:
+            logger.error(f"Failed to dispatch website task to {service}: {e}")
+            return {"success": False, "error": str(e)}
+
 # Global instance
 service_client = ServiceClient()

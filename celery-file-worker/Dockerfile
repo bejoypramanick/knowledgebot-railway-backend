@@ -17,12 +17,12 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements files
-COPY knowledgebase_ingestion/requirements.txt /tmp/kb-requirements.txt
-COPY website_crawling/requirements.txt /tmp/web-requirements.txt
+COPY celery-file-worker/requirements.txt /tmp/kb-requirements.txt
+COPY shared/requirements-otel.txt /tmp/otel-requirements.txt
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r /tmp/kb-requirements.txt && \
-    pip install --no-cache-dir -r /tmp/web-requirements.txt
+    pip install --no-cache-dir -r /tmp/otel-requirements.txt
 
 # Install Playwright browsers (may be needed by docling or other services)
 RUN playwright install chromium

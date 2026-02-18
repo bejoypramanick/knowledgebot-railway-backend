@@ -9,6 +9,23 @@ from shared.otel_logger import get_otel_logger
 logger = get_otel_logger("internal_router", "website-crawling")
 router = APIRouter(prefix="/internal", tags=["internal"])
 
+@router.post("/dispatch-website")
+async def dispatch_website_task(**kwargs):
+    """Dispatch a website scraping task"""
+    try:
+        from tasks import scrape_website_task
+        
+        task = scrape_website_task.delay(**kwargs)
+        logger.info(f"✅ Dispatched website task: {task.id}")
+        return {
+            "success": True, 
+            "task_id": task.id,
+            "message": f"Website task dispatched successfully: {task.id}"
+        }
+    except Exception as e:
+        logger.error(f"❌ Failed to dispatch website task: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to dispatch website task: {e}")
+
 @router.post("/celery/purge")
 async def purge_celery_queue():
     """Purge all pending tasks from the Celery queue"""

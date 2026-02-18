@@ -1837,39 +1837,46 @@ async def scrape_website_celery(
         logger.info(f"✅ [CELERY] Created scraped_websites record ID {website_record_id} with status='pending'")
 
         # Dispatch Celery task for actual scraping
-        from website_crawling.tasks import scrape_website_task
-        from website_crawling.celery_app import celery_app
-
-        logger.info(f"📤 [TASK_DISPATCH] Preparing to dispatch task for website ID {website_record_id}, URL: {url}")
-
-        task = scrape_website_task.delay(
-            website_id=website_record_id,
-            url=url,
-            options=options
-        )
-
-        logger.info(f"✅ [CELERY] Dispatched Celery task {task.id} for website ID {website_record_id}")
-        logger.info(f"📊 [TASK_INFO] Task State: {task.state}, Routing: 'web_crawling' queue, Timeout: 2 hours")
-
-        # Store Celery task_id in database so we can revoke it later if needed
-        from website_crawling.dao.scraping_dao import ScrapingDAO
+        from shared.service_client import service_client
         
-        scraping_dao = ScrapingDAO()
-        await scraping_dao.update_celery_task_id(website_record_id, task.id)
-        logger.info(f"💾 [TASK_TRACKING] Stored celery_task_id {task.id} in database for website {website_record_id}")
-
-        # Return immediate response with pending status
-        return {
-            "success": True,
-            "message": "Website scraping queued for processing",
-            "website": {
-                "id": str(website_record_id),
-                "url": url,
-                "processing_status": "pending",
-                "created_at": datetime.utcnow().isoformat()
-            },
-            "task_id": task.id
-        }
+        logger.info(f"📤 [TASK_DISPATCH] Preparing to dispatch task for website ID {website_record_id}, URL: {url}")
+        
+        # Call worker service via HTTP to dispatch task
+        try:
+            result = await service_client.dispatch_website_task(
+                'website_crawling',
+                website_id=website_record_id,
+                url=url,
+                options=options
+            )
+            
+            if result.get('success'):
+                task_id = result.get('task_id')
+                logger.info(f"✅ [TASK_DISPATCH] Website task dispatched successfully: {task_id}")
+                return {
+                    "success": True,
+                    "message": "Website scraping task dispatched successfully",
+                    "task_id": task_id,
+                    "website": {
+                        "id": str(website_record_id),
+                        "url": url,
+                        "processing_status": "pending"
+                    }
+                }
+            else:
+                error_msg = result.get('error', 'Unknown error')
+                logger.error(f"❌ [TASK_DISPATCH] Failed to dispatch website task: {error_msg}")
+                return {
+                    "success": False,
+                    "error": f"Failed to dispatch website task: {error_msg}"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ [TASK_DISPATCH] Error calling worker service: {e}")
+            return {
+                "success": False,
+                "error": f"Error dispatching website task: {str(e)}"
+            }
 
     except Exception as e:
         logger.error(f"❌ [CELERY] Error in scrape_website_celery: {e}")

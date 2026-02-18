@@ -1453,48 +1453,54 @@ async def upload_file_celery(
         logger.info(f"✅ [CELERY] Created DB record ID {file_record_id} with status='pending'")
 
         # Dispatch Celery task for actual processing
-        from knowledgebase_ingestion.tasks import process_file_upload_task
-        from knowledgebase_ingestion.celery_app import celery_app
-
+        from shared.service_client import service_client
+        
         logger.info(f"📤 [TASK_DISPATCH] Preparing to dispatch task for file ID {file_record_id}, filename: {original_filename}, size: {file_size} bytes, mime: {detected_mime_type}")
-
-        task = process_file_upload_task.delay(
-            file_id=file_record_id,
-            tmp_path=tmp_path,
-            original_filename=original_filename,
-            file_display_name=file_display_name,
-            detected_mime_type=detected_mime_type,
-            user_email=email,
-            file_size=file_size,
-            sha256_hash=sha256_hash
-        )
-
-        logger.info(f"✅ [CELERY] Dispatched Celery task {task.id} for file ID {file_record_id}")
-        logger.info(f"📊 [TASK_INFO] Task State: {task.state}, Routing: 'file_processing' queue, Timeout: 30 minutes")
-
-        # Store the Celery task_id in database so we can revoke it later if needed
-        async with get_db_connection() as conn:
-            await conn.execute(
-                "UPDATE file_uploads SET celery_task_id = $1 WHERE id = $2",
-                task.id, file_record_id
+        
+        # Call worker service via HTTP to dispatch task
+        try:
+            result = await service_client.dispatch_file_task(
+                file_id=file_record_id,
+                tmp_path=tmp_path,
+                original_filename=original_filename,
+                file_display_name=file_display_name,
+                detected_mime_type=detected_mime_type,
+                user_email=user_email,
+                file_size=file_size,
+                sha256_hash=sha256_hash,
+                celery_task_id=None  # Removed celery_task_id as it's not needed
             )
-        logger.info(f"💾 [TASK_TRACKING] Stored celery_task_id {task.id} in database for file {file_record_id}")
-
-        # Return immediate response with pending status
-        return {
-            "success": True,
-            "message": "File upload queued for processing",
-            "file": {
-                "id": str(file_record_id),
-                "original_filename": original_filename,
-                "display_name": file_display_name,
-                "size_bytes": str(file_size),
-                "mime_type": detected_mime_type,
-                "processing_status": "pending",
-                "created_at": datetime.utcnow().isoformat()
-            },
-            "task_id": task.id
-        }
+            
+            if result.get('success'):
+                task_id = result.get('task_id')
+                logger.info(f"✅ [TASK_DISPATCH] File task dispatched successfully: {task_id}")
+                return {
+                    "success": True,
+                    "message": "File processing task dispatched successfully",
+                    "task_id": task_id,
+                    "file": {
+                        "id": str(file_record_id),
+                        "original_filename": original_filename,
+                        "file_display_name": file_display_name,
+                        "size_bytes": file_size,
+                        "mime_type": detected_mime_type,
+                        "processing_status": "pending"
+                    }
+                }
+            else:
+                error_msg = result.get('error', 'Unknown error')
+                logger.error(f"❌ [TASK_DISPATCH] Failed to dispatch file task: {error_msg}")
+                return {
+                    "success": False,
+                    "error": f"Failed to dispatch file task: {error_msg}"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ [TASK_DISPATCH] Error calling worker service: {e}")
+            return {
+                "success": False,
+                "error": f"Error dispatching file task: {str(e)}"
+            }
 
     except HTTPException:
         raise
