@@ -97,10 +97,15 @@ def scrape_website_task(
         task_id = self.request.id
         logger.info(f"🆔 [TASK_ID] Current task ID: {task_id}")
 
+        # Use service layer for processing
+        from .service.website_service import WebsiteService
+        
+        website_service = WebsiteService()
+        
         # Run async function in event loop
         loop = asyncio.get_event_loop()
         loop.run_until_complete(
-            process_website_async(
+            website_service.process_website_async(
                 website_id=website_id,
                 url=url,
                 options=options,
