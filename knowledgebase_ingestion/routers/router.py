@@ -455,13 +455,7 @@ async def scrape_website_async_endpoint(request: Request = None):
         
         # Queue scraping task
         success = redis_queue.publish_web_task(
-            website_id=int(website_id),
-            url=url,
-            celery_task_id=task_id,
-            max_depth=request_data.get('max_depth', 2),
-            max_pages=request_data.get('max_pages', 100),
-            max_concurrent=request_data.get('max_concurrent', 10),
-            delay_between_requests=request_data.get('delay_between_requests', 0.0)
+            celery_task_id=task_id
         )
         
         if success:

@@ -96,14 +96,7 @@ class RedisMessageQueue:
             logger.error(f"❌ Error getting file task: {e}")
             return None
 
-    def publish_file_result(
-        self,
-        file_id: int,
-        celery_task_id: str,
-        status: str,  # 'completed', 'failed', 'cancelled'
-        result: Dict[str, Any] = None,
-        error: str = None
-    ) -> bool:
+    def publish_file_result(self, celery_task_id: str) -> bool:
         """
         Publish file processing result
         Called by: celery-file-worker
@@ -116,18 +109,13 @@ class RedisMessageQueue:
         try:
             message = {
                 "type": "FILE_RESULT",
-                "file_id": file_id,
-                "celery_task_id": celery_task_id,
-                "status": status,
-                "result": result or {},
-                "error": error,
-                "timestamp": datetime.utcnow().isoformat()
+                "celery_task_id": celery_task_id
             }
 
             message_json = json.dumps(message)
             self._connection.rpush(self.FILE_RESULT_QUEUE, message_json)
 
-            logger.info(f"📤 [FILE_RESULT] Published: file_id={file_id}, status={status}")
+            logger.info(f"📤 [FILE_RESULT] Published: {celery_task_id}")
             return True
 
         except Exception as e:
@@ -159,16 +147,7 @@ class RedisMessageQueue:
 
     # ========== WEBSITE PROCESSING MESSAGES ==========
 
-    def publish_web_task(
-        self,
-        website_id: int,
-        url: str,
-        celery_task_id: str,
-        max_depth: int = 2,
-        max_pages: int = 100,
-        max_concurrent: int = 10,
-        delay_between_requests: float = 0.0
-    ) -> bool:
+    def publish_web_task(self, celery_task_id: str) -> bool:
         """
         Publish website scraping task to queue
         Called by: knowledgebase_ingestion
@@ -181,19 +160,13 @@ class RedisMessageQueue:
         try:
             message = {
                 "type": "WEB_SCRAPE",
-                "website_id": website_id,
-                "url": url,
-                "max_depth": max_depth,
-                "max_pages": max_pages,
-                "max_concurrent": max_concurrent,
-                "delay_between_requests": delay_between_requests,
                 "celery_task_id": celery_task_id
             }
 
             message_json = json.dumps(message)
             self._connection.rpush(self.WEB_TASK_QUEUE, message_json)
 
-            logger.info(f"📤 [WEB] Published task: task_id={celery_task_id}")
+            logger.info(f"📤 [WEB] Published task: {celery_task_id}")
             return True
 
         except Exception as e:
