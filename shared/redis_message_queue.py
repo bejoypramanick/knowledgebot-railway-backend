@@ -48,11 +48,6 @@ class RedisMessageQueue:
 
     def publish_file_task(
         self,
-        s3_key: str,
-        original_filename: str,
-        file_display_name: str,
-        file_size: int,
-        user_email: str,
         celery_task_id: str,
         file_id: Optional[int] = None
     ) -> bool:
@@ -69,21 +64,13 @@ class RedisMessageQueue:
         try:
             message = {
                 "type": "FILE_PROCESS",
-                "file_id": file_id,
-                "s3_key": s3_key,
-                "original_filename": original_filename,
-                "file_display_name": file_display_name,
-                "file_size": file_size,
-                "user_email": user_email,
-                "celery_task_id": celery_task_id,
-                "timestamp": datetime.utcnow().isoformat(),
-                "status": "queued"
+                "celery_task_id": celery_task_id
             }
 
             message_json = json.dumps(message)
             self._connection.rpush(self.FILE_TASK_QUEUE, message_json)
 
-            logger.info(f"📤 [FILE] Published task: task_id={celery_task_id}, s3_key={s3_key}")
+            logger.info(f"📤 [FILE] Published task: {celery_task_id}")
             return True
 
         except Exception as e:
