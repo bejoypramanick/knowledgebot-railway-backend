@@ -163,13 +163,11 @@ class RedisMessageQueue:
         self,
         website_id: int,
         url: str,
-        max_depth: int,
-        max_pages: int,
-        max_concurrent: int,
-        delay_between_requests: float,
-        user_email: str,
         celery_task_id: str,
-        **options
+        max_depth: int = 2,
+        max_pages: int = 100,
+        max_concurrent: int = 10,
+        delay_between_requests: float = 0.0
     ) -> bool:
         """
         Publish website scraping task to queue
@@ -183,7 +181,19 @@ class RedisMessageQueue:
         try:
             message = {
                 "type": "WEB_SCRAPE",
-                "website_id": website_id,
+                "celery_task_id": celery_task_id
+            }
+
+            message_json = json.dumps(message)
+            self._connection.rpush(self.WEB_TASK_QUEUE, message_json)
+
+            logger.info(f"📤 [WEB] Published task: task_id={celery_task_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Failed to publish web task: {e}")
+            return False
+
     def get_web_task(self, timeout: int = 1) -> Optional[Dict[str, Any]]:
         """
         Get web task from queue (blocking pop)
