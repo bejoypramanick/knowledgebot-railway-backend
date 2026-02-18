@@ -96,6 +96,9 @@ async def scrape_website_async_endpoint(request: Request):
                     "url": url,
                     "type": url_type,
                     "success": result.get("success", True),
+                    "duplicate": result.get("duplicate", False),
+                    "where_exists": result.get("where_exists", []),
+                    "error": result.get("error"),
                     "result": result
                 })
 
@@ -108,12 +111,16 @@ async def scrape_website_async_endpoint(request: Request):
                     "error": str(e)
                 })
 
-        logger.info(f"✅ Async batch scrape queued: {len([r for r in all_results if r.get('success')])}/{len(urls)} accepted")
+        queued = [r for r in all_results if r.get("success")]
+        failed = [r for r in all_results if not r.get("success")]
+        logger.info(f"✅ Async batch scrape queued: {len(queued)}/{len(urls)} accepted, {len(failed)} failed")
 
         return {
-            "success": True,
+            "success": len(queued) > 0 or len(failed) == 0,
             "data": all_results,
-            "message": f"Queued {len(urls)} URL(s) for scraping"
+            "queued_count": len(queued),
+            "failed_count": len(failed),
+            "message": f"Queued {len(queued)} URL(s) for scraping" + (f", {len(failed)} failed" if failed else "")
         }
 
     except HTTPException:

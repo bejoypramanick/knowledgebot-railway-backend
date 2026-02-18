@@ -1780,10 +1780,38 @@ async def scrape_website_celery(
     try:
         service = WebsiteService()
 
-        # Check if URL already exists
+        # Check if URL already exists (only active records: pending/processing/completed)
         existing = await service.scraping_dao.get_existing_website(url)
         if existing and not options.get("replace_existing", False):
-            raise Exception("Website already exists. Set replace_existing=true to update.")
+            # Also check if it exists in Gemini FileSearch
+            in_filesearch = False
+            try:
+                from knowledgebase_ingestion.core.config import settings as kb_settings
+                from shared.genai_client import get_genai_client
+                from shared.file_search import get_file_search_store_by_display_name
+                genai_client = get_genai_client()
+                if genai_client:
+                    store_name = get_file_search_store_by_display_name(
+                        genai_client,
+                        display_name=kb_settings.gemini_file_search_store_name
+                    )
+                    in_filesearch = store_name is not None
+            except Exception:
+                pass
+
+            where_exists = []
+            where_exists.append("database")
+            if in_filesearch:
+                where_exists.append("FileSearch")
+
+            logger.info(f"⚠️ [DUPLICATE] Website already exists in {', '.join(where_exists)}: {url}")
+            return {
+                "success": False,
+                "duplicate": True,
+                "error": f"URL already exists in {', '.join(where_exists)}. Delete it first or enable Replace Existing.",
+                "where_exists": where_exists,
+                "existing_record": dict(existing)
+            }
 
         if existing and options.get("replace_existing", False):
             logger.info(f"🔄 Replacing existing website: {url}")
