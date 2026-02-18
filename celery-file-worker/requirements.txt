@@ -24,9 +24,6 @@ opentelemetry-instrumentation-logging>=0.41b0
 opentelemetry-instrumentation-fastapi>=0.41b0
 opentelemetry-exporter-otlp>=1.20.0
 opentelemetry-instrumentation-httpx>=0.41b0
-opentelemetry-propagator-otlp==1.20.0
-opentelemetry-sdk-extension-asyncpg==0.42b0
-opentelemetry-exporter-otlp==1.20.0
-opentelemetry-resource-detector-package==1.20.0
-opentelemetry-semantic-conventions==0.42b0
-opentelemetry-util-http==1.20.0
+opentelemetry-propagator-jaeger>=1.20.0
+opentelemetry-sdk-extension-asyncpg>=0.42b0
+opentelemetry-semantic-conventions>=0.42b0
