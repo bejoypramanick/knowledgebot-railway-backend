@@ -9,12 +9,20 @@ import logging
 
 from ..service.website_service import WebsiteService, scrape_website_celery
 from ..service.ai_service import upload_content_to_gemini
+from ..client.service_client import ServiceClient
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Import ServiceClient for HTTP communication with worker services
+from shared.service_client import service_client
+
 # Initialize services
 website_service = WebsiteService()
+scraping_dao = ScrapingDAO()
+
+# ServiceClient for HTTP communication with worker services
+service_client = ServiceClient()
 
 # =================================
 # WEB SCRAPING ENDPOINTS
@@ -340,19 +348,18 @@ async def cancel_scraping_task(item_id: str):
                         logger.info(f"🔴 [CELERY_REVOKE] Revoked task {celery_task_id} from Redis queue")
                     except Exception as e:
                         # If revoke fails, raise exception to trigger transaction rollback
-                        logger.error(f"❌ [ATOMIC_TX] Revoke failed for task {celery_task_id}: {e}")
+                        logger.error(f" [ATOMIC_TX] Revoke failed for task {celery_task_id}: {e}")
                         raise HTTPException(status_code=500, detail=f"Failed to revoke task from queue: {e}")
 
                 # Step 2: Update database (same transaction)
                 try:
-                    from website_crawling.dao.scraping_dao import ScrapingDAO
-                    
                     scraping_dao = ScrapingDAO()
                     await scraping_dao.update_website_status(
                         website_id=int(item_id),
                         status="cancelled",
                         error_message=f"Task cancelled by admin (celery_task_id: {celery_task_id})"
                     )
+                    logger.info(f" [ATOMIC_TX] Updated DB: website {item_id} marked as cancelled")
                     logger.info(f"✅ [ATOMIC_TX] Updated DB: website {item_id} marked as cancelled")
                 except Exception as e:
                     # If DB update fails, transaction rolls back
