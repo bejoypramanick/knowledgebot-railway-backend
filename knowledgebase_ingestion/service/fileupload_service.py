@@ -20,6 +20,7 @@ from knowledgebase_ingestion.utils.validation import (
 from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import file_celery, web_celery
+from shared.task_control import TaskControl
 
 logger = get_otel_logger("fileupload_service", "knowledgebase-ingestion")
 
@@ -433,90 +434,17 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.error(f"❌ [GEMINI_RAW_DELETE_ERROR] Error deleting raw files: {e}")
             errors.append(f"Raw file deletion failed: {e}")
 
-        # Step 2: Clear Redis queues and revoke Celery tasks
-        logger.info("🔴 [REDIS_CLEAR] Clearing Redis task queues...")
+        # Step 2: Stop all running tasks (Celery revoke + Redis flags)
+        logger.info("🔴 [TASK_CONTROL] Stopping all Celery tasks...")
         try:
-            redis_queue = RedisMessageQueue()
-            redis_queue.clear_file_task_queue()
-            redis_queue.clear_web_task_queue()
-            logger.info("   ✅ Redis queues cleared")
+            success = TaskControl.stop_all_tasks()
+            if success:
+                logger.info("   ✅ All Celery tasks stopped (revoked + flags set)")
+            else:
+                logger.warning("   ⚠️ Some tasks may not have been stopped")
         except Exception as e:
-            logger.error(f"❌ [REDIS_CLEAR_ERROR] Error clearing Redis: {e}")
-            errors.append(f"Redis clear failed: {e}")
-
-        # Step 2b: Set cancellation flags in Redis for all running tasks
-        logger.info("🔴 [TASK_CANCEL_FLAGS] Setting cancellation flags in Redis...")
-        try:
-            import redis as redis_lib
-
-            # Get all websites and set cancellation flags
-            async with get_db_connection() as conn:
-                running_websites = await conn.fetch(
-                    "SELECT id, celery_task_id FROM scraped_websites WHERE processing_status = 'processing' AND celery_task_id IS NOT NULL"
-                )
-
-                if running_websites:
-                    logger.info(f"   Found {len(running_websites)} running website tasks")
-
-                    # Set cancellation flag for each running task in Redis
-                    file_redis_url = os.getenv('FILE_REDIS_URL', 'redis://localhost:6379/0')
-                    web_redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
-
-                    for website in running_websites:
-                        task_id = website['celery_task_id']
-                        if task_id:
-                            try:
-                                # Set flag in web Redis (DB 1) since these are web tasks
-                                redis_conn = redis_lib.from_url(web_redis_url, decode_responses=True, socket_connect_timeout=2)
-                                redis_conn.setex(f"task_cancelled:{task_id}", 300, "1")  # Expire in 5 minutes
-                                redis_conn.close()
-                                logger.info(f"   ✅ Set cancellation flag for task {task_id}")
-                            except Exception as cf_err:
-                                logger.warning(f"   ⚠️ Could not set flag for {task_id}: {cf_err}")
-                else:
-                    logger.info("   No running website tasks found")
-
-                # Get all files and set cancellation flags
-                running_files = await conn.fetch(
-                    "SELECT id, celery_task_id FROM file_uploads WHERE processing_status = 'processing' AND celery_task_id IS NOT NULL"
-                )
-
-                if running_files:
-                    logger.info(f"   Found {len(running_files)} running file tasks")
-
-                    for file_rec in running_files:
-                        task_id = file_rec['celery_task_id']
-                        if task_id:
-                            try:
-                                # Set flag in file Redis (DB 0) since these are file tasks
-                                redis_conn = redis_lib.from_url(file_redis_url, decode_responses=True, socket_connect_timeout=2)
-                                redis_conn.setex(f"task_cancelled:{task_id}", 300, "1")  # Expire in 5 minutes
-                                redis_conn.close()
-                                logger.info(f"   ✅ Set cancellation flag for task {task_id}")
-                            except Exception as cf_err:
-                                logger.warning(f"   ⚠️ Could not set flag for {task_id}: {cf_err}")
-                else:
-                    logger.info("   No running file tasks found")
-
-            logger.info("   ✅ All cancellation flags set in Redis")
-        except Exception as e:
-            logger.warning(f"⚠️ [TASK_CANCEL_FLAGS_ERROR] Error setting cancellation flags: {e}")
-            # Don't add to errors - this is just a safety mechanism
-
-        # Step 2c: Revoke all Celery tasks via control.purge()
-        logger.info("🔴 [CELERY_REVOKE] Revoking all Celery tasks...")
-        try:
-            logger.info("   📋 Purging file_processing queue...")
-            file_celery.control.purge()
-            logger.info("   ✅ file_processing tasks purged")
-
-            logger.info("   📋 Purging web_crawling queue...")
-            web_celery.control.purge()
-            logger.info("   ✅ web_crawling tasks purged")
-
-            logger.info("   ✅ All Celery task queues purged")
-        except Exception as e:
-            logger.warning(f"⚠️ [CELERY_REVOKE_ERROR] Error purging Celery tasks: {e}")
+            logger.warning(f"⚠️ [TASK_CONTROL_ERROR] Error stopping tasks: {e}")
+            # Don't add to errors - task termination is best-effort
 
         # Step 3: Mark all files as deleted in database (soft delete - don't remove records)
         logger.info("💾 [DB_UPDATE_FILES] Marking all files as deleted in database...")
