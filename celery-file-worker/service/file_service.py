@@ -169,7 +169,8 @@ class FileService:
         gemini_processed_at: Any,
         mime_type: str,
         file_search_metadata: Optional[Dict[str, Any]] = None,
-        char_count: int = 0
+        char_count: int = 0,
+        user_role_id: int = None
     ) -> Optional[int]:
         """
         Record file metadata to database.
@@ -178,8 +179,9 @@ class FileService:
         try:
             from shared.db import get_db_connection
 
-            # Get admin user role ID
-            user_role_id = await self.get_admin_user_role_id(user_email)
+            # Use provided user_role_id or look it up from database
+            if not user_role_id:
+                user_role_id = await self.get_admin_user_role_id(user_email)
 
             async with get_db_connection() as conn:
                 file_id = await conn.fetchval(

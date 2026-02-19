@@ -35,6 +35,7 @@ class ProcessingService:
         delay_between_requests: float = 0.0,
         replace_existing: bool = False,
         user_email: str = "admin",
+        user_role_id: int = None,
         celery_task_id: str = None,
         **options
     ) -> Dict[str, Any]:
@@ -137,7 +138,8 @@ class ProcessingService:
                 website_id=website_id,
                 url=url,
                 processed_pages=processed_pages,
-                user_email=user_email
+                user_email=user_email,
+                celery_task_id=celery_task_id
             )
 
             if not file_search_result.get("success"):
@@ -603,7 +605,8 @@ class ProcessingService:
         website_id: int,
         url: str,
         processed_pages: List[Dict[str, str]],
-        user_email: str
+        user_email: str,
+        celery_task_id: str = None
     ) -> Dict[str, Any]:
         """Upload website content to Gemini FileSearch"""
         try:
@@ -633,10 +636,14 @@ class ProcessingService:
 
             logger.info(f"📤 Uploading {len(processed_pages)} pages individually to FileSearch")
 
-            # Get admin user role ID for child page records
-            user_role_id = await self.scraping_dao.get_admin_user_role_id(user_email)
+            # Use user_role_id if provided, otherwise try to look up from database
             if not user_role_id:
-                logger.warning(f"⚠️ Could not find admin user role for {user_email}, child pages will have NULL user_role_id")
+                logger.info(f"ℹ️ user_role_id not provided, attempting to look up for {user_email}...")
+                user_role_id = await self.scraping_dao.get_admin_user_role_id(user_email)
+                if not user_role_id:
+                    logger.warning(f"⚠️ Could not find user role for {user_email}, child pages will have NULL user_role_id")
+            else:
+                logger.info(f"✅ Using provided user_role_id: {user_role_id}")
 
             uploaded_pages = []
             failed_pages = []

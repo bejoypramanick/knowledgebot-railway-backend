@@ -19,7 +19,8 @@ def process_file_upload_task(
     file_display_name: str,
     s3_key: str,
     file_size: int,
-    user_email: str
+    user_email: str,
+    user_role_id: int = None
 ):
     """
     Celery task for async file processing.
@@ -47,6 +48,7 @@ def process_file_upload_task(
     logger.info(f"📄 [FILE_PARAMS] Size: {file_size} bytes")
     logger.info(f"📄 [FILE_PARAMS] S3 Key: {s3_key}")
     logger.info(f"👤 [USER_INFO] Email: {user_email}")
+    logger.info(f"👤 [USER_INFO] Role ID: {user_role_id}")
 
     try:
         logger.info("🔍 [PROCESSING] Loading ProcessingService...")
@@ -63,6 +65,7 @@ def process_file_upload_task(
                 s3_key=s3_key,
                 file_size=file_size,
                 user_email=user_email,
+                user_role_id=user_role_id,
                 celery_task_id=task_id
             )
         )

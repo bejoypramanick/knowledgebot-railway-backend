@@ -119,7 +119,8 @@ async def queue_website_for_scraping(
             'max_depth': max_depth,
             'max_pages': max_pages,
             'max_concurrent': max_concurrent,
-            'delay_between_requests': delay_between_requests
+            'delay_between_requests': delay_between_requests,
+            'user_role_id': user_role_id
         }
         logger.info(f"✅ [OPTIONS] Built options dict: {options}")
 

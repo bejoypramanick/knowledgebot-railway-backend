@@ -453,7 +453,8 @@ async def upload_file_async(
                     file_display_name or validation_result['filename'],
                     s3_key,
                     file_size,
-                    user_email
+                    user_email,
+                    user_id
                 ],
                 queue='file_processing'
             )
@@ -467,6 +468,7 @@ async def upload_file_async(
             logger.info(f"     - s3_key: {s3_key}")
             logger.info(f"     - file_size: {file_size}")
             logger.info(f"     - user_email: {user_email}")
+            logger.info(f"     - user_id: {user_id}")
 
             # Create file record in database with the Celery task ID
             logger.info(f"💾 [DB_INSERT_START] Creating file record in database")

@@ -225,6 +225,7 @@ async def process_file_content(
     s3_key: str,
     file_size: int,
     user_email: str = "admin",
+    user_role_id: int = None,
     celery_task_id: str = None
 ) -> Dict[str, Any]:
     """
@@ -585,7 +586,8 @@ async def process_file_content(
                     gemini_processed_at=gemini_processed_at,
                     mime_type=detected_mime_type,
                     file_search_metadata=file_search_metadata,
-                    char_count=char_count
+                    char_count=char_count,
+                    user_role_id=user_role_id
                 )
 
                 if not file_record_id:
