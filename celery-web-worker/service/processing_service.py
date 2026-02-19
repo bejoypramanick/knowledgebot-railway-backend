@@ -15,7 +15,6 @@ from urllib.parse import urljoin, urlparse
 from shared.otel_logger import get_otel_logger
 from shared.file_search import get_file_search_store_by_display_name
 from shared.file_metrics import calculate_metrics
-from shared.db import get_db_connection
 
 from models.value_objects import (
     CrawlConfig,
@@ -797,12 +796,15 @@ class ProcessingService:
         ]
         
         try:
+            from shared.db import get_db_connection
             async with get_db_connection() as conn:
                 await conn.execute(query, *params)
                 logger.info(f"✅ [UPDATE_WEBSITE_SUCCESS] Website record updated")
                 return True
         except Exception as e:
             logger.error(f"❌ [UPDATE_WEBSITE_ERROR] Failed to update website: {e}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
             return False
 
     # ==================== UTILITIES ====================
