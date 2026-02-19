@@ -5,8 +5,8 @@
 
 import os
 
-# Max file size (configurable via MAX_FILE_SIZE_MB env var, defaults to 100MB)
-_MAX_SIZE_MB = int(os.getenv('MAX_FILE_SIZE_MB', '100'))
+# Max file size (configurable via MAX_FILE_SIZE_MB env var, defaults to 5MB)
+_MAX_SIZE_MB = int(os.getenv('MAX_FILE_SIZE_MB', '5'))
 MAX_FILE_SIZE_BYTES = _MAX_SIZE_MB * 1024 * 1024
 
 # Allowed file extensions (configurable via ALLOWED_FILE_EXTENSIONS env var)
