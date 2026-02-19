@@ -645,24 +645,14 @@ class ProcessingService:
                 temp_file = f.name
 
             try:
-                # Upload to Gemini (files.upload doesn't support mime_type parameter)
+                # Upload directly to FileSearch for RAG embeddings
+                # (Don't need raw files.upload() - FileSearch handles embeddings and indexing)
                 mime_type = "text/markdown"
-                with open(temp_file, 'rb') as f:
-                    file_size = os.path.getsize(temp_file)
-                    logger.info(f"📤 Gemini files.upload:")
-                    logger.info(f"   - File: {os.path.basename(temp_file)}")
-                    logger.info(f"   - File size: {file_size} bytes")
-
-                    file_response = genai_client.files.upload(file=f)
-                    gemini_file_name = file_response.name
-
-                logger.info(f"✅ Uploaded to Gemini: {gemini_file_name}")
-
-                # Upload to FileSearch
                 document_name = f"website_{website_id}_{int(time.time())}"
+
                 with open(temp_file, 'rb') as f:
                     file_size = os.path.getsize(temp_file)
-                    logger.info(f"📤 FileSearch upload details:")
+                    logger.info(f"📤 FileSearch upload:")
                     logger.info(f"   - Store: {file_search_store_name}")
                     logger.info(f"   - Document: {document_name}")
                     logger.info(f"   - MIME type: {mime_type}")
@@ -679,12 +669,10 @@ class ProcessingService:
 
                 return {
                     "success": True,
-                    "gemini_file_name": gemini_file_name,
                     "file_search_metadata": {
                         "type": "file_search",
                         "file_search_store_name": file_search_store_name,
                         "document_name": file_search_response.name,
-                        "gemini_file_name": gemini_file_name,
                         "uploaded_at": datetime.utcnow().isoformat()
                     }
                 }
