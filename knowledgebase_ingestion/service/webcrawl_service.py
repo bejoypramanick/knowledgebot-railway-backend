@@ -191,12 +191,45 @@ async def queue_website_for_scraping(
         logger.info(f"📋 [RESULT] Celery Task ID: {task_id}")
         logger.info(f"📋 [RESULT] URL: {url}")
 
+        # Fetch the complete website record for UI population
+        try:
+            full_website = await get_website_by_id(website_id)
+            if full_website:
+                logger.info(f"✅ [WEBSITE_FETCH] Fetched full website record for UI")
+                return {
+                    "success": True,
+                    "message": "Website scraping started successfully",
+                    "task_id": task_id,
+                    "website_id": str(website_id),
+                    "url": url,
+                    "domain": full_website.get('domain', ''),
+                    "processing_status": full_website.get('processing_status', 'pending'),
+                    "char_count": full_website.get('char_count', 0),
+                    "file_size": full_website.get('content_length', 0),
+                    "pages_scraped": full_website.get('pages_scraped', 0),
+                    "created_at": full_website.get('created_at').isoformat() if full_website.get('created_at') else None,
+                    "updated_at": full_website.get('updated_at').isoformat() if full_website.get('updated_at') else None,
+                    "children": [],
+                    "status": "Queued"
+                }
+        except Exception as fetch_err:
+            logger.warning(f"⚠️ Could not fetch full website record: {fetch_err}")
+
+        # Fallback response if fetch fails
         return {
             "success": True,
             "message": "Website scraping started successfully",
             "task_id": task_id,
             "website_id": str(website_id),
             "url": url,
+            "domain": url.split('/')[2] if '://' in url else url,
+            "processing_status": "pending",
+            "char_count": 0,
+            "file_size": 0,
+            "pages_scraped": 0,
+            "created_at": None,
+            "updated_at": None,
+            "children": [],
             "status": "Queued"
         }
 
