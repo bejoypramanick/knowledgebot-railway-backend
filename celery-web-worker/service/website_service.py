@@ -82,8 +82,7 @@ class WebsiteService:
                 max_concurrent=options.get("max_concurrent", 10),
                 delay_between_requests=options.get("delay_between_requests", 0.0),
                 replace_existing=options.get("replace_existing", False),
-                user_email=options.get("user_email", "admin"),
-                **options
+                user_email=options.get("user_email", "admin")
             )
 
             if result.get("success"):
