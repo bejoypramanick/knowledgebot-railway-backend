@@ -261,7 +261,7 @@ class WebCrawlDAO:
                 return hierarchical_websites
 
         except Exception as e:
-            logger.error(f"❌ [TREE_ERROR] Error building hierarchical websites: {e}", exc_info=True)
+            logger.error(f"❌ [TREE_ERROR] Error building hierarchical websites: {e}")
             logger.log_db_query(query, error=e)
             return []
 
@@ -307,7 +307,17 @@ class WebCrawlDAO:
 
     def _format_website_record(self, record) -> Dict[str, Any]:
         """Format a website record for API response."""
-        metadata = record['metadata'] if record['metadata'] else {}
+        # Safely handle metadata - could be None, dict, or string
+        metadata = {}
+        if record['metadata']:
+            if isinstance(record['metadata'], dict):
+                metadata = record['metadata']
+            elif isinstance(record['metadata'], str):
+                try:
+                    import json
+                    metadata = json.loads(record['metadata'])
+                except (json.JSONDecodeError, ValueError):
+                    metadata = {}
 
         return {
             "id": record['id'],
@@ -323,6 +333,6 @@ class WebCrawlDAO:
             "created_at": record['created_at'].isoformat() if record['created_at'] else None,
             "updated_at": record['updated_at'].isoformat() if record['updated_at'] else None,
             "celery_task_id": record['celery_task_id'],
-            "scraping_config": metadata.get('scraping_config'),
+            "scraping_config": metadata.get('scraping_config') if metadata else None,
             "children": []  # Will be populated by caller
         }

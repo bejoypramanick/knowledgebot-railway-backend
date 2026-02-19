@@ -89,7 +89,7 @@ class FileUploadDAO:
                     return None
 
         except Exception as e:
-            logger.error(f"❌ [FILE_DAO_INSERT_ERROR] Failed to insert file record: {e}", exc_info=True)
+            logger.error(f"❌ [FILE_DAO_INSERT_ERROR] Failed to insert file record: {e}")
             logger.log_db_query(query, params, error=e)
             return None
 
@@ -186,7 +186,7 @@ class FileUploadDAO:
                     return False
 
         except Exception as e:
-            logger.error(f"❌ [FILE_DAO_UPDATE_ERROR] Failed to update file status: {e}", exc_info=True)
+            logger.error(f"❌ [FILE_DAO_UPDATE_ERROR] Failed to update file status: {e}")
             logger.log_db_query(query, params, error=e)
             return False
 
@@ -224,7 +224,7 @@ class FileUploadDAO:
                     return 0
 
         except Exception as e:
-            logger.error(f"❌ [FILE_DAO_CANCEL_ERROR] Failed to cancel files: {e}", exc_info=True)
+            logger.error(f"❌ [FILE_DAO_CANCEL_ERROR] Failed to cancel files: {e}")
             logger.log_db_query(query, error=e)
             return 0
 

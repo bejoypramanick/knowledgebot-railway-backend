@@ -63,7 +63,7 @@ async def create_file_record(record_data: Dict[str, Any]) -> Optional[str]:
             logger.error(f"❌ [DB_INSERT_FAILED] Failed to create file record (returned None)")
             return None
     except Exception as e:
-        logger.error(f"❌ [DB_INSERT_ERROR] Error creating file record: {e}", exc_info=True)
+        logger.error(f"❌ [DB_INSERT_ERROR] Error creating file record: {e}")
         return None
 
 
