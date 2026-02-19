@@ -654,11 +654,20 @@ class ProcessingService:
 
                 # Upload to FileSearch
                 document_name = f"website_{website_id}_{int(time.time())}"
+                mime_type = "text/markdown"
+
                 with open(temp_file, 'rb') as f:
+                    file_size = os.path.getsize(temp_file)
+                    logger.info(f"📤 FileSearch upload details:")
+                    logger.info(f"   - Store: {file_search_store_name}")
+                    logger.info(f"   - Document: {document_name}")
+                    logger.info(f"   - MIME type: {mime_type}")
+                    logger.info(f"   - File size: {file_size} bytes")
+
                     file_search_response = genai_client.file_search_stores.documents.create(
                         parent=file_search_store_name,
                         display_name=document_name,
-                        mime_type="text/markdown",
+                        mime_type=mime_type,
                         file=f
                     )
 
@@ -684,7 +693,9 @@ class ProcessingService:
                     pass
 
         except Exception as e:
-            logger.error(f"❌ Gemini upload failed: {e}")
+            import traceback
+            logger.error(f"❌ Gemini upload failed: {type(e).__name__}: {e}")
+            logger.error(f"   Traceback: {traceback.format_exc()}")
             return {
                 "success": False,
                 "error": str(e)
