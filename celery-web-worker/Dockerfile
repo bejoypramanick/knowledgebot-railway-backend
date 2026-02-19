@@ -7,17 +7,14 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-# Playwright requires these system libraries to run chromium
-# fonts-unifont is Debian equivalent of ttf-unifont (needed by docling/crawl4ai)
+# Install system dependencies for Playwright/Chromium
+# These are the minimal dependencies needed for browser automation
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     postgresql-client \
     ca-certificates \
-    fonts-liberation \
-    fonts-noto-cjk \
-    fonts-unifont \
+    libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
     libatspi2.0-0 \
@@ -28,7 +25,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 \
     libglib2.0-0 \
     libgtk-3-0 \
-    libgtk-4-1 \
     libnspr4 \
     libnss3 \
     libpango-1.0-0 \
@@ -42,7 +38,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrandr2 \
     libxrender1 \
     libxshmfence1 \
-    xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install requirements files first (for better caching)
