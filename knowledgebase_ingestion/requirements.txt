@@ -23,7 +23,7 @@ tenacity>=8.2.2
 pydantic[email]>=2.12.0
 
 # Google Gemini
-google-genai>=2.0.0
+google-genai>=1.60.0
 google-auth>=2.38.0
 
 # File handling
