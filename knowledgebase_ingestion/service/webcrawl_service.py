@@ -137,25 +137,40 @@ async def queue_website_for_scraping(
         logger.info(f"✅ [DB_CREATE_SUCCESS] Website record created with ID: {website_id}")
 
         # Dispatch to Celery worker with the real website_id — Celery assigns the task ID
+        logger.info("=" * 80)
         logger.info(f"📤 [CELERY_DISPATCH] About to dispatch to Celery...")
+        logger.info("=" * 80)
+        logger.info(f"🔧 [CELERY_CONFIG] web_celery object: {web_celery}")
+        logger.info(f"🔧 [CELERY_CONFIG] web_celery broker: {web_celery.conf.get('broker_url', 'NOT SET')}")
+        logger.info(f"🔧 [CELERY_CONFIG] web_celery result_backend: {web_celery.conf.get('result_backend', 'NOT SET')}")
         logger.info(f"   Task: 'tasks.scrape_website_task'")
         logger.info(f"   Args: website_id={website_id}, url={url}")
         logger.info(f"   Queue: 'web_crawling'")
 
         try:
+            logger.info(f"📬 [CELERY_SEND_CALL] Calling web_celery.send_task()...")
             result = web_celery.send_task(
                 'tasks.scrape_website_task',
                 args=[website_id, url, options],
                 queue='web_crawling'
             )
-            logger.info(f"✅ [CELERY_SEND_SUCCESS] Task dispatched successfully")
+            logger.info(f"✅ [CELERY_SEND_SUCCESS] Task dispatched successfully!")
             logger.info(f"   Result type: {type(result)}")
-            logger.info(f"   Result: {result}")
+            logger.info(f"   Result object: {result}")
+            logger.info(f"   Result.__dict__: {result.__dict__ if hasattr(result, '__dict__') else 'N/A'}")
 
             task_id = result.id
             logger.info(f"✅ [CELERY_TASK_ID] Celery assigned task ID: {task_id}")
+            logger.info(f"   Task state: {result.state}")
+            logger.info(f"   Task status: {result.status}")
         except Exception as celery_err:
-            logger.error(f"❌ [CELERY_SEND_ERROR] Failed to dispatch to Celery: {celery_err}", exc_info=True)
+            logger.error("=" * 80)
+            logger.error(f"❌ [CELERY_SEND_ERROR] FAILED to dispatch to Celery")
+            logger.error("=" * 80)
+            logger.error(f"🚨 [ERROR_TYPE] {type(celery_err).__name__}")
+            logger.error(f"🚨 [ERROR_MESSAGE] {str(celery_err)}")
+            logger.error(f"🚨 [ERROR_DETAILS] Full traceback:")
+            logger.error("", exc_info=True)
             raise
 
         # Update DB record with the real Celery task ID

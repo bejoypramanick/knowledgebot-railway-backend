@@ -70,3 +70,26 @@ except Exception as e:
 logger.info("=" * 80)
 logger.info("✅ [CELERY_DISPATCHER_INIT] Celery Dispatcher initialization complete")
 logger.info("=" * 80)
+
+# Add methods to log when tasks are sent
+original_send_task = web_celery.send_task
+
+def logged_send_task(*args, **kwargs):
+    """Wrapper to log all send_task calls"""
+    logger.info("=" * 80)
+    logger.info("📤 [WEB_CELERY_SEND_TASK] web_celery.send_task() called")
+    logger.info("=" * 80)
+    logger.info(f"   Args: {args}")
+    logger.info(f"   Kwargs: {kwargs}")
+    try:
+        result = original_send_task(*args, **kwargs)
+        logger.info(f"✅ [WEB_CELERY_SEND_RESULT] Task sent successfully")
+        logger.info(f"   Result type: {type(result)}")
+        logger.info(f"   Result ID: {result.id if hasattr(result, 'id') else 'N/A'}")
+        return result
+    except Exception as e:
+        logger.error(f"❌ [WEB_CELERY_SEND_ERROR] send_task failed: {e}", exc_info=True)
+        raise
+
+web_celery.send_task = logged_send_task
+logger.info("✅ [SEND_TASK_WRAPPER] Wrapped web_celery.send_task with logging")
