@@ -9,7 +9,9 @@ WORKDIR /app
 
 # Install system dependencies for Playwright/Chromium
 # These are the minimal dependencies needed for browser automation
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     postgresql-client \

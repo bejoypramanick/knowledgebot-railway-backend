@@ -373,25 +373,53 @@ class ProcessingService:
             return []
 
     async def _html_to_markdown(self, html_content: str) -> str:
-        """Convert HTML content to Markdown"""
+        """Convert HTML content to Markdown with noise filtering"""
         try:
+            import trafilatura
             from markdownify import markdownify as md
             from bs4 import BeautifulSoup
 
-            # Clean HTML: remove script, style, nav, footer, header elements
-            soup = BeautifulSoup(html_content, 'lxml')
-            for element in soup(["script", "style", "nav", "footer", "header", "aside"]):
-                element.extract()
+            # Step 1: Use trafilatura to extract main content (removes boilerplate, ads, nav, etc)
+            logger.info("🧹 [CONTENT_EXTRACTION] Using trafilatura to extract main content...")
+            extracted_content = trafilatura.extract(html_content, include_comments=False)
 
-            # Convert to markdown
-            markdown = md(str(soup), heading_style="atx")
+            if extracted_content:
+                logger.info("✅ [TRAFILATURA] Successfully extracted main content")
+                # Convert extracted content to markdown
+                markdown = md(extracted_content, heading_style="atx")
+            else:
+                logger.warning("⚠️ [TRAFILATURA] Failed to extract content, falling back to manual cleaning")
+                # Fallback: Manual HTML cleaning
+                soup = BeautifulSoup(html_content, 'lxml')
+                # Remove script, style, nav, footer, header, aside, and other noise elements
+                for element in soup(["script", "style", "nav", "footer", "header", "aside",
+                                     "form", "button", "meta", "link", "noscript"]):
+                    element.extract()
 
-            # Clean up excessive whitespace
+                # Remove elements with common ad/nav class names
+                for element in soup.find_all(class_=lambda x: x and any(
+                    noise in x.lower() for noise in ['ad', 'sidebar', 'widget', 'comment', 'related', 'cookie'])):
+                    element.extract()
+
+                # Convert to markdown
+                markdown = md(str(soup), heading_style="atx")
+
+            # Step 2: Clean up markdown formatting
+            logger.info("🧹 [MARKDOWN_CLEANUP] Cleaning up markdown formatting...")
             lines = markdown.split('\n')
             lines = [line.rstrip() for line in lines]
             lines = [line for line in lines if line.strip()]  # Remove empty lines
+
+            # Remove lines that are just special characters or very short noise
+            lines = [line for line in lines if len(line) > 2 or line.startswith('#')]
+
             markdown = '\n'.join(lines)
 
+            # Remove excessive blank lines (more than 2 consecutive)
+            while '\n\n\n' in markdown:
+                markdown = markdown.replace('\n\n\n', '\n\n')
+
+            logger.info(f"✅ [CONTENT_EXTRACTED] Content cleaned: {len(markdown)} characters")
             return markdown
 
         except Exception as e:
