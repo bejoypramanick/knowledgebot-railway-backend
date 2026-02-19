@@ -25,6 +25,68 @@ logger = get_otel_logger("fileupload_router", "knowledgebase-ingestion")
 router = APIRouter(tags=["file-upload"])
 
 # =================================
+# FILE UPLOAD CONSTRAINTS ENDPOINT
+# =================================
+
+@router.get("/upload/constraints")
+async def get_upload_constraints(request: Request = None):
+    """Get file upload constraints (max file size, allowed extensions)"""
+    try:
+        # Extract authenticated user information (optional, just for logging)
+        try:
+            user_email, user_id = extract_user_from_request(request)
+            logger.info(f"📋 [CONSTRAINTS] Upload constraints requested by {user_email}")
+        except:
+            logger.info(f"📋 [CONSTRAINTS] Upload constraints requested (unauthenticated)")
+
+        # Return upload constraints
+        return {
+            "success": True,
+            "constraints": {
+                "max_file_size": 100 * 1024 * 1024,  # 100 MB
+                "max_file_size_display": "100 MB",
+                "allowed_extensions": [
+                    # Documents
+                    "pdf", "docx", "txt", "doc",
+                    # Spreadsheets
+                    "xlsx", "csv", "xls",
+                    # Presentations
+                    "pptx", "ppt",
+                    # Code/Web
+                    "py", "js", "html", "json", "md", "yaml", "xml",
+                    # Archives
+                    "zip", "tar", "gz"
+                ],
+                "allowed_mime_types": [
+                    "application/pdf",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "application/msword",
+                    "text/plain",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.ms-excel",
+                    "text/csv",
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "application/vnd.ms-powerpoint",
+                    "text/x-python",
+                    "application/javascript",
+                    "text/html",
+                    "application/json",
+                    "text/markdown",
+                    "application/yaml",
+                    "application/xml",
+                    "text/xml",
+                    "application/zip",
+                    "application/x-tar",
+                    "application/gzip"
+                ]
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting upload constraints: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =================================
 # FILE LISTING ENDPOINTS
 # =================================
 
