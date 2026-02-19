@@ -93,8 +93,6 @@ class ProcessingService:
 
             logger.info(f"✅ [COMPLETE] Website {request.website_id} processed: {aggregate_metrics.total_pages_uploaded} pages in {processing_time:.1f}s")
 
-            # Publish
-            await self._reportSuccessResult(result, job_context)
             return result.to_dict()
 
         except Exception as e:
@@ -110,7 +108,6 @@ class ProcessingService:
                 error=str(e)
             )
             logger.error(f"❌ Processing error: {e}")
-            await self._reportErrorResult(result, request.celery_task_id)
             return result.to_dict()
 
     async def _crawlWebsitePages(
@@ -190,32 +187,6 @@ class ProcessingService:
         except Exception as e:
             logger.error(f"   ❌ Error: {e}")
             return None
-
-    async def _reportSuccessResult(self, result: ProcessingResult, job_context: JobContext):
-        """Publish success to Redis"""
-        try:
-            from shared.redis_message_queue import redis_message_queue
-            redis_message_queue.publish_web_result(
-                job_context.website_id,
-                job_context.celery_task_id,
-                "completed",
-                result.to_dict()
-            )
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to publish result: {e}")
-
-    async def _reportErrorResult(self, result: ProcessingResult, celery_task_id: str):
-        """Publish error to Redis"""
-        try:
-            from shared.redis_message_queue import redis_message_queue
-            redis_message_queue.publish_web_result(
-                result.website_id,
-                celery_task_id,
-                "failed",
-                error=result.error
-            )
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to publish error: {e}")
 
     # ==================== CRAWL LAYER ====================
 
