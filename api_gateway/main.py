@@ -207,13 +207,9 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
             )
 
 # Add middleware to app
-app.add_middleware(FirebaseAuthMiddleware)
-
-register_fastapi_exception_handlers(app, "api_gateway")
-
-# Middleware
-app.middleware("http")(log_requests_middleware)
-
+# IMPORTANT: Add CORS middleware FIRST (before other middlewares)
+# Middlewares execute in REVERSE order of addition, so CORS must be added last
+# to execute first and handle OPTIONS preflight requests
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -224,9 +220,18 @@ app.add_middleware(
         "*"
     ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,
 )
+
+app.add_middleware(FirebaseAuthMiddleware)
+
+register_fastapi_exception_handlers(app, "api_gateway")
+
+# Middleware
+app.middleware("http")(log_requests_middleware)
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
