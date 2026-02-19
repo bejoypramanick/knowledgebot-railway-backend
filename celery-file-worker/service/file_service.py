@@ -6,7 +6,7 @@ import asyncio
 import os
 import json
 from typing import Dict, List, Any, Optional
-from ..dao.file_dao import FileDAO
+from dao.file_dao import FileDAO
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("file_service", "celery-file-worker")

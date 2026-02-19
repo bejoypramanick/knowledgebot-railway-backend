@@ -4,7 +4,7 @@ Handles business logic for website crawling operations
 """
 import os
 from typing import Dict, List, Any, Optional
-from ..dao.scraping_dao import ScrapingDAO
+from dao.scraping_dao import ScrapingDAO
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("website_service", "celery-web-worker")

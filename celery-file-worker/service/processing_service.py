@@ -23,15 +23,15 @@ from shared.file_search import get_file_search_store_by_display_name
 from shared.html_processor import extract_content_from_html
 from shared.db import get_db_connection
 
-from ..utils.validation import (
+from utils.validation import (
     validate_file_extension,
     validate_file_size,
     validate_mime_type,
     sanitize_filename,
     detect_mime_type_from_extension
 )
-from ..utils.files import calculate_sha256, stream_to_temp_file
-from .file_service import FileService
+from utils.files import calculate_sha256, stream_to_temp_file
+from service.file_service import FileService
 
 logger = get_otel_logger("processing_service", "celery-file-worker")
 
