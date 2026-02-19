@@ -626,7 +626,7 @@ class ProcessingService:
                 os.close(fd)
             except:
                 pass
-            self._deleteTemporaryFile(temp_file)
+            await self._deleteTemporaryFile(temp_file)
 
     async def _buildGeminiUploadConfig(self, doc_name: str, website_id: int, page_url: str) -> Dict:
         """Build Gemini upload configuration"""
@@ -656,8 +656,8 @@ class ProcessingService:
                 logger.error(f"   ❌ Timeout uploading ({elapsed:.0f}s)")
                 # Cancel the operation to free resources
                 try:
-                    genai_client.operations.cancel(operation.name)
-                    logger.info(f"   ✅ Cancelled stuck upload operation: {operation.name}")
+                    genai_client.operations.cancel(operation.name if hasattr(operation, 'name') else operation)
+                    logger.info(f"   ✅ Cancelled stuck upload operation: {operation.name if hasattr(operation, 'name') else operation}")
                 except Exception as cancel_err:
                     logger.warning(f"   ⚠️ Could not cancel operation: {cancel_err}")
                 return None
@@ -665,7 +665,9 @@ class ProcessingService:
             logger.info(f"   ⏳ Waiting for upload... ({elapsed:.0f}s)")
             await asyncio.sleep(2)  # Reduced from 5s to 2s for more responsive checking
             
-            operation = genai_client.operations.get(operation.name)
+            # Get the operation by name if it's a string, or use the operation object directly
+            operation_name = operation.name if hasattr(operation, 'name') else operation
+            operation = genai_client.operations.get(operation_name)
             
         # Final check - if operation is still not done after max_wait, fail it
         if not operation.done:
