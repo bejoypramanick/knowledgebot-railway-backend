@@ -1,0 +1,422 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║               WEBSITE SCRAPING - ULTRA SIMPLE EXPLANATION                      ║
+║                                                                                ║
+║                    How to crawl a website and save it                          ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+
+                             WHAT THE USER DOES
+                             ══════════════════
+
+    User in Web UI:
+
+    [Knowledge Base]  [Add Website]  [Delete]
+                           │
+                           ▼
+                    Enters: https://example.com
+                    Clicks: "Start Crawling"
+                           │
+                           ▼
+                    Toast: "Crawling started!"
+                    "Click Refresh when done"
+                           │
+                    (User waits 30-60 seconds)
+                           │
+                    Clicks: "Refresh"
+                           │
+                           ▼
+                    Knowledge base shows:
+                    ✓ About Us
+                    ✓ Contact Page
+                    ✓ Products
+
+
+                        WHAT HAPPENS IN BACKGROUND
+                        ═════════════════════════════
+
+    Step 1: Dispatch Task
+    ─────────────────────
+
+    API Gateway receives request
+              │
+              ▼
+    knowledgebase_ingestion
+              │
+              ▼
+    Queue task to Celery (Redis)
+              │
+              ▼
+    Return to user immediately
+
+
+    Step 2: Worker Picks It Up
+    ──────────────────────────
+
+    celery-web-worker (listening on Redis)
+              │
+              ▼
+    Receives: "Scrape https://example.com"
+              │
+              ▼
+    ProcessingService.process_website_content()
+              │
+              ▼
+    Setup:
+    - Get FileSearch store from Gemini
+    - Get user role ID from database
+              │
+              ▼
+    Ready to crawl!
+
+
+    Step 3: Main Loop - Process Each Page
+    ──────────────────────────────────────
+
+    ┌─────────────────────────────────────────┐
+    │  FOR EACH PAGE (repeat until max_pages) │
+    └──────────────────┬──────────────────────┘
+                       │
+    ┌──────────────────┼──────────────────────┐
+    ▼                  ▼                      ▼
+ FETCH           CONVERT                 UPLOAD
+    │                  │                      │
+    │              ┌───┴───┐                 │
+    │              ▼       ▼                 │
+    │          HTML →  Markdown              │
+    │                  (with text            │
+    │                   extraction)          │
+    │                                        │
+    ▼                  ▼                      ▼
+ Crawl4ai        Trafilatura            Gemini FileSearch
+    │                  │                      │
+    ▼                  ▼                      ▼
+ Download        "# About Us              Upload to
+ HTML            We are..."               FileSearch
+                                          Get doc_id
+ <html>                                   │
+ ...                            ┌─────────┴──────────┐
+ </html>                        │                    │
+    │                           ▼                    ▼
+    │               ┌──────────────────────┐    ┌──────────────┐
+    │               │ Optional: Docling    │    │ SUCCESS:     │
+    │               │ Extract PDFs/DOCX    │    │ document_id= │
+    │               │ Add to markdown      │    │ docs/abc123  │
+    │               └──────────────────────┘    └──────┬───────┘
+    │                                                  │
+    └──────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+                         ┌──────────────────┐
+                         │ STEP 4: RECORD   │
+                         │                  │
+                         │ Save to database:│
+                         │ - parent_id: 5   │
+                         │ - url: /about    │
+                         │ - doc_id: abc123 │
+                         │ - size: 50KB     │
+                         │ - chars: 5000    │
+                         └────────┬─────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    │                           │
+                    ▼                           ▼
+                DONE?                    Next Page
+                    │                           │
+                NO  │                          YES
+                    │                           │
+                    ▼                           ▼
+                CONTINUE              ┌─────────────────┐
+                LOOP                  │ Process Page 2  │
+                                      │ Process Page 3  │
+                                      │ ... etc         │
+                                      └─────────────────┘
+
+
+    Step 4: Finalization
+    ───────────────────
+
+    All pages done (or max_pages reached)
+              │
+              ▼
+    Update parent record with:
+    - Total pages: 47
+    - Total size: 2.3 MB
+    - Total chars: 237,000
+    - Status: "completed"
+              │
+              ▼
+    Publish to Redis:
+    "Scraping finished! 47 pages"
+              │
+              ▼
+    UI detects message
+    Shows "Refresh" is available
+              │
+              ▼
+    User clicks "Refresh"
+              │
+              ▼
+    Knowledge base updated
+    Shows all 47 pages!
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+
+                          THE 4 STEPS FOR EACH PAGE
+                          ═════════════════════════
+
+    Page:  https://example.com/about
+    ___________________________________
+
+
+    ┌───────────────────────────────────────────────────────────────┐
+    │ STEP 1: FETCH                                                 │
+    │ ─────────                                                     │
+    │ Use crawl4ai to download the HTML from the URL               │
+    │                                                               │
+    │ Input:  URL (https://example.com/about)                      │
+    │ Output: HTML code                                            │
+    │                                                               │
+    │ <html>                                                        │
+    │   <body>                                                      │
+    │     <h1>About Us</h1>                                         │
+    │     <p>We are a company...</p>                                │
+    │   </body>                                                     │
+    │ </html>                                                       │
+    └───────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+    ┌───────────────────────────────────────────────────────────────┐
+    │ STEP 2: CONVERT                                               │
+    │ ──────────                                                    │
+    │ Convert HTML to readable Markdown text                       │
+    │ Remove ads, nav bars, scripts - keep only main content       │
+    │                                                               │
+    │ Input:  HTML (from Step 1)                                   │
+    │ Output: Markdown text                                        │
+    │                                                               │
+    │ # About Us                                                    │
+    │                                                               │
+    │ We are a company...                                           │
+    │                                                               │
+    │ ## Our Values                                                 │
+    │                                                               │
+    │ - Quality                                                     │
+    │ - Innovation                                                  │
+    │ - Customer focus                                              │
+    └───────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+    ┌───────────────────────────────────────────────────────────────┐
+    │ STEP 3: UPLOAD                                                │
+    │ ───────────                                                   │
+    │ Send the Markdown to Gemini FileSearch                        │
+    │ Gemini indexes it for RAG search                              │
+    │                                                               │
+    │ Input:  Markdown (from Step 2)                               │
+    │ Output: document_id                                          │
+    │                                                               │
+    │ Gemini Response:                                              │
+    │ ✓ Document created                                            │
+    │ ✓ ID: documents/page_abc123def                                │
+    │ ✓ Indexed in FileSearch store                                 │
+    │ ✓ Ready for RAG search                                        │
+    └───────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+    ┌───────────────────────────────────────────────────────────────┐
+    │ STEP 4: RECORD                                                │
+    │ ──────────                                                    │
+    │ Save metadata to database                                    │
+    │ (For tracking, display, and later deletion)                  │
+    │                                                               │
+    │ Input:  document_id (from Step 3)                            │
+    │ Output: Row in database                                      │
+    │                                                               │
+    │ Database Row:                                                 │
+    │ ┌──────────────────────────────────────────────┐             │
+    │ │ ID        | 6                                │             │
+    │ │ parent_id | 5 (root website)                 │             │
+    │ │ url       | /about                           │             │
+    │ │ doc_id    | documents/page_abc123def         │             │
+    │ │ size      | 50 KB                            │             │
+    │ │ chars     | 5000                             │             │
+    │ │ status    | completed                        │             │
+    │ └──────────────────────────────────────────────┘             │
+    └───────────────────────────────────────────────────────────────┘
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+
+                             MEMORY MAGIC
+                             ════════════
+
+    OLD WAY (Bad ✗):
+    ──────────────
+
+    Step 1: Fetch ALL 100 pages         → 500 MB in memory
+    Step 2: Convert ALL 100 pages       → still 500 MB in memory!
+    Step 3: Upload ALL 100 pages        → still 500 MB in memory!
+    Step 4: Record ALL 100 pages        → finally released
+
+    Memory used: 500 MB (throughout entire process)
+
+
+    NEW WAY (Good ✓):
+    ────────────────
+
+    Page 1:
+      - Fetch page 1 (150 KB)
+      - Convert page 1 (150 KB)
+      - Upload page 1 (150 KB)
+      - Record page 1
+      - DELETE from memory ✓
+
+    Page 2:
+      - Fetch page 2 (150 KB)
+      - Convert page 2 (150 KB)
+      - Upload page 2 (150 KB)
+      - Record page 2
+      - DELETE from memory ✓
+
+    Page 3-100: repeat...
+
+    Memory used: ~150 KB (constant, reused)
+
+
+    RESULT: 100x LESS MEMORY! ✓
+    From 500 MB → 5 MB
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+
+                            ERROR HANDLING
+                            ══════════════
+
+    What if page fails to upload?
+    ────────────────────────────
+
+    Page 3 Upload FAILS:
+         │
+         ▼
+    Log: "⚠️ Upload failed, skipping this page"
+         │
+         ▼
+    Continue to Page 4 (don't stop)
+         │
+         ▼
+    Final count: 47 pages uploaded (not 48)
+         │
+         ▼
+    User sees: "Completed: 47 pages"
+
+
+    What if admin clicks "Delete All"?
+    ──────────────────────────────────
+
+    Delete All button
+         │
+         ▼
+    Set Redis flag: "task_cancelled:abc123xyz"
+         │
+         ▼
+    celery-web-worker CHECKS flag
+         │
+         ├─ If checking before fetch: Stop immediately
+         ├─ If checking at loop start: Stop immediately
+         ├─ If checking during upload: Stop immediately
+         │
+         ▼
+    Task stops, partial count recorded
+         │
+         ▼
+    No stale data inserted to database
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+
+                         SIMPLE DATA FLOW
+                         ════════════════
+
+    INPUT:
+    URL: https://example.com
+    Max Depth: 2 (root + 1 level)
+    Max Pages: 100
+
+
+    PROCESSING:
+    Fetch → Convert → Upload → Record
+    (repeat for each page)
+
+
+    OUTPUT:
+    Database rows (47 pages):
+    ┌────────────────────────────────────────┐
+    │ parent_id | url          | doc_id     │
+    ├────────────────────────────────────────┤
+    │ NULL      | /            | docs/p1    │
+    │ 5         | /about       | docs/p2    │
+    │ 5         | /contact     | docs/p3    │
+    │ 5         | /products    | docs/p4    │
+    │ 5         | /products/x  | docs/p5    │
+    │ 5         | /products/y  | docs/p6    │
+    │ ... (47 total rows)                    │
+    └────────────────────────────────────────┘
+
+    Gemini FileSearch:
+    ✓ 47 documents indexed
+    ✓ Ready for RAG chatbot queries
+    ✓ "What is your mission?" → Finds relevant docs
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+
+                            TIMELINE
+                            ════════
+
+    t=0s    User clicks "Start Crawling"
+    t=0s    API returns "Started" message
+    t=1s    Worker picks up task
+    t=2s    Fetches first 5 pages (in parallel, max_concurrent=10)
+    t=5s    First page uploaded to Gemini
+    t=10s   First 10 pages uploaded
+    t=20s   First 25 pages uploaded
+    t=30s   All 47 pages processed
+            Finalization: Update parent record
+    t=31s   Publish to Redis
+    t=32s   User refreshes knowledge base
+            "Knowledge base updated: 47 pages"
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+
+                            KEY METHODS
+                            ══════════
+
+    User → API → Worker → ProcessingService
+
+    Main methods (in order):
+
+    1. process_website_content()          [Entry point]
+    2. _resolve_file_search_store()       [Setup: get Gemini store]
+    3. _resolve_user_role_id()            [Setup: get user]
+    4. _stream_pages_through_pipeline()   [Main loop]
+       └─ _crawl_pages()                  [BFS: get URL + HTML]
+       └─ _process_page_content()         [Convert: HTML → MD]
+       └─ _upload_page_to_gemini()        [Upload: MD → Gemini]
+       └─ _record_child_page()            [Record: save to DB]
+    5. _finalize_website_record()         [Update parent stats]
+    6. _publish_success_result()          [Notify Redis]
+    7. UI refresh shows results           [User sees new content]
+
+
+═════════════════════════════════════════════════════════════════════════════════
+
+Status: ✅ Ready for Production
+
