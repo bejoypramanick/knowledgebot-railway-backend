@@ -1,7 +1,7 @@
 """
 Website Processing Service for Celery Web Worker
 Handles all website scraping, content extraction, and Gemini FileSearch upload
-with extreme single-responsibility and minimal method size
+with extreme single-responsibility, minimal method size, and value objects
 """
 import asyncio
 import time
@@ -16,11 +16,22 @@ from shared.otel_logger import get_otel_logger
 from shared.file_search import get_file_search_store_by_display_name
 from shared.file_metrics import calculate_metrics
 
+from models.value_objects import (
+    CrawlConfig,
+    JobContext,
+    PageData,
+    UploadResult,
+    PageMetrics,
+    AggregateMetrics,
+    ProcessingResult,
+    FinalizeRequest,
+)
+
 logger = get_otel_logger("processing_service", "celery-web-worker")
 
 
 class ProcessingService:
-    """Handle website scraping and content processing with streaming pipeline"""
+    """Handle website scraping and content processing with value objects"""
 
     def __init__(self):
         from dao.scraping_dao import ScrapingDAO
@@ -45,132 +56,204 @@ class ProcessingService:
         """Main orchestration: resolve → stream → finalize → publish"""
         start_time = time.time()
         try:
-            self._log_job_start(website_id, url, max_depth, max_pages)
-            if await self._is_task_cancelled(celery_task_id):
-                return self._error_result(website_id, "Task cancelled by admin")
+            logger.info(f"🚀 [SCRAPING] Starting website processing: {website_id}")
+            logger.info(f"   URL: {url}")
+            logger.info(f"   Depth: {max_depth}, Max Pages: {max_pages}")
 
-            result = await self._process_with_error_handling(
-                website_id, url, max_depth, max_pages, max_concurrent,
-                delay_between_requests, user_email, user_role_id, celery_task_id, start_time
+            if await self._is_task_cancelled(celery_task_id):
+                result = ProcessingResult(
+                    success=False,
+                    website_id=website_id,
+                    message="Task cancelled by admin",
+                    page_count=0,
+                    total_size_bytes=0,
+                    total_char_count=0,
+                    processing_time_seconds=0,
+                    error="Task cancelled by admin"
+                )
+                return result.to_dict()
+
+            # Build value objects
+            crawl_config = CrawlConfig(
+                max_depth=max_depth,
+                max_pages=max_pages,
+                max_concurrent=max_concurrent,
+                delay_between_requests=delay_between_requests
             )
-            await self._publish_success_result(website_id, celery_task_id, result)
-            return result
+
+            store_name = await self._resolve_file_search_store()
+            resolved_user_role_id = await self._resolve_user_role_id(user_email, user_role_id)
+
+            job_context = JobContext(
+                website_id=website_id,
+                root_url=url,
+                celery_task_id=celery_task_id,
+                store_name=store_name,
+                user_role_id=resolved_user_role_id
+            )
+
+            # Process pages
+            aggregate_metrics = await self._stream_pages_through_pipeline(
+                crawl_config=crawl_config,
+                job_context=job_context
+            )
+
+            # Finalize
+            finalize_request = FinalizeRequest(
+                website_id=website_id,
+                page_count=aggregate_metrics.total_pages_uploaded,
+                total_size_bytes=aggregate_metrics.total_size_bytes,
+                total_char_count=aggregate_metrics.total_char_count,
+                file_search_store_name=store_name
+            )
+            await self._finalize_website_record(finalize_request)
+
+            # Build result
+            processing_time = time.time() - start_time
+            result = ProcessingResult(
+                success=True,
+                website_id=website_id,
+                message=f"Website processed successfully: {aggregate_metrics.total_pages_uploaded} pages",
+                page_count=aggregate_metrics.total_pages_uploaded,
+                total_size_bytes=aggregate_metrics.total_size_bytes,
+                total_char_count=aggregate_metrics.total_char_count,
+                processing_time_seconds=processing_time
+            )
+
+            logger.info(f"✅ [COMPLETE] Website {website_id} processed: {aggregate_metrics.total_pages_uploaded} pages in {processing_time:.1f}s")
+
+            # Publish
+            await self._publish_success_result(result, job_context)
+            return result.to_dict()
 
         except Exception as e:
-            await self._publish_error_result(website_id, celery_task_id, str(e))
-            return self._error_result(website_id, str(e))
-
-    def _log_job_start(self, website_id: int, url: str, max_depth: int, max_pages: int):
-        """Log job initialization"""
-        logger.info(f"🚀 [SCRAPING] Starting website processing: {website_id}")
-        logger.info(f"   URL: {url}")
-        logger.info(f"   Depth: {max_depth}, Max Pages: {max_pages}")
-
-    async def _process_with_error_handling(
-        self, website_id, url, max_depth, max_pages, max_concurrent,
-        delay_between_requests, user_email, user_role_id, celery_task_id, start_time
-    ) -> Dict[str, Any]:
-        """Resolve dependencies and stream pages through pipeline"""
-        store = await self._resolve_file_search_store()
-        user_role_id = await self._resolve_user_role_id(user_email, user_role_id)
-
-        pages_uploaded, total_size, total_chars = await self._stream_pages_through_pipeline(
-            website_id, url, max_depth, max_pages, max_concurrent, delay_between_requests,
-            store, user_role_id, celery_task_id
-        )
-
-        await self._finalize_website_record(website_id, pages_uploaded, total_size, total_chars, store)
-        return self._success_result(website_id, pages_uploaded, total_size, total_chars, start_time)
+            processing_time = time.time() - start_time
+            result = ProcessingResult(
+                success=False,
+                website_id=website_id,
+                message="Processing failed",
+                page_count=0,
+                total_size_bytes=0,
+                total_char_count=0,
+                processing_time_seconds=processing_time,
+                error=str(e)
+            )
+            logger.error(f"❌ Processing error: {e}")
+            await self._publish_error_result(result, celery_task_id)
+            return result.to_dict()
 
     async def _stream_pages_through_pipeline(
-        self, website_id, url, max_depth, max_pages, max_concurrent, delay_between_requests,
-        store, user_role_id, celery_task_id
-    ) -> Tuple[int, int, int]:
+        self,
+        crawl_config: CrawlConfig,
+        job_context: JobContext
+    ) -> AggregateMetrics:
         """Stream each page: crawl → process → upload → record"""
         pages_uploaded = total_size = total_chars = 0
+        start_time = time.time()
 
-        async for page_url, page_html in self._crawl_pages(
-            url, max_depth, max_pages, max_concurrent, delay_between_requests, celery_task_id
-        ):
-            if await self._is_task_cancelled(celery_task_id):
+        logger.info(f"📄 [PIPELINE] Starting page-by-page streaming...")
+
+        async for page_data in self._crawl_pages(crawl_config, job_context):
+            if await self._is_task_cancelled(job_context.celery_task_id):
+                logger.warning(f"⏸️ Cancellation detected, stopping pipeline")
                 break
 
-            result = await self._process_pipeline_page(
-                website_id, page_url, page_html, store, user_role_id, url, max_depth
-            )
-            if result:
+            metrics = await self._process_pipeline_page(page_data, job_context)
+            if metrics:
                 pages_uploaded += 1
-                total_size += result.get('size', 0)
-                total_chars += result.get('chars', 0)
+                total_size += metrics.file_size_bytes
+                total_chars += metrics.char_count
 
         if pages_uploaded == 0:
             raise Exception("No pages successfully processed")
 
-        return pages_uploaded, total_size, total_chars
+        total_time = time.time() - start_time
+        logger.info(f"✅ [PIPELINE] Completed: {pages_uploaded} pages in {total_time:.1f}s")
+
+        return AggregateMetrics(
+            total_pages_uploaded=pages_uploaded,
+            total_size_bytes=total_size,
+            total_char_count=total_chars,
+            total_time_seconds=total_time
+        )
 
     async def _process_pipeline_page(
-        self, website_id, page_url, page_html, store, user_role_id, url, max_depth
-    ) -> Optional[Dict[str, int]]:
+        self,
+        page_data: PageData,
+        job_context: JobContext
+    ) -> Optional[PageMetrics]:
         """Process one page: convert → upload → record"""
-        logger.info(f"📄 [PIPELINE] Processing: {page_url}")
+        logger.info(f"📄 [PIPELINE] Processing: {page_data.page_url}")
 
         try:
-            markdown = await self._process_page_content(page_html, page_url)
-            doc_name = await self._upload_page_to_gemini(website_id, page_url, markdown, store)
+            start_time = time.time()
 
-            if not doc_name:
-                logger.warning(f"   ⚠️ Upload failed, skipping")
+            # Convert
+            markdown = await self._process_page_content(page_data.page_html, page_data.page_url)
+            page_data = PageData(
+                page_url=page_data.page_url,
+                page_html=page_data.page_html,
+                markdown=markdown
+            )
+
+            # Upload
+            upload_result = await self._upload_page_to_gemini(page_data, job_context)
+            if not upload_result:
+                logger.warning(f"   ⚠️ Upload failed, skipping this page")
                 return None
 
-            await self._record_child_page(website_id, page_url, doc_name, store, user_role_id, markdown, url, max_depth)
+            logger.info(f"   ✅ Uploaded to Gemini: {upload_result.document_name}")
+
+            # Record
+            await self._record_child_page(page_data, upload_result, job_context)
+
+            # Metrics
             metrics = calculate_metrics(markdown)
-            return {'size': metrics.get('file_size_bytes', 0), 'chars': metrics.get('char_count', 0)}
+            processing_time = time.time() - start_time
+
+            return PageMetrics(
+                file_size_bytes=metrics.get('file_size_bytes', 0),
+                char_count=metrics.get('char_count', 0),
+                processing_time_seconds=processing_time
+            )
         except Exception as e:
             logger.error(f"   ❌ Error: {e}")
             return None
 
-    def _success_result(self, website_id, pages_uploaded, total_size, total_chars, start_time) -> Dict[str, Any]:
-        """Build success result dict"""
-        processing_time = time.time() - start_time
-        logger.info(f"✅ [COMPLETE] Website {website_id} processed: {pages_uploaded} pages in {processing_time:.1f}s")
-
-        return {
-            "success": True,
-            "message": f"Website processed successfully: {pages_uploaded} pages",
-            "website_id": website_id,
-            "page_count": pages_uploaded,
-            "total_size_bytes": total_size,
-            "total_char_count": total_chars,
-            "processing_time_seconds": processing_time
-        }
-
-    def _error_result(self, website_id: int, error: str) -> Dict[str, Any]:
-        """Build error result dict"""
-        return {"success": False, "error": error, "website_id": website_id}
-
-    async def _publish_success_result(self, website_id: int, celery_task_id: str, result: Dict):
+    async def _publish_success_result(self, result: ProcessingResult, job_context: JobContext):
         """Publish success to Redis"""
         try:
             from shared.redis_message_queue import redis_message_queue
-            redis_message_queue.publish_web_result(website_id, celery_task_id, "completed", result)
+            redis_message_queue.publish_web_result(
+                job_context.website_id,
+                job_context.celery_task_id,
+                "completed",
+                result.to_dict()
+            )
         except Exception as e:
             logger.warning(f"⚠️ Failed to publish result: {e}")
 
-    async def _publish_error_result(self, website_id: int, celery_task_id: str, error: str):
+    async def _publish_error_result(self, result: ProcessingResult, celery_task_id: str):
         """Publish error to Redis"""
         try:
             from shared.redis_message_queue import redis_message_queue
-            redis_message_queue.publish_web_result(website_id, celery_task_id, "failed", error=error)
+            redis_message_queue.publish_web_result(
+                result.website_id,
+                celery_task_id,
+                "failed",
+                error=result.error
+            )
         except Exception as e:
             logger.warning(f"⚠️ Failed to publish error: {e}")
 
     # ==================== CRAWL LAYER ====================
 
     async def _crawl_pages(
-        self, url: str, max_depth: int, max_pages: int, max_concurrent: int,
-        delay_between_requests: float, celery_task_id: str = None
-    ) -> AsyncGenerator[Tuple[str, str], None]:
-        """Async generator yielding (page_url, page_html) one at a time"""
+        self,
+        crawl_config: CrawlConfig,
+        job_context: JobContext
+    ) -> AsyncGenerator[PageData, None]:
+        """Async generator yielding PageData one at a time"""
         try:
             from crawl4ai import AsyncWebCrawler
         except ImportError as ie:
@@ -178,36 +261,38 @@ class ProcessingService:
             return
 
         visited_urls = set()
-        to_visit = [(url, 0)]
-        semaphore = asyncio.Semaphore(max_concurrent)
+        to_visit = [(job_context.root_url, 0)]
+        semaphore = asyncio.Semaphore(crawl_config.max_concurrent)
         pages_yielded = 0
 
-        while to_visit and pages_yielded < max_pages:
-            if await self._is_task_cancelled(celery_task_id):
+        logger.info(f"🔄 Starting BFS crawl with max_depth={crawl_config.max_depth}, max_pages={crawl_config.max_pages}")
+
+        while to_visit and pages_yielded < crawl_config.max_pages:
+            if await self._is_task_cancelled(job_context.celery_task_id):
                 logger.warning(f"⏸️ Crawling cancelled")
                 break
 
             current_url, current_depth = to_visit.pop(0)
 
-            if not await self._should_crawl_url(current_url, current_depth, max_depth, visited_urls):
+            if not await self._should_crawl_url(current_url, current_depth, crawl_config.max_depth, visited_urls):
                 continue
 
             visited_urls.add(self._normalize_url(current_url))
 
-            result = await self._fetch_single_page(current_url, semaphore, delay_between_requests)
+            result = await self._fetch_single_page(current_url, semaphore, crawl_config.delay_between_requests)
             if result:
                 page_url, page_html = result
                 pages_yielded += 1
-                logger.info(f"✅ [BFS] Yielded page {pages_yielded}/{max_pages}")
+                logger.info(f"✅ [BFS] Yielded page {pages_yielded}/{crawl_config.max_pages}")
 
-                yield page_url, page_html
+                yield PageData(page_url=page_url, page_html=page_html)
 
-                if current_depth < max_depth and pages_yielded < max_pages:
-                    new_links = await self._extract_links(page_html, page_url, self._get_domain(url), visited_urls)
-                    to_visit.extend((link, current_depth + 1) for link in new_links if pages_yielded < max_pages)
+                if current_depth < crawl_config.max_depth and pages_yielded < crawl_config.max_pages:
+                    new_links = await self._extract_links(page_html, page_url, self._get_domain(job_context.root_url), visited_urls)
+                    to_visit.extend((link, current_depth + 1) for link in new_links if pages_yielded < crawl_config.max_pages)
 
     async def _should_crawl_url(self, url: str, depth: int, max_depth: int, visited_urls: set) -> bool:
-        """Check if URL should be crawled (not visited, depth ok)"""
+        """Check if URL should be crawled"""
         normalized = self._normalize_url(url)
 
         if normalized in visited_urls:
@@ -221,9 +306,12 @@ class ProcessingService:
         return True
 
     async def _fetch_single_page(
-        self, page_url: str, semaphore: asyncio.Semaphore, delay: float
+        self,
+        page_url: str,
+        semaphore: asyncio.Semaphore,
+        delay: float
     ) -> Optional[Tuple[str, str]]:
-        """Fetch single page via crawl4ai within semaphore"""
+        """Fetch single page via crawl4ai"""
         async with semaphore:
             try:
                 from crawl4ai import AsyncWebCrawler
@@ -272,7 +360,7 @@ class ProcessingService:
         return urljoin(page_url, href)
 
     def _is_valid_crawl_link(self, url: str, base_domain: str, visited_urls: set) -> bool:
-        """Check if URL should be queued (same domain, not visited)"""
+        """Check if URL should be queued"""
         if self._get_domain(url) != base_domain:
             return False
         if self._normalize_url(url) in visited_urls:
@@ -363,7 +451,7 @@ class ProcessingService:
                 file_links.append({'url': href, 'text': link.get_text(strip=True) or 'Document'})
 
         logger.info(f"📎 [DOCLING] Found {len(file_links)} embedded files")
-        return file_links[:5]  # Limit to 5 per page
+        return file_links[:5]
 
     async def _process_all_docling_files(self, file_links: List[Dict]) -> List[Dict]:
         """Process all files through docling service"""
@@ -482,8 +570,10 @@ class ProcessingService:
         return user_role_id
 
     async def _upload_page_to_gemini(
-        self, website_id: int, page_url: str, markdown: str, store_name: str
-    ) -> Optional[str]:
+        self,
+        page_data: PageData,
+        job_context: JobContext
+    ) -> Optional[UploadResult]:
         """Upload single page to Gemini FileSearch"""
         from core.ai import get_genai_client
 
@@ -494,25 +584,25 @@ class ProcessingService:
         fd, temp_file = tempfile.mkstemp(suffix='.md')
 
         try:
-            os.write(fd, markdown.encode('utf-8'))
+            os.write(fd, page_data.markdown.encode('utf-8'))
             os.close(fd)
 
-            metrics = calculate_metrics(markdown)
-            doc_name = f"page_{website_id}_{int(time.time())}"
+            metrics = calculate_metrics(page_data.markdown)
+            doc_name = f"page_{job_context.website_id}_{int(time.time())}"
 
             logger.info(f"   📤 Uploading: {doc_name} ({metrics.get('file_size_bytes', 0):,} bytes)")
 
             operation = genai_client.file_search_stores.upload_to_file_search_store(
                 file=temp_file,
-                file_search_store_name=store_name,
-                config=await self._build_upload_config(doc_name, website_id, page_url)
+                file_search_store_name=job_context.store_name,
+                config=await self._build_upload_config(doc_name, job_context.website_id, page_data.page_url)
             )
 
             if not operation:
                 logger.error(f"   ❌ Failed to create upload operation")
                 return None
 
-            return await self._poll_upload_operation(operation)
+            return await self._poll_upload_operation(operation, job_context)
         finally:
             try:
                 os.close(fd)
@@ -539,7 +629,7 @@ class ProcessingService:
         except:
             pass
 
-    async def _poll_upload_operation(self, operation, celery_task_id: str = None) -> Optional[str]:
+    async def _poll_upload_operation(self, operation, job_context: JobContext) -> Optional[UploadResult]:
         """Poll Gemini upload operation until done"""
         from core.ai import get_genai_client
 
@@ -548,7 +638,7 @@ class ProcessingService:
         max_wait = 300
 
         while not operation.done:
-            if await self._is_task_cancelled(celery_task_id):
+            if await self._is_task_cancelled(job_context.celery_task_id):
                 logger.error(f"   ❌ Task cancelled during upload polling")
                 return None
 
@@ -561,14 +651,18 @@ class ProcessingService:
             await asyncio.sleep(5)
             operation = genai_client.operations.get(operation)
 
-        return await self._get_document_name_from_operation(operation)
+        return await self._get_document_name_from_operation(operation, job_context.store_name)
 
-    async def _get_document_name_from_operation(self, operation) -> Optional[str]:
+    async def _get_document_name_from_operation(self, operation, store_name: str) -> Optional[UploadResult]:
         """Extract document name from completed upload operation"""
         if operation.done and hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
             doc_name = operation.response.document_name
             logger.info(f"   ✅ FileSearch document: {doc_name}")
-            return doc_name
+            return UploadResult(
+                document_name=doc_name,
+                file_search_store_name=store_name,
+                uploaded_at=datetime.utcnow()
+            )
 
         logger.error(f"   ❌ Upload failed or invalid response")
         return None
@@ -576,67 +670,53 @@ class ProcessingService:
     # ==================== DATABASE LAYER ====================
 
     async def _record_child_page(
-        self, website_id: int, page_url: str, doc_name: str, store_name: str,
-        user_role_id: Optional[int], markdown: str, root_url: str, max_depth: int
+        self,
+        page_data: PageData,
+        upload_result: UploadResult,
+        job_context: JobContext
     ) -> Optional[int]:
         """Record single page in database"""
-        if await self._should_skip_child_record(page_url, root_url, max_depth):
+        if await self._should_skip_child_record(page_data.page_url, job_context.root_url):
             logger.info(f"   ℹ️ Skipping child record (single-page depth=0)")
-            return website_id
+            return job_context.website_id
 
-        metadata = await self._build_child_page_metadata(doc_name, store_name)
-        metrics = calculate_metrics(markdown)
-
-        return await self.scraping_dao.record_child_page(
-            parent_id=website_id,
-            page_url=page_url,
-            gemini_file_name=doc_name,
-            file_search_metadata=metadata,
-            user_role_id=user_role_id,
-            file_size=metrics.get('file_size_bytes', 0),
-            char_count=metrics.get('char_count', 0)
+        child_page_id = await self.scraping_dao.record_child_page(
+            parent_id=job_context.website_id,
+            page_url=page_data.page_url,
+            gemini_file_name=upload_result.document_name,
+            file_search_metadata=upload_result.file_search_metadata,
+            user_role_id=job_context.user_role_id,
+            file_size=calculate_metrics(page_data.markdown).get('file_size_bytes', 0),
+            char_count=calculate_metrics(page_data.markdown).get('char_count', 0)
         )
 
-    async def _should_skip_child_record(self, page_url: str, root_url: str, max_depth: int) -> bool:
-        """Check if child record should be skipped (single-page root)"""
-        return max_depth == 0 and page_url == root_url
+        return child_page_id
 
-    async def _build_child_page_metadata(self, doc_name: str, store_name: str) -> Dict:
-        """Build FileSearch metadata for child page"""
-        return {
+    async def _should_skip_child_record(self, page_url: str, root_url: str) -> bool:
+        """Check if child record should be skipped"""
+        return page_url == root_url
+
+    async def _finalize_website_record(self, finalize_request: FinalizeRequest):
+        """Update parent website record with aggregate stats via DAO"""
+        metadata = {
             "type": "file_search",
-            "file_search_store_name": store_name,
-            "document_name": doc_name,
+            "file_search_store_name": finalize_request.file_search_store_name,
+            "pages_count": finalize_request.page_count,
             "uploaded_at": datetime.utcnow().isoformat()
         }
 
-    async def _finalize_website_record(
-        self, website_id: int, page_count: int, total_size: int, total_chars: int, store_name: str
-    ):
-        """Update parent website record with aggregate stats via DAO"""
-        metadata = await self._build_finalize_metadata(page_count, store_name)
-
         success = await self.scraping_dao.finalize_website_metadata(
-            website_id=website_id,
-            page_count=page_count,
-            total_size_bytes=total_size,
-            total_char_count=total_chars,
+            website_id=finalize_request.website_id,
+            page_count=finalize_request.page_count,
+            total_size_bytes=finalize_request.total_size_bytes,
+            total_char_count=finalize_request.total_char_count,
             file_search_metadata=metadata
         )
 
         if not success:
-            raise Exception(f"Failed to finalize website record {website_id}")
+            raise Exception(f"Failed to finalize website record {finalize_request.website_id}")
 
-        logger.info(f"✅ Finalized website {website_id}: {page_count} pages, {total_size:,} bytes")
-
-    async def _build_finalize_metadata(self, page_count: int, store_name: str) -> Dict:
-        """Build metadata for finalization"""
-        return {
-            "type": "file_search",
-            "file_search_store_name": store_name,
-            "pages_count": page_count,
-            "uploaded_at": datetime.utcnow().isoformat()
-        }
+        logger.info(f"✅ Finalized: {finalize_request.page_count} pages, {finalize_request.total_size_bytes:,} bytes")
 
     # ==================== CANCELLATION ====================
 
