@@ -1,40 +1,35 @@
 # Dockerfile for Celery File Processing Worker
+# Optimized for minimal image size by copying only required directories
 # Build image: docker build -t knowledgebot-celery-file-worker .
 # Run: docker run -e REDIS_URL=redis://redis:6379/0 knowledgebot-celery-file-worker
-# Build: 2025-02-18 - Celery worker with asyncio.run() fix
 
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-# Note: File worker doesn't need chromium/playwright - those are only for web scraping
-RUN apt-get update && apt-get install -y \
+# Install system dependencies (minimal - no browser tools needed)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
-    git \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements files
+# Copy and install requirements files first (for better caching)
 COPY celery-file-worker/requirements.txt /tmp/kb-requirements.txt
 COPY shared/requirements-otel.txt /tmp/otel-requirements.txt
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r /tmp/kb-requirements.txt && \
-    pip install --no-cache-dir -r /tmp/otel-requirements.txt
+# Install Python dependencies with better caching
+RUN pip install --no-cache-dir --no-warn-script-location \
+    -r /tmp/kb-requirements.txt \
+    -r /tmp/otel-requirements.txt
 
-# Note: Removed Playwright - file worker only processes files, doesn't need browser automation
-
-# Copy application code
-COPY . .
+# Copy only required directories (not entire repository)
+COPY celery-file-worker /app/celery-file-worker
+COPY shared /app/shared
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-# PYTHONPATH includes /app so 'shared.*' imports work from /app/celery-file-worker/
 ENV PYTHONPATH="/app"
-# Note: REDIS_URL is set at runtime via Railway environment variables
-# Do NOT set CELERY_BROKER_URL/CELERY_RESULT_BACKEND here - let celery_app.py read REDIS_URL at runtime
 
 # Change to service directory and start Celery worker for file_processing queue
 WORKDIR /app/celery-file-worker
