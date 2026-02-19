@@ -572,9 +572,11 @@ class FileService:
         Delete a single file completely.
 
         Operations:
-        1. Retrieves file record with all metadata
-        2. Deletes from Gemini (raw files and/or FileSearch store)
-        3. Marks record as deleted in database (soft delete for audit trail)
+        1. Retrieves file record with all metadata and Celery task ID
+        2. Revokes Celery worker tasks (kills running processors)
+        3. Sets Redis task cancellation flags
+        4. Deletes from Gemini (raw files and/or FileSearch store) and verifies deletion
+        5. Marks record as deleted in database (soft delete for audit trail)
 
         Returns:
             {"success": bool, "message": str, ...details}
@@ -586,13 +588,15 @@ class FileService:
         try:
             from shared.db import get_db_connection
             from knowledgebase_ingestion.core.ai import get_genai_client
+            from shared.celery_dispatcher import file_celery
+            from shared.redis_message_queue import RedisMessageQueue
             import json
 
-            # Step 1: Get file record
+            # Step 1: Get file record with celery_task_id
             logger.info(f"🔍 [LOOKUP] Fetching file record...")
             async with get_db_connection() as conn:
                 file_record = await conn.fetchrow(
-                    "SELECT id, original_filename, gemini_file_name, metadata FROM file_uploads WHERE id = $1",
+                    "SELECT id, original_filename, gemini_file_name, metadata, celery_task_id FROM file_uploads WHERE id = $1",
                     int(file_id)
                 )
 
@@ -605,11 +609,35 @@ class FileService:
                 }
 
             logger.info(f"✅ File found: {file_record['original_filename']}")
+            logger.info(f"   Celery task ID: {file_record['celery_task_id']}")
 
-            # Step 2: Delete from Gemini
-            logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini...")
+            # Step 2: Revoke Celery task and set cancellation flag
+            logger.info(f"🔪 [CELERY_REVOKE] Killing Celery worker task...")
+            celery_task_revoked = False
+
+            if file_record['celery_task_id']:
+                try:
+                    logger.info(f"   🔪 Revoking Celery task: {file_record['celery_task_id']}")
+                    file_celery.control.revoke(file_record['celery_task_id'], terminate=True, signal='SIGKILL')
+                    celery_task_revoked = True
+                    logger.info(f"   ✅ Task revoked: {file_record['celery_task_id']}")
+                except Exception as e:
+                    logger.warning(f"   ⚠️  Could not revoke task {file_record['celery_task_id']}: {e}")
+
+                # Set Redis cancellation flag for in-progress tasks
+                logger.info(f"🚩 [REDIS_FLAG] Setting task cancellation flag...")
+                try:
+                    redis_queue = RedisMessageQueue()
+                    redis_queue.set_task_cancelled(file_record['celery_task_id'])
+                    logger.info(f"   ✅ Set cancellation flag for task: {file_record['celery_task_id']}")
+                except Exception as e:
+                    logger.warning(f"   ⚠️  Could not set cancellation flag: {e}")
+
+            # Step 3: Delete from Gemini and verify
+            logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini and verifying...")
             deleted_from_gemini = False
             deleted_from_filesearch = False
+            failed_deletes = 0
 
             try:
                 genai_client = get_genai_client()
@@ -619,11 +647,21 @@ class FileService:
                     # Delete raw file if it exists
                     if file_record['gemini_file_name'] and not file_record['gemini_file_name'].startswith("documents/"):
                         try:
+                            logger.info(f"   📍 Deleting raw Gemini file: {file_record['gemini_file_name']}")
                             genai_client.files.delete(name=file_record['gemini_file_name'])
-                            deleted_from_gemini = True
-                            logger.info(f"✅ Deleted from Gemini raw files: {file_record['gemini_file_name']}")
+
+                            # Verify deletion
+                            try:
+                                genai_client.files.get(name=file_record['gemini_file_name'])
+                                logger.warning(f"   ⚠️  Verification FAILED: Raw file still exists: {file_record['gemini_file_name']}")
+                                failed_deletes += 1
+                            except:
+                                # File not found = successfully deleted
+                                deleted_from_gemini = True
+                                logger.info(f"   ✅ Verified deleted from Gemini raw: {file_record['gemini_file_name']}")
                         except Exception as e:
-                            logger.warning(f"⚠️  Could not delete from Gemini raw files: {e}")
+                            logger.warning(f"   ⚠️  Could not delete from Gemini raw files: {e}")
+                            failed_deletes += 1
 
                     # Delete from FileSearch store if metadata contains FileSearch info
                     metadata = file_record['metadata']
@@ -638,20 +676,37 @@ class FileService:
 
                                 if store_name and document_name:
                                     try:
+                                        logger.info(f"   📍 Deleting FileSearch document: {document_name} from store: {store_name}")
                                         genai_client.file_search_stores.delete_document(
                                             file_search_store_name=store_name,
                                             document_name=document_name
                                         )
-                                        deleted_from_filesearch = True
-                                        logger.info(f"✅ Deleted from FileSearch store: {document_name}")
+
+                                        # Verify deletion: check if document still exists
+                                        try:
+                                            documents = genai_client.file_search_stores.list_documents(
+                                                file_search_store_name=store_name
+                                            )
+                                            doc_exists = any(doc.name == document_name for doc in documents)
+                                            if doc_exists:
+                                                logger.warning(f"   ⚠️  Verification FAILED: Document still exists: {document_name}")
+                                                failed_deletes += 1
+                                            else:
+                                                deleted_from_filesearch = True
+                                                logger.info(f"   ✅ Verified deleted from FileSearch: {document_name}")
+                                        except Exception as verify_err:
+                                            logger.warning(f"   ⚠️  Could not verify FileSearch deletion: {verify_err}")
+                                            # Assume delete was successful if no error on delete itself
+                                            deleted_from_filesearch = True
                                     except Exception as fs_err:
-                                        logger.warning(f"⚠️  Could not delete from FileSearch store: {fs_err}")
+                                        logger.warning(f"   ❌ Failed to delete from FileSearch store: {fs_err}")
+                                        failed_deletes += 1
                         except Exception as e:
-                            logger.warning(f"⚠️  Error processing metadata: {e}")
+                            logger.warning(f"   ⚠️  Error processing metadata: {e}")
             except Exception as e:
                 logger.warning(f"⚠️  Error during Gemini deletion: {e}")
 
-            # Step 3: Mark as deleted in database (soft delete)
+            # Step 4: Mark as deleted in database (soft delete)
             logger.info(f"💾 [DB_UPDATE] Marking file as deleted in database...")
             try:
                 async with get_db_connection() as conn:
@@ -668,8 +723,10 @@ class FileService:
             logger.info(f"✅ [DELETE_FILE_COMPLETE] File deletion completed")
             logger.info("=" * 80)
             logger.info(f"   File: {file_record['original_filename']}")
+            logger.info(f"   Celery task revoked: {celery_task_revoked}")
             logger.info(f"   Deleted from Gemini raw: {deleted_from_gemini}")
             logger.info(f"   Deleted from FileSearch: {deleted_from_filesearch}")
+            logger.info(f"   Failed deletes: {failed_deletes}")
             logger.info(f"   Marked as deleted in DB: Yes")
 
             return {
@@ -677,8 +734,10 @@ class FileService:
                 "message": "File deleted successfully",
                 "file_id": file_id,
                 "filename": file_record['original_filename'],
+                "celery_task_revoked": celery_task_revoked,
                 "deleted_from_gemini": deleted_from_gemini,
-                "deleted_from_filesearch": deleted_from_filesearch
+                "deleted_from_filesearch": deleted_from_filesearch,
+                "failed_deletes": failed_deletes
             }
 
         except Exception as e:
@@ -698,9 +757,11 @@ class FileService:
         Delete a single website and all its child pages.
 
         Operations:
-        1. Retrieves website record and all child pages
-        2. Deletes all documents from Gemini FileSearch store
-        3. Marks website and all children as deleted in database (soft delete for audit trail)
+        1. Retrieves website record and all child pages with Celery task IDs
+        2. Revokes Celery worker tasks (kills running scrapers)
+        3. Sets Redis task cancellation flags
+        4. Deletes all documents from Gemini FileSearch store and verifies deletion
+        5. Marks website and all children as deleted in database (soft delete for audit trail)
 
         Returns:
             {"success": bool, "message": str, ...details}
@@ -712,13 +773,16 @@ class FileService:
         try:
             from shared.db import get_db_connection
             from knowledgebase_ingestion.core.ai import get_genai_client
+            from shared.celery_dispatcher import web_celery
+            from shared.redis_message_queue import RedisMessageQueue
             import json
+            import redis as redis_lib
 
-            # Step 1: Get website record and all child pages
-            logger.info(f"🔍 [LOOKUP] Fetching website and child pages...")
+            # Step 1: Get website record and all child pages with celery_task_id
+            logger.info(f"🔍 [LOOKUP] Fetching website, child pages, and task IDs...")
             async with get_db_connection() as conn:
                 website_record = await conn.fetchrow(
-                    "SELECT id, original_url, metadata FROM scraped_websites WHERE id = $1",
+                    "SELECT id, original_url, metadata, celery_task_id FROM scraped_websites WHERE id = $1",
                     int(website_id)
                 )
 
@@ -730,18 +794,56 @@ class FileService:
                         "website_id": website_id
                     }
 
-                # Get all child pages
+                # Get all child pages with their task IDs
                 child_pages = await conn.fetch(
-                    "SELECT id, original_url, metadata FROM scraped_websites WHERE parent_id = $1",
+                    "SELECT id, original_url, metadata, celery_task_id FROM scraped_websites WHERE parent_id = $1",
                     int(website_id)
                 )
 
             logger.info(f"✅ Website found: {website_record['original_url']}")
             logger.info(f"   Child pages: {len(child_pages)}")
+            logger.info(f"   Parent Celery task ID: {website_record['celery_task_id']}")
 
-            # Step 2: Delete from Gemini FileSearch
-            logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini FileSearch...")
+            # Step 2: Revoke Celery tasks and set cancellation flags
+            logger.info(f"🔪 [CELERY_REVOKE] Killing Celery worker tasks...")
+            revoked_tasks = 0
+            task_ids_to_revoke = []
+
+            # Collect all task IDs (parent + children)
+            if website_record['celery_task_id']:
+                task_ids_to_revoke.append(website_record['celery_task_id'])
+
+            for child in child_pages:
+                if child['celery_task_id']:
+                    task_ids_to_revoke.append(child['celery_task_id'])
+
+            # Revoke all Celery tasks
+            for task_id in task_ids_to_revoke:
+                try:
+                    logger.info(f"   🔪 Revoking Celery task: {task_id}")
+                    web_celery.control.revoke(task_id, terminate=True, signal='SIGKILL')
+                    revoked_tasks += 1
+                    logger.info(f"   ✅ Task revoked: {task_id}")
+                except Exception as e:
+                    logger.warning(f"   ⚠️  Could not revoke task {task_id}: {e}")
+
+            # Set Redis cancellation flags for in-progress tasks
+            logger.info(f"🚩 [REDIS_FLAGS] Setting task cancellation flags...")
+            try:
+                redis_queue = RedisMessageQueue()
+                for task_id in task_ids_to_revoke:
+                    try:
+                        redis_queue.set_task_cancelled(task_id)
+                        logger.info(f"   ✅ Set cancellation flag for task: {task_id}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️  Could not set cancellation flag for {task_id}: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️  Error setting Redis cancellation flags: {e}")
+
+            # Step 3: Delete from Gemini FileSearch and verify
+            logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini FileSearch and verifying...")
             deleted_documents = 0
+            failed_deletes = 0
 
             try:
                 genai_client = get_genai_client()
@@ -764,20 +866,37 @@ class FileService:
 
                                     if store_name and document_name:
                                         try:
+                                            logger.info(f"   📍 Deleting: {document_name} from store: {store_name}")
                                             genai_client.file_search_stores.delete_document(
                                                 file_search_store_name=store_name,
                                                 document_name=document_name
                                             )
-                                            deleted_documents += 1
-                                            logger.info(f"   ✅ Deleted from FileSearch: {page['original_url']}")
+
+                                            # Verify deletion: check if document still exists
+                                            try:
+                                                documents = genai_client.file_search_stores.list_documents(
+                                                    file_search_store_name=store_name
+                                                )
+                                                doc_exists = any(doc.name == document_name for doc in documents)
+                                                if doc_exists:
+                                                    logger.warning(f"   ⚠️  Verification FAILED: Document still exists in FileSearch: {document_name}")
+                                                    failed_deletes += 1
+                                                else:
+                                                    deleted_documents += 1
+                                                    logger.info(f"   ✅ Verified deleted from FileSearch: {page['original_url']}")
+                                            except Exception as verify_err:
+                                                logger.warning(f"   ⚠️  Could not verify deletion: {verify_err}")
+                                                # Assume delete was successful if no error on delete itself
+                                                deleted_documents += 1
                                         except Exception as fs_err:
-                                            logger.warning(f"   ⚠️  Could not delete document from FileSearch: {fs_err}")
+                                            logger.warning(f"   ❌ Failed to delete document from FileSearch: {fs_err}")
+                                            failed_deletes += 1
                             except Exception as e:
                                 logger.warning(f"   ⚠️  Error processing metadata: {e}")
             except Exception as e:
                 logger.warning(f"⚠️  Error during Gemini deletion: {e}")
 
-            # Step 3: Mark website and all children as deleted in database (soft delete)
+            # Step 4: Mark website and all children as deleted in database (soft delete)
             logger.info(f"💾 [DB_UPDATE] Marking website and child pages as deleted...")
             try:
                 async with get_db_connection() as conn:
@@ -805,7 +924,9 @@ class FileService:
             logger.info("=" * 80)
             logger.info(f"   Website: {website_record['original_url']}")
             logger.info(f"   Child pages deleted: {len(child_pages)}")
+            logger.info(f"   Celery tasks revoked: {revoked_tasks}")
             logger.info(f"   Documents deleted from FileSearch: {deleted_documents}")
+            logger.info(f"   Failed FileSearch deletes: {failed_deletes}")
             logger.info(f"   Marked as deleted in DB: Yes")
 
             return {
@@ -814,7 +935,9 @@ class FileService:
                 "website_id": website_id,
                 "url": website_record['original_url'],
                 "child_pages_deleted": len(child_pages),
-                "documents_deleted_from_filesearch": deleted_documents
+                "celery_tasks_revoked": revoked_tasks,
+                "documents_deleted_from_filesearch": deleted_documents,
+                "failed_filesearch_deletes": failed_deletes
             }
 
         except Exception as e:
