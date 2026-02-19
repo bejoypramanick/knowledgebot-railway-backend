@@ -329,17 +329,18 @@ class ProcessingService:
             logger.info(f"📋 [BFS] Starting queue with: {to_visit}")
             while to_visit and len(pages) < max_pages:
                 current_url, current_depth = to_visit.pop(0)
-                logger.info(f"📋 [BFS] Processing queue item: {current_url} (depth={current_depth}, visited={len(visited_urls)}, pages={len(pages)})")
+                normalized_current_url = self._normalize_url(current_url)
+                logger.info(f"📋 [BFS] Processing queue item: {current_url} (normalized: {normalized_current_url}, depth={current_depth}, visited={len(visited_urls)}, pages={len(pages)})")
 
                 # Skip if already visited or depth exceeded
-                if current_url in visited_urls:
-                    logger.info(f"⏭️  [BFS] Already visited: {current_url}")
+                if normalized_current_url in visited_urls:
+                    logger.info(f"⏭️  [BFS] Already visited: {current_url} (normalized: {normalized_current_url})")
                     continue
                 if current_depth > max_depth:
                     logger.info(f"⏭️  [BFS] Depth exceeded ({current_depth} > {max_depth}): {current_url}")
                     continue
 
-                visited_urls.add(current_url)
+                visited_urls.add(normalized_current_url)
 
                 # Fetch page
                 logger.info(f"🔍 [BFS] Fetching page at depth {current_depth}: {current_url}")
@@ -370,10 +371,14 @@ class ProcessingService:
                                 elif not href.startswith('http'):
                                     continue
 
+                                # Normalize URL for deduplication
+                                normalized_href = self._normalize_url(href)
+
                                 # Only crawl same domain
-                                if self._get_domain(href) == base_domain and href not in visited_urls:
+                                if self._get_domain(href) == base_domain and normalized_href not in visited_urls:
                                     to_visit.append((href, current_depth + 1))
                                     found_links.append(href)
+                                    logger.debug(f"🔗 [LINKS] Queued (normalized): {normalized_href}")
                                     if len(pages) >= max_pages:
                                         break
 
@@ -878,3 +883,39 @@ class ProcessingService:
             return domain
         except:
             return url
+
+    @staticmethod
+    def _normalize_url(url: str) -> str:
+        """Normalize URL for consistent deduplication.
+
+        Removes query parameters, fragments, and normalizes trailing slashes.
+        This ensures that URLs like https://example.com/ and https://example.com
+        are treated as the same page.
+        """
+        try:
+            from urllib.parse import urlparse, urlunparse
+
+            parsed = urlparse(url)
+
+            # Remove query parameters and fragments (they're not relevant for crawling)
+            normalized = urlunparse((
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                '',  # params (empty)
+                '',  # query (empty)
+                ''   # fragment (empty)
+            ))
+
+            # Remove trailing slash from path (but keep it for root: https://example.com/)
+            if normalized.endswith('/') and not normalized.endswith('://'):
+                # Check if path is not just the root
+                if parsed.path not in ('/', ''):
+                    normalized = normalized.rstrip('/')
+            # Ensure root URLs always have trailing slash (https://example.com/)
+            elif not normalized.endswith('/') and not parsed.path:
+                normalized += '/'
+
+            return normalized.lower()  # Lowercase for case-insensitive comparison
+        except:
+            return url.lower()
