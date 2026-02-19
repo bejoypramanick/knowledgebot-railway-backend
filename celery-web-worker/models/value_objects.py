@@ -124,6 +124,22 @@ class ProcessingResult:
 
 
 @dataclass(frozen=True)
+class ProcessingRequest:
+    """Complete request to process a website - groups all orchestrator parameters"""
+    website_id: int
+    url: str
+    crawl_config: CrawlConfig
+    user_email: str = "admin"
+    user_role_id: Optional[int] = None
+    celery_task_id: Optional[str] = None
+    replace_existing: bool = False
+    options: Optional[Dict[str, Any]] = None
+
+    def __repr__(self) -> str:
+        return f"ProcessingRequest(website_id={self.website_id}, url={self.url})"
+
+
+@dataclass(frozen=True)
 class FinalizeRequest:
     """Request to finalize a website record"""
     website_id: int

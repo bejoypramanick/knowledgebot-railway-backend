@@ -71,24 +71,33 @@ class WebsiteService:
 
             # Use processing service for all website logic
             from .processing_service import ProcessingService
+            from models.value_objects import ProcessingRequest, CrawlConfig
             processing_service = ProcessingService()
 
-            # Extract user_role_id from options with logging
+            # Extract parameters from options
             extracted_user_role_id = options.get("user_role_id")
             logger.info(f"👤 [USER_ROLE] Extracted user_role_id from options: {extracted_user_role_id} (type: {type(extracted_user_role_id).__name__})")
 
-            result = await processing_service.process_website_content(
-                website_id=website_id,
-                url=url,
-                celery_task_id=celery_task_id,
+            # Build ProcessingRequest with CrawlConfig
+            crawl_config = CrawlConfig(
                 max_depth=options.get("max_depth", 2),
                 max_pages=options.get("max_pages", 100),
                 max_concurrent=options.get("max_concurrent", 10),
-                delay_between_requests=options.get("delay_between_requests", 0.0),
-                replace_existing=options.get("replace_existing", False),
-                user_email=options.get("user_email", "admin"),
-                user_role_id=extracted_user_role_id
+                delay_between_requests=options.get("delay_between_requests", 0.0)
             )
+
+            processing_request = ProcessingRequest(
+                website_id=website_id,
+                url=url,
+                crawl_config=crawl_config,
+                user_email=options.get("user_email", "admin"),
+                user_role_id=extracted_user_role_id,
+                celery_task_id=celery_task_id,
+                replace_existing=options.get("replace_existing", False),
+                options=options
+            )
+
+            result = await processing_service.process_website_content(processing_request)
 
             if result.get("success"):
                 logger.info(f"✅ [CELERY] Website ID {website_id} processed successfully")

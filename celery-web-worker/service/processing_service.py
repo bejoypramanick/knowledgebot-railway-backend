@@ -24,6 +24,7 @@ from models.value_objects import (
     PageMetrics,
     AggregateMetrics,
     ProcessingResult,
+    ProcessingRequest,
     FinalizeRequest,
 )
 
@@ -41,53 +42,36 @@ class ProcessingService:
 
     async def process_website_content(
         self,
-        website_id: int,
-        url: str,
-        max_depth: int = 2,
-        max_pages: int = 100,
-        max_concurrent: int = 10,
-        delay_between_requests: float = 0.0,
-        replace_existing: bool = False,
-        user_email: str = "admin",
-        user_role_id: int = None,
-        celery_task_id: str = None,
-        **options
+        request: ProcessingRequest
     ) -> Dict[str, Any]:
         """Main orchestration: resolve → stream → finalize → publish"""
         start_time = time.time()
         try:
-            logger.info(f"🚀 [SCRAPING] Starting website processing: {website_id}")
-            logger.info(f"   URL: {url}")
-            logger.info(f"   Depth: {max_depth}, Max Pages: {max_pages}")
+            logger.info(f"🚀 [SCRAPING] Starting website processing: {request.website_id}")
+            logger.info(f"   URL: {request.url}")
+            logger.info(f"   Depth: {request.crawl_config.max_depth}, Max Pages: {request.crawl_config.max_pages}")
 
-            # Build value objects
-            crawl_config = CrawlConfig(
-                max_depth=max_depth,
-                max_pages=max_pages,
-                max_concurrent=max_concurrent,
-                delay_between_requests=delay_between_requests
-            )
-
+            # Resolve dependencies
             store_name = await self._resolveFileSearchStore()
-            resolved_user_role_id = await self._resolveUserRoleID(user_email, user_role_id)
+            resolved_user_role_id = await self._resolveUserRoleID(request.user_email, request.user_role_id)
 
             job_context = JobContext(
-                website_id=website_id,
-                root_url=url,
-                celery_task_id=celery_task_id,
+                website_id=request.website_id,
+                root_url=request.url,
+                celery_task_id=request.celery_task_id,
                 store_name=store_name,
                 user_role_id=resolved_user_role_id
             )
 
             # Process pages
             aggregate_metrics = await self._crawlWebsitePages(
-                crawl_config=crawl_config,
+                crawl_config=request.crawl_config,
                 job_context=job_context
             )
 
             # Finalize
             finalize_request = FinalizeRequest(
-                website_id=website_id,
+                website_id=request.website_id,
                 page_count=aggregate_metrics.total_pages_uploaded,
                 total_size_bytes=aggregate_metrics.total_size_bytes,
                 total_char_count=aggregate_metrics.total_char_count,
@@ -99,7 +83,7 @@ class ProcessingService:
             processing_time = time.time() - start_time
             result = ProcessingResult(
                 success=True,
-                website_id=website_id,
+                website_id=request.website_id,
                 message=f"Website processed successfully: {aggregate_metrics.total_pages_uploaded} pages",
                 page_count=aggregate_metrics.total_pages_uploaded,
                 total_size_bytes=aggregate_metrics.total_size_bytes,
@@ -107,7 +91,7 @@ class ProcessingService:
                 processing_time_seconds=processing_time
             )
 
-            logger.info(f"✅ [COMPLETE] Website {website_id} processed: {aggregate_metrics.total_pages_uploaded} pages in {processing_time:.1f}s")
+            logger.info(f"✅ [COMPLETE] Website {request.website_id} processed: {aggregate_metrics.total_pages_uploaded} pages in {processing_time:.1f}s")
 
             # Publish
             await self._reportSuccessResult(result, job_context)
@@ -117,7 +101,7 @@ class ProcessingService:
             processing_time = time.time() - start_time
             result = ProcessingResult(
                 success=False,
-                website_id=website_id,
+                website_id=request.website_id,
                 message="Processing failed",
                 page_count=0,
                 total_size_bytes=0,
@@ -126,7 +110,7 @@ class ProcessingService:
                 error=str(e)
             )
             logger.error(f"❌ Processing error: {e}")
-            await self._reportErrorResult(result, celery_task_id)
+            await self._reportErrorResult(result, request.celery_task_id)
             return result.to_dict()
 
     async def _crawlWebsitePages(

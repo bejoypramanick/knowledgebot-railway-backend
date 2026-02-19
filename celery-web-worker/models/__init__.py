@@ -11,6 +11,7 @@ from .value_objects import (
     PageMetrics,
     AggregateMetrics,
     ProcessingResult,
+    ProcessingRequest,
     FinalizeRequest,
 )
 
@@ -29,6 +30,7 @@ __all__ = [
     "PageMetrics",
     "AggregateMetrics",
     "ProcessingResult",
+    "ProcessingRequest",
     "FinalizeRequest",
     # Cancellation
     "CancellationToken",
