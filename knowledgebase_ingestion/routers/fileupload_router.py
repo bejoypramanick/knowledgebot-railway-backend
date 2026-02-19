@@ -14,6 +14,7 @@ from knowledgebase_ingestion.service.fileupload_service import (
     validate_file_upload, delete_all_knowledge
 )
 from knowledgebase_ingestion.service.file_service import get_file_service
+from knowledgebase_ingestion.service.upload_constraints_service import get_upload_constraints_service
 from knowledgebase_ingestion.dao.webcrawl_dao import WebCrawlDAO
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import file_celery
@@ -30,59 +31,49 @@ router = APIRouter(tags=["file-upload"])
 
 @router.get("/upload/constraints")
 async def get_upload_constraints(request: Request = None):
-    """Get file upload constraints (max file size, allowed extensions)"""
+    """
+    Get file upload constraints (max file size, allowed extensions, MIME types).
+
+    Returns:
+        Upload constraints including:
+        - max_file_size: Maximum file size in bytes
+        - max_file_size_display: Human-readable file size (e.g., "100 MB")
+        - allowed_extensions: List of allowed file extensions
+        - allowed_mime_types: List of allowed MIME types
+        - supported_file_types: Detailed metadata for each file type
+        - file_categories: Grouped by category (document, spreadsheet, etc.)
+    """
     try:
+        logger.info("=" * 80)
+        logger.info("📋 [CONSTRAINTS_REQUEST] Upload constraints requested")
+        logger.info("=" * 80)
+
         # Extract authenticated user information (optional, just for logging)
         try:
             user_email, user_id = extract_user_from_request(request)
-            logger.info(f"📋 [CONSTRAINTS] Upload constraints requested by {user_email}")
-        except:
-            logger.info(f"📋 [CONSTRAINTS] Upload constraints requested (unauthenticated)")
+            logger.info(f"👤 [USER] Requested by: {user_email}")
+        except Exception:
+            logger.info(f"👤 [USER] Requested by: unauthenticated client")
 
-        # Return upload constraints
-        return {
-            "success": True,
-            "constraints": {
-                "max_file_size": 100 * 1024 * 1024,  # 100 MB
-                "max_file_size_display": "100 MB",
-                "allowed_extensions": [
-                    # Documents
-                    "pdf", "docx", "txt", "doc",
-                    # Spreadsheets
-                    "xlsx", "csv", "xls",
-                    # Presentations
-                    "pptx", "ppt",
-                    # Code/Web
-                    "py", "js", "html", "json", "md", "yaml", "xml",
-                    # Archives
-                    "zip", "tar", "gz"
-                ],
-                "allowed_mime_types": [
-                    "application/pdf",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    "application/msword",
-                    "text/plain",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "application/vnd.ms-excel",
-                    "text/csv",
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    "application/vnd.ms-powerpoint",
-                    "text/x-python",
-                    "application/javascript",
-                    "text/html",
-                    "application/json",
-                    "text/markdown",
-                    "application/yaml",
-                    "application/xml",
-                    "text/xml",
-                    "application/zip",
-                    "application/x-tar",
-                    "application/gzip"
-                ]
-            }
-        }
+        # Get constraints from service
+        logger.info("🔧 [LOAD] Loading upload constraints from service...")
+        constraints_service = get_upload_constraints_service()
+        constraints = constraints_service.get_constraints()
+
+        logger.info("=" * 80)
+        logger.info("✅ [CONSTRAINTS_SUCCESS] Upload constraints retrieved successfully")
+        logger.info("=" * 80)
+        logger.info(f"📊 [DETAILS] Max file size: {constraints['constraints']['max_file_size_display']}")
+        logger.info(f"📊 [DETAILS] Allowed extensions: {len(constraints['constraints']['allowed_extensions'])}")
+        logger.info(f"📊 [DETAILS] Allowed MIME types: {len(constraints['constraints']['allowed_mime_types'])}")
+        logger.info(f"📊 [DETAILS] File categories: {', '.join(constraints['constraints']['file_categories'].keys())}")
+
+        return constraints
+
     except Exception as e:
-        logger.error(f"Error getting upload constraints: {e}")
+        logger.error("=" * 80)
+        logger.error(f"❌ [CONSTRAINTS_ERROR] Error getting upload constraints: {e}")
+        logger.error("=" * 80, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
