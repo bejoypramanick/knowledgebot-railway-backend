@@ -19,6 +19,7 @@ from knowledgebase_ingestion.utils.validation import (
 )
 from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
 from shared.redis_message_queue import RedisMessageQueue
+from shared.celery_dispatcher import file_celery, web_celery
 
 logger = get_otel_logger("fileupload_service", "knowledgebase-ingestion")
 
@@ -387,7 +388,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.error(f"❌ [GEMINI_DELETE_ERROR] Error deleting from Gemini: {e}")
             errors.append(f"Gemini deletion failed: {e}")
 
-        # Step 2: Clear Redis queues
+        # Step 2: Clear Redis queues and revoke Celery tasks
         logger.info("🔴 [REDIS_CLEAR] Clearing Redis task queues...")
         try:
             redis_queue = RedisMessageQueue()
@@ -397,6 +398,24 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         except Exception as e:
             logger.error(f"❌ [REDIS_CLEAR_ERROR] Error clearing Redis: {e}")
             errors.append(f"Redis clear failed: {e}")
+
+        # Step 2b: Revoke all Celery tasks (kills running tasks)
+        logger.info("🔴 [CELERY_REVOKE] Revoking all Celery tasks...")
+        try:
+            # Purge pending file processing tasks
+            logger.info("   📋 Purging file_processing queue...")
+            file_celery.control.purge()
+            logger.info("   ✅ file_processing tasks purged")
+
+            # Purge pending web crawling tasks
+            logger.info("   📋 Purging web_crawling queue...")
+            web_celery.control.purge()
+            logger.info("   ✅ web_crawling tasks purged")
+
+            logger.info("   ✅ All Celery tasks revoked/purged")
+        except Exception as e:
+            logger.error(f"❌ [CELERY_REVOKE_ERROR] Error revoking Celery tasks: {e}")
+            errors.append(f"Celery revoke failed: {e}")
 
         # Step 3: Mark all files as deleted in database (soft delete - don't remove records)
         logger.info("💾 [DB_UPDATE_FILES] Marking all files as deleted in database...")
