@@ -241,7 +241,8 @@ class WebCrawlDAO:
                 error_message,
                 created_at,
                 updated_at,
-                celery_task_id
+                celery_task_id,
+                char_count
             FROM scraped_websites
             WHERE parent_id IS NULL AND processing_status != 'deleted'
             ORDER BY depth ASC, created_at DESC
@@ -296,7 +297,8 @@ class WebCrawlDAO:
                 error_message,
                 created_at,
                 updated_at,
-                celery_task_id
+                celery_task_id,
+                char_count
             FROM scraped_websites
             WHERE parent_id = $1 AND processing_status != 'deleted'
             ORDER BY depth ASC, created_at ASC
@@ -340,6 +342,7 @@ class WebCrawlDAO:
             "title": record['title'],
             "pages_scraped": record['pages_scraped'] or 0,
             "size_bytes": record['file_size'] or 0,
+            "char_count": record["char_count"] or 0,
             "processing_status": record['processing_status'],
             "error_message": record['error_message'],
             "created_at": record['created_at'].isoformat() if record['created_at'] else None,
