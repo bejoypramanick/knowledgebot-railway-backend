@@ -16,19 +16,39 @@ class WebCrawlDAO:
 
     async def create_website_record(self, url: str, user_email: str, task_id: str) -> Optional[int]:
         """Create website record with Queued status."""
+        import json
+
+        # Store user_email in metadata JSONB for audit trail
+        metadata = {
+            "initiated_by": user_email,
+            "scraping_config": {
+                "source": "single"  # Single website scrape
+            }
+        }
+
         query = """
-            INSERT INTO scraped_websites (original_url, processing_status, user_email, celery_task_id, created_at, updated_at)
-            VALUES ($1, 'Queued', $2, $3, NOW(), NOW())
+            INSERT INTO scraped_websites (original_url, processing_status, celery_task_id, metadata, created_at, updated_at)
+            VALUES ($1, 'Queued', $2, $3::jsonb, NOW(), NOW())
             RETURNING id
         """
-        params = [url, user_email, task_id]
+        params = [url, task_id, json.dumps(metadata)]
         try:
             logger.log_db_operation(query, params)
+            logger.info(f"🌐 [WEB_CREATE] Creating website record")
+            logger.info(f"   URL: {url}")
+            logger.info(f"   Initiated by: {user_email}")
+            logger.info(f"   Task ID: {task_id}")
+
             async with get_db_connection() as conn:
-                result = await conn.fetchval(query, url, user_email, task_id)
+                result = await conn.fetchval(query, url, task_id, json.dumps(metadata))
                 logger.log_db_query(query, params, result)
+
+                if result:
+                    logger.info(f"✅ [WEB_CREATE_SUCCESS] Website record created with ID: {result}")
+
                 return result
         except Exception as e:
+            logger.error(f"❌ [WEB_CREATE_ERROR] Failed to create website record: {e}", exc_info=True)
             logger.log_db_query(query, params, error=e)
             return None
 

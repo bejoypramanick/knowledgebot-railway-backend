@@ -679,11 +679,17 @@ CREATE TABLE public.scraped_websites (
 	-- Async processing status columns
 	processing_status varchar(20) DEFAULT 'pending'::character varying NULL,
 	error_message text NULL,
+	celery_task_id varchar(255) NULL,
+	-- Hierarchy columns (for parent-child relationships in sitemaps)
+	depth int4 DEFAULT 0 NULL,
+	parent_id int4 NULL,
+	crawl_session_id int4 NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	CONSTRAINT scraped_websites_pkey PRIMARY KEY (id),
 	CONSTRAINT scraped_websites_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL,
-	CONSTRAINT valid_processing_status_websites CHECK ((processing_status::text = ANY (ARRAY[('pending'::character varying)::text, ('processing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('cancelled'::character varying)::text])))
+	CONSTRAINT scraped_websites_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.scraped_websites(id) ON DELETE CASCADE,
+	CONSTRAINT valid_processing_status_websites CHECK ((processing_status::text = ANY (ARRAY[('pending'::character varying)::text, ('processing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('cancelled'::character varying)::text, ('deleted'::character varying)::text])))
 );
 CREATE INDEX idx_scraped_websites_domain ON public.scraped_websites USING btree (domain);
 CREATE INDEX idx_scraped_websites_gemini_state ON public.scraped_websites USING btree (gemini_state);
@@ -691,6 +697,11 @@ CREATE INDEX idx_scraped_websites_original_url ON public.scraped_websites USING 
 CREATE INDEX idx_scraped_websites_user_role_id ON public.scraped_websites USING btree (user_role_id);
 CREATE INDEX idx_scraped_websites_processing_status ON public.scraped_websites USING btree (processing_status);
 CREATE INDEX idx_scraped_websites_processing_pending ON public.scraped_websites(processing_status) WHERE processing_status IN ('pending', 'processing');
+CREATE INDEX idx_scraped_websites_celery_task_id ON public.scraped_websites USING btree (celery_task_id);
+CREATE INDEX idx_scraped_websites_parent_id ON public.scraped_websites USING btree (parent_id);
+CREATE INDEX idx_scraped_websites_depth ON public.scraped_websites USING btree (depth);
+CREATE INDEX idx_scraped_websites_crawl_session_id ON public.scraped_websites USING btree (crawl_session_id);
+CREATE INDEX idx_scraped_websites_session_parent ON public.scraped_websites(crawl_session_id, parent_id);
 COMMENT ON TABLE public.scraped_websites IS 'Scraped website content for knowledge base';
 
 ALTER TABLE public.scraped_websites OWNER TO postgres;
