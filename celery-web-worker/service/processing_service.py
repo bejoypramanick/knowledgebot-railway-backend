@@ -627,7 +627,7 @@ class ProcessingService:
             elapsed = time.time() - start_time
             if elapsed > max_wait:
                 logger.error(f"   ❌ Timeout uploading ({elapsed:.0f}s)")
-                # 2. AWAIT the cancellation call
+                # 2. AWAIT cancellation call
                 try:
                     await genai_client.operations.cancel(operation_name)
                     logger.info(f"   ✅ Cancelled stuck upload operation: {operation_name}")
@@ -638,21 +638,24 @@ class ProcessingService:
             logger.info(f"   ⏳ Waiting for upload... ({elapsed:.0f}s)")
             await asyncio.sleep(2)  # Reduced from 5s to 2s for more responsive checking
             
-            # 3. AWAIT the get operation call
+            # 3. AWAIT get operation call
             try:
                 # This is the critical change for non-blocking I/O
                 current_op = await genai_client.operations.get(operation_name)
                 
-                # If API returns a string, it means operation is still pending
+                # 1. FIX: If API returns ID (string) instead of object, 
+                # we just continue to the next loop iteration to try fetching again.
                 if isinstance(current_op, str):
-                    # Operation is still in progress, continue waiting
+                    logger.info(f"   ⏳ Operation {operation_name} still pending...")
                     continue
-                elif hasattr(current_op, 'done') and current_op.done:
-                    # Operation is complete
+
+                # 2. Now it's safe to check attributes because current_op is an OBJECT
+                if getattr(current_op, 'done', False):
                     operation = current_op
                     break
-                elif hasattr(current_op, 'response') and current_op.response:
-                    # Operation is complete if it has a response
+                
+                # Some versions use 'metadata' or 'response' to indicate progress
+                if hasattr(current_op, 'response') and current_op.response:
                     operation = current_op
                     break
                 elif hasattr(current_op, 'error'):
