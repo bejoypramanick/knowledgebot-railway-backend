@@ -388,7 +388,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                     new_store_name = FileSearchStoreManager.delete_and_recreate_store(genai_client)
 
                     # Verify the new store was created
-                    if new_store_name and not new_store_name.startswith("fileSearchStores/"):
+                    if new_store_name and new_store_name.startswith("fileSearchStores/"):
                         # Got a proper store name back
                         filesearch_store_deleted = True
                         filesearch_store_created = True
