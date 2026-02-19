@@ -13,7 +13,7 @@ logger = get_otel_logger("celery_app", "celery-file-worker")
 
 # Configure Celery with Redis broker (DB 0)
 # Use explicit fallback to avoid cross-DB issues
-redis_url = os.getenv('FILE_REDIS_URL', 'redis://localhost:6379/0')
+redis_url = os.getenv('FILE_REDIS_URL', 'redis://redis.railway.internal:6379/0')
 
 # Create Celery app
 celery_app = Celery('celery_file_worker')
