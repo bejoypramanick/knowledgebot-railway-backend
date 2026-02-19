@@ -9,6 +9,7 @@ WORKDIR /app
 
 # Install system dependencies
 # Playwright requires these system libraries to run chromium
+# fonts-unifont is Debian equivalent of ttf-unifont (needed by docling/crawl4ai)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
@@ -16,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     fonts-liberation \
     fonts-noto-cjk \
+    fonts-unifont \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
     libatspi2.0-0 \
