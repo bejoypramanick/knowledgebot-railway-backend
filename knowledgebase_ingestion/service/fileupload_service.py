@@ -534,4 +534,4 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             "new_store_name": new_store_name,
             "errors": [str(e)]
         }
-        }
+
