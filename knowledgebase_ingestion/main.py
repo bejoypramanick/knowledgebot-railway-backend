@@ -22,7 +22,7 @@ if not hasattr(logging, '_otel_initialized_for_kb'):
 logger = logging.getLogger("knowledgebase_ingestion")
 
 from knowledgebase_ingestion.core.ai import get_genai_client
-from knowledgebase_ingestion.routers import fileupload_router, webcrawl_router
+from knowledgebase_ingestion.routers import fileupload_router, webcrawl_router, task_router
 from knowledgebase_ingestion.utils.middleware import log_requests_middleware
 from shared.db import close_databases
 from knowledgebase_ingestion.core.config import settings
@@ -128,6 +128,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # Frontend sends requests to /api/v1/gateway/knowledgebase/... for both
 app.include_router(fileupload_router, prefix="/api/v1/knowledgebase")
 app.include_router(webcrawl_router, prefix="/api/v1/knowledgebase")
+
+# Task control endpoints (no prefix needed - includes /api/v1/tasks)
+app.include_router(task_router.router)
 
 @app.get("/")
 async def root():
