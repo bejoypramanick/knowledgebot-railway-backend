@@ -373,7 +373,19 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         from knowledgebase_ingestion.core.ai import get_genai_client
         from shared.file_search_store_manager import FileSearchStoreManager
 
-        # Step 1: Delete and recreate FileSearch store
+        # Step 1: Stop all running tasks FIRST
+        logger.info("🔴 [TASK_CONTROL] Stopping all Celery tasks...")
+        try:
+            success = TaskControl.stop_all_tasks()
+            if success:
+                logger.info("   ✅ All Celery tasks stopped (revoked + flags set)")
+            else:
+                logger.warning("   ⚠️ Some tasks may not have been stopped")
+        except Exception as e:
+            logger.warning(f"⚠️ [TASK_CONTROL_ERROR] Error stopping tasks: {e}")
+            # Don't add to errors - task termination is best-effort
+
+        # Step 2: Delete and recreate FileSearch store
         logger.info("🤖 [FILESEARCH_RECREATE] Deleting and recreating Gemini FileSearch store...")
         filesearch_store_deleted = False
         filesearch_store_created = False
@@ -433,18 +445,6 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         except Exception as e:
             logger.error(f"❌ [GEMINI_RAW_DELETE_ERROR] Error deleting raw files: {e}")
             errors.append(f"Raw file deletion failed: {e}")
-
-        # Step 2: Stop all running tasks (Celery revoke + Redis flags)
-        logger.info("🔴 [TASK_CONTROL] Stopping all Celery tasks...")
-        try:
-            success = TaskControl.stop_all_tasks()
-            if success:
-                logger.info("   ✅ All Celery tasks stopped (revoked + flags set)")
-            else:
-                logger.warning("   ⚠️ Some tasks may not have been stopped")
-        except Exception as e:
-            logger.warning(f"⚠️ [TASK_CONTROL_ERROR] Error stopping tasks: {e}")
-            # Don't add to errors - task termination is best-effort
 
         # Step 3: Mark all files as deleted in database (soft delete - don't remove records)
         logger.info("💾 [DB_UPDATE_FILES] Marking all files as deleted in database...")
