@@ -28,6 +28,9 @@ from models.value_objects import (
 
 logger = get_otel_logger("processing_service", "celery-web-worker")
 
+# Reduce crawl4ai logging verbosity (it logs database migrations at INFO level)
+logging.getLogger('crawl4ai').setLevel(logging.WARNING)
+
 
 class ProcessingService:
     """Handle website scraping and content processing with value objects"""
