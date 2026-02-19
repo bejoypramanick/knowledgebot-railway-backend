@@ -60,19 +60,6 @@ class ProcessingService:
             logger.info(f"   URL: {url}")
             logger.info(f"   Depth: {max_depth}, Max Pages: {max_pages}")
 
-            if await self._isTaskCancelled(celery_task_id):
-                result = ProcessingResult(
-                    success=False,
-                    website_id=website_id,
-                    message="Task cancelled by admin",
-                    page_count=0,
-                    total_size_bytes=0,
-                    total_char_count=0,
-                    processing_time_seconds=0,
-                    error="Task cancelled by admin"
-                )
-                return result.to_dict()
-
             # Build value objects
             crawl_config = CrawlConfig(
                 max_depth=max_depth,
