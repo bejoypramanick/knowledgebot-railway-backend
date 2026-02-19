@@ -205,7 +205,7 @@ async def queue_website_for_scraping(
                     "domain": full_website.get('domain', ''),
                     "processing_status": full_website.get('processing_status', 'pending'),
                     "char_count": full_website.get('char_count', 0),
-                    "file_size": full_website.get('content_length', 0),
+                    "file_size": full_website.get('file_size', 0),
                     "pages_scraped": full_website.get('pages_scraped', 0),
                     "created_at": full_website.get('created_at').isoformat() if full_website.get('created_at') else None,
                     "updated_at": full_website.get('updated_at').isoformat() if full_website.get('updated_at') else None,
