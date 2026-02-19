@@ -84,7 +84,7 @@ def process_file_upload_task(
         logger.error(f"📄 [FILE] {original_filename}")
         logger.error(f"🚨 [ERROR] {type(e).__name__}: {str(e)}")
         logger.error(f"🔄 [RETRY_INFO] Current Attempt: {retry_count + 1}, Max Retries: {self.max_retries}")
-        logger.error(f"⏱️  [BACKOFF] Next retry in: {60 * (2 ** retry_count)}s (exponential backoff)", exc_info=True)
+        logger.error(f"⏱️  [BACKOFF] Next retry in: {60 * (2 ** retry_count)}s (exponential backoff)")
 
         # Retry with exponential backoff (60s, then 120s)
         try:

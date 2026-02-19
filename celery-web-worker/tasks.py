@@ -132,4 +132,4 @@ def scrape_website_task(
                 )
                 logger.info(f"✅ [DB_UPDATE] Website status updated to failed for ID {website_id}")
             except Exception as dao_err:
-                logger.error(f"❌ [DB_UPDATE] Failed to update website status to failed: {dao_err}", exc_info=True)
+                logger.error(f"❌ [DB_UPDATE] Failed to update website status to failed: {dao_err}")
