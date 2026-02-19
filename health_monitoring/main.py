@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
     try:
         logger.info("🚀 Health Monitoring Service starting...")
+        logger.info(f"⚙️  Config: HEALTH_MONITOR_ENABLED={settings.health_monitor_enabled}, HEALTH_CHECK_ENABLED={settings.health_check_enabled}")
 
         # Initialize database
         if settings.railway_postgres_url or settings.database_url:
@@ -33,20 +34,23 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("⚠️ Database URL not configured - health checks will not be persisted")
 
-        # Start the health check scheduler (only if enabled)
-        if settings.health_check_enabled:
-            scheduler = get_scheduler()
-            await scheduler.start()
-            logger.info(f"✅ Health check scheduler started (interval: {settings.health_check_interval_seconds}s)")
+        # Start the health check scheduler (only if HEALTH_MONITOR_ENABLED=true)
+        if settings.health_monitor_enabled:
+            if settings.health_check_enabled:
+                scheduler = get_scheduler()
+                await scheduler.start()
+                logger.info(f"✅ Health check scheduler started (interval: {settings.health_check_interval_seconds}s)")
+            else:
+                logger.info("ℹ️  Service monitoring is ENABLED, but checks are disabled (HEALTH_CHECK_ENABLED=false)")
         else:
-            logger.warning("⚠️ Health check scheduler is DISABLED (HEALTH_CHECK_ENABLED=false)")
+            logger.warning("⚠️ Service monitoring is DISABLED (HEALTH_MONITOR_ENABLED=false)")
 
         logger.info("✅ Health Monitoring Service started successfully")
         yield
 
         # Shutdown
         logger.info("🛑 Health Monitoring Service shutting down...")
-        if settings.health_check_enabled:
+        if settings.health_monitor_enabled and settings.health_check_enabled:
             scheduler = get_scheduler()
             await scheduler.stop()
         logger.info("✅ Health Monitoring Service shutdown complete")

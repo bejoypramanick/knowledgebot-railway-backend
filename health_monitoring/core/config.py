@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     railway_postgres_url: Optional[str] = None
     database_url: Optional[str] = None
 
-    # Health Check Configuration
+    # Health Monitor Configuration
+    health_monitor_enabled: bool = True  # Set to False via HEALTH_MONITOR_ENABLED=false to disable monitoring
     health_check_enabled: bool = True  # Set to False via HEALTH_CHECK_ENABLED=false to disable health checks
     health_check_interval_seconds: int = 300  # 5 minutes
     health_check_timeout_seconds: int = 10
@@ -40,6 +41,10 @@ class Settings(BaseSettings):
         # Log service URLs on startup
         import logging
         logger = logging.getLogger(__name__)
+        logger.info(f"⚙️  Health Monitor Configuration:")
+        logger.info(f"   - HEALTH_MONITOR_ENABLED: {self.health_monitor_enabled}")
+        logger.info(f"   - HEALTH_CHECK_ENABLED: {self.health_check_enabled}")
+        logger.info(f"   - Check interval: {self.health_check_interval_seconds}s")
         logger.info(f"📡 Service URLs configured:")
         logger.info(f"   - api_gateway: {self.api_gateway_url}")
         logger.info(f"   - configuration: {self.configuration_service_url}")
