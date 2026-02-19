@@ -25,9 +25,9 @@ class RedisMessageQueue:
     def __init__(self):
         """Initialize Redis connections for both databases"""
         # File processing: Redis DB 0 (EXPLICIT - never falls back to REDIS_URL)
-        self.file_redis_url = os.getenv('FILE_REDIS_URL', 'redis://localhost:6379/0')
+        self.file_redis_url = os.getenv('FILE_REDIS_URL', 'redis://redis.railway.internal:6379/0')
         # Web crawling: Redis DB 1 (EXPLICIT - never falls back to REDIS_URL)
-        self.web_redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
+        self.web_redis_url = os.getenv('WEB_REDIS_URL', 'redis://redis.railway.internal:6379/1')
 
         self._file_connection = None
         self._web_connection = None
