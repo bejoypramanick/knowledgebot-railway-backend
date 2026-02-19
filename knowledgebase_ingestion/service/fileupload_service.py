@@ -343,13 +343,15 @@ async def validate_file_upload(file: UploadFile, file_size: int) -> Dict[str, An
 
 async def delete_all_knowledge() -> Dict[str, Any]:
     """
-    Soft delete all files and websites from knowledge base.
+    Completely clear the knowledge base by deleting and recreating the FileSearch store.
 
     Operations performed:
-    1. Removes all files from Gemini FileSearch store
-    2. Clears Redis task queues (file_processing, web_crawling)
-    3. Marks all file records with status='deleted' (soft delete)
-    4. Marks all website records with status='deleted' (soft delete)
+    1. Delete the entire Gemini FileSearch store (removes all documents)
+    2. Create a new FileSearch store (ready for new uploads)
+    3. Delete all raw Gemini files
+    4. Clears Redis task queues (file_processing, web_crawling)
+    5. Marks all file records with status='deleted' (soft delete)
+    6. Marks all website records with status='deleted' (soft delete)
 
     Database records are retained with status='deleted' for:
     - Audit trail and compliance
@@ -362,17 +364,34 @@ async def delete_all_knowledge() -> Dict[str, Any]:
 
     deleted_files = 0
     deleted_websites = 0
+    new_store_name = None
     errors = []
 
     try:
         from shared.db import get_db_connection
         from knowledgebase_ingestion.core.ai import get_genai_client
+        from shared.file_search_store_manager import FileSearchStoreManager
 
-        # Step 1: Delete all files from Gemini FileSearch
-        logger.info("📝 [GEMINI_DELETE] Deleting files from Gemini FileSearch...")
+        # Step 1: Delete and recreate FileSearch store
+        logger.info("🤖 [FILESEARCH_RECREATE] Deleting and recreating Gemini FileSearch store...")
+        try:
+            genai_client = get_genai_client()
+            if genai_client:
+                # Delete old store and create new one
+                new_store_name = FileSearchStoreManager.delete_and_recreate_store(genai_client)
+                logger.info(f"   ✅ FileSearch store deleted and recreated: {new_store_name}")
+            else:
+                logger.error("   ❌ Gemini client not available")
+                errors.append("Gemini client not available")
+        except Exception as e:
+            logger.error(f"❌ [FILESEARCH_RECREATE_ERROR] Error recreating FileSearch store: {e}")
+            errors.append(f"FileSearch store recreation failed: {e}")
+
+        # Step 1b: Delete all raw Gemini files
+        logger.info("📝 [GEMINI_RAW_DELETE] Deleting raw Gemini files...")
         try:
             async with get_db_connection() as conn:
-                # Get all files with gemini_file_name
+                # Get all files with gemini_file_name (non-FileSearch files)
                 files = await conn.fetch(
                     "SELECT id, original_filename, gemini_file_name FROM file_uploads WHERE gemini_file_name IS NOT NULL"
                 )
@@ -381,19 +400,18 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                 genai_client = get_genai_client()
                 if genai_client:
                     for file_record in files:
-                        try:
-                            genai_client.files.delete(name=file_record['gemini_file_name'])
-                            deleted_files += 1
-                            logger.info(f"   ✅ Deleted from Gemini: {file_record['original_filename']}")
-                        except Exception as gem_err:
-                            logger.warning(f"   ⚠️  Could not delete from Gemini: {file_record['gemini_file_name']} - {gem_err}")
-                            errors.append(f"Gemini delete failed for {file_record['original_filename']}: {gem_err}")
-                else:
-                    logger.error("   ❌ Gemini client not available")
-                    errors.append("Gemini client not available")
+                        # Only delete raw files (those not starting with "documents/")
+                        if not file_record['gemini_file_name'].startswith("documents/"):
+                            try:
+                                genai_client.files.delete(name=file_record['gemini_file_name'])
+                                deleted_files += 1
+                                logger.info(f"   ✅ Deleted raw file from Gemini: {file_record['original_filename']}")
+                            except Exception as gem_err:
+                                logger.warning(f"   ⚠️  Could not delete from Gemini: {file_record['gemini_file_name']} - {gem_err}")
+                                errors.append(f"Raw file delete failed for {file_record['original_filename']}: {gem_err}")
         except Exception as e:
-            logger.error(f"❌ [GEMINI_DELETE_ERROR] Error deleting from Gemini: {e}")
-            errors.append(f"Gemini deletion failed: {e}")
+            logger.error(f"❌ [GEMINI_RAW_DELETE_ERROR] Error deleting raw files: {e}")
+            errors.append(f"Raw file deletion failed: {e}")
 
         # Step 2: Clear Redis queues and revoke Celery tasks
         logger.info("🔴 [REDIS_CLEAR] Clearing Redis task queues...")
@@ -511,9 +529,12 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         logger.info("=" * 80)
         logger.info("✅ [DELETE_ALL_COMPLETE] Knowledge base clear completed")
         logger.info("=" * 80)
-        logger.info(f"📊 [RESULT] Files deleted: {deleted_files}")
-        logger.info(f"📊 [RESULT] Websites deleted: {deleted_websites}")
+        logger.info(f"📊 [RESULT] Raw files deleted from Gemini: {deleted_files}")
+        logger.info(f"📊 [RESULT] Websites marked as deleted: {deleted_websites}")
         logger.info(f"📊 [RESULT] Redis queues cleared: 2 (file_processing, web_crawling)")
+        logger.info(f"📊 [RESULT] FileSearch store: Deleted and recreated")
+        if new_store_name:
+            logger.info(f"   New store name: {new_store_name}")
 
         if errors:
             logger.warning(f"⚠️  [ERRORS] {len(errors)} error(s) occurred:")
@@ -522,10 +543,12 @@ async def delete_all_knowledge() -> Dict[str, Any]:
 
         return {
             "success": len(errors) == 0,
-            "message": "Knowledge base cleared successfully" if not errors else "Knowledge base cleared with errors",
-            "deleted_files": deleted_files,
-            "deleted_websites": deleted_websites,
+            "message": "Knowledge base cleared successfully and FileSearch store recreated" if not errors else "Knowledge base cleared with errors",
+            "raw_files_deleted": deleted_files,
+            "websites_marked_deleted": deleted_websites,
             "redis_queues_cleared": 2,
+            "filesearch_store_recreated": True,
+            "new_filesearch_store": new_store_name,
             "errors": errors if errors else None
         }
 
@@ -537,7 +560,9 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         return {
             "success": False,
             "message": f"Error clearing knowledge base: {str(e)}",
-            "deleted_files": deleted_files,
-            "deleted_websites": deleted_websites,
+            "raw_files_deleted": deleted_files,
+            "websites_marked_deleted": deleted_websites,
+            "filesearch_store_recreated": new_store_name is not None,
+            "new_filesearch_store": new_store_name,
             "errors": [str(e)]
         }

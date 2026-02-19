@@ -331,23 +331,28 @@ async def delete_all_knowledge_endpoint(request: Request = None):
 
         if result.get("success"):
             logger.info("=" * 80)
-            logger.info(f"✅ [DELETE_ALL_SUCCESS] Knowledge base marked as deleted successfully")
+            logger.info(f"✅ [DELETE_ALL_SUCCESS] Knowledge base cleared and FileSearch store recreated")
             logger.info("=" * 80)
-            logger.info(f"   Files removed from Gemini: {result.get('deleted_files')}")
-            logger.info(f"   Files marked as deleted: {result.get('deleted_files')}")
-            logger.info(f"   Websites marked as deleted: {result.get('deleted_websites')}")
+            logger.info(f"   Raw files removed from Gemini: {result.get('raw_files_deleted')}")
+            logger.info(f"   Websites marked as deleted: {result.get('websites_marked_deleted')}")
             logger.info(f"   Redis queues cleared: {result.get('redis_queues_cleared')}")
+            logger.info(f"   FileSearch store deleted: Yes")
+            logger.info(f"   FileSearch store recreated: Yes")
+            if result.get('new_filesearch_store'):
+                logger.info(f"   New FileSearch store: {result.get('new_filesearch_store')}")
             logger.info(f"   Database records retained with status='deleted' for audit trail")
-            logger.info(f"   Marked as deleted by: {user_email}")
+            logger.info(f"   Cleared by: {user_email}")
 
             return {
                 "success": True,
-                "message": "Knowledge base marked as deleted successfully (soft delete - records retained)",
-                "files_removed_from_gemini": result.get("deleted_files"),
-                "files_marked_deleted": result.get("deleted_files"),
-                "websites_marked_deleted": result.get("deleted_websites"),
+                "message": result.get("message"),
+                "raw_files_deleted": result.get("raw_files_deleted"),
+                "websites_marked_deleted": result.get("websites_marked_deleted"),
                 "redis_queues_cleared": result.get("redis_queues_cleared"),
-                "note": "Database records retained with status='deleted' for audit trail and recovery"
+                "filesearch_store_deleted": True,
+                "filesearch_store_recreated": result.get("filesearch_store_recreated"),
+                "new_filesearch_store": result.get("new_filesearch_store"),
+                "note": "Database records retained with status='deleted' for audit trail and recovery. FileSearch store is now empty and ready for new content."
             }
         else:
             logger.error("=" * 80)
