@@ -8,17 +8,20 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("celery_dispatcher", "knowledgebase-ingestion")
 
-# File processing: Redis DB 0
-file_redis_url = os.getenv('FILE_REDIS_URL', os.getenv('REDIS_URL', 'redis://localhost:6379/0'))
+# File processing: Redis DB 0 (EXPLICIT - never falls back to REDIS_URL)
+file_redis_url = os.getenv('FILE_REDIS_URL', 'redis://localhost:6379/0')
 
-# Web crawling: Redis DB 1
-web_redis_url = os.getenv('WEB_REDIS_URL', os.getenv('REDIS_URL', 'redis://localhost:6379/1'))
+# Web crawling: Redis DB 1 (EXPLICIT - never falls back to REDIS_URL)
+web_redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
 
 logger.info("=" * 80)
 logger.info("🚀 [CELERY_DISPATCHER_INIT] Initializing Celery Dispatcher")
 logger.info("=" * 80)
-logger.info(f"📍 [FILE_REDIS] URL: {file_redis_url}")
-logger.info(f"📍 [WEB_REDIS] URL: {web_redis_url}")
+logger.info(f"🔑 [ENV_VAR] FILE_REDIS_URL: {os.getenv('FILE_REDIS_URL', 'NOT SET (using default)')}")
+logger.info(f"🔑 [ENV_VAR] WEB_REDIS_URL: {os.getenv('WEB_REDIS_URL', 'NOT SET (using default)')}")
+logger.info(f"🔑 [ENV_VAR] REDIS_URL: {os.getenv('REDIS_URL', 'NOT SET')}")
+logger.info(f"📍 [FILE_REDIS_RESOLVED] URL: {file_redis_url}")
+logger.info(f"📍 [WEB_REDIS_RESOLVED] URL: {web_redis_url}")
 
 # Dispatcher app for file processing tasks (DB 0)
 logger.info("🔧 [FILE_CELERY] Creating file_celery dispatcher...")
