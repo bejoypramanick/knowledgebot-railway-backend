@@ -9,10 +9,16 @@ from shared.otel_logger import get_otel_logger
 logger = get_otel_logger("celery_dispatcher", "knowledgebase-ingestion")
 
 # File processing: Redis DB 0 (EXPLICIT - never falls back to REDIS_URL)
-file_redis_url = os.getenv('FILE_REDIS_URL', 'redis://redis.railway.internal:6379/0')
+# Must be explicitly configured via FILE_REDIS_URL environment variable
+file_redis_url = os.getenv('FILE_REDIS_URL')
+if not file_redis_url:
+    logger.warning("⚠️  FILE_REDIS_URL not set - file Celery dispatcher will fail")
 
 # Web crawling: Redis DB 1 (EXPLICIT - never falls back to REDIS_URL)
-web_redis_url = os.getenv('WEB_REDIS_URL', 'redis://redis.railway.internal:6379/1')
+# Must be explicitly configured via WEB_REDIS_URL environment variable
+web_redis_url = os.getenv('WEB_REDIS_URL')
+if not web_redis_url:
+    logger.warning("⚠️  WEB_REDIS_URL not set - web Celery dispatcher will fail")
 
 logger.info("=" * 80)
 logger.info("🚀 [CELERY_DISPATCHER_INIT] Initializing Celery Dispatcher")

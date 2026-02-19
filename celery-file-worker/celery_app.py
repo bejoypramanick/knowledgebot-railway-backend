@@ -12,8 +12,8 @@ import redis
 logger = get_otel_logger("celery_app", "celery-file-worker")
 
 # Configure Celery with Redis broker (DB 0)
-# Use explicit fallback to avoid cross-DB issues
-redis_url = os.getenv('FILE_REDIS_URL', 'redis://redis.railway.internal:6379/0')
+# Must be explicitly configured via FILE_REDIS_URL environment variable
+redis_url = os.getenv('FILE_REDIS_URL')
 
 # Create Celery app
 celery_app = Celery('celery_file_worker')
@@ -21,6 +21,9 @@ celery_app = Celery('celery_file_worker')
 # Log Celery initialization
 logger.info("🚀 [CELERY_APP] Initializing Celery for File Processing Worker")
 logger.info(f"📊 [REDIS] FILE_REDIS_URL: {redis_url}")
+
+if not redis_url:
+    logger.warning("⚠️  FILE_REDIS_URL not set - file Celery app will fail to connect to Redis")
 
 # Test Redis connection at startup
 try:
