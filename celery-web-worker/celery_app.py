@@ -12,18 +12,19 @@ import redis
 logger = get_otel_logger("celery_app", "celery-web-worker")
 
 # Configure Celery with Redis broker (DB 1)
-redis_url = os.getenv('WEB_REDIS_URL', os.getenv('REDIS_URL', 'redis://localhost:6379/1'))
+# Use explicit fallback to avoid cross-DB issues
+redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
 
 # Create Celery app
 celery_app = Celery('celery_web_worker')
 
 # Log Celery initialization
 logger.info("🚀 [CELERY_APP] Initializing Celery for Website Crawling Worker")
-logger.info(f"📊 [REDIS] Broker URL: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
+logger.info(f"📊 [REDIS] WEB_REDIS_URL: {redis_url}")
 
 # Test Redis connection at startup and monitor queue
 try:
-    redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=5)
+    redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2)
     redis_client.ping()
     logger.info("✅ [REDIS] Connection test successful - Redis is reachable")
 
@@ -37,8 +38,11 @@ try:
         logger.info(f"📋 [REDIS] Sample tasks in queue: {sample_tasks}")
 
     redis_client.close()
+except redis.ConnectionError as conn_err:
+    logger.warning(f"⚠️  [REDIS] Connection test failed (this is OK in local dev): {redis_url}")
+    logger.debug(f"   Error: {conn_err}")
 except Exception as e:
-    logger.error(f"❌ [REDIS] Connection test failed - {e}")
+    logger.error(f"❌ [REDIS] Unexpected error during connection test: {e}")
 
 celery_app.conf.update(
     broker_url=redis_url,
