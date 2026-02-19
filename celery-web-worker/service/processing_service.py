@@ -645,17 +645,24 @@ class ProcessingService:
                 temp_file = f.name
 
             try:
-                # Upload to Gemini
+                # Upload to Gemini with explicit MIME type
+                mime_type = "text/markdown"
                 with open(temp_file, 'rb') as f:
-                    file_response = genai_client.files.upload(file=f)
+                    file_size = os.path.getsize(temp_file)
+                    logger.info(f"📤 Gemini files.upload:")
+                    logger.info(f"   - MIME type: {mime_type}")
+                    logger.info(f"   - File size: {file_size} bytes")
+
+                    file_response = genai_client.files.upload(
+                        file=f,
+                        mime_type=mime_type
+                    )
                     gemini_file_name = file_response.name
 
                 logger.info(f"✅ Uploaded to Gemini: {gemini_file_name}")
 
                 # Upload to FileSearch
                 document_name = f"website_{website_id}_{int(time.time())}"
-                mime_type = "text/markdown"
-
                 with open(temp_file, 'rb') as f:
                     file_size = os.path.getsize(temp_file)
                     logger.info(f"📤 FileSearch upload details:")
