@@ -1,13 +1,14 @@
 """
 Website Processing Service for Celery Web Worker
 Handles all website scraping, content extraction, and Gemini FileSearch upload
+with extreme single-responsibility and minimal method size
 """
 import asyncio
 import time
 import os
 import tempfile
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, AsyncGenerator, Tuple
 import logging
 from urllib.parse import urljoin, urlparse
 
@@ -19,11 +20,13 @@ logger = get_otel_logger("processing_service", "celery-web-worker")
 
 
 class ProcessingService:
-    """Handle website scraping and content processing"""
+    """Handle website scraping and content processing with streaming pipeline"""
 
     def __init__(self):
         from dao.scraping_dao import ScrapingDAO
         self.scraping_dao = ScrapingDAO()
+
+    # ==================== MAIN ORCHESTRATOR ====================
 
     async def process_website_content(
         self,
@@ -39,908 +42,656 @@ class ProcessingService:
         celery_task_id: str = None,
         **options
     ) -> Dict[str, Any]:
-        """
-        Main orchestration function for website processing:
-        1. Scrape website content
-        2. Extract HTML content to Markdown
-        3. Upload to Gemini FileSearch
-        4. Record metadata in database
-
-        Args:
-            website_id: Database ID of website record
-            url: Website URL to scrape
-            max_depth: Maximum depth for crawling
-            max_pages: Maximum number of pages to scrape
-            max_concurrent: Maximum concurrent requests
-            delay_between_requests: Delay between requests in seconds
-            replace_existing: Whether to replace existing content
-            user_email: User email for metadata
-            celery_task_id: Celery task ID for cancellation checking
-            **options: Additional scraping options
-
-        Returns:
-            Dictionary with success status and details
-        """
+        """Main orchestration: resolve → stream → finalize → publish"""
         start_time = time.time()
-
         try:
-            logger.info(f"🚀 [SCRAPING] Starting website processing: {website_id}")
-            logger.info(f"   URL: {url}")
-            logger.info(f"   Depth: {max_depth}, Max Pages: {max_pages}")
-            logger.info(f"   Concurrent: {max_concurrent}, Delay: {delay_between_requests}s")
-
-            # Step 1: Check for cancellation before starting
+            self._log_job_start(website_id, url, max_depth, max_pages)
             if await self._is_task_cancelled(celery_task_id):
-                logger.warning(f"❌ Task {celery_task_id} marked for cancellation")
-                return {
-                    "success": False,
-                    "error": "Task cancelled by admin",
-                    "website_id": website_id
-                }
+                return self._error_result(website_id, "Task cancelled by admin")
 
-            # Step 2: Scrape website and collect pages
-            logger.info(f"📄 [SCRAPING] Fetching pages from {url}")
-            scraped_pages = await self._scrape_website(
-                url=url,
-                max_depth=max_depth,
-                max_pages=max_pages,
-                max_concurrent=max_concurrent,
-                delay_between_requests=delay_between_requests,
-                celery_task_id=celery_task_id
+            result = await self._process_with_error_handling(
+                website_id, url, max_depth, max_pages, max_concurrent,
+                delay_between_requests, user_email, user_role_id, celery_task_id, start_time
             )
-
-            if not scraped_pages:
-                logger.error(f"❌ Failed to scrape website: {url}")
-                return {
-                    "success": False,
-                    "error": "No pages scraped from website",
-                    "website_id": website_id
-                }
-
-            logger.info(f"✅ Scraped {len(scraped_pages)} pages from {url}")
-
-            # Step 3: Extract and convert content for each page
-            logger.info(f"🔄 [PROCESSING] Converting {len(scraped_pages)} pages to Markdown")
-            processed_pages = []
-            for page_url, page_html in scraped_pages:
-                try:
-                    markdown_content = await self._html_to_markdown(page_html)
-
-                    # If docling is enabled, also extract embedded files from the page
-                    markdown_content = await self._extract_embedded_files_if_docling_enabled(
-                        page_html,
-                        page_url,
-                        markdown_content
-                    )
-
-                    processed_pages.append({
-                        "url": page_url,
-                        "markdown": markdown_content,
-                        "html": page_html
-                    })
-                except Exception as e:
-                    logger.warning(f"⚠️ Failed to process page {page_url}: {e}")
-                    continue
-
-            if not processed_pages:
-                logger.error(f"❌ Failed to process any pages from {url}")
-                return {
-                    "success": False,
-                    "error": "No pages successfully processed",
-                    "website_id": website_id
-                }
-
-            logger.info(f"✅ Successfully processed {len(processed_pages)} pages")
-
-            # Step 4: Upload to Gemini FileSearch
-            logger.info(f"🤖 [GEMINI] Uploading {len(processed_pages)} pages to FileSearch")
-            file_search_result = await self._upload_to_gemini(
-                website_id=website_id,
-                url=url,
-                processed_pages=processed_pages,
-                max_depth=max_depth,
-                user_email=user_email,
-                user_role_id=user_role_id,
-                celery_task_id=celery_task_id
-            )
-
-            if not file_search_result.get("success"):
-                logger.error(f"❌ Failed to upload to Gemini: {file_search_result.get('error')}")
-                return {
-                    "success": False,
-                    "error": f"Gemini upload failed: {file_search_result.get('error')}",
-                    "website_id": website_id
-                }
-
-            logger.info(f"✅ Successfully uploaded to Gemini FileSearch")
-
-            # Step 5: Calculate aggregate size and char_count from all processed pages
-            total_size_bytes = sum(page.get('size_bytes', 0) for page in processed_pages)
-            total_char_count = sum(page.get('char_count', 0) for page in processed_pages)
-            logger.info(f"📊 [AGGREGATE] Total size: {total_size_bytes:,} bytes, Total chars: {total_char_count:,}")
-
-            # Step 6: Record metadata in database
-            logger.info(f"💾 [DATABASE] Recording website metadata")
-            db_result = await self._record_website_metadata(
-                website_id=website_id,
-                url=url,
-                gemini_file_name=file_search_result.get("gemini_file_name"),
-                file_search_metadata=file_search_result.get("file_search_metadata"),
-                page_count=len(processed_pages),
-                total_size_bytes=total_size_bytes,
-                total_char_count=total_char_count,
-                user_email=user_email
-            )
-
-            if not db_result.get("success"):
-                logger.error(f"❌ Failed to record metadata: {db_result.get('error')}")
-                return {
-                    "success": False,
-                    "error": f"Database recording failed: {db_result.get('error')}",
-                    "website_id": website_id
-                }
-
-            processing_time = time.time() - start_time
-
-            logger.info(f"✅ [COMPLETE] Website {website_id} processed successfully")
-            logger.info(f"   Pages: {len(processed_pages)}")
-            logger.info(f"   Time: {processing_time:.1f}s")
-
-            # SUCCESS: Publish result to Redis
-            result = {
-                "success": True,
-                "message": f"Website processed successfully: {len(processed_pages)} pages",
-                "website_id": website_id,
-                "page_count": len(processed_pages),
-                "processing_time_seconds": processing_time,
-                "gemini_file_name": file_search_result.get("gemini_file_name"),
-                "file_search_metadata": file_search_result.get("file_search_metadata")
-            }
-
-            try:
-                from shared.redis_message_queue import redis_message_queue
-                redis_message_queue.publish_web_result(
-                    website_id=website_id,
-                    celery_task_id=celery_task_id,
-                    status="completed",
-                    result=result
-                )
-            except Exception as redis_error:
-                logger.warning(f"⚠️ Failed to publish result to Redis: {redis_error}")
-
+            await self._publish_success_result(website_id, celery_task_id, result)
             return result
 
         except Exception as e:
-            logger.error(f"❌ Unexpected error processing website {website_id}: {e}")
+            await self._publish_error_result(website_id, celery_task_id, str(e))
+            return self._error_result(website_id, str(e))
 
-            # FAILURE: Publish error result to Redis
+    def _log_job_start(self, website_id: int, url: str, max_depth: int, max_pages: int):
+        """Log job initialization"""
+        logger.info(f"🚀 [SCRAPING] Starting website processing: {website_id}")
+        logger.info(f"   URL: {url}")
+        logger.info(f"   Depth: {max_depth}, Max Pages: {max_pages}")
+
+    async def _process_with_error_handling(
+        self, website_id, url, max_depth, max_pages, max_concurrent,
+        delay_between_requests, user_email, user_role_id, celery_task_id, start_time
+    ) -> Dict[str, Any]:
+        """Resolve dependencies and stream pages through pipeline"""
+        store = await self._resolve_file_search_store()
+        user_role_id = await self._resolve_user_role_id(user_email, user_role_id)
+
+        pages_uploaded, total_size, total_chars = await self._stream_pages_through_pipeline(
+            website_id, url, max_depth, max_pages, max_concurrent, delay_between_requests,
+            store, user_role_id, celery_task_id
+        )
+
+        await self._finalize_website_record(website_id, pages_uploaded, total_size, total_chars, store)
+        return self._success_result(website_id, pages_uploaded, total_size, total_chars, start_time)
+
+    async def _stream_pages_through_pipeline(
+        self, website_id, url, max_depth, max_pages, max_concurrent, delay_between_requests,
+        store, user_role_id, celery_task_id
+    ) -> Tuple[int, int, int]:
+        """Stream each page: crawl → process → upload → record"""
+        pages_uploaded = total_size = total_chars = 0
+
+        async for page_url, page_html in self._crawl_pages(
+            url, max_depth, max_pages, max_concurrent, delay_between_requests, celery_task_id
+        ):
+            if await self._is_task_cancelled(celery_task_id):
+                break
+
+            result = await self._process_pipeline_page(
+                website_id, page_url, page_html, store, user_role_id, url, max_depth
+            )
+            if result:
+                pages_uploaded += 1
+                total_size += result.get('size', 0)
+                total_chars += result.get('chars', 0)
+
+        if pages_uploaded == 0:
+            raise Exception("No pages successfully processed")
+
+        return pages_uploaded, total_size, total_chars
+
+    async def _process_pipeline_page(
+        self, website_id, page_url, page_html, store, user_role_id, url, max_depth
+    ) -> Optional[Dict[str, int]]:
+        """Process one page: convert → upload → record"""
+        logger.info(f"📄 [PIPELINE] Processing: {page_url}")
+
+        try:
+            markdown = await self._process_page_content(page_html, page_url)
+            doc_name = await self._upload_page_to_gemini(website_id, page_url, markdown, store)
+
+            if not doc_name:
+                logger.warning(f"   ⚠️ Upload failed, skipping")
+                return None
+
+            await self._record_child_page(website_id, page_url, doc_name, store, user_role_id, markdown, url, max_depth)
+            metrics = calculate_metrics(markdown)
+            return {'size': metrics.get('file_size_bytes', 0), 'chars': metrics.get('char_count', 0)}
+        except Exception as e:
+            logger.error(f"   ❌ Error: {e}")
+            return None
+
+    def _success_result(self, website_id, pages_uploaded, total_size, total_chars, start_time) -> Dict[str, Any]:
+        """Build success result dict"""
+        processing_time = time.time() - start_time
+        logger.info(f"✅ [COMPLETE] Website {website_id} processed: {pages_uploaded} pages in {processing_time:.1f}s")
+
+        return {
+            "success": True,
+            "message": f"Website processed successfully: {pages_uploaded} pages",
+            "website_id": website_id,
+            "page_count": pages_uploaded,
+            "total_size_bytes": total_size,
+            "total_char_count": total_chars,
+            "processing_time_seconds": processing_time
+        }
+
+    def _error_result(self, website_id: int, error: str) -> Dict[str, Any]:
+        """Build error result dict"""
+        return {"success": False, "error": error, "website_id": website_id}
+
+    async def _publish_success_result(self, website_id: int, celery_task_id: str, result: Dict):
+        """Publish success to Redis"""
+        try:
+            from shared.redis_message_queue import redis_message_queue
+            redis_message_queue.publish_web_result(website_id, celery_task_id, "completed", result)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to publish result: {e}")
+
+    async def _publish_error_result(self, website_id: int, celery_task_id: str, error: str):
+        """Publish error to Redis"""
+        try:
+            from shared.redis_message_queue import redis_message_queue
+            redis_message_queue.publish_web_result(website_id, celery_task_id, "failed", error=error)
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to publish error: {e}")
+
+    # ==================== CRAWL LAYER ====================
+
+    async def _crawl_pages(
+        self, url: str, max_depth: int, max_pages: int, max_concurrent: int,
+        delay_between_requests: float, celery_task_id: str = None
+    ) -> AsyncGenerator[Tuple[str, str], None]:
+        """Async generator yielding (page_url, page_html) one at a time"""
+        try:
+            from crawl4ai import AsyncWebCrawler
+        except ImportError as ie:
+            logger.error(f"❌ crawl4ai not available: {ie}")
+            return
+
+        visited_urls = set()
+        to_visit = [(url, 0)]
+        semaphore = asyncio.Semaphore(max_concurrent)
+        pages_yielded = 0
+
+        while to_visit and pages_yielded < max_pages:
+            if await self._is_task_cancelled(celery_task_id):
+                logger.warning(f"⏸️ Crawling cancelled")
+                break
+
+            current_url, current_depth = to_visit.pop(0)
+
+            if not await self._should_crawl_url(current_url, current_depth, max_depth, visited_urls):
+                continue
+
+            visited_urls.add(self._normalize_url(current_url))
+
+            result = await self._fetch_single_page(current_url, semaphore, delay_between_requests)
+            if result:
+                page_url, page_html = result
+                pages_yielded += 1
+                logger.info(f"✅ [BFS] Yielded page {pages_yielded}/{max_pages}")
+
+                yield page_url, page_html
+
+                if current_depth < max_depth and pages_yielded < max_pages:
+                    new_links = await self._extract_links(page_html, page_url, self._get_domain(url), visited_urls)
+                    to_visit.extend((link, current_depth + 1) for link in new_links if pages_yielded < max_pages)
+
+    async def _should_crawl_url(self, url: str, depth: int, max_depth: int, visited_urls: set) -> bool:
+        """Check if URL should be crawled (not visited, depth ok)"""
+        normalized = self._normalize_url(url)
+
+        if normalized in visited_urls:
+            logger.info(f"⏭️  Already visited: {url}")
+            return False
+
+        if depth > max_depth:
+            logger.info(f"⏭️  Depth exceeded: {url}")
+            return False
+
+        return True
+
+    async def _fetch_single_page(
+        self, page_url: str, semaphore: asyncio.Semaphore, delay: float
+    ) -> Optional[Tuple[str, str]]:
+        """Fetch single page via crawl4ai within semaphore"""
+        async with semaphore:
             try:
-                from shared.redis_message_queue import redis_message_queue
-                redis_message_queue.publish_web_result(
-                    website_id=website_id,
-                    celery_task_id=celery_task_id,
-                    status="failed",
-                    error=str(e)
-                )
-            except Exception as redis_error:
-                logger.warning(f"⚠️ Failed to publish error to Redis: {redis_error}")
+                from crawl4ai import AsyncWebCrawler
+                async with AsyncWebCrawler() as crawler:
+                    result = await crawler.arun(url=page_url, timeout=30, js_code=None)
 
-            return {
-                "success": False,
-                "error": f"Processing error: {str(e)}",
-                "website_id": website_id
+                    if result.success and result.html:
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+                        logger.info(f"✅ Fetched {len(result.html)} bytes from {page_url}")
+                        return (page_url, result.html)
+
+                    logger.warning(f"⚠️ Failed to fetch {page_url}")
+                    return None
+            except Exception as e:
+                logger.error(f"❌ Error fetching {page_url}: {e}")
+                return None
+
+    async def _extract_links(
+        self, html: str, page_url: str, base_domain: str, visited_urls: set
+    ) -> List[str]:
+        """Parse HTML and return list of new, same-domain URLs"""
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, 'lxml')
+
+            links = []
+            for a_tag in soup.find_all('a', href=True):
+                href = self._make_absolute_url(a_tag['href'], page_url)
+                if self._is_valid_crawl_link(href, base_domain, visited_urls):
+                    links.append(href)
+
+            logger.info(f"🔗 [LINKS] Found {len(links)} new links")
+            return links
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to extract links: {e}")
+            return []
+
+    def _make_absolute_url(self, href: str, page_url: str) -> str:
+        """Convert relative URL to absolute"""
+        if href.startswith(('http://', 'https://')):
+            return href
+        if href.startswith('/'):
+            domain = self._get_domain(page_url)
+            return f"{domain}{href}"
+        return urljoin(page_url, href)
+
+    def _is_valid_crawl_link(self, url: str, base_domain: str, visited_urls: set) -> bool:
+        """Check if URL should be queued (same domain, not visited)"""
+        if self._get_domain(url) != base_domain:
+            return False
+        if self._normalize_url(url) in visited_urls:
+            return False
+        return True
+
+    # ==================== CONTENT LAYER ====================
+
+    async def _process_page_content(self, html: str, page_url: str) -> str:
+        """Convert HTML to Markdown and extract embedded files"""
+        markdown = await self._html_to_markdown(html)
+        markdown = await self._extract_embedded_files_if_docling_enabled(html, page_url, markdown)
+        return markdown
+
+    async def _html_to_markdown(self, html_content: str) -> str:
+        """Convert HTML to Markdown using trafilatura + cleanup"""
+        try:
+            import trafilatura
+            from markdownify import markdownify as md
+
+            extracted = trafilatura.extract(html_content, include_comments=False)
+            markdown = md(extracted, heading_style="atx") if extracted else await self._fallback_manual_clean(html_content)
+
+            markdown = await self._clean_markdown_lines(markdown)
+            logger.info(f"✅ [CONTENT] {len(markdown)} characters")
+            return markdown
+        except Exception as e:
+            logger.error(f"❌ HTML to Markdown conversion failed: {e}")
+            raise
+
+    async def _fallback_manual_clean(self, html_content: str) -> str:
+        """Fallback: manual HTML cleaning if trafilatura fails"""
+        from markdownify import markdownify as md
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html_content, 'lxml')
+        for element in soup(["script", "style", "nav", "footer", "header", "aside", "form", "button", "meta", "link", "noscript"]):
+            element.extract()
+
+        return md(str(soup), heading_style="atx")
+
+    async def _clean_markdown_lines(self, markdown: str) -> str:
+        """Remove empty lines, noise, and excessive blank lines"""
+        lines = [line.rstrip() for line in markdown.split('\n')]
+        lines = [line for line in lines if line.strip()]
+        lines = [line for line in lines if len(line) > 2 or line.startswith('#')]
+
+        markdown = '\n'.join(lines)
+        while '\n\n\n' in markdown:
+            markdown = markdown.replace('\n\n\n', '\n\n')
+
+        return markdown
+
+    async def _extract_embedded_files_if_docling_enabled(
+        self, html_content: str, page_url: str, page_markdown: str
+    ) -> str:
+        """Extract embedded files from HTML if docling enabled"""
+        from core.config import settings
+
+        if not settings.docling_enabled:
+            return page_markdown
+
+        try:
+            file_links = await self._find_embedded_file_links(html_content, page_url)
+            if not file_links:
+                return page_markdown
+
+            extracted_docs = await self._process_all_docling_files(file_links)
+            return await self._append_extracted_docs(page_markdown, extracted_docs)
+        except Exception as e:
+            logger.warning(f"⚠️ [DOCLING] Error: {e}")
+            return page_markdown
+
+    async def _find_embedded_file_links(self, html_content: str, page_url: str) -> List[Dict]:
+        """Find embedded files (PDF, DOCX, etc.) in HTML"""
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html_content, 'lxml')
+        docling_supported = {'.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls'}
+
+        file_links = []
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            if not href.startswith(('http://', 'https://')):
+                href = urljoin(page_url, href)
+
+            if any(urlparse(href).path.lower().endswith(ext) for ext in docling_supported):
+                file_links.append({'url': href, 'text': link.get_text(strip=True) or 'Document'})
+
+        logger.info(f"📎 [DOCLING] Found {len(file_links)} embedded files")
+        return file_links[:5]  # Limit to 5 per page
+
+    async def _process_all_docling_files(self, file_links: List[Dict]) -> List[Dict]:
+        """Process all files through docling service"""
+        import httpx
+
+        extracted_docs = []
+        async with httpx.AsyncClient(timeout=60) as client:
+            for file_link in file_links:
+                doc = await self._process_single_docling_file(client, file_link)
+                if doc:
+                    extracted_docs.append(doc)
+
+        return extracted_docs
+
+    async def _process_single_docling_file(self, client: Any, file_link: Dict) -> Optional[Dict]:
+        """Process single file through docling"""
+        file_url = file_link['url']
+
+        try:
+            response = await client.get(file_url, timeout=30)
+            if response.status_code != 200:
+                logger.warning(f"⚠️ Failed to download {file_url}")
+                return None
+
+            if len(response.content) > 25 * 1024 * 1024:
+                logger.warning(f"⚠️ File too large: {file_url}")
+                return None
+
+            return await self._download_and_process_docling_file(response.content, file_url, file_link)
+        except Exception as e:
+            logger.warning(f"⚠️ Error processing {file_url}: {e}")
+            return None
+
+    async def _download_and_process_docling_file(self, file_bytes: bytes, file_url: str, file_link: Dict) -> Optional[Dict]:
+        """Save file and process through docling"""
+        _, file_ext = os.path.splitext(urlparse(file_url).path.lower())
+        fd, temp_path = tempfile.mkstemp(suffix=file_ext)
+
+        try:
+            os.write(fd, file_bytes)
+            os.close(fd)
+
+            from shared.docling_integration import process_with_docling
+
+            mime_types = {
+                '.pdf': 'application/pdf',
+                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                '.doc': 'application/msword',
+                '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                '.ppt': 'application/vnd.ms-powerpoint',
+                '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                '.xls': 'application/vnd.ms-excel',
             }
 
+            filename = os.path.basename(urlparse(file_url).path)
+            mime_type = mime_types.get(file_ext, 'application/octet-stream')
+
+            markdown_content, _ = await process_with_docling(temp_path, filename, mime_type, timeout_seconds=30)
+
+            if markdown_content:
+                logger.info(f"✅ [DOCLING] Extracted {len(markdown_content)} chars")
+                return {'title': file_link['text'], 'filename': filename, 'content': markdown_content}
+
+            return None
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    async def _append_extracted_docs(self, page_markdown: str, extracted_docs: List[Dict]) -> str:
+        """Append extracted documents to page markdown"""
+        if not extracted_docs:
+            return page_markdown
+
+        page_markdown += "\n\n---\n\n## Embedded Documents\n\n"
+
+        for doc in extracted_docs:
+            page_markdown += f"### {doc['title']}\n"
+            page_markdown += f"*Source: {doc['filename']}*\n\n"
+            page_markdown += doc['content']
+            page_markdown += "\n\n"
+
+        return page_markdown
+
+    # ==================== UPLOAD LAYER ====================
+
+    async def _resolve_file_search_store(self) -> str:
+        """Resolve FileSearch store name (fail fast)"""
+        from core.config import settings
+        from core.ai import get_genai_client
+
+        store_display_name = settings.gemini_file_search_store_name
+        if not store_display_name:
+            raise Exception("GEMINI_FILE_SEARCH_STORE_NAME not configured")
+
+        genai_client = get_genai_client()
+        if not genai_client:
+            raise Exception("Gemini client not configured")
+
+        store = get_file_search_store_by_display_name(genai_client, display_name=store_display_name)
+        if not store:
+            raise Exception("FileSearch store not found")
+
+        logger.info(f"✅ Resolved FileSearch store: {store}")
+        return store
+
+    async def _resolve_user_role_id(self, user_email: str, user_role_id: int = None) -> Optional[int]:
+        """Resolve user_role_id (allow NULL if not found)"""
+        if user_role_id:
+            logger.info(f"✅ Using provided user_role_id: {user_role_id}")
+            return user_role_id
+
+        user_role_id = await self.scraping_dao.get_admin_user_role_id(user_email)
+        if not user_role_id:
+            logger.warning(f"⚠️ No user role found, will use NULL")
+
+        return user_role_id
+
+    async def _upload_page_to_gemini(
+        self, website_id: int, page_url: str, markdown: str, store_name: str
+    ) -> Optional[str]:
+        """Upload single page to Gemini FileSearch"""
+        from core.ai import get_genai_client
+
+        genai_client = get_genai_client()
+        if not genai_client:
+            raise Exception("Gemini client not configured")
+
+        fd, temp_file = tempfile.mkstemp(suffix='.md')
+
+        try:
+            os.write(fd, markdown.encode('utf-8'))
+            os.close(fd)
+
+            metrics = calculate_metrics(markdown)
+            doc_name = f"page_{website_id}_{int(time.time())}"
+
+            logger.info(f"   📤 Uploading: {doc_name} ({metrics.get('file_size_bytes', 0):,} bytes)")
+
+            operation = genai_client.file_search_stores.upload_to_file_search_store(
+                file=temp_file,
+                file_search_store_name=store_name,
+                config=await self._build_upload_config(doc_name, website_id, page_url)
+            )
+
+            if not operation:
+                logger.error(f"   ❌ Failed to create upload operation")
+                return None
+
+            return await self._poll_upload_operation(operation)
+        finally:
+            try:
+                os.close(fd)
+            except:
+                pass
+            self._cleanup_temp_file(temp_file)
+
+    async def _build_upload_config(self, doc_name: str, website_id: int, page_url: str) -> Dict:
+        """Build Gemini upload configuration"""
+        return {
+            'display_name': doc_name,
+            'mime_type': 'text/markdown',
+            'custom_metadata': [
+                {'key': 'source_type', 'string_value': 'website'},
+                {'key': 'website_id', 'string_value': str(website_id)},
+                {'key': 'page_url', 'string_value': page_url}
+            ]
+        }
+
+    def _cleanup_temp_file(self, temp_file: str):
+        """Clean up temporary file"""
+        try:
+            os.unlink(temp_file)
+        except:
+            pass
+
+    async def _poll_upload_operation(self, operation, celery_task_id: str = None) -> Optional[str]:
+        """Poll Gemini upload operation until done"""
+        from core.ai import get_genai_client
+
+        genai_client = get_genai_client()
+        start_time = time.time()
+        max_wait = 300
+
+        while not operation.done:
+            if await self._is_task_cancelled(celery_task_id):
+                logger.error(f"   ❌ Task cancelled during upload polling")
+                return None
+
+            elapsed = time.time() - start_time
+            if elapsed > max_wait:
+                logger.error(f"   ❌ Timeout uploading ({elapsed:.0f}s)")
+                return None
+
+            logger.info(f"   ⏳ Waiting for upload... ({elapsed:.0f}s)")
+            await asyncio.sleep(5)
+            operation = genai_client.operations.get(operation)
+
+        return await self._get_document_name_from_operation(operation)
+
+    async def _get_document_name_from_operation(self, operation) -> Optional[str]:
+        """Extract document name from completed upload operation"""
+        if operation.done and hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
+            doc_name = operation.response.document_name
+            logger.info(f"   ✅ FileSearch document: {doc_name}")
+            return doc_name
+
+        logger.error(f"   ❌ Upload failed or invalid response")
+        return None
+
+    # ==================== DATABASE LAYER ====================
+
+    async def _record_child_page(
+        self, website_id: int, page_url: str, doc_name: str, store_name: str,
+        user_role_id: Optional[int], markdown: str, root_url: str, max_depth: int
+    ) -> Optional[int]:
+        """Record single page in database"""
+        if await self._should_skip_child_record(page_url, root_url, max_depth):
+            logger.info(f"   ℹ️ Skipping child record (single-page depth=0)")
+            return website_id
+
+        metadata = await self._build_child_page_metadata(doc_name, store_name)
+        metrics = calculate_metrics(markdown)
+
+        return await self.scraping_dao.record_child_page(
+            parent_id=website_id,
+            page_url=page_url,
+            gemini_file_name=doc_name,
+            file_search_metadata=metadata,
+            user_role_id=user_role_id,
+            file_size=metrics.get('file_size_bytes', 0),
+            char_count=metrics.get('char_count', 0)
+        )
+
+    async def _should_skip_child_record(self, page_url: str, root_url: str, max_depth: int) -> bool:
+        """Check if child record should be skipped (single-page root)"""
+        return max_depth == 0 and page_url == root_url
+
+    async def _build_child_page_metadata(self, doc_name: str, store_name: str) -> Dict:
+        """Build FileSearch metadata for child page"""
+        return {
+            "type": "file_search",
+            "file_search_store_name": store_name,
+            "document_name": doc_name,
+            "uploaded_at": datetime.utcnow().isoformat()
+        }
+
+    async def _finalize_website_record(
+        self, website_id: int, page_count: int, total_size: int, total_chars: int, store_name: str
+    ):
+        """Update parent website record with aggregate stats"""
+        try:
+            from shared.db import get_db_connection
+            import json
+
+            metadata = await self._build_finalize_metadata(page_count, store_name)
+
+            async with get_db_connection() as conn:
+                await conn.execute(
+                    """UPDATE scraped_websites
+                       SET pages_scraped = $1, metadata = $2, file_size = $3,
+                           char_count = $4, processing_status = 'completed', updated_at = NOW()
+                       WHERE id = $5""",
+                    page_count, json.dumps(metadata), total_size, total_chars, website_id
+                )
+
+            logger.info(f"✅ Finalized website {website_id}: {page_count} pages, {total_size:,} bytes")
+        except Exception as e:
+            logger.error(f"❌ Failed to finalize: {e}")
+            raise
+
+    async def _build_finalize_metadata(self, page_count: int, store_name: str) -> Dict:
+        """Build metadata for finalization"""
+        return {
+            "type": "file_search",
+            "file_search_store_name": store_name,
+            "pages_count": page_count,
+            "uploaded_at": datetime.utcnow().isoformat()
+        }
+
+    # ==================== CANCELLATION ====================
+
     async def _is_task_cancelled(self, celery_task_id: str) -> bool:
-        """Check if task has been marked for cancellation via Redis"""
+        """Check if task marked for cancellation via Redis"""
         if not celery_task_id:
             return False
 
         try:
             import redis as redis_lib
-            # Use WEB_REDIS_URL (DB 1) for web tasks
             redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
 
             try:
                 redis_conn = redis_lib.from_url(redis_url, socket_connect_timeout=2)
-                cancelled_key = f"task_cancelled:{celery_task_id}"
-                result = redis_conn.exists(cancelled_key)
+                result = redis_conn.exists(f"task_cancelled:{celery_task_id}")
                 redis_conn.close()
                 return bool(result)
-            except redis_lib.ConnectionError as conn_err:
-                # Redis not available - not critical, just skip cancellation check
-                # This is common in local development without Redis
-                logger.debug(f"ℹ️ Redis unavailable for cancellation check (this is OK): {redis_url}")
+            except redis_lib.ConnectionError:
+                logger.debug(f"ℹ️ Redis unavailable (OK in local dev)")
                 return False
         except Exception as e:
             logger.debug(f"ℹ️ Skipping cancellation check: {e}")
             return False
 
-    async def _scrape_website(
-        self,
-        url: str,
-        max_depth: int,
-        max_pages: int,
-        max_concurrent: int,
-        delay_between_requests: float,
-        celery_task_id: str = None
-    ) -> List[tuple]:
-        """
-        Scrape website using crawl4ai with concurrency control
-
-        Returns:
-            List of tuples: [(page_url, page_html), ...]
-        """
-        try:
-            # Check if dependencies are available
-            try:
-                from crawl4ai import AsyncWebCrawler, CrawlResult
-                logger.info("✅ crawl4ai is available")
-            except ImportError as ie:
-                logger.error(f"❌ crawl4ai not available: {ie}")
-                logger.error("   Make sure: pip install crawl4ai")
-                logger.error("   And run: playwright install")
-                return []
-
-            pages = []
-            visited_urls = set()
-            to_visit = [(url, 0)]  # (url, depth)
-            semaphore = asyncio.Semaphore(max_concurrent)
-
-            logger.info(f"🔄 Starting BFS crawl with max_depth={max_depth}, max_pages={max_pages}")
-
-            async def fetch_page(page_url: str) -> Optional[tuple]:
-                """Fetch a single page with semaphore limiting"""
-                # Check cancellation periodically
-                if await self._is_task_cancelled(celery_task_id):
-                    logger.warning(f"⏸️ Crawling cancelled for {url}")
-                    return None
-
-                async with semaphore:
-                    try:
-                        logger.info(f"📄 Fetching: {page_url}")
-
-                        try:
-                            async with AsyncWebCrawler() as crawler:
-                                result: CrawlResult = await crawler.arun(
-                                    url=page_url,
-                                    timeout=30,
-                                    js_code=None  # Set to JavaScript code if needed for dynamic content
-                                )
-
-                                if result.success and result.html:
-                                    logger.info(f"✅ Fetched {len(result.html)} bytes from {page_url}")
-
-                                    # Apply delay before next request
-                                    if delay_between_requests > 0:
-                                        await asyncio.sleep(delay_between_requests)
-
-                                    return (page_url, result.html)
-                                else:
-                                    # Log detailed error info from crawler
-                                    error_msg = getattr(result, 'error_message', 'Unknown error')
-                                    logger.warning(f"⚠️ Failed to fetch {page_url}: {error_msg}")
-                                    logger.warning(f"   Success: {result.success}, HTML length: {len(result.html) if result.html else 0}")
-                                    return None
-                        except ImportError as ie:
-                            logger.error(f"❌ Import error - crawl4ai or dependencies not available: {ie}")
-                            logger.error(f"   Make sure crawl4ai is installed and playwright browsers are available")
-                            return None
-
-                    except Exception as e:
-                        logger.error(f"❌ Error fetching {page_url}: {e}")
-                        import traceback
-                        logger.error(f"   Traceback: {traceback.format_exc()}")
-                        return None
-
-            # BFS crawling with depth control
-            logger.info(f"📋 [BFS] Starting queue with: {to_visit}")
-            while to_visit and len(pages) < max_pages:
-                current_url, current_depth = to_visit.pop(0)
-                normalized_current_url = self._normalize_url(current_url)
-                logger.info(f"📋 [BFS] Processing queue item: {current_url} (normalized: {normalized_current_url}, depth={current_depth}, visited={len(visited_urls)}, pages={len(pages)})")
-
-                # Skip if already visited or depth exceeded
-                if normalized_current_url in visited_urls:
-                    logger.info(f"⏭️  [BFS] Already visited: {current_url} (normalized: {normalized_current_url})")
-                    continue
-                if current_depth > max_depth:
-                    logger.info(f"⏭️  [BFS] Depth exceeded ({current_depth} > {max_depth}): {current_url}")
-                    continue
-
-                visited_urls.add(normalized_current_url)
-
-                # Fetch page
-                logger.info(f"🔍 [BFS] Fetching page at depth {current_depth}: {current_url}")
-                result = await fetch_page(current_url)
-                if result:
-                    pages.append(result)
-                    logger.info(f"✅ [BFS] Added page {len(pages)}/{max_pages}")
-                    page_url, page_html = result
-
-                    # Extract links for next level if depth allows
-                    if current_depth < max_depth and len(pages) < max_pages:
-                        try:
-                            from bs4 import BeautifulSoup
-
-                            soup = BeautifulSoup(page_html, 'lxml')
-                            base_domain = self._get_domain(url)
-                            logger.info(f"🔗 [LINKS] Extracting links from {current_url} (base_domain={base_domain})")
-
-                            found_links = []
-                            all_links = soup.find_all('a', href=True)
-                            logger.info(f"🔗 [LINKS] Found {len(all_links)} total <a> tags")
-
-                            for link in all_links:
-                                href = link['href']
-                                # Convert relative URLs to absolute
-                                if href.startswith('/'):
-                                    href = f"{base_domain}{href}"
-                                elif not href.startswith('http'):
-                                    continue
-
-                                # Normalize URL for deduplication
-                                normalized_href = self._normalize_url(href)
-
-                                # Only crawl same domain
-                                if self._get_domain(href) == base_domain and normalized_href not in visited_urls:
-                                    to_visit.append((href, current_depth + 1))
-                                    found_links.append(href)
-                                    logger.debug(f"🔗 [LINKS] Queued (normalized): {normalized_href}")
-                                    if len(pages) >= max_pages:
-                                        break
-
-                            logger.info(f"🔗 [LINKS] Added {len(found_links)} new links to queue")
-
-                        except Exception as e:
-                            logger.warning(f"⚠️ Failed to extract links from {current_url}: {e}")
-                            import traceback
-                            logger.warning(f"   Traceback: {traceback.format_exc()}")
-
-            logger.info(f"✅ Crawling complete: {len(pages)} pages collected")
-            return pages
-
-        except Exception as e:
-            logger.error(f"❌ Website scraping failed: {e}")
-            return []
-
-    async def _html_to_markdown(self, html_content: str) -> str:
-        """Convert HTML content to Markdown with noise filtering"""
-        try:
-            import trafilatura
-            from markdownify import markdownify as md
-            from bs4 import BeautifulSoup
-
-            # Step 1: Use trafilatura to extract main content (removes boilerplate, ads, nav, etc)
-            logger.info("🧹 [CONTENT_EXTRACTION] Using trafilatura to extract main content...")
-            extracted_content = trafilatura.extract(html_content, include_comments=False)
-
-            if extracted_content:
-                logger.info("✅ [TRAFILATURA] Successfully extracted main content")
-                # Convert extracted content to markdown
-                markdown = md(extracted_content, heading_style="atx")
-            else:
-                logger.warning("⚠️ [TRAFILATURA] Failed to extract content, falling back to manual cleaning")
-                # Fallback: Manual HTML cleaning
-                soup = BeautifulSoup(html_content, 'lxml')
-                # Remove script, style, nav, footer, header, aside, and other noise elements
-                for element in soup(["script", "style", "nav", "footer", "header", "aside",
-                                     "form", "button", "meta", "link", "noscript"]):
-                    element.extract()
-
-                # Remove elements with common ad/nav class names
-                for element in soup.find_all(class_=lambda x: x and any(
-                    noise in x.lower() for noise in ['ad', 'sidebar', 'widget', 'comment', 'related', 'cookie'])):
-                    element.extract()
-
-                # Convert to markdown
-                markdown = md(str(soup), heading_style="atx")
-
-            # Step 2: Clean up markdown formatting
-            logger.info("🧹 [MARKDOWN_CLEANUP] Cleaning up markdown formatting...")
-            lines = markdown.split('\n')
-            lines = [line.rstrip() for line in lines]
-            lines = [line for line in lines if line.strip()]  # Remove empty lines
-
-            # Remove lines that are just special characters or very short noise
-            lines = [line for line in lines if len(line) > 2 or line.startswith('#')]
-
-            markdown = '\n'.join(lines)
-
-            # Remove excessive blank lines (more than 2 consecutive)
-            while '\n\n\n' in markdown:
-                markdown = markdown.replace('\n\n\n', '\n\n')
-
-            logger.info(f"✅ [CONTENT_EXTRACTED] Content cleaned: {len(markdown)} characters")
-            return markdown
-
-        except Exception as e:
-            logger.error(f"❌ HTML to Markdown conversion failed: {e}")
-            raise
-
-    async def _extract_embedded_files_if_docling_enabled(
-        self,
-        html_content: str,
-        page_url: str,
-        page_markdown: str
-    ) -> str:
-        """
-        Extract embedded files (PDF, DOCX, etc.) from HTML if docling is enabled.
-        Process them through docling service and append to markdown.
-
-        Only runs if DOCLING_ENABLED is true.
-        """
-        from core.config import settings
-
-        # Only run if docling is enabled
-        if not settings.docling_enabled:
-            return page_markdown
-
-        try:
-            from bs4 import BeautifulSoup
-            import httpx
-
-            logger.info("📎 [DOCLING] Checking for embedded files since DOCLING_ENABLED=true")
-
-            # Parse HTML to find file links
-            soup = BeautifulSoup(html_content, 'lxml')
-            docling_supported = {'.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls'}
-
-            # Find all links to supported file types
-            file_links = []
-            for link in soup.find_all('a', href=True):
-                href = link['href']
-                # Skip if already absolute, make absolute
-                if not href.startswith(('http://', 'https://')):
-                    href = urljoin(page_url, href)
-
-                # Check if it's a supported file type
-                parsed_url = urlparse(href)
-                path_lower = parsed_url.path.lower()
-
-                if any(path_lower.endswith(ext) for ext in docling_supported):
-                    file_links.append({
-                        'url': href,
-                        'text': link.get_text(strip=True) or 'Document'
-                    })
-
-            if not file_links:
-                logger.info("📎 [DOCLING] No embedded files found in page")
-                return page_markdown
-
-            logger.info(f"📎 [DOCLING] Found {len(file_links)} embedded files in page")
-
-            # Limit to max 5 files per page to avoid overwhelming processing
-            max_files = 5
-            if len(file_links) > max_files:
-                logger.warning(f"⚠️ [DOCLING] Found {len(file_links)} files, limiting to {max_files}")
-                file_links = file_links[:max_files]
-
-            # Process each file through docling
-            extracted_docs = []
-
-            async with httpx.AsyncClient(timeout=60) as client:
-                for i, file_link in enumerate(file_links, 1):
-                    try:
-                        file_url = file_link['url']
-                        file_text = file_link['text']
-
-                        logger.info(f"📥 [DOCLING] Downloading file {i}/{len(file_links)}: {file_url}")
-
-                        # Download file with size limit (max 25MB per file)
-                        response = await client.get(file_url, timeout=30)
-
-                        if response.status_code != 200:
-                            logger.warning(f"⚠️ [DOCLING] Failed to download {file_url}: HTTP {response.status_code}")
-                            continue
-
-                        file_size = len(response.content)
-                        max_file_size = 25 * 1024 * 1024  # 25MB
-
-                        if file_size > max_file_size:
-                            logger.warning(f"⚠️ [DOCLING] File too large ({file_size/1024/1024:.1f}MB > 25MB): {file_url}")
-                            continue
-
-                        logger.info(f"📥 [DOCLING] Downloaded {file_size/1024:.1f}KB from {file_url}")
-
-                        # Save to temporary file
-                        _, file_ext = os.path.splitext(urlparse(file_url).path.lower())
-                        fd, temp_path = tempfile.mkstemp(suffix=file_ext)
-
-                        try:
-                            os.write(fd, response.content)
-                            os.close(fd)
-
-                            # Process through docling
-                            from shared.docling_integration import process_with_docling
-
-                            # Infer MIME type from extension
-                            mime_types = {
-                                '.pdf': 'application/pdf',
-                                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                                '.doc': 'application/msword',
-                                '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                                '.ppt': 'application/vnd.ms-powerpoint',
-                                '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                                '.xls': 'application/vnd.ms-excel',
-                            }
-                            mime_type = mime_types.get(file_ext, 'application/octet-stream')
-
-                            filename = os.path.basename(urlparse(file_url).path)
-
-                            logger.info(f"🤖 [DOCLING] Processing {filename} through docling service...")
-
-                            markdown_content, metadata = await process_with_docling(
-                                temp_path,
-                                filename,
-                                mime_type,
-                                timeout_seconds=30
-                            )
-
-                            if markdown_content:
-                                logger.info(f"✅ [DOCLING] Successfully extracted {len(markdown_content)} chars from {filename}")
-                                extracted_docs.append({
-                                    'title': file_text,
-                                    'filename': filename,
-                                    'content': markdown_content
-                                })
-                            else:
-                                logger.warning(f"⚠️ [DOCLING] Failed to extract content from {filename}")
-
-                        finally:
-                            if os.path.exists(temp_path):
-                                os.unlink(temp_path)
-
-                    except Exception as e:
-                        logger.warning(f"⚠️ [DOCLING] Error processing {file_link['url']}: {e}")
-                        continue
-
-            # If we extracted any documents, append to markdown
-            if extracted_docs:
-                logger.info(f"✅ [DOCLING] Extracted {len(extracted_docs)} embedded files, appending to page markdown")
-
-                page_markdown += "\n\n---\n\n## Embedded Documents\n\n"
-
-                for doc in extracted_docs:
-                    page_markdown += f"### {doc['title']}\n"
-                    page_markdown += f"*Source: {doc['filename']}*\n\n"
-                    page_markdown += doc['content']
-                    page_markdown += "\n\n"
-
-            return page_markdown
-
-        except Exception as e:
-            logger.warning(f"⚠️ [DOCLING] Error extracting embedded files: {e}")
-            # Return original markdown if extraction fails
-            return page_markdown
-
-    async def _upload_to_gemini(
-        self,
-        website_id: int,
-        url: str,
-        processed_pages: List[Dict[str, str]],
-        max_depth: int = 2,
-        user_email: str = None,
-        user_role_id: int = None,
-        celery_task_id: str = None
-    ) -> Dict[str, Any]:
-        """Upload website content to Gemini FileSearch"""
-        try:
-            from core.ai import get_genai_client
-            from core.config import settings
-            import json
-            import tempfile
-            import os
-
-            genai_client = get_genai_client()
-            if not genai_client:
-                raise Exception("Gemini client not configured")
-
-            # Get FileSearch store
-            store_display_name = settings.gemini_file_search_store_name
-            if not store_display_name:
-                raise Exception("GEMINI_FILE_SEARCH_STORE_NAME not configured")
-
-            file_search_store_name = get_file_search_store_by_display_name(
-                genai_client,
-                display_name=store_display_name
-            )
-
-            if not file_search_store_name:
-                logger.error("❌ FileSearch store not found")
-                raise Exception("FileSearch store not found")
-
-            logger.info(f"📤 Uploading {len(processed_pages)} pages individually to FileSearch")
-
-            # Use user_role_id if provided, otherwise try to look up from database
-            logger.info(f"👤 [UPLOAD_START] user_role_id value: {user_role_id} (type: {type(user_role_id).__name__})")
-            if not user_role_id:
-                logger.info(f"ℹ️ user_role_id not provided, attempting to look up for {user_email}...")
-                user_role_id = await self.scraping_dao.get_admin_user_role_id(user_email)
-                if not user_role_id:
-                    logger.warning(f"⚠️ Could not find user role for {user_email}, child pages will have NULL user_role_id")
-                else:
-                    logger.info(f"✅ Looked up user_role_id from database: {user_role_id}")
-            else:
-                logger.info(f"✅ Using provided user_role_id: {user_role_id}")
-
-            uploaded_pages = []
-            failed_pages = []
-
-            # Upload each page individually
-            for idx, page in enumerate(processed_pages, 1):
-                # CHECK FOR CANCELLATION BEFORE PROCESSING EACH PAGE
-                if await self._is_task_cancelled(celery_task_id):
-                    logger.warning(f"❌ Task cancelled before processing page {idx}/{len(processed_pages)}")
-                    raise Exception("Task cancelled by admin")
-
-                page_url = page['url']
-                page_markdown = page['markdown']
-
-                logger.info(f"📄 [{idx}/{len(processed_pages)}] Uploading page: {page_url}")
-
-                try:
-                    # Create temp file for this page
-                    with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as pf:
-                        pf.write(page_markdown)
-                        page_temp_file = pf.name
-
-                    try:
-                        # Calculate metrics before upload
-                        metrics = calculate_metrics(page_markdown)
-                        char_count = metrics.get('char_count', 0)
-                        file_size = metrics.get('file_size_bytes', 0)
-
-                        # Upload this page to FileSearch
-                        document_display_name = f"page_{website_id}_{int(time.time())}_{idx}"
-
-                        logger.info(f"   - Document: {document_display_name}")
-                        logger.info(f"   - Size: {file_size:,} bytes")
-                        logger.info(f"   - Characters: {char_count:,}")
-
-                        # Upload using async LRO pattern
-                        operation = genai_client.file_search_stores.upload_to_file_search_store(
-                            file=page_temp_file,
-                            file_search_store_name=file_search_store_name,
-                            config={
-                                'display_name': document_display_name,
-                                'mime_type': 'text/markdown',
-                                'custom_metadata': [
-                                    {'key': 'source_type', 'string_value': 'website'},
-                                    {'key': 'website_id', 'string_value': str(website_id)},
-                                    {'key': 'source_url', 'string_value': url},
-                                    {'key': 'page_url', 'string_value': page_url}
-                                ]
-                            }
-                        )
-
-                        if not operation:
-                            logger.error(f"   ❌ Failed to create upload operation for {page_url}")
-                            failed_pages.append(page_url)
-                            continue
-
-                        # Wait for upload to complete
-                        start_time = time.time()
-                        max_wait_time = 300  # 5 minutes
-                        document_name = None
-
-                        while not operation.done:
-                            # CHECK FOR CANCELLATION WHILE WAITING FOR UPLOAD
-                            if await self._is_task_cancelled(celery_task_id):
-                                logger.error(f"❌ TASK CANCELLED WHILE UPLOADING - STOPPING ENTIRE PROCESS")
-                                raise Exception("Task cancelled by admin during upload")
-
-                            elapsed = time.time() - start_time
-                            if elapsed > max_wait_time:
-                                logger.error(f"   ❌ Timeout uploading {page_url}")
-                                failed_pages.append(page_url)
-                                break
-
-                            await asyncio.sleep(5)
-                            operation = genai_client.operations.get(operation)
-
-                        if operation.done and hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
-                            document_name = operation.response.document_name
-                            logger.info(f"   ✅ Created FileSearch document: {document_name}")
-
-                            # CHECK FOR CANCELLATION AFTER UPLOAD, BEFORE RECORDING
-                            if await self._is_task_cancelled(celery_task_id):
-                                logger.error(f"❌ TASK CANCELLED AFTER UPLOAD - STOPPING ENTIRE PROCESS")
-                                raise Exception("Task cancelled by admin after upload")
-
-                            # Prepare metadata for this page
-                            file_search_metadata = {
-                                "type": "file_search",
-                                "file_search_store_name": file_search_store_name,
-                                "document_name": document_name,
-                                "uploaded_at": datetime.utcnow().isoformat()
-                            }
-
-                            # Record this page in database IMMEDIATELY
-                            # Skip child page recording if this is a depth=0 single-page scrape (root is the only page)
-                            is_root_page = (page_url == url)
-                            is_single_page_scrape = (max_depth == 0)
-
-                            if is_single_page_scrape and is_root_page:
-                                logger.info(f"   ℹ️  Skipping child page record (root page in single-page depth=0 scrape)")
-                                child_page_id = website_id  # Use parent ID since root IS the website
-                            else:
-                                child_page_id = await self.scraping_dao.record_child_page(
-                                    parent_id=website_id,
-                                    page_url=page_url,
-                                    gemini_file_name=document_name,
-                                    file_search_metadata=file_search_metadata,
-                                    user_role_id=user_role_id,
-                                    file_size=file_size,
-                                    char_count=char_count
-                                )
-
-                            if child_page_id:
-                                logger.info(f"   ✅ Recorded child page ID: {child_page_id}")
-                                uploaded_pages.append({
-                                    "url": page_url,
-                                    "page_id": child_page_id,
-                                    "document_name": document_name,
-                                    "metadata": file_search_metadata
-                                })
-                            else:
-                                logger.error(f"   ❌ Failed to record child page in database")
-                                failed_pages.append(page_url)
-                        else:
-                            logger.error(f"   ❌ FileSearch upload failed for {page_url}")
-                            failed_pages.append(page_url)
-
-                    finally:
-                        # Clean up temp file
-                        try:
-                            os.unlink(page_temp_file)
-                        except:
-                            pass
-
-                except Exception as page_error:
-                    logger.error(f"   ❌ Error uploading page {page_url}: {page_error}")
-                    failed_pages.append(page_url)
-                    continue
-
-            # Summary
-            logger.info(f"\n📊 Upload Summary:")
-            logger.info(f"   - Pages uploaded: {len(uploaded_pages)}/{len(processed_pages)}")
-            logger.info(f"   - Failed: {len(failed_pages)}")
-
-            if failed_pages:
-                logger.warning(f"   - Failed pages: {', '.join(failed_pages)}")
-
-            if not uploaded_pages:
-                raise Exception(f"Failed to upload any pages. {len(failed_pages)} pages failed.")
-
-            # Return success with all uploaded pages info
-            return {
-                "success": True,
-                "pages_uploaded": len(uploaded_pages),
-                "pages_failed": len(failed_pages),
-                "uploaded_pages": uploaded_pages,
-                "file_search_metadata": {
-                    "type": "file_search",
-                    "file_search_store_name": file_search_store_name,
-                    "pages_count": len(uploaded_pages),
-                    "uploaded_at": datetime.utcnow().isoformat()
-                }
-            }
-
-        except Exception as e:
-            import traceback
-            logger.error(f"❌ Gemini upload failed: {type(e).__name__}: {e}")
-            logger.error(f"   Traceback: {traceback.format_exc()}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
-
-    async def _record_website_metadata(
-        self,
-        website_id: int,
-        url: str,
-        gemini_file_name: str,
-        file_search_metadata: Dict[str, Any],
-        page_count: int,
-        total_size_bytes: int = 0,
-        total_char_count: int = 0,
-        user_email: str = None
-    ) -> Dict[str, Any]:
-        """
-        Record website metadata in database.
-        With the new per-page upload approach, this updates the main website record
-        with overall status and metadata about the pages_uploaded.
-        Individual page records are created immediately during upload.
-        """
-        try:
-            from shared.db import get_db_connection
-            import json
-
-            async with get_db_connection() as conn:
-                # Update the main website record with overall status
-                # Extract pages_uploaded count from file_search_metadata if available
-                pages_uploaded = file_search_metadata.get('pages_count', page_count) if file_search_metadata else page_count
-
-                await conn.execute(
-                    """UPDATE scraped_websites
-                       SET pages_scraped = $1,
-                           metadata = $2,
-                           file_size = $4,
-                           char_count = $5,
-                           processing_status = 'completed',
-                           updated_at = NOW()
-                       WHERE id = $3""",
-                    pages_uploaded,
-                    json.dumps(file_search_metadata),
-                    website_id,
-                    total_size_bytes,
-                    total_char_count
-                )
-
-            logger.info(f"✅ Recorded metadata for website {website_id}")
-            logger.info(f"   - Pages uploaded: {pages_uploaded}")
-            logger.info(f"   - Total size: {total_size_bytes:,} bytes")
-            logger.info(f"   - Total chars: {total_char_count:,}")
-            logger.info(f"   - Status: completed")
-
-            return {
-                "success": True,
-                "website_id": website_id,
-                "page_count": pages_uploaded
-            }
-
-        except Exception as e:
-            logger.error(f"❌ Failed to record metadata: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+    # ==================== UTILITIES ====================
 
     @staticmethod
     def _get_domain(url: str) -> str:
         """Extract domain from URL"""
         try:
-            from urllib.parse import urlparse
-
             parsed = urlparse(url)
-            domain = f"{parsed.scheme}://{parsed.netloc}"
-            return domain
+            return f"{parsed.scheme}://{parsed.netloc}"
         except:
             return url
 
     @staticmethod
     def _normalize_url(url: str) -> str:
-        """Normalize URL for consistent deduplication.
-
-        Removes query parameters, fragments, and normalizes trailing slashes.
-        This ensures that URLs like https://example.com/ and https://example.com
-        are treated as the same page.
-        """
+        """Normalize URL for consistent deduplication"""
         try:
             from urllib.parse import urlparse, urlunparse
 
             parsed = urlparse(url)
+            normalized = urlunparse((parsed.scheme, parsed.netloc, parsed.path, '', '', ''))
 
-            # Remove query parameters and fragments (they're not relevant for crawling)
-            normalized = urlunparse((
-                parsed.scheme,
-                parsed.netloc,
-                parsed.path,
-                '',  # params (empty)
-                '',  # query (empty)
-                ''   # fragment (empty)
-            ))
-
-            # Remove trailing slash from path (but keep it for root: https://example.com/)
             if normalized.endswith('/') and not normalized.endswith('://'):
-                # Check if path is not just the root
                 if parsed.path not in ('/', ''):
                     normalized = normalized.rstrip('/')
-            # Ensure root URLs always have trailing slash (https://example.com/)
             elif not normalized.endswith('/') and not parsed.path:
                 normalized += '/'
 
-            return normalized.lower()  # Lowercase for case-insensitive comparison
+            return normalized.lower()
         except:
             return url.lower()
