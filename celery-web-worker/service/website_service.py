@@ -73,6 +73,10 @@ class WebsiteService:
             from .processing_service import ProcessingService
             processing_service = ProcessingService()
 
+            # Extract user_role_id from options with logging
+            extracted_user_role_id = options.get("user_role_id")
+            logger.info(f"👤 [USER_ROLE] Extracted user_role_id from options: {extracted_user_role_id} (type: {type(extracted_user_role_id).__name__})")
+
             result = await processing_service.process_website_content(
                 website_id=website_id,
                 url=url,
@@ -83,7 +87,7 @@ class WebsiteService:
                 delay_between_requests=options.get("delay_between_requests", 0.0),
                 replace_existing=options.get("replace_existing", False),
                 user_email=options.get("user_email", "admin"),
-                user_role_id=options.get("user_role_id")
+                user_role_id=extracted_user_role_id
             )
 
             if result.get("success"):

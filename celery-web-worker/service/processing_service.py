@@ -639,11 +639,14 @@ class ProcessingService:
             logger.info(f"📤 Uploading {len(processed_pages)} pages individually to FileSearch")
 
             # Use user_role_id if provided, otherwise try to look up from database
+            logger.info(f"👤 [UPLOAD_START] user_role_id value: {user_role_id} (type: {type(user_role_id).__name__})")
             if not user_role_id:
                 logger.info(f"ℹ️ user_role_id not provided, attempting to look up for {user_email}...")
                 user_role_id = await self.scraping_dao.get_admin_user_role_id(user_email)
                 if not user_role_id:
                     logger.warning(f"⚠️ Could not find user role for {user_email}, child pages will have NULL user_role_id")
+                else:
+                    logger.info(f"✅ Looked up user_role_id from database: {user_role_id}")
             else:
                 logger.info(f"✅ Using provided user_role_id: {user_role_id}")
 
