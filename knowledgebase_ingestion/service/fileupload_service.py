@@ -399,23 +399,79 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.error(f"❌ [REDIS_CLEAR_ERROR] Error clearing Redis: {e}")
             errors.append(f"Redis clear failed: {e}")
 
-        # Step 2b: Revoke all Celery tasks (kills running tasks)
+        # Step 2b: Set cancellation flags in Redis for all running tasks
+        logger.info("🔴 [TASK_CANCEL_FLAGS] Setting cancellation flags in Redis...")
+        try:
+            import redis as redis_lib
+
+            # Get all websites and set cancellation flags
+            async with get_db_connection() as conn:
+                running_websites = await conn.fetch(
+                    "SELECT id, celery_task_id FROM scraped_websites WHERE processing_status = 'processing' AND celery_task_id IS NOT NULL"
+                )
+
+                if running_websites:
+                    logger.info(f"   Found {len(running_websites)} running website tasks")
+
+                    # Set cancellation flag for each running task in Redis
+                    file_redis_url = os.getenv('FILE_REDIS_URL', 'redis://localhost:6379/0')
+                    web_redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
+
+                    for website in running_websites:
+                        task_id = website['celery_task_id']
+                        if task_id:
+                            try:
+                                # Set flag in web Redis (DB 1) since these are web tasks
+                                redis_conn = redis_lib.from_url(web_redis_url, decode_responses=True, socket_connect_timeout=2)
+                                redis_conn.setex(f"task_cancelled:{task_id}", 300, "1")  # Expire in 5 minutes
+                                redis_conn.close()
+                                logger.info(f"   ✅ Set cancellation flag for task {task_id}")
+                            except Exception as cf_err:
+                                logger.warning(f"   ⚠️ Could not set flag for {task_id}: {cf_err}")
+                else:
+                    logger.info("   No running website tasks found")
+
+                # Get all files and set cancellation flags
+                running_files = await conn.fetch(
+                    "SELECT id, celery_task_id FROM file_uploads WHERE processing_status = 'processing' AND celery_task_id IS NOT NULL"
+                )
+
+                if running_files:
+                    logger.info(f"   Found {len(running_files)} running file tasks")
+
+                    for file_rec in running_files:
+                        task_id = file_rec['celery_task_id']
+                        if task_id:
+                            try:
+                                # Set flag in file Redis (DB 0) since these are file tasks
+                                redis_conn = redis_lib.from_url(file_redis_url, decode_responses=True, socket_connect_timeout=2)
+                                redis_conn.setex(f"task_cancelled:{task_id}", 300, "1")  # Expire in 5 minutes
+                                redis_conn.close()
+                                logger.info(f"   ✅ Set cancellation flag for task {task_id}")
+                            except Exception as cf_err:
+                                logger.warning(f"   ⚠️ Could not set flag for {task_id}: {cf_err}")
+                else:
+                    logger.info("   No running file tasks found")
+
+            logger.info("   ✅ All cancellation flags set in Redis")
+        except Exception as e:
+            logger.warning(f"⚠️ [TASK_CANCEL_FLAGS_ERROR] Error setting cancellation flags: {e}")
+            # Don't add to errors - this is just a safety mechanism
+
+        # Step 2c: Revoke all Celery tasks via control.purge()
         logger.info("🔴 [CELERY_REVOKE] Revoking all Celery tasks...")
         try:
-            # Purge pending file processing tasks
             logger.info("   📋 Purging file_processing queue...")
             file_celery.control.purge()
             logger.info("   ✅ file_processing tasks purged")
 
-            # Purge pending web crawling tasks
             logger.info("   📋 Purging web_crawling queue...")
             web_celery.control.purge()
             logger.info("   ✅ web_crawling tasks purged")
 
-            logger.info("   ✅ All Celery tasks revoked/purged")
+            logger.info("   ✅ All Celery task queues purged")
         except Exception as e:
-            logger.error(f"❌ [CELERY_REVOKE_ERROR] Error revoking Celery tasks: {e}")
-            errors.append(f"Celery revoke failed: {e}")
+            logger.warning(f"⚠️ [CELERY_REVOKE_ERROR] Error purging Celery tasks: {e}")
 
         # Step 3: Mark all files as deleted in database (soft delete - don't remove records)
         logger.info("💾 [DB_UPDATE_FILES] Marking all files as deleted in database...")
