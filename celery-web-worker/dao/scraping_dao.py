@@ -82,16 +82,26 @@ class ScrapingDAO:
         Stores scraping_config in metadata JSONB for UI tree detection.
         """
         import json
+        from urllib.parse import urlparse
+
+        # Determine source type: use provided url_type or detect from URL
+        # Domain only (https://www.globistaan.com or https://www.globistaan.com/) → "website"
+        # With path (https://www.globistaan.com/index.html or /about) → "single"
+        url_type = record_data.get('url_type')
+        if not url_type:
+            parsed_url = urlparse(record_data.get('original_url', ''))
+            path = parsed_url.path.strip('/')
+            url_type = "website" if not path else "single"
 
         logger.info(f"🌐 [WEB_INSERT_START] Recording scraped website metadata")
         logger.info(f"   URL: {record_data.get('original_url')}")
-        logger.info(f"   Type: {record_data.get('url_type', 'single')}")
+        logger.info(f"   Type: {url_type}")
         logger.info(f"   User Role ID: {record_data.get('user_role_id')}")
 
         # Prepare metadata with scraping_config for UI tree detection
         metadata = {
             "scraping_config": {
-                "source": record_data.get('url_type', 'single'),  # 'sitemap', 'website', 'single'
+                "source": url_type,  # 'sitemap', 'website', 'single'
             }
         }
 
