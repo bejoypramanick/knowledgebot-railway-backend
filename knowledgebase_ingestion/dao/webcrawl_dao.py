@@ -117,15 +117,15 @@ class WebCrawlDAO:
     async def update_website_status(self, website_id: int, status: str, error_message: str = None) -> bool:
         """Update website processing status."""
         query = """
-            UPDATE scraped_websites 
+            UPDATE scraped_websites
             SET processing_status = $2, error_message = $3, updated_at = NOW()
             WHERE id = $1
         """
-        params = [status, error_message, website_id]
+        params = [website_id, status, error_message]
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                result = await conn.execute(query, status, error_message, website_id)
+                result = await conn.execute(query, website_id, status, error_message)
                 logger.log_db_query(query, params, result)
                 return result != "UPDATE 0"
         except Exception as e:
