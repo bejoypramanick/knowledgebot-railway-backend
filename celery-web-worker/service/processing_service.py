@@ -664,9 +664,14 @@ class ProcessingService:
 
                 # 2. Now it's safe to check attributes because current_op is an OBJECT
                 # Use getattr with default values to avoid AttributeError
-                is_done = getattr(current_op, 'done', False)
-                response = getattr(current_op, 'response', None)
-                error = getattr(current_op, 'error', None)
+                try:
+                    is_done = getattr(current_op, 'done', False)
+                    response = getattr(current_op, 'response', None)
+                    error = getattr(current_op, 'error', None)
+                except AttributeError as attr_err:
+                    logger.warning(f"   ⚠️ AttributeError accessing operation attributes: {attr_err}")
+                    logger.warning(f"   ⚠️ Operation type: {type(current_op)}, value: {current_op}")
+                    continue
                 
                 if is_done:
                     operation_result = current_op
@@ -688,6 +693,8 @@ class ProcessingService:
             except AttributeError as e:
                 # Specific handling for attribute errors (likely string instead of object)
                 logger.warning(f"   ⚠️ Error checking operation status (AttributeError): {e}")
+                import traceback
+                logger.warning(f"   ⚠️ Traceback: {traceback.format_exc()}")
                 # Continue waiting, the operation might still be processing
                 continue
             except Exception as e:
