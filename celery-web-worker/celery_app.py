@@ -64,12 +64,12 @@ celery_app.conf.update(
     },
     # Result backend configuration
     result_expires=3600,  # Results expire after 1 hour
-    # Task timeout (24 hours for large-scale web crawling with many pages)
-    task_soft_time_limit=86400,  # 24 hours
-    task_time_limit=86500,  # 24 hours + 100s buffer
+    # Task timeout (6 hours for web crawling - enough for 100+ pages at 5MB limit)
+    task_soft_time_limit=21600,  # 6 hours
+    task_time_limit=21700,  # 6 hours + 100s buffer
 )
 
-logger.info("✅ [CELERY_APP] Configuration updated - Task timeout: 24 hours, Queue: 'web_crawling'")
+logger.info("✅ [CELERY_APP] Configuration updated - Task timeout: 6 hours, Queue: 'web_crawling'")
 
 # Import tasks module to register task definitions
 try:
