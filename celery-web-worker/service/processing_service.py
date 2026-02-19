@@ -651,21 +651,30 @@ class ProcessingService:
                     continue
 
                 # 2. Now it's safe to check attributes because current_op is an OBJECT
-                if getattr(current_op, 'done', False):
+                # Use getattr with default values to avoid AttributeError
+                is_done = getattr(current_op, 'done', False)
+                has_response = hasattr(current_op, 'response')
+                has_error = hasattr(current_op, 'error')
+                
+                if is_done:
                     operation_result = current_op
                     break
                 
                 # Some versions use 'metadata' or 'response' to indicate progress
-                if hasattr(current_op, 'response') and current_op.response:
-                    operation_result = current_op
-                    break
-                elif hasattr(current_op, 'error'):
+                if has_response:
+                    response = getattr(current_op, 'response', None)
+                    if response and not isinstance(response, str):
+                        operation_result = current_op
+                        break
+                
+                if has_error:
                     # Operation has an error
-                    logger.error(f"   ❌ Operation failed: {current_op.error}")
+                    error = getattr(current_op, 'error', 'Unknown error')
+                    logger.error(f"   ❌ Operation failed: {error}")
                     return None
-                else:
-                    # Unknown operation state, continue waiting
-                    continue
+                
+                # Unknown operation state, continue waiting
+                continue
                     
             except AttributeError as e:
                 # Specific handling for attribute errors (likely string instead of object)
