@@ -64,16 +64,22 @@ class FileService:
 
         try:
             import redis as redis_lib
-            redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-            redis_conn = redis_lib.from_url(redis_url)
+            # Use FILE_REDIS_URL (DB 0) for file tasks
+            redis_url = os.getenv('FILE_REDIS_URL', 'redis://localhost:6379/0')
 
-            cancelled_key = f"task_cancelled:{celery_task_id}"
-            result = redis_conn.exists(cancelled_key)
-            redis_conn.close()
-
-            return bool(result)
+            try:
+                redis_conn = redis_lib.from_url(redis_url, socket_connect_timeout=2)
+                cancelled_key = f"task_cancelled:{celery_task_id}"
+                result = redis_conn.exists(cancelled_key)
+                redis_conn.close()
+                return bool(result)
+            except redis_lib.ConnectionError as conn_err:
+                # Redis not available - not critical, just skip cancellation check
+                # This is common in local development without Redis
+                logger.debug(f"ℹ️ Redis unavailable for cancellation check (this is OK): {redis_url}")
+                return False
         except Exception as e:
-            logger.warning(f"⚠️ Error checking cancellation status: {e}")
+            logger.debug(f"ℹ️ Skipping cancellation check: {e}")
             return False
 
     async def handle_duplicate_check(self, sha256_hash: str, original_filename: str, replace_existing: bool = False) -> Dict[str, Any]:
