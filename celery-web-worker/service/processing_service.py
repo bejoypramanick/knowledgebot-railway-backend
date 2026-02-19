@@ -123,7 +123,7 @@ class ProcessingService:
             logger.info(f"✅ [COMPLETE] Website {website_id} processed: {aggregate_metrics.total_pages_uploaded} pages in {processing_time:.1f}s")
 
             # Publish
-            await self._publishSuccessToQueue(result, job_context)
+            await self._reportSuccessResult(result, job_context)
             return result.to_dict()
 
         except Exception as e:
@@ -139,7 +139,7 @@ class ProcessingService:
                 error=str(e)
             )
             logger.error(f"❌ Processing error: {e}")
-            await self._publishErrorToQueue(result, celery_task_id)
+            await self._reportErrorResult(result, celery_task_id)
             return result.to_dict()
 
     async def _crawlWebsitePages(
@@ -220,7 +220,7 @@ class ProcessingService:
             logger.error(f"   ❌ Error: {e}")
             return None
 
-    async def _publishSuccessToQueue(self, result: ProcessingResult, job_context: JobContext):
+    async def _reportSuccessResult(self, result: ProcessingResult, job_context: JobContext):
         """Publish success to Redis"""
         try:
             from shared.redis_message_queue import redis_message_queue
@@ -233,7 +233,7 @@ class ProcessingService:
         except Exception as e:
             logger.warning(f"⚠️ Failed to publish result: {e}")
 
-    async def _publishErrorToQueue(self, result: ProcessingResult, celery_task_id: str):
+    async def _reportErrorResult(self, result: ProcessingResult, celery_task_id: str):
         """Publish error to Redis"""
         try:
             from shared.redis_message_queue import redis_message_queue
