@@ -40,11 +40,14 @@ class PageData:
     page_url: str
     page_html: str
     markdown: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    session_id: Optional[str] = None
 
     def __repr__(self) -> str:
         html_len = len(self.page_html) if self.page_html else 0
         md_len = len(self.markdown) if self.markdown else 0
-        return f"PageData(url={self.page_url}, html={html_len}B, md={md_len}B)"
+        return f"PageData(url={self.page_url}, html={html_len}B, md={md_len}B, title={self.title})"
 
 
 @dataclass(frozen=True)
@@ -53,6 +56,7 @@ class UploadResult:
     document_name: str
     file_search_store_name: str
     uploaded_at: datetime
+    gemini_file_uri: Optional[str] = None
 
     @property
     def file_search_metadata(self) -> Dict[str, Any]:
@@ -61,6 +65,7 @@ class UploadResult:
             "type": "file_search",
             "file_search_store_name": self.file_search_store_name,
             "document_name": self.document_name,
+            "gemini_file_uri": self.gemini_file_uri,
             "uploaded_at": self.uploaded_at.isoformat()
         }
 

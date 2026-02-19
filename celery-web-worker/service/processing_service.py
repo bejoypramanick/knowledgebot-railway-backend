@@ -270,11 +270,17 @@ class ProcessingService:
 
             result = await self._fetchPageHTML(current_url, semaphore, crawl_config.delay_between_requests)
             if result:
-                page_url, page_html = result
+                page_url, page_html, title, description, session_id = result
                 pages_yielded += 1
                 logger.info(f"✅ [BFS] Yielded page {pages_yielded}/{crawl_config.max_pages}")
 
-                yield PageData(page_url=page_url, page_html=page_html)
+                yield PageData(
+                    page_url=page_url,
+                    page_html=page_html,
+                    title=title,
+                    description=description,
+                    session_id=session_id
+                )
 
                 if current_depth < crawl_config.max_depth and pages_yielded < crawl_config.max_pages:
                     new_links = await self._extractLinksFromHTML(page_html, page_url, self._get_domain(job_context.root_url), visited_urls)
@@ -299,8 +305,8 @@ class ProcessingService:
         page_url: str,
         semaphore: asyncio.Semaphore,
         delay: float
-    ) -> Optional[Tuple[str, str]]:
-        """Fetch single page via crawl4ai"""
+    ) -> Optional[Tuple[str, str, Optional[str], Optional[str], Optional[str]]]:
+        """Fetch single page via crawl4ai - returns (url, html, title, description, session_id)"""
         async with semaphore:
             try:
                 from crawl4ai import AsyncWebCrawler
@@ -311,7 +317,15 @@ class ProcessingService:
                         if delay > 0:
                             await asyncio.sleep(delay)
                         logger.info(f"✅ Fetched {len(result.html)} bytes from {page_url}")
-                        return (page_url, result.html)
+                        
+                        # Extract title and description from metadata
+                        title = None
+                        description = None
+                        if result.metadata:
+                            title = result.metadata.get('title')
+                            description = result.metadata.get('description')
+                        
+                        return (page_url, result.html, title, description, result.session_id)
 
                     logger.warning(f"⚠️ Failed to fetch {page_url}")
                     return None
@@ -659,7 +673,7 @@ class ProcessingService:
         return await self._extractDocumentNameFromOperation(current_operation, job_context.store_name)
 
     async def _extractDocumentNameFromOperation(self, operation, store_name: str) -> Optional[UploadResult]:
-        """Extract document name from operation"""
+        """Extract document name and URI from operation"""
         # Handle case where operation is still a string (ID)
         if isinstance(operation, str):
             logger.error(f"   ❌ Cannot extract document name from string operation: {operation}")
@@ -668,11 +682,18 @@ class ProcessingService:
         # FileSearch upload returns result in response.document_name
         if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
             doc_name = operation.response.document_name
+            # Try to get URI if available
+            doc_uri = getattr(operation.response, 'uri', None) if hasattr(operation.response, 'uri') else None
+            
             logger.info(f"   ✅ FileSearch document: {doc_name}")
+            if doc_uri:
+                logger.info(f"   📎 Document URI: {doc_uri}")
+            
             return UploadResult(
                 document_name=doc_name,
                 file_search_store_name=store_name,
-                uploaded_at=datetime.utcnow()
+                uploaded_at=datetime.utcnow(),
+                gemini_file_uri=doc_uri
             )
         
         logger.error(f"   ❌ Upload failed or invalid response - no document_name in operation.response")
@@ -702,10 +723,14 @@ class ProcessingService:
             parent_id=job_context.website_id,
             page_url=page_data.page_url,
             gemini_file_name=upload_result.document_name,
+            gemini_file_uri=upload_result.gemini_file_uri,
             file_search_metadata=upload_result.file_search_metadata,
             user_role_id=job_context.user_role_id,
             file_size=calculate_metrics(page_data.markdown).get('file_size_bytes', 0),
-            char_count=calculate_metrics(page_data.markdown).get('char_count', 0)
+            char_count=calculate_metrics(page_data.markdown).get('char_count', 0),
+            title=page_data.title,
+            description=page_data.description,
+            crawl_session_id=page_data.session_id
         )
 
         return child_page_id

@@ -245,10 +245,14 @@ class ScrapingDAO:
         parent_id: int,
         page_url: str,
         gemini_file_name: str = None,
+        gemini_file_uri: str = None,
         file_search_metadata: Dict[str, Any] = None,
         user_role_id: int = None,
         file_size: int = 0,
-        char_count: int = 0
+        char_count: int = 0,
+        title: str = None,
+        description: str = None,
+        crawl_session_id: str = None
     ) -> Optional[int]:
         """
         Record a child page immediately after it's uploaded to Gemini.
@@ -261,17 +265,20 @@ class ScrapingDAO:
         logger.info(f"📄 [CHILD_PAGE_INSERT] Recording child page for parent {parent_id}")
         logger.info(f"   URL: {page_url}")
         logger.info(f"   Gemini File: {gemini_file_name}")
+        logger.info(f"   Title: {title}")
 
         query = """
             INSERT INTO scraped_websites (
                 parent_id, original_url, processing_status,
-                gemini_file_name, metadata, depth, user_role_id,
-                file_size, char_count,
+                gemini_file_name, gemini_file_uri, metadata, depth, user_role_id,
+                file_size, char_count, title, description, crawl_session_id,
+                pages_scraped,
                 created_at, updated_at
             ) VALUES (
                 $1, $2, $3,
-                $4, $5::jsonb, $6, $7,
-                $8, $9,
+                $4, $5, $6::jsonb, $7, $8,
+                $9, $10, $11, $12, $13,
+                $14,
                 NOW(), NOW()
             ) RETURNING id
         """
@@ -281,11 +288,16 @@ class ScrapingDAO:
             page_url,
             'completed' if gemini_file_name else 'processing',
             gemini_file_name,
+            gemini_file_uri,
             json.dumps(file_search_metadata) if file_search_metadata else None,
             1,  # depth = 1 (child of root)
             user_role_id,
             file_size,
-            char_count
+            char_count,
+            title,
+            description,
+            crawl_session_id,
+            1  # pages_scraped = 1 for individual pages
         ]
 
         try:
