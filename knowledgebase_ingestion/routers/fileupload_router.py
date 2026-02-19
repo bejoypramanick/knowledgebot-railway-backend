@@ -338,8 +338,6 @@ async def delete_all_knowledge_endpoint(request: Request = None):
             logger.info(f"   Redis queues cleared: {result.get('redis_queues_cleared')}")
             logger.info(f"   FileSearch store deleted: Yes")
             logger.info(f"   FileSearch store recreated: Yes")
-            if result.get('new_filesearch_store'):
-                logger.info(f"   New FileSearch store: {result.get('new_filesearch_store')}")
             logger.info(f"   Database records retained with status='deleted' for audit trail")
             logger.info(f"   Cleared by: {user_email}")
 
@@ -351,7 +349,6 @@ async def delete_all_knowledge_endpoint(request: Request = None):
                 "redis_queues_cleared": result.get("redis_queues_cleared"),
                 "filesearch_store_deleted": True,
                 "filesearch_store_recreated": result.get("filesearch_store_recreated"),
-                "new_filesearch_store": result.get("new_filesearch_store"),
                 "note": "Database records retained with status='deleted' for audit trail and recovery. FileSearch store is now empty and ready for new content."
             }
         else:

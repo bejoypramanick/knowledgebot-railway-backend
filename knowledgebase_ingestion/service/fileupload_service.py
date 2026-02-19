@@ -532,9 +532,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         logger.info(f"📊 [RESULT] Raw files deleted from Gemini: {deleted_files}")
         logger.info(f"📊 [RESULT] Websites marked as deleted: {deleted_websites}")
         logger.info(f"📊 [RESULT] Redis queues cleared: 2 (file_processing, web_crawling)")
-        logger.info(f"📊 [RESULT] FileSearch store: Deleted and recreated")
-        if new_store_name:
-            logger.info(f"   New store name: {new_store_name}")
+        logger.info(f"📊 [RESULT] FileSearch store: Deleted and recreated successfully")
 
         if errors:
             logger.warning(f"⚠️  [ERRORS] {len(errors)} error(s) occurred:")
@@ -548,7 +546,6 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             "websites_marked_deleted": deleted_websites,
             "redis_queues_cleared": 2,
             "filesearch_store_recreated": True,
-            "new_filesearch_store": new_store_name,
             "errors": errors if errors else None
         }
 
@@ -563,6 +560,5 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             "raw_files_deleted": deleted_files,
             "websites_marked_deleted": deleted_websites,
             "filesearch_store_recreated": new_store_name is not None,
-            "new_filesearch_store": new_store_name,
             "errors": [str(e)]
         }
