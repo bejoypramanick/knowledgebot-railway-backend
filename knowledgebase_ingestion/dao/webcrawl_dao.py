@@ -89,10 +89,11 @@ class WebCrawlDAO:
             return None
 
     async def get_all_websites(self) -> List[Dict[str, Any]]:
-        """Get all websites with their status."""
+        """Get all websites with their status (excludes deleted records)."""
         query = """
             SELECT id, original_url, processing_status, error_message, created_at, updated_at
             FROM scraped_websites
+            WHERE processing_status != 'deleted'
             ORDER BY updated_at DESC
         """
         try:
@@ -240,7 +241,7 @@ class WebCrawlDAO:
                 updated_at,
                 celery_task_id
             FROM scraped_websites
-            WHERE parent_id IS NULL
+            WHERE parent_id IS NULL AND processing_status != 'deleted'
             ORDER BY depth ASC, created_at DESC
         """
         try:
@@ -295,7 +296,7 @@ class WebCrawlDAO:
                 updated_at,
                 celery_task_id
             FROM scraped_websites
-            WHERE parent_id = $1
+            WHERE parent_id = $1 AND processing_status != 'deleted'
             ORDER BY depth ASC, created_at ASC
         """
         try:

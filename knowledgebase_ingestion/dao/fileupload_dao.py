@@ -120,10 +120,11 @@ class FileUploadDAO:
             return None
 
     async def get_all_files(self) -> List[Dict[str, Any]]:
-        """Get all files with their status."""
+        """Get all files with their status (excludes deleted records)."""
         query = """
             SELECT id, original_filename, processing_status, error_message, created_at, updated_at
             FROM file_uploads
+            WHERE processing_status != 'deleted'
             ORDER BY updated_at DESC
         """
         try:
