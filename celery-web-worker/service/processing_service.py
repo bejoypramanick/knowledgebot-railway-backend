@@ -534,39 +534,7 @@ class ProcessingService:
 
         genai_client = get_genai_client()
         if not genai_client:
-            async def _waitForGeminiUploadCompletion(self, operation, job_context: JobContext) -> Optional[UploadResult]:
-                """Poll Gemini upload operation until done"""
-                from core.ai import get_genai_client
-
-                genai_client = get_genai_client()
-                start_time = time.time()
-                max_wait = 120  # Reduced from 300s to 120s (2 minutes)
-                
-                logger.info(f"   ⏳ Waiting for upload... (timeout: {max_wait}s)")
-                
-                while not operation.done:
-                    elapsed = time.time() - start_time
-                    if elapsed > max_wait:
-                        logger.error(f"   ❌ Timeout uploading ({elapsed:.0f}s)")
-                        # Cancel the operation to free resources
-                        try:
-                            genai_client.operations.cancel(operation.name)
-                            logger.info(f"   ✅ Cancelled stuck upload operation: {operation.name}")
-                        except Exception as cancel_err:
-                            logger.warning(f"   ⚠️ Could not cancel operation: {cancel_err}")
-                        return None
-                    
-                    logger.info(f"   ⏳ Waiting for upload... ({elapsed:.0f}s)")
-                    await asyncio.sleep(2)  # Reduced from 5s to 2s for more responsive checking
-                    
-                    operation = genai_client.operations.get(operation.name)
-                    
-                # Final check - if operation is still not done after max_wait, fail it
-                if not operation.done:
-                    logger.error(f"   ❌ Upload failed after timeout ({max_wait}s)")
-                    return None
-                
-                return await self._extractDocumentNameFromOperation(operation, job_context.store_name)
+            raise Exception("Gemini client not configured")
 
         store = get_file_search_store_by_display_name(genai_client, display_name=store_display_name)
         if not store:
@@ -656,8 +624,9 @@ class ProcessingService:
                 logger.error(f"   ❌ Timeout uploading ({elapsed:.0f}s)")
                 # Cancel the operation to free resources
                 try:
-                    genai_client.operations.cancel(operation.name if hasattr(operation, 'name') else operation)
-                    logger.info(f"   ✅ Cancelled stuck upload operation: {operation.name if hasattr(operation, 'name') else operation}")
+                    operation_name = operation.name if hasattr(operation, 'name') else operation
+                    genai_client.operations.cancel(operation_name)
+                    logger.info(f"   ✅ Cancelled stuck upload operation: {operation_name}")
                 except Exception as cancel_err:
                     logger.warning(f"   ⚠️ Could not cancel operation: {cancel_err}")
                 return None
