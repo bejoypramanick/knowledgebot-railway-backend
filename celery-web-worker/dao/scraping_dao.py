@@ -159,3 +159,42 @@ class ScrapingDAO:
             logger.error(f"   URL: {url}")
             logger.log_db_query(query, params, error=e)
             raise
+
+    async def check_duplicate_website(self, original_url: str) -> Optional[Dict[str, Any]]:
+        """
+        Check if a website with the same URL already exists (excluding deleted records).
+
+        Helps prevent duplicate scraping when dealing with soft-deleted records.
+        """
+        logger.info(f"🔍 [WEB_DUPLICATE_CHECK] Checking for duplicate website URL: {original_url}")
+
+        query = """
+            SELECT id, original_url, processing_status, created_at
+            FROM scraped_websites
+            WHERE original_url = $1::text AND processing_status != 'deleted'
+        """
+        params = {"url": original_url}
+
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.fetchrow(query, original_url)
+
+                if result:
+                    logger.info(f"⚠️  [WEB_DUPLICATE_FOUND] Website already exists (ID: {result['id']}, Status: {result['processing_status']})")
+                    logger.log_db_query(query, params, result)
+                    return {
+                        "id": result['id'],
+                        "original_url": result['original_url'],
+                        "processing_status": result['processing_status'],
+                        "created_at": result['created_at']
+                    }
+                else:
+                    logger.info(f"✅ [WEB_DUPLICATE_NOT_FOUND] No active website found for URL: {original_url}")
+                    logger.log_db_query(query, params, result=None)
+                    return None
+
+        except Exception as e:
+            logger.warning(f"⚠️  [WEB_DUPLICATE_CHECK_ERROR] Error checking for duplicate website: {e}")
+            logger.log_db_query(query, params, error=e)
+            return None

@@ -33,14 +33,14 @@ class FileService:
         return error_message
 
     async def check_duplicate_file(self, sha256_hash: str, original_filename: str) -> Optional[Dict[str, Any]]:
-        """Check if a file with the same hash or name already exists."""
+        """Check if a file with the same hash or name already exists (excluding deleted records)."""
         try:
             from shared.db import get_db_connection
-            
+
             async with get_db_connection() as conn:
-                # Check by hash first (exact duplicate)
+                # Check by hash first (exact duplicate) - exclude deleted records
                 existing = await conn.fetchrow(
-                    "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1",
+                    "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status != 'deleted'",
                     sha256_hash
                 )
                 if existing:
@@ -54,10 +54,10 @@ class FileService:
                         "version": existing.get('version', 1),
                         "match_type": "hash"
                     }
-                
-                # Check by filename (same name, different content)
+
+                # Check by filename (same name, different content) - exclude deleted records
                 existing_by_name = await conn.fetchrow(
-                    "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1",
+                    "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status != 'deleted'",
                     original_filename
                 )
                 if existing_by_name:
@@ -71,7 +71,7 @@ class FileService:
                         "version": existing_by_name.get('version', 1),
                         "match_type": "filename"
                     }
-                
+
                 return None
         except Exception as e:
             logger.warning(f"Error checking for duplicate file: {e}")
