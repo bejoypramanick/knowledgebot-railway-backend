@@ -8,13 +8,12 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies
+# Note: File worker doesn't need chromium/playwright - those are only for web scraping
 RUN apt-get update && apt-get install -y \
     build-essential \
     curl \
     git \
     postgresql-client \
-    chromium \
-    chromium-driver \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements files
@@ -25,9 +24,7 @@ COPY shared/requirements-otel.txt /tmp/otel-requirements.txt
 RUN pip install --no-cache-dir -r /tmp/kb-requirements.txt && \
     pip install --no-cache-dir -r /tmp/otel-requirements.txt
 
-# Install Playwright (may be needed by docling or other services)
-# Note: Not using --with-deps since chromium and system dependencies are already installed via apt-get
-RUN pip install playwright && python -m playwright install chromium
+# Note: Removed Playwright - file worker only processes files, doesn't need browser automation
 
 # Copy application code
 COPY . .
