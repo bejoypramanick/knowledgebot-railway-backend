@@ -138,6 +138,7 @@ class ProcessingService:
                 website_id=website_id,
                 url=url,
                 processed_pages=processed_pages,
+                max_depth=max_depth,
                 user_email=user_email,
                 user_role_id=user_role_id,
                 celery_task_id=celery_task_id
@@ -618,7 +619,8 @@ class ProcessingService:
         website_id: int,
         url: str,
         processed_pages: List[Dict[str, str]],
-        user_email: str,
+        max_depth: int = 2,
+        user_email: str = None,
         user_role_id: int = None,
         celery_task_id: str = None
     ) -> Dict[str, Any]:
