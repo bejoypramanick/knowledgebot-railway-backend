@@ -416,7 +416,9 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                         # Create a new FileSearch store with the display name
                         logger.info(f"🔨 [FILESEARCH_CREATE] Creating new FileSearch store: {base_display_name}")
                         try:
-                            new_store = genai_client.file_search_stores.create(display_name=base_display_name)
+                            new_store = genai_client.file_search_stores.create(
+                                config={'display_name': base_display_name}
+                            )
                             new_store_name = new_store.name
                             logger.info(f"   ✅ Created new FileSearch store: {new_store_name}")
                         except Exception as create_err:

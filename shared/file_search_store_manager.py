@@ -48,7 +48,9 @@ class FileSearchStoreManager:
 
                 # Store not found, create it
                 logger.info(f"🔨 Creating new FileSearch store: {store_name}")
-                store = client.file_search_stores.create(display_name=store_name)
+                store = client.file_search_stores.create(
+                    config={'display_name': store_name}
+                )
                 store_full_name = store.name
                 cls._cached_store_name = store_full_name
                 logger.info(f"✅ Created new FileSearch store: {store_full_name}")
@@ -211,7 +213,9 @@ class FileSearchStoreManager:
         # Create new store
         logger.info(f"🔨 [FILESEARCH_CREATE] Creating new FileSearch store: {store_name}")
         try:
-            new_store = client.file_search_stores.create(display_name=store_name)
+            new_store = client.file_search_stores.create(
+                config={'display_name': store_name}
+            )
             new_store_name = new_store.name
             logger.info(f"✅ [FILESEARCH_CREATE_SUCCESS] Created new store: {new_store_name}")
             
