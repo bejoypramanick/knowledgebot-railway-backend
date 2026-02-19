@@ -643,7 +643,7 @@ CREATE TABLE public.file_uploads (
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	CONSTRAINT file_uploads_pkey PRIMARY KEY (id),
 	CONSTRAINT file_uploads_user_role_id_fkey FOREIGN KEY (user_role_id) REFERENCES public.user_role_mapping(user_role_id) ON DELETE SET NULL,
-	CONSTRAINT valid_processing_status CHECK ((processing_status::text = ANY (ARRAY[('pending'::character varying)::text, ('processing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('cancelled'::character varying)::text])))
+	CONSTRAINT valid_processing_status CHECK ((processing_status::text = ANY (ARRAY[('pending'::character varying)::text, ('processing'::character varying)::text, ('completed'::character varying)::text, ('failed'::character varying)::text, ('cancelled'::character varying)::text, ('deleted'::character varying)::text])))
 );
 CREATE INDEX idx_file_uploads_created_at ON public.file_uploads USING btree (created_at DESC);
 CREATE INDEX idx_file_uploads_gemini_file_name ON public.file_uploads USING btree (gemini_file_name);
