@@ -123,45 +123,103 @@ class FileSearchStoreManager:
                     # Delete the store with force=True to automatically clear all documents and chunks
                     logger.info(f"🗑️  [FILESEARCH_DELETE] Deleting store with force=True (will clear all documents): {target_store.name}")
                     try:
-                        # Use force=True to delete the store and all its contents in one operation
-                        # This is more efficient than manually deleting each document
-                        client.file_search_stores.delete(
-                            name=target_store.name,
-                            force=True
-                        )
-                        store_deleted = True
-                        logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted with force=True: {target_store.name}")
-                        logger.info(f"   All documents and metadata automatically cleared")
-                    except TypeError:
-                        # Fallback for older API versions that don't support force parameter
-                        logger.warning(f"⚠️  force=True parameter not supported, falling back to manual document deletion")
+                        # Try to delete with force parameter (different SDK versions handle this differently)
+                        store_deleted = False
+
+                        # Try method 1: force as direct argument
                         try:
-                            # First clear all documents manually
-                            documents = list(client.file_search_stores.list_documents(
-                                file_search_store_name=target_store.name
-                            ))
-                            logger.info(f"   Found {len(documents)} documents to delete")
-
-                            for idx, doc in enumerate(documents, 1):
-                                try:
-                                    logger.info(f"   📍 Deleting document {idx}/{len(documents)}: {doc.name}")
-                                    client.file_search_stores.delete_document(
-                                        file_search_store_name=target_store.name,
-                                        document_name=doc.name
-                                    )
-                                    logger.info(f"   ✅ Deleted: {doc.name}")
-                                except Exception as doc_err:
-                                    logger.warning(f"   ⚠️  Could not delete document {doc.name}: {doc_err}")
-
-                            # Now delete the empty store
-                            client.file_search_stores.delete(name=target_store.name)
+                            logger.info("   Attempting delete with force=True (direct argument)...")
+                            client.file_search_stores.delete(
+                                name=target_store.name,
+                                force=True
+                            )
                             store_deleted = True
-                            logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted: {target_store.name}")
-                        except Exception as fallback_err:
-                            logger.error(f"❌ [FILESEARCH_DELETE_ERROR] Error in fallback deletion: {fallback_err}")
-                            raise fallback_err
+                            logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted with force=True: {target_store.name}")
+                            logger.info(f"   All documents and metadata automatically cleared")
+                        except TypeError as te:
+                            logger.warning(f"   ⚠️  force=True as direct argument failed: {te}")
+
+                            # Try method 2: force in config/options object
+                            try:
+                                logger.info("   Attempting delete with force in delete_options...")
+                                from google.protobuf.field_mask_pb2 import FieldMask
+                                from google.cloud import aiplatform_v1beta1
+
+                                # Try using delete_options
+                                client.file_search_stores.delete(
+                                    name=target_store.name,
+                                    delete_options={'force': True}
+                                )
+                                store_deleted = True
+                                logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted with delete_options: {target_store.name}")
+                            except Exception as opts_err:
+                                logger.warning(f"   ⚠️  force in delete_options failed: {opts_err}")
+
+                                # Try method 3: Manual document clearing before delete
+                                logger.warning(f"   Falling back to manual document deletion...")
+                                try:
+                                    # List files using different possible method names
+                                    files = None
+
+                                    # Try list_files() first (Gemini SDK)
+                                    if hasattr(client.file_search_stores, 'list_files'):
+                                        files = list(client.file_search_stores.list_files(
+                                            file_search_store_name=target_store.name
+                                        ))
+                                        logger.info(f"   Found {len(files)} files using list_files()")
+
+                                    # Try list_documents() if list_files didn't work
+                                    elif hasattr(client.file_search_stores, 'list_documents'):
+                                        files = list(client.file_search_stores.list_documents(
+                                            file_search_store_name=target_store.name
+                                        ))
+                                        logger.info(f"   Found {len(files)} documents using list_documents()")
+
+                                    # Try list_rag_files() for Vertex AI
+                                    elif hasattr(client, 'list_rag_files'):
+                                        files = list(client.list_rag_files(parent=target_store.name))
+                                        logger.info(f"   Found {len(files)} RAG files using list_rag_files()")
+
+                                    if files:
+                                        logger.info(f"   Found {len(files)} items to delete")
+                                        for idx, file_item in enumerate(files, 1):
+                                            try:
+                                                file_name = getattr(file_item, 'name', str(file_item))
+                                                logger.info(f"   📍 Deleting item {idx}/{len(files)}: {file_name}")
+
+                                                # Try different delete methods
+                                                if hasattr(client.file_search_stores, 'delete_file'):
+                                                    client.file_search_stores.delete_file(
+                                                        file_search_store_name=target_store.name,
+                                                        file_name=file_name
+                                                    )
+                                                elif hasattr(client.file_search_stores, 'delete_document'):
+                                                    client.file_search_stores.delete_document(
+                                                        file_search_store_name=target_store.name,
+                                                        document_name=file_name
+                                                    )
+                                                elif hasattr(client, 'delete_rag_file'):
+                                                    client.delete_rag_file(name=file_name)
+
+                                                logger.info(f"   ✅ Deleted: {file_name}")
+                                            except Exception as file_err:
+                                                logger.warning(f"   ⚠️  Could not delete {file_name}: {file_err}")
+
+                                        logger.info(f"   ✅ All files cleared from store")
+
+                                    # Now delete the (hopefully empty) store
+                                    logger.info(f"   Deleting now-empty store...")
+                                    client.file_search_stores.delete(name=target_store.name)
+                                    store_deleted = True
+                                    logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted: {target_store.name}")
+                                except Exception as manual_err:
+                                    logger.error(f"❌ [FILESEARCH_DELETE_ERROR] Error in manual deletion fallback: {manual_err}")
+                                    raise manual_err
+
                     except Exception as delete_err:
                         logger.error(f"❌ [FILESEARCH_DELETE_ERROR] Error deleting store {target_store.name}: {delete_err}")
+                        import traceback
+                        logger.error(f"   Traceback: {traceback.format_exc()}")
                         raise delete_err
                 else:
                     logger.warning(f"⚠️  [FILESEARCH_NOT_FOUND] No existing store found with display_name='{store_name}'")
