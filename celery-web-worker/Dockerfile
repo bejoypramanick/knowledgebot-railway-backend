@@ -55,8 +55,9 @@ RUN pip install --no-cache-dir --no-warn-script-location \
     -r /tmp/otel-requirements.txt
 
 # Install Playwright browsers (required by Crawl4AI for web scraping)
-# Note: We skip 'install-deps' since we've already installed all system dependencies above
-RUN python -m playwright install chromium && \
+# Use install-deps to ensure all system dependencies are available
+RUN python -m playwright install-deps chromium && \
+    python -m playwright install chromium && \
     # Aggressive cleanup of build artifacts and caches
     apt-get remove -y build-essential && \
     apt-get autoremove -y && \
