@@ -45,13 +45,15 @@ class ProcessingService:
         request: ProcessingRequest
     ) -> Dict[str, Any]:
         """
-        Main orchestration: Resolve dependencies → Stream pages → Finalize → Return result
+        Main orchestration: Resolve dependencies → Stream pages → Return result
 
         This is the entry point for website scraping. It coordinates the entire pipeline:
         1. RESOLVE: Look up Gemini FileSearch store and user role (fail-fast approach)
         2. STREAM: Process each page (crawl → extract content → upload → record in DB)
-        3. FINALIZE: Update aggregate statistics in database
-        4. RETURN: Build success/error result
+        3. RETURN: Build success/error result
+
+        Aggregate statistics are calculated from child page records on-demand, avoiding
+        redundant data storage in parent record. Each page record contains full metrics.
 
         The pipeline uses a streaming approach (async generator) to process one page at a
         time, avoiding loading all pages into memory. This enables processing of
@@ -126,21 +128,7 @@ class ProcessingService:
                 job_context=job_context
             )
 
-            # ========== PHASE 3: FINALIZE ==========
-            # Update aggregate statistics in database (scraped_websites table).
-            # This includes: page count, total size, total characters, metadata.
-            # Done AFTER all pages are processed so stats are accurate.
-
-            finalize_request = FinalizeRequest(
-                website_id=request.website_id,
-                page_count=aggregate_metrics.total_pages_uploaded,
-                total_size_bytes=aggregate_metrics.total_size_bytes,
-                total_char_count=aggregate_metrics.total_char_count,
-                file_search_store_name=store_name
-            )
-            await self._recordWebsiteToDB(finalize_request)
-
-            # ========== PHASE 4: BUILD SUCCESS RESULT ==========
+            # ========== PHASE 3: BUILD SUCCESS RESULT ==========
             # Compute total processing time and build result object.
             # Result is returned to Celery task for logging/status updates.
             # Note: WebsiteService also calls update_website_status() in database.
