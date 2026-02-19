@@ -130,17 +130,30 @@ class DatabaseManager:
         logger.debug(f"🔌{cid_str} Acquiring database connection...")
         
         max_retries = 2
+        last_error = None
+        
         for attempt in range(max_retries):
             try:
                 async with self._pool.acquire() as conn:
                     yield conn
                 return
             except Exception as e:
+                last_error = e
+                error_str = str(e)
                 logger.error(f"❌{cid_str} Failed to acquire DB connection (attempt {attempt + 1}/{max_retries}): {e}")
                 
-                # If it's an event loop error and we have retries left, try to reinitialize
-                if attempt < max_retries - 1 and ("Event loop is closed" in str(e) or "Bad file descriptor" in str(e)):
-                    logger.warning(f"⚠️{cid_str} Attempting to reinitialize pool due to event loop issue")
+                # Only retry on specific errors and if we have retries left
+                should_retry = (
+                    attempt < max_retries - 1 and 
+                    any(err in error_str for err in [
+                        "Event loop is closed",
+                        "Bad file descriptor",
+                        "pool is closed"
+                    ])
+                )
+                
+                if should_retry:
+                    logger.warning(f"⚠️{cid_str} Attempting to reinitialize pool due to connection issue")
                     async with self._lock:
                         try:
                             if self._pool:
@@ -148,10 +161,16 @@ class DatabaseManager:
                         except:
                             pass
                         self._pool = None
-                        self._event_loop_id = None
                         await self._create_pool()
+                    # Small delay before retry
+                    await asyncio.sleep(0.1)
                 else:
+                    # Don't retry for "another operation is in progress" or other errors
                     raise
+        
+        # If we exhausted retries, raise the last error
+        if last_error:
+            raise last_error
 
     async def close(self):
         if self._pool:
