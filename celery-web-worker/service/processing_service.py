@@ -763,49 +763,19 @@ class ProcessingService:
         char_count: int
     ) -> bool:
         """Update parent website record with single page data"""
-        import json
-        
         logger.info(f"💾 [UPDATE_WEBSITE] Updating website {website_id} with page data")
         
-        query = """
-            UPDATE scraped_websites
-            SET gemini_file_name = $1,
-                gemini_file_uri = $2,
-                file_size = $3,
-                char_count = $4,
-                title = $5,
-                description = $6,
-                crawl_session_id = $7,
-                pages_scraped = $8,
-                metadata = $9::jsonb,
-                updated_at = NOW()
-            WHERE id = $10
-        """
-        
-        params = [
-            upload_result.document_name,
-            upload_result.gemini_file_uri,
-            file_size,
-            char_count,
-            page_data.title,
-            page_data.description,
-            page_data.session_id,
-            1,  # pages_scraped = 1 for single page
-            json.dumps(upload_result.file_search_metadata),
-            website_id
-        ]
-        
-        try:
-            from shared.db import get_db_connection
-            async with get_db_connection() as conn:
-                await conn.execute(query, *params)
-                logger.info(f"✅ [UPDATE_WEBSITE_SUCCESS] Website record updated")
-                return True
-        except Exception as e:
-            logger.error(f"❌ [UPDATE_WEBSITE_ERROR] Failed to update website: {e}")
-            import traceback
-            logger.error(f"   Traceback: {traceback.format_exc()}")
-            return False
+        return await self.scraping_dao.update_website_with_page_data(
+            website_id=website_id,
+            gemini_file_name=upload_result.document_name,
+            gemini_file_uri=upload_result.gemini_file_uri,
+            file_size=file_size,
+            char_count=char_count,
+            title=page_data.title,
+            description=page_data.description,
+            crawl_session_id=page_data.session_id,
+            file_search_metadata=upload_result.file_search_metadata
+        )
 
     # ==================== UTILITIES ====================
 

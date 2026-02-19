@@ -366,3 +366,71 @@ class ScrapingDAO:
             logger.error(f"   Website ID: {website_id}")
             logger.log_db_query(query, params, error=e)
             return False
+
+    async def update_website_with_page_data(
+        self,
+        website_id: int,
+        gemini_file_name: str,
+        gemini_file_uri: str,
+        file_size: int,
+        char_count: int,
+        title: str,
+        description: str,
+        crawl_session_id: str,
+        file_search_metadata: Dict[str, Any]
+    ) -> bool:
+        """
+        Update parent website record with single page data.
+        Used for single-page scrapes (depth=0).
+
+        Returns: True on success, False on failure
+        """
+        import json
+
+        logger.info(f"💾 [UPDATE_WEBSITE_PAGE] Updating website {website_id} with page data")
+        logger.info(f"   Title: {title}")
+        logger.info(f"   File Size: {file_size:,} bytes")
+        logger.info(f"   Char Count: {char_count:,}")
+
+        query = """
+            UPDATE scraped_websites
+            SET gemini_file_name = $1,
+                gemini_file_uri = $2,
+                file_size = $3,
+                char_count = $4,
+                title = $5,
+                description = $6,
+                crawl_session_id = $7,
+                pages_scraped = $8,
+                metadata = $9::jsonb,
+                updated_at = NOW()
+            WHERE id = $10
+        """
+
+        params = [
+            gemini_file_name,
+            gemini_file_uri,
+            file_size,
+            char_count,
+            title,
+            description,
+            crawl_session_id,
+            1,  # pages_scraped = 1 for single page
+            json.dumps(file_search_metadata),
+            website_id
+        ]
+
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                await conn.execute(query, *params)
+                logger.info(f"✅ [UPDATE_WEBSITE_PAGE_SUCCESS] Website record updated")
+                logger.log_db_query(query, params, "UPDATE succeeded")
+                return True
+        except Exception as e:
+            logger.error(f"❌ [UPDATE_WEBSITE_PAGE_ERROR] Failed to update website: {e}")
+            logger.error(f"   Website ID: {website_id}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+            logger.log_db_query(query, params, error=e)
+            return False
