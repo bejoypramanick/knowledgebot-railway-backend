@@ -690,7 +690,12 @@ class ProcessingService:
 
     async def _extractDocumentNameFromOperation(self, operation, store_name: str) -> Optional[UploadResult]:
         """Extract document name from operation"""
-        if operation.response and operation.response.status_code == 200:
+        # Handle case where operation is still a string (ID)
+        if isinstance(operation, str):
+            logger.error(f"   ❌ Cannot extract document name from string operation: {operation}")
+            return None
+            
+        if hasattr(operation, 'response') and operation.response and hasattr(operation.response, 'status_code') and operation.response.status_code == 200:
             doc_name = operation.response.json()['name']
             logger.info(f"   ✅ FileSearch document: {doc_name}")
             return UploadResult(
