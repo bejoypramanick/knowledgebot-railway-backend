@@ -112,7 +112,7 @@ async def cancel_files() -> int:
         logger.error("=" * 80)
         logger.error(f"❌ [CANCEL_ALL_ERROR] Error cancelling files: {e}")
         logger.error("=" * 80)
-        logger.error(f"   Error Type: {type(e).__name__}", exc_info=True)
+        logger.error(f"   Error Type: {type(e).__name__}")
         return 0
 
 
@@ -235,7 +235,7 @@ async def queue_file_for_deletion(file_id: int) -> Dict[str, Any]:
         logger.error(f"❌ [DELETE_ERROR] Error queuing file for deletion: {e}")
         logger.error("=" * 80)
         logger.error(f"   File ID: {file_id}")
-        logger.error(f"   Error Type: {type(e).__name__}", exc_info=True)
+        logger.error(f"   Error Type: {type(e).__name__}")
 
         return {
             "success": False,
@@ -324,7 +324,7 @@ async def validate_file_upload(file: UploadFile, file_size: int) -> Dict[str, An
         logger.error("=" * 80)
         logger.error(f"   File: {file.filename}")
         logger.error(f"   Size: {file_size} bytes")
-        logger.error(f"   Error Type: {type(e).__name__}", exc_info=True)
+        logger.error(f"   Error Type: {type(e).__name__}")
 
         return {
             "valid": False,
@@ -384,7 +384,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                     logger.error("   ❌ Gemini client not available")
                     errors.append("Gemini client not available")
         except Exception as e:
-            logger.error(f"❌ [GEMINI_DELETE_ERROR] Error deleting from Gemini: {e}", exc_info=True)
+            logger.error(f"❌ [GEMINI_DELETE_ERROR] Error deleting from Gemini: {e}")
             errors.append(f"Gemini deletion failed: {e}")
 
         # Step 2: Clear Redis queues
@@ -395,7 +395,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             redis_queue.clear_web_task_queue()
             logger.info("   ✅ Redis queues cleared")
         except Exception as e:
-            logger.error(f"❌ [REDIS_CLEAR_ERROR] Error clearing Redis: {e}", exc_info=True)
+            logger.error(f"❌ [REDIS_CLEAR_ERROR] Error clearing Redis: {e}")
             errors.append(f"Redis clear failed: {e}")
 
         # Step 3: Mark all files as deleted in database (soft delete - don't remove records)
@@ -407,7 +407,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                 )
                 logger.info(f"   ✅ All file records marked as deleted (status updated, records retained)")
         except Exception as e:
-            logger.error(f"❌ [DB_UPDATE_FILES_ERROR] Error marking files as deleted: {e}", exc_info=True)
+            logger.error(f"❌ [DB_UPDATE_FILES_ERROR] Error marking files as deleted: {e}")
             errors.append(f"File status update failed: {e}")
 
         # Step 4: Mark all websites as deleted in database (soft delete - don't remove records)
@@ -423,7 +423,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                 deleted_websites = len(websites)
                 logger.info(f"   ✅ All {deleted_websites} website records marked as deleted (status updated, records retained)")
         except Exception as e:
-            logger.error(f"❌ [DB_DELETE_WEBSITES_ERROR] Error deleting websites: {e}", exc_info=True)
+            logger.error(f"❌ [DB_DELETE_WEBSITES_ERROR] Error deleting websites: {e}")
             errors.append(f"Website deletion failed: {e}")
 
         logger.info("=" * 80)
@@ -450,7 +450,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
     except Exception as e:
         logger.error("=" * 80)
         logger.error(f"❌ [DELETE_ALL_ERROR] Error clearing knowledge base: {e}")
-        logger.error("=" * 80, exc_info=True)
+        logger.error("=" * 80)
 
         return {
             "success": False,
