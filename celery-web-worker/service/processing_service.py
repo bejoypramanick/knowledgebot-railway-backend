@@ -245,7 +245,15 @@ class ProcessingService:
             List of tuples: [(page_url, page_html), ...]
         """
         try:
-            from crawl4ai import AsyncWebCrawler, CrawlResult
+            # Check if dependencies are available
+            try:
+                from crawl4ai import AsyncWebCrawler, CrawlResult
+                logger.info("✅ crawl4ai is available")
+            except ImportError as ie:
+                logger.error(f"❌ crawl4ai not available: {ie}")
+                logger.error("   Make sure: pip install crawl4ai")
+                logger.error("   And run: playwright install")
+                return []
 
             pages = []
             visited_urls = set()
@@ -265,43 +273,61 @@ class ProcessingService:
                     try:
                         logger.info(f"📄 Fetching: {page_url}")
 
-                        async with AsyncWebCrawler() as crawler:
-                            result: CrawlResult = await crawler.arun(
-                                url=page_url,
-                                timeout=30,
-                                js_code=None  # Set to JavaScript code if needed for dynamic content
-                            )
+                        try:
+                            async with AsyncWebCrawler() as crawler:
+                                result: CrawlResult = await crawler.arun(
+                                    url=page_url,
+                                    timeout=30,
+                                    js_code=None  # Set to JavaScript code if needed for dynamic content
+                                )
 
-                            if result.success and result.html:
-                                logger.info(f"✅ Fetched {len(result.html)} bytes from {page_url}")
+                                if result.success and result.html:
+                                    logger.info(f"✅ Fetched {len(result.html)} bytes from {page_url}")
 
-                                # Apply delay before next request
-                                if delay_between_requests > 0:
-                                    await asyncio.sleep(delay_between_requests)
+                                    # Apply delay before next request
+                                    if delay_between_requests > 0:
+                                        await asyncio.sleep(delay_between_requests)
 
-                                return (page_url, result.html)
-                            else:
-                                logger.warning(f"⚠️ Failed to fetch {page_url}")
-                                return None
+                                    return (page_url, result.html)
+                                else:
+                                    # Log detailed error info from crawler
+                                    error_msg = getattr(result, 'error_message', 'Unknown error')
+                                    logger.warning(f"⚠️ Failed to fetch {page_url}: {error_msg}")
+                                    logger.warning(f"   Success: {result.success}, HTML length: {len(result.html) if result.html else 0}")
+                                    return None
+                        except ImportError as ie:
+                            logger.error(f"❌ Import error - crawl4ai or dependencies not available: {ie}")
+                            logger.error(f"   Make sure crawl4ai is installed and playwright browsers are available")
+                            return None
 
                     except Exception as e:
                         logger.error(f"❌ Error fetching {page_url}: {e}")
+                        import traceback
+                        logger.error(f"   Traceback: {traceback.format_exc()}")
                         return None
 
             # BFS crawling with depth control
+            logger.info(f"📋 [BFS] Starting queue with: {to_visit}")
             while to_visit and len(pages) < max_pages:
                 current_url, current_depth = to_visit.pop(0)
+                logger.info(f"📋 [BFS] Processing queue item: {current_url} (depth={current_depth}, visited={len(visited_urls)}, pages={len(pages)})")
 
                 # Skip if already visited or depth exceeded
-                if current_url in visited_urls or current_depth > max_depth:
+                if current_url in visited_urls:
+                    logger.info(f"⏭️  [BFS] Already visited: {current_url}")
+                    continue
+                if current_depth > max_depth:
+                    logger.info(f"⏭️  [BFS] Depth exceeded ({current_depth} > {max_depth}): {current_url}")
                     continue
 
                 visited_urls.add(current_url)
 
                 # Fetch page
+                logger.info(f"🔍 [BFS] Fetching page at depth {current_depth}: {current_url}")
                 result = await fetch_page(current_url)
                 if result:
                     pages.append(result)
+                    logger.info(f"✅ [BFS] Added page {len(pages)}/{max_pages}")
                     page_url, page_html = result
 
                     # Extract links for next level if depth allows
@@ -311,8 +337,13 @@ class ProcessingService:
 
                             soup = BeautifulSoup(page_html, 'lxml')
                             base_domain = self._get_domain(url)
+                            logger.info(f"🔗 [LINKS] Extracting links from {current_url} (base_domain={base_domain})")
 
-                            for link in soup.find_all('a', href=True):
+                            found_links = []
+                            all_links = soup.find_all('a', href=True)
+                            logger.info(f"🔗 [LINKS] Found {len(all_links)} total <a> tags")
+
+                            for link in all_links:
                                 href = link['href']
                                 # Convert relative URLs to absolute
                                 if href.startswith('/'):
@@ -323,11 +354,16 @@ class ProcessingService:
                                 # Only crawl same domain
                                 if self._get_domain(href) == base_domain and href not in visited_urls:
                                     to_visit.append((href, current_depth + 1))
+                                    found_links.append(href)
                                     if len(pages) >= max_pages:
                                         break
 
+                            logger.info(f"🔗 [LINKS] Added {len(found_links)} new links to queue")
+
                         except Exception as e:
                             logger.warning(f"⚠️ Failed to extract links from {current_url}: {e}")
+                            import traceback
+                            logger.warning(f"   Traceback: {traceback.format_exc()}")
 
             logger.info(f"✅ Crawling complete: {len(pages)} pages collected")
             return pages
