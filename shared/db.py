@@ -2,6 +2,7 @@
 import asyncio
 import os
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import Optional, Any
 
@@ -97,7 +98,7 @@ class DatabaseManager:
             await self.initialize()
             return
 
-        now = asyncio.get_event_loop().time()
+        now = time.time()
         if now - self._last_health_check < self._health_check_interval:
             return
 
