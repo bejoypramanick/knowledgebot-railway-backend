@@ -3,8 +3,8 @@ import re
 import puremagic
 from typing import Optional, Tuple
 
-from ..utils.constants import (ALLOWED_FILE_EXTENSIONS, ALLOWED_MIME_TYPES,
-                               MAX_FILE_SIZE_BYTES)
+from utils.constants import (ALLOWED_FILE_EXTENSIONS, ALLOWED_MIME_TYPES,
+                             MAX_FILE_SIZE_BYTES)
 
 
 def validate_file_extension(filename: str) -> Tuple[bool, str]:

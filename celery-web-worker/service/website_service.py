@@ -106,7 +106,8 @@ class WebsiteService:
 
         try:
             import redis as redis_lib
-            redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+            # Use WEB_REDIS_URL (DB 1) for web tasks
+            redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
             redis_conn = redis_lib.from_url(redis_url)
 
             cancelled_key = f"task_cancelled:{celery_task_id}"
