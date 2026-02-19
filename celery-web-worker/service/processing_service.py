@@ -563,7 +563,8 @@ class ProcessingService:
         """Upload single page to Gemini FileSearch"""
         from core.ai import get_genai_client
 
-        genai_client = get_genai_client()
+        # Use async client for consistency with polling method
+        genai_client = get_genai_client().aio
         if not genai_client:
             raise Exception("Gemini client not configured")
 
@@ -578,7 +579,7 @@ class ProcessingService:
 
             logger.info(f"   📤 Uploading: {doc_name} ({metrics.get('file_size_bytes', 0):,} bytes)")
 
-            operation = genai_client.file_search_stores.upload_to_file_search_store(
+            operation = await genai_client.file_search_stores.upload_to_file_search_store(
                 file=temp_file,
                 file_search_store_name=job_context.store_name,
                 config=await self._buildGeminiUploadConfig(doc_name, job_context.website_id, page_data.page_url)
@@ -609,25 +610,26 @@ class ProcessingService:
         }
 
     async def _waitForGeminiUploadCompletion(self, operation, job_context: JobContext) -> Optional[UploadResult]:
-        """Poll Gemini upload operation until done"""
+        """Poll Gemini upload operation until done using async client"""
         from core.ai import get_genai_client
 
-        genai_client = get_genai_client()
+        # 1. Initialize the ASYNC client
+        genai_client = get_genai_client().aio
+        
         start_time = time.time()
         max_wait = 120  # Reduced from 300s to 120s (2 minutes)
         
         logger.info(f"   ⏳ Waiting for upload... (timeout: {max_wait}s)")
         
-        # Handle operation as string (operation name) from Gemini API
         operation_name = operation if isinstance(operation, str) else (operation.name if hasattr(operation, 'name') else str(operation))
         
         while True:
             elapsed = time.time() - start_time
             if elapsed > max_wait:
                 logger.error(f"   ❌ Timeout uploading ({elapsed:.0f}s)")
-                # Cancel the operation to free resources
+                # 2. AWAIT the cancellation call
                 try:
-                    genai_client.operations.cancel(operation_name)
+                    await genai_client.operations.cancel(operation_name)
                     logger.info(f"   ✅ Cancelled stuck upload operation: {operation_name}")
                 except Exception as cancel_err:
                     logger.warning(f"   ⚠️ Could not cancel operation: {cancel_err}")
@@ -636,23 +638,47 @@ class ProcessingService:
             logger.info(f"   ⏳ Waiting for upload... ({elapsed:.0f}s)")
             await asyncio.sleep(2)  # Reduced from 5s to 2s for more responsive checking
             
-            # Get the current operation state
+            # 3. AWAIT the get operation call
             try:
-                operation = genai_client.operations.get(operation_name)
-                if hasattr(operation, 'done') and operation.done:
+                # This is the critical change for non-blocking I/O
+                current_op = await genai_client.operations.get(operation_name)
+                
+                # If API returns a string, it means operation is still pending
+                if isinstance(current_op, str):
+                    # Operation is still in progress, continue waiting
+                    continue
+                elif hasattr(current_op, 'done') and current_op.done:
+                    # Operation is complete
+                    operation = current_op
                     break
-                elif hasattr(operation, 'response') and operation.response:
+                elif hasattr(current_op, 'response') and current_op.response:
                     # Operation is complete if it has a response
+                    operation = current_op
                     break
+                elif hasattr(current_op, 'error'):
+                    # Operation has an error
+                    logger.error(f"   ❌ Operation failed: {current_op.error}")
+                    return None
+                else:
+                    # Unknown operation state, continue waiting
+                    continue
+                    
             except Exception as e:
                 logger.warning(f"   ⚠️ Error checking operation status: {e}")
                 # If we can't check the operation, assume it's done after some time
                 if elapsed > 30:  # Wait at least 30 seconds before assuming completion
+                    logger.info(f"   ℹ️ Assuming operation completed after {elapsed:.0f}s due to API errors")
                     break
+                continue
             
         # Final check - try to get the operation result
         try:
-            operation = genai_client.operations.get(operation_name)
+            final_op = await genai_client.operations.get(operation_name)
+            if isinstance(final_op, str):
+                # If still getting a string, create a mock operation object
+                logger.warning(f"   ⚠️ Operation still pending as string, creating mock result")
+                return None
+            operation = final_op
         except Exception as e:
             logger.error(f"   ❌ Failed to get final operation result: {e}")
             return None
