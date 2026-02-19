@@ -242,8 +242,8 @@ async def delete_file(file_id: str, request: Request = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/clear-all")
-async def clear_all_knowledge(request: Request = None):
+@router.post("/delete-all")
+async def delete_all_knowledge_endpoint(request: Request = None):
     """
     Delete all files and websites from knowledge base.
     This operation:
@@ -251,23 +251,23 @@ async def clear_all_knowledge(request: Request = None):
     2. Clears all Redis task queues (file_processing, web_crawling)
     3. Deletes all file and website records from database
 
-    REQUIRES: X-Confirm-Clear-All: true header (safety check to prevent accidental deletion)
+    REQUIRES: X-Confirm-Delete-All: true header (safety check to prevent accidental deletion)
     """
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
         # Safety check: require confirmation header
-        confirm_header = request.headers.get("X-Confirm-Clear-All")
+        confirm_header = request.headers.get("X-Confirm-Delete-All")
         if confirm_header != "true":
-            logger.warning(f"❌ [CLEAR_ALL_DENIED] Clear all requested without confirmation header by {user_email}")
+            logger.warning(f"❌ [DELETE_ALL_DENIED] Delete all requested without confirmation header by {user_email}")
             raise HTTPException(
                 status_code=400,
-                detail="Clear all operation requires X-Confirm-Clear-All: true header"
+                detail="Delete all operation requires X-Confirm-Delete-All: true header"
             )
 
         logger.info("=" * 80)
-        logger.info(f"🔴 [CLEAR_ALL_REQUEST] Clear all knowledge base requested by {user_email}")
+        logger.info(f"🔴 [DELETE_ALL_REQUEST] Delete all knowledge base requested by {user_email}")
         logger.info("=" * 80)
 
         # Call delete all service function
@@ -275,23 +275,23 @@ async def clear_all_knowledge(request: Request = None):
 
         if result.get("success"):
             logger.info("=" * 80)
-            logger.info(f"✅ [CLEAR_ALL_SUCCESS] Knowledge base cleared successfully")
+            logger.info(f"✅ [DELETE_ALL_SUCCESS] Knowledge base deleted successfully")
             logger.info("=" * 80)
             logger.info(f"   Files deleted from Gemini: {result.get('deleted_files')}")
             logger.info(f"   Websites deleted from DB: {result.get('deleted_websites')}")
             logger.info(f"   Redis queues cleared: {result.get('redis_queues_cleared')}")
-            logger.info(f"   Cleared by: {user_email}")
+            logger.info(f"   Deleted by: {user_email}")
 
             return {
                 "success": True,
-                "message": "Knowledge base cleared successfully",
+                "message": "Knowledge base deleted successfully",
                 "deleted_files": result.get("deleted_files"),
                 "deleted_websites": result.get("deleted_websites"),
                 "redis_queues_cleared": result.get("redis_queues_cleared")
             }
         else:
             logger.error("=" * 80)
-            logger.error(f"❌ [CLEAR_ALL_FAILED] Knowledge base clear failed")
+            logger.error(f"❌ [DELETE_ALL_FAILED] Knowledge base delete failed")
             logger.error("=" * 80)
             logger.error(f"   Message: {result.get('message')}")
             if result.get("errors"):
@@ -300,13 +300,13 @@ async def clear_all_knowledge(request: Request = None):
 
             raise HTTPException(
                 status_code=500,
-                detail=result.get("message", "Failed to clear knowledge base")
+                detail=result.get("message", "Failed to delete knowledge base")
             )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ [CLEAR_ALL_ERROR] Error clearing all knowledge: {e}", exc_info=True)
+        logger.error(f"❌ [DELETE_ALL_ERROR] Error deleting all knowledge: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
