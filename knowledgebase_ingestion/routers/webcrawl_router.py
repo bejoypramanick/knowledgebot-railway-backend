@@ -238,7 +238,7 @@ async def scrape_website_async_endpoint(request: Request = None):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in async website scraping: {e}", exc_info=True)
+        logger.error(f"Error in async website scraping: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
