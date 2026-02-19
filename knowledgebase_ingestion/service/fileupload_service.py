@@ -412,6 +412,18 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                         logger.info(f"   ✅ Successfully deleted {filesearch_stores_deleted} FileSearch stores")
                         for store_name in deleted_store_names:
                             logger.info(f"      - Deleted: {store_name}")
+                        
+                        # Create a new FileSearch store with the display name
+                        logger.info(f"🔨 [FILESEARCH_CREATE] Creating new FileSearch store: {base_display_name}")
+                        try:
+                            new_store = genai_client.file_search_stores.create(display_name=base_display_name)
+                            new_store_name = new_store.name
+                            logger.info(f"   ✅ Created new FileSearch store: {new_store_name}")
+                        except Exception as create_err:
+                            logger.error(f"   ❌ Error creating new FileSearch store: {create_err}")
+                            import traceback
+                            logger.error(f"   Traceback: {traceback.format_exc()}")
+                            errors.append(f"FileSearch store creation failed: {create_err}")
                     else:
                         logger.error(f"   ❌ Failed to delete some stores: {deletion_result['errors']}")
                         errors.extend(deletion_result['errors'])
@@ -489,6 +501,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         logger.info(f"📊 [RESULT] Redis queues cleared: 2 (file_processing, web_crawling)")
         logger.info(f"📊 [RESULT] FileSearch stores deleted: {filesearch_stores_deleted}")
         logger.info(f"📊 [RESULT] Deleted store names: {deleted_store_names}")
+        logger.info(f"📊 [RESULT] New FileSearch store created: {new_store_name}")
 
         if errors:
             logger.warning(f"⚠️  [ERRORS] {len(errors)} error(s) occurred:")
@@ -496,13 +509,14 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                 logger.warning(f"   - {error}")
 
         return {
-            "success": len(errors) == 0 and filesearch_stores_deleted > 0,
-            "message": f"Successfully deleted {filesearch_stores_deleted} FileSearch stores" if (len(errors) == 0 and filesearch_stores_deleted > 0) else "Knowledge base cleared with errors",
+            "success": len(errors) == 0 and filesearch_stores_deleted > 0 and new_store_name is not None,
+            "message": f"Successfully deleted {filesearch_stores_deleted} FileSearch stores and created new store" if (len(errors) == 0 and filesearch_stores_deleted > 0 and new_store_name) else "Knowledge base cleared with errors",
             "raw_files_deleted": deleted_files,
             "websites_marked_deleted": deleted_websites,
             "redis_queues_cleared": 2,
             "filesearch_stores_deleted": filesearch_stores_deleted,
             "deleted_store_names": deleted_store_names,
+            "new_store_name": new_store_name,
             "errors": errors if errors else None
         }
 
@@ -516,6 +530,8 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             "message": f"Error clearing knowledge base: {str(e)}",
             "raw_files_deleted": deleted_files,
             "websites_marked_deleted": deleted_websites,
-            "filesearch_store_recreated": new_store_name is not None,
+            "filesearch_stores_deleted": 0,
+            "new_store_name": new_store_name,
             "errors": [str(e)]
+        }
         }

@@ -31,6 +31,8 @@ def get_file_search_store_by_display_name(
         absent or proceed with dependent operations.
     """
     logger.info(f"🔍 Looking up FileSearch store by display_name: '{display_name}'")
+    logger.info(f"🔍 Client type: {type(client)}")
+    logger.info(f"🔍 Client has file_search_stores: {hasattr(client, 'file_search_stores')}")
 
     # Check if client has file_search_stores API
     if not hasattr(client, 'file_search_stores'):
@@ -39,7 +41,17 @@ def get_file_search_store_by_display_name(
     # List all FileSearch stores — let exceptions propagate so callers know the
     # lookup itself failed (rather than silently treating it as "not found").
     logger.info("📋 Listing FileSearch stores...")
-    stores = list(client.file_search_stores.list())
+    
+    # Handle pagination properly - the list() method returns a pager that needs iteration
+    stores = []
+    try:
+        pager = client.file_search_stores.list()
+        for store in pager:
+            stores.append(store)
+    except Exception as e:
+        logger.error(f"❌ Error listing FileSearch stores: {e}")
+        raise
+    
     logger.info(f"📋 Found {len(stores)} FileSearch store(s)")
 
     if not stores:
