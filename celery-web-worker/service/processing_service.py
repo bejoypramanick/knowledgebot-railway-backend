@@ -645,37 +645,65 @@ class ProcessingService:
                 temp_file = f.name
 
             try:
-                # Upload directly to FileSearch for RAG embeddings
-                # (Don't need raw files.upload() - FileSearch handles embeddings and indexing)
-                mime_type = "text/markdown"
-                document_name = f"website_{website_id}_{int(time.time())}"
+                # Upload to FileSearch using async LRO pattern (same as file worker)
+                # This handles large files better and supports metadata
+                document_display_name = f"website_{website_id}_{int(time.time())}"
+                file_size = os.path.getsize(temp_file)
 
-                with open(temp_file, 'rb') as f:
-                    file_size = os.path.getsize(temp_file)
-                    logger.info(f"📤 FileSearch upload:")
-                    logger.info(f"   - Store: {file_search_store_name}")
-                    logger.info(f"   - Document: {document_name}")
-                    logger.info(f"   - MIME type: {mime_type}")
-                    logger.info(f"   - File size: {file_size} bytes")
+                logger.info(f"📤 FileSearch upload:")
+                logger.info(f"   - Store: {file_search_store_name}")
+                logger.info(f"   - Document: {document_display_name}")
+                logger.info(f"   - File size: {file_size} bytes")
 
-                    file_search_response = genai_client.file_search_stores.documents.create(
-                        parent=file_search_store_name,
-                        display_name=document_name,
-                        mime_type=mime_type,
-                        file=f
-                    )
-
-                logger.info(f"✅ Created FileSearch document: {file_search_response.name}")
-
-                return {
-                    "success": True,
-                    "file_search_metadata": {
-                        "type": "file_search",
-                        "file_search_store_name": file_search_store_name,
-                        "document_name": file_search_response.name,
-                        "uploaded_at": datetime.utcnow().isoformat()
+                # Use async LRO pattern (handles large files, supports metadata)
+                operation = genai_client.file_search_stores.upload_to_file_search_store(
+                    file=temp_file,
+                    file_search_store_name=file_search_store_name,
+                    config={
+                        'display_name': document_display_name,
+                        'custom_metadata': [
+                            {'key': 'source_type', 'string_value': 'website'},
+                            {'key': 'website_id', 'string_value': str(website_id)},
+                            {'key': 'source_url', 'string_value': url}
+                        ]
                     }
-                }
+                )
+
+                if not operation:
+                    logger.error("❌ Failed to create upload operation")
+                    raise Exception("FileSearch upload operation creation failed")
+
+                # Wait for the upload operation to complete
+                start_time = time.time()
+                max_wait_time = 300  # 5 minutes
+                document_name = None
+
+                while not operation.done:
+                    elapsed = time.time() - start_time
+                    if elapsed > max_wait_time:
+                        logger.error(f"❌ Timeout waiting for FileSearch upload to complete")
+                        raise Exception("FileSearch upload timeout")
+
+                    await asyncio.sleep(5)
+                    operation = genai_client.operations.get(operation)
+
+                # Extract document name from operation response
+                if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
+                    document_name = operation.response.document_name
+                    logger.info(f"✅ Created FileSearch document: {document_name}")
+
+                    return {
+                        "success": True,
+                        "file_search_metadata": {
+                            "type": "file_search",
+                            "file_search_store_name": file_search_store_name,
+                            "document_name": document_name,
+                            "uploaded_at": datetime.utcnow().isoformat()
+                        }
+                    }
+                else:
+                    logger.error(f"❌ FileSearch upload failed - no document_name in response: {operation}")
+                    raise Exception("FileSearch upload failed - no document returned")
 
             finally:
                 # Clean up temp file
