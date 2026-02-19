@@ -21,14 +21,24 @@ celery_app = Celery('celery_web_worker')
 logger.info("🚀 [CELERY_APP] Initializing Celery for Website Crawling Worker")
 logger.info(f"📊 [REDIS] Broker URL: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
 
-# Test Redis connection at startup
+# Test Redis connection at startup and monitor queue
 try:
-    redis_client = redis.from_url(redis_url, decode_responses=True)
+    redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=5)
     redis_client.ping()
     logger.info("✅ [REDIS] Connection test successful - Redis is reachable")
+
+    # Check queue depth
+    queue_depth = redis_client.llen('web_crawling')
+    logger.info(f"📊 [REDIS] Current queue depth: {queue_depth} tasks")
+
+    # Check if there are any tasks in the queue
+    if queue_depth > 0:
+        sample_tasks = redis_client.lrange('web_crawling', 0, 2)
+        logger.info(f"📋 [REDIS] Sample tasks in queue: {sample_tasks}")
+
     redis_client.close()
 except Exception as e:
-    logger.error(f"❌ [REDIS] Connection test failed - {e}")
+    logger.error(f"❌ [REDIS] Connection test failed - {e}", exc_info=True)
 
 celery_app.conf.update(
     broker_url=redis_url,

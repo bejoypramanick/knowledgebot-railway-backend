@@ -27,22 +27,41 @@ def scrape_website_task(
     retry_count = self.request.retries
 
     logger.info("=" * 80)
-    logger.info("🚀 [CELERY_TASK_START] Website scraping task started")
+    logger.info("🚀 [CELERY_TASK_RECEIVED] Website scraping task RECEIVED by worker")
     logger.info("=" * 80)
+    logger.info(f"⏰ [TIMESTAMP] Task received at: {__import__('datetime').datetime.utcnow().isoformat()}")
     logger.info(f"📋 [TASK_ID] Celery Task ID: {task_id}")
+    logger.info(f"👷 [WORKER_INFO] Worker name: {self.request.hostname}")
     logger.info(f"🔄 [RETRY_INFO] Retry Count: {retry_count}, Max Retries: {self.max_retries}")
     logger.info(f"🌐 [WEBSITE_PARAMS] Website ID: {website_id}")
     logger.info(f"🌐 [WEBSITE_PARAMS] URL: {url}")
     logger.info(f"🌐 [WEBSITE_PARAMS] Options: {options}")
+    logger.info(f"📊 [REQUEST_INFO] Full request: {self.request}")
 
     try:
-        logger.info("🔍 [PROCESSING] Loading WebsiteService...")
-        from service.website_service import WebsiteService
+        logger.info("=" * 80)
+        logger.info("📦 [PROCESSING_START] Beginning website scraping process")
+        logger.info("=" * 80)
 
+        logger.info("🔍 [SERVICE_LOAD] Attempting to load WebsiteService...")
+        try:
+            from service.website_service import WebsiteService
+            logger.info("✅ [SERVICE_LOAD_SUCCESS] WebsiteService imported successfully")
+        except Exception as import_err:
+            logger.error(f"❌ [SERVICE_LOAD_ERROR] Failed to import WebsiteService: {import_err}", exc_info=True)
+            raise
+
+        logger.info("🔧 [SERVICE_INIT] Instantiating WebsiteService...")
         website_service = WebsiteService()
-        logger.info("✅ [PROCESSING] WebsiteService loaded successfully")
+        logger.info("✅ [SERVICE_INIT_SUCCESS] WebsiteService instantiated successfully")
 
-        logger.info("⚙️  [PROCESSING] Calling process_website_async() with all parameters...")
+        logger.info("⚙️  [PROCESS_CALL] About to call process_website_async()...")
+        logger.info(f"   Parameters:")
+        logger.info(f"     - website_id: {website_id}")
+        logger.info(f"     - url: {url}")
+        logger.info(f"     - options: {options}")
+        logger.info(f"     - celery_task_id: {task_id}")
+
         asyncio.run(
             website_service.process_website_async(
                 website_id=website_id,
@@ -58,16 +77,21 @@ def scrape_website_task(
         logger.info(f"🌐 [RESULT] Website ID: {website_id}")
         logger.info(f"🌐 [RESULT] URL: {url}")
         logger.info(f"📋 [RESULT] Task ID: {task_id}")
+        logger.info(f"⏰ [TIMESTAMP] Task completed at: {__import__('datetime').datetime.utcnow().isoformat()}")
 
     except Exception as e:
         logger.error("=" * 80)
-        logger.error(f"❌ [CELERY_TASK_ERROR] Error in website scraping task {task_id}")
+        logger.error(f"❌ [CELERY_TASK_ERROR] ERROR in website scraping task {task_id}")
         logger.error("=" * 80)
+        logger.error(f"⏰ [TIMESTAMP] Error occurred at: {__import__('datetime').datetime.utcnow().isoformat()}")
         logger.error(f"🌐 [WEBSITE] Website ID: {website_id}")
         logger.error(f"🌐 [WEBSITE] URL: {url}")
-        logger.error(f"🚨 [ERROR] {type(e).__name__}: {str(e)}")
+        logger.error(f"🚨 [ERROR_TYPE] {type(e).__name__}")
+        logger.error(f"🚨 [ERROR_MESSAGE] {str(e)}")
+        logger.error(f"🚨 [ERROR_DETAILS] Full traceback:")
+        logger.error("", exc_info=True)
         logger.error(f"🔄 [RETRY_INFO] Current Attempt: {retry_count + 1}, Max Retries: {self.max_retries}")
-        logger.error(f"⏱️  [BACKOFF] Next retry in: {60 * (2 ** retry_count)}s (exponential backoff)", exc_info=True)
+        logger.error(f"⏱️  [BACKOFF] Next retry in: {60 * (2 ** retry_count)}s (exponential backoff)")
 
         # Retry with exponential backoff (60s, then 120s)
         try:
