@@ -33,4 +33,4 @@ ENV PYTHONPATH="/app"
 
 # Change to service directory and start Celery worker for file_processing queue
 WORKDIR /app/celery-file-worker
-CMD ["celery", "-A", "celery_app", "worker", "-Q", "file_processing", "-l", "info", "-c", "2", "--max-tasks-per-child=1000"]
+CMD ["celery", "-A", "celery_app", "worker", "-Q", "file_processing", "-l", "info", "-c", "4", "--max-tasks-per-child=1000"]

@@ -77,4 +77,4 @@ ENV PYTHONPATH="/app"
 
 # Change to service directory and start Celery worker for web_crawling queue
 WORKDIR /app/celery-web-worker
-CMD ["celery", "-A", "celery_app", "worker", "-Q", "web_crawling", "-l", "info", "-c", "1", "--max-tasks-per-child=100"]
+CMD ["celery", "-A", "celery_app", "worker", "-Q", "web_crawling", "-l", "info", "-c", "3", "--max-tasks-per-child=100"]
