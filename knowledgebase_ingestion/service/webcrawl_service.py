@@ -104,6 +104,13 @@ async def queue_website_for_scraping(
         max_concurrent: Maximum concurrent requests
         delay_between_requests: Delay between requests in seconds
     """
+    logger.info("=" * 80)
+    logger.info("🌐 [SCRAPE_START] Queue website for scraping - START")
+    logger.info("=" * 80)
+    logger.info(f"📍 [INPUT] URL: {url}")
+    logger.info(f"👤 [INPUT] User Role ID: {user_role_id}")
+    logger.info(f"⚙️  [INPUT] Options: max_depth={max_depth}, max_pages={max_pages}, max_concurrent={max_concurrent}, delay={delay_between_requests}")
+
     try:
         import uuid
 
@@ -114,31 +121,60 @@ async def queue_website_for_scraping(
             'max_concurrent': max_concurrent,
             'delay_between_requests': delay_between_requests
         }
+        logger.info(f"✅ [OPTIONS] Built options dict: {options}")
 
         # Create DB record first with a placeholder task_id so we get the website_id
         placeholder_task_id = str(uuid.uuid4())
+        logger.info(f"📝 [DB_CREATE] Creating DB record with placeholder task_id: {placeholder_task_id}")
         website_id = await create_website_record(url, user_role_id, placeholder_task_id)
 
         if not website_id:
+            logger.error("❌ [DB_CREATE_ERROR] Failed to create website record - returned None")
             return {
                 "success": False,
                 "error": "Failed to create website record"
             }
+        logger.info(f"✅ [DB_CREATE_SUCCESS] Website record created with ID: {website_id}")
 
         # Dispatch to Celery worker with the real website_id — Celery assigns the task ID
-        logger.info(f"📤 [CELERY] Dispatching website scraping task for URL: {url}, website_id: {website_id}")
-        result = web_celery.send_task(
-            'tasks.scrape_website_task',
-            args=[website_id, url, options],
-            queue='web_crawling'
-        )
-        task_id = result.id
+        logger.info(f"📤 [CELERY_DISPATCH] About to dispatch to Celery...")
+        logger.info(f"   Task: 'tasks.scrape_website_task'")
+        logger.info(f"   Args: website_id={website_id}, url={url}")
+        logger.info(f"   Queue: 'web_crawling'")
+
+        try:
+            result = web_celery.send_task(
+                'tasks.scrape_website_task',
+                args=[website_id, url, options],
+                queue='web_crawling'
+            )
+            logger.info(f"✅ [CELERY_SEND_SUCCESS] Task dispatched successfully")
+            logger.info(f"   Result type: {type(result)}")
+            logger.info(f"   Result: {result}")
+
+            task_id = result.id
+            logger.info(f"✅ [CELERY_TASK_ID] Celery assigned task ID: {task_id}")
+        except Exception as celery_err:
+            logger.error(f"❌ [CELERY_SEND_ERROR] Failed to dispatch to Celery: {celery_err}", exc_info=True)
+            raise
 
         # Update DB record with the real Celery task ID
+        logger.info(f"💾 [DB_UPDATE] Updating DB with real Celery task ID: {task_id}")
         dao = get_webcrawl_dao()
-        await dao.update_celery_task_id(website_id, task_id)
+        try:
+            await dao.update_celery_task_id(website_id, task_id)
+            logger.info(f"✅ [DB_UPDATE_SUCCESS] DB updated with Celery task ID")
+        except Exception as db_err:
+            logger.error(f"❌ [DB_UPDATE_ERROR] Failed to update DB with task ID: {db_err}", exc_info=True)
+            raise
 
-        logger.info(f"✅ Queued website scraping task: {task_id} for website ID: {website_id}")
+        logger.info("=" * 80)
+        logger.info(f"✅ [SCRAPE_QUEUED] Website scraping task successfully queued")
+        logger.info("=" * 80)
+        logger.info(f"📋 [RESULT] Website ID: {website_id}")
+        logger.info(f"📋 [RESULT] Celery Task ID: {task_id}")
+        logger.info(f"📋 [RESULT] URL: {url}")
+
         return {
             "success": True,
             "message": "Website scraping started successfully",
@@ -149,9 +185,92 @@ async def queue_website_for_scraping(
         }
 
     except Exception as e:
-        logger.error(f"❌ Error queuing website for scraping: {e}")
+        logger.error("=" * 80)
+        logger.error(f"❌ [SCRAPE_ERROR] Error queuing website for scraping")
+        logger.error("=" * 80)
+        logger.error(f"📍 [ERROR_INPUT] URL: {url}")
+        logger.error(f"🚨 [ERROR_DETAILS] {type(e).__name__}: {str(e)}", exc_info=True)
         return {
             "success": False,
+            "error": str(e)
+        }
+
+
+async def get_task_status(task_id: str) -> Dict[str, Any]:
+    """
+    Get the status of a Celery task.
+
+    Args:
+        task_id: Celery task ID
+
+    Returns:
+        Task status information
+    """
+    try:
+        logger.info(f"🔍 [TASK_STATUS_CHECK] Checking status for task: {task_id}")
+
+        # Get task result from Celery
+        task_result = web_celery.AsyncResult(task_id)
+
+        logger.info(f"📊 [TASK_STATE] Task state: {task_result.state}")
+        logger.info(f"📊 [TASK_RESULT] Task result: {task_result.result}")
+        logger.info(f"📊 [TASK_READY] Task ready: {task_result.ready()}")
+        logger.info(f"📊 [TASK_SUCCESSFUL] Task successful: {task_result.successful()}")
+        logger.info(f"📊 [TASK_FAILED] Task failed: {task_result.failed()}")
+
+        return {
+            "task_id": task_id,
+            "state": task_result.state,
+            "result": str(task_result.result) if task_result.result else None,
+            "ready": task_result.ready(),
+            "successful": task_result.successful(),
+            "failed": task_result.failed()
+        }
+    except Exception as e:
+        logger.error(f"❌ [TASK_STATUS_ERROR] Error checking task status: {e}", exc_info=True)
+        return {
+            "task_id": task_id,
+            "error": str(e)
+        }
+
+
+async def check_redis_queue() -> Dict[str, Any]:
+    """
+    Check Redis queue for pending tasks.
+
+    Returns:
+        Redis queue information
+    """
+    try:
+        logger.info("🔍 [REDIS_CHECK] Checking Redis queue...")
+
+        import redis
+        import os
+
+        redis_url = os.getenv('WEB_REDIS_URL', os.getenv('REDIS_URL', 'redis://localhost:6379/1'))
+        redis_client = redis.from_url(redis_url, decode_responses=True)
+
+        # Check queue length
+        queue_length = redis_client.llen('celery')  # Default Celery queue
+        web_crawling_length = redis_client.llen('web_crawling')  # Our specific queue
+
+        logger.info(f"📊 [REDIS_QUEUES] Celery queue length: {queue_length}")
+        logger.info(f"📊 [REDIS_QUEUES] web_crawling queue length: {web_crawling_length}")
+
+        # Get queue contents (first 10 items)
+        queue_items = redis_client.lrange('web_crawling', 0, 9)
+        logger.info(f"📊 [REDIS_ITEMS] Queue items (first 10): {queue_items}")
+
+        redis_client.close()
+
+        return {
+            "celery_queue_length": queue_length,
+            "web_crawling_queue_length": web_crawling_length,
+            "sample_items": queue_items[:3] if queue_items else []
+        }
+    except Exception as e:
+        logger.error(f"❌ [REDIS_CHECK_ERROR] Error checking Redis queue: {e}", exc_info=True)
+        return {
             "error": str(e)
         }
 

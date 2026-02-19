@@ -11,7 +11,7 @@ from knowledgebase_ingestion.utils.logging import get_otel_logger
 from knowledgebase_ingestion.service.webcrawl_service import (
     get_webcrawl_dao, get_pending_websites, get_website_by_id,
     cancel_websites, update_website_status, queue_website_for_scraping,
-    queue_website_for_deletion, validate_scraping_request
+    queue_website_for_deletion, validate_scraping_request, get_task_status, check_redis_queue
 )
 from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import web_celery
@@ -239,6 +239,40 @@ async def scrape_website_async_endpoint(request: Request = None):
         raise
     except Exception as e:
         logger.error(f"Error in async website scraping: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =================================
+# DEBUG/MONITORING ENDPOINTS
+# =================================
+
+@router.get("/debug/task-status/{task_id}")
+async def debug_task_status(task_id: str, request: Request = None):
+    """DEBUG: Check status of a Celery task"""
+    try:
+        extract_user_from_request(request)  # Verify auth
+        status = await get_task_status(task_id)
+        return {
+            "success": True,
+            "task_status": status
+        }
+    except Exception as e:
+        logger.error(f"Error getting task status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/debug/redis-queue")
+async def debug_redis_queue(request: Request = None):
+    """DEBUG: Check Redis queue status"""
+    try:
+        extract_user_from_request(request)  # Verify auth
+        queue_info = await check_redis_queue()
+        return {
+            "success": True,
+            "redis_queue_info": queue_info
+        }
+    except Exception as e:
+        logger.error(f"Error checking Redis queue: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
