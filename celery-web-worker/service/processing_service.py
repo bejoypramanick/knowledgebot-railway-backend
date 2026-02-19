@@ -656,11 +656,13 @@ class ProcessingService:
                 logger.info(f"   - File size: {file_size} bytes")
 
                 # Use async LRO pattern (handles large files, supports metadata)
+                # Include mime_type in config for API
                 operation = genai_client.file_search_stores.upload_to_file_search_store(
                     file=temp_file,
                     file_search_store_name=file_search_store_name,
                     config={
                         'display_name': document_display_name,
+                        'mime_type': 'text/markdown',
                         'custom_metadata': [
                             {'key': 'source_type', 'string_value': 'website'},
                             {'key': 'website_id', 'string_value': str(website_id)},
