@@ -15,6 +15,7 @@ from urllib.parse import urljoin, urlparse
 from shared.otel_logger import get_otel_logger
 from shared.file_search import get_file_search_store_by_display_name
 from shared.file_metrics import calculate_metrics
+from shared.db import get_db_connection
 
 from models.value_objects import (
     CrawlConfig,
@@ -212,7 +213,10 @@ class ProcessingService:
             page_data = PageData(
                 page_url=page_data.page_url,
                 page_html=page_data.page_html,
-                markdown=markdown
+                markdown=markdown,
+                title=page_data.title,
+                description=page_data.description,
+                session_id=page_data.session_id
             )
 
             # Upload
@@ -715,8 +719,20 @@ class ProcessingService:
         job_context: JobContext
     ) -> Optional[int]:
         """Record single page in database"""
+        metrics = calculate_metrics(page_data.markdown)
+        
         if await self._isSinglePageMode(page_data.page_url, job_context.root_url):
-            logger.info(f"   ℹ️ Skipping child record (single-page depth=0)")
+            logger.info(f"   ℹ️ Single-page mode: updating parent record with page data")
+            
+            # Update the parent website record with the page data
+            await self._updateWebsiteWithPageData(
+                website_id=job_context.website_id,
+                page_data=page_data,
+                upload_result=upload_result,
+                file_size=metrics.get('file_size_bytes', 0),
+                char_count=metrics.get('char_count', 0)
+            )
+            
             return job_context.website_id
 
         child_page_id = await self.scraping_dao.record_child_page(
@@ -738,6 +754,56 @@ class ProcessingService:
     async def _isSinglePageMode(self, page_url: str, root_url: str) -> bool:
         """Check if child record should be skipped"""
         return page_url == root_url
+
+    async def _updateWebsiteWithPageData(
+        self,
+        website_id: int,
+        page_data: PageData,
+        upload_result: UploadResult,
+        file_size: int,
+        char_count: int
+    ) -> bool:
+        """Update parent website record with single page data"""
+        import json
+        
+        logger.info(f"💾 [UPDATE_WEBSITE] Updating website {website_id} with page data")
+        
+        query = """
+            UPDATE scraped_websites
+            SET gemini_file_name = $1,
+                gemini_file_uri = $2,
+                file_size = $3,
+                char_count = $4,
+                title = $5,
+                description = $6,
+                crawl_session_id = $7,
+                pages_scraped = $8,
+                metadata = $9::jsonb,
+                updated_at = NOW()
+            WHERE id = $10
+        """
+        
+        params = [
+            upload_result.document_name,
+            upload_result.gemini_file_uri,
+            file_size,
+            char_count,
+            page_data.title,
+            page_data.description,
+            page_data.session_id,
+            1,  # pages_scraped = 1 for single page
+            json.dumps(upload_result.file_search_metadata),
+            website_id
+        ]
+        
+        try:
+            async with get_db_connection() as conn:
+                await conn.execute(query, *params)
+                logger.info(f"✅ [UPDATE_WEBSITE_SUCCESS] Website record updated")
+                return True
+        except Exception as e:
+            logger.error(f"❌ [UPDATE_WEBSITE_ERROR] Failed to update website: {e}")
+            return False
 
     # ==================== UTILITIES ====================
 
