@@ -209,19 +209,20 @@ async def scrape_website_async_endpoint(request: Request = None):
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
+        logger.info(f"🔐 [AUTH] User Email: {user_email}, User ID: {user_id}")
+
         # Get request data
         request_data = await request.json()
-        
+
         # Validate request
         validation_result = await validate_scraping_request(request_data)
         if not validation_result['valid']:
             raise HTTPException(status_code=400, detail=validation_result['error'])
-        
+
         # Queue website for scraping with all validated params
         result = await queue_website_for_scraping(
             url=validation_result['url'],
-            user_email=user_email,
+            user_role_id=user_id,
             max_depth=validation_result.get('max_depth', 2),
             max_pages=validation_result.get('max_pages', 100),
             max_concurrent=validation_result.get('max_concurrent', 10),

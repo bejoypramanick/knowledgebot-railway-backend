@@ -26,14 +26,19 @@ def get_webcrawl_dao() -> WebCrawlDAO:
     return _webcrawl_dao
 
 
-async def create_website_record(url: str, user_email: str, task_id: str) -> Optional[int]:
+async def create_website_record(url: str, user_role_id: int = None, task_id: str = None) -> Optional[int]:
     """
     Create website record with Queued status.
     Delegates to DAO layer for database operations.
+
+    Args:
+        url: Website URL to scrape
+        user_role_id: User role ID (optional, for audit trail)
+        task_id: Celery task ID
     """
     try:
         dao = get_webcrawl_dao()
-        return await dao.create_website_record(url, user_email, task_id)
+        return await dao.create_website_record(url, user_role_id, task_id)
     except Exception as e:
         logger.error(f"❌ Error creating website record: {e}")
         return None
@@ -81,7 +86,7 @@ async def update_website_status(website_id: int, status: str, error_message: str
 
 async def queue_website_for_scraping(
     url: str,
-    user_email: str,
+    user_role_id: int = None,
     max_depth: int = 2,
     max_pages: int = 100,
     max_concurrent: int = 10,
@@ -90,6 +95,14 @@ async def queue_website_for_scraping(
     """
     Queue website for scraping via Celery.
     Flow: create DB record → dispatch to Celery with website_id → update DB with real task_id.
+
+    Args:
+        url: Website URL to scrape
+        user_role_id: User role ID (optional, for audit trail)
+        max_depth: Maximum crawl depth
+        max_pages: Maximum pages to crawl
+        max_concurrent: Maximum concurrent requests
+        delay_between_requests: Delay between requests in seconds
     """
     try:
         import uuid
@@ -99,13 +112,12 @@ async def queue_website_for_scraping(
             'max_depth': max_depth,
             'max_pages': max_pages,
             'max_concurrent': max_concurrent,
-            'delay_between_requests': delay_between_requests,
-            'user_email': user_email
+            'delay_between_requests': delay_between_requests
         }
 
         # Create DB record first with a placeholder task_id so we get the website_id
         placeholder_task_id = str(uuid.uuid4())
-        website_id = await create_website_record(url, user_email, placeholder_task_id)
+        website_id = await create_website_record(url, user_role_id, placeholder_task_id)
 
         if not website_id:
             return {
