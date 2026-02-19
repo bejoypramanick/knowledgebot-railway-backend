@@ -24,6 +24,7 @@ class WebCrawlDAO:
         # With path (https://www.globistaan.com/index.html or /about) → "single"
         parsed_url = urlparse(url)
         path = parsed_url.path.strip('/')
+        domain = parsed_url.netloc or url  # Extract domain from URL
         source_type = "website" if not path else "single"
 
         # Build metadata for audit trail
@@ -34,22 +35,23 @@ class WebCrawlDAO:
         }
 
         query = """
-            INSERT INTO scraped_websites (original_url, processing_status, user_role_id, celery_task_id, metadata, created_at, updated_at)
-            VALUES ($1, 'pending', $2, $3, $4::jsonb, NOW(), NOW())
+            INSERT INTO scraped_websites (original_url, domain, processing_status, user_role_id, celery_task_id, metadata, created_at, updated_at)
+            VALUES ($1, $2, 'pending', $3, $4, $5::jsonb, NOW(), NOW())
             RETURNING id
         """
-        params = [url, user_role_id, task_id, json.dumps(metadata)]
+        params = [url, domain, user_role_id, task_id, json.dumps(metadata)]
 
         try:
             logger.log_db_operation(query, params)
             logger.info(f"🌐 [WEB_CREATE] Creating website record")
             logger.info(f"   URL: {url}")
+            logger.info(f"   Domain: {domain}")
             logger.info(f"   Source Type: {source_type}")
             logger.info(f"   User Role ID: {user_role_id}")
             logger.info(f"   Task ID: {task_id}")
 
             async with get_db_connection() as conn:
-                result = await conn.fetchval(query, url, user_role_id, task_id, json.dumps(metadata))
+                result = await conn.fetchval(query, url, domain, user_role_id, task_id, json.dumps(metadata))
                 logger.log_db_query(query, params, result)
 
                 if result:
