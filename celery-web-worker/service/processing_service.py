@@ -534,7 +534,39 @@ class ProcessingService:
 
         genai_client = get_genai_client()
         if not genai_client:
-            raise Exception("Gemini client not configured")
+            async def _waitForGeminiUploadCompletion(self, operation, job_context: JobContext) -> Optional[UploadResult]:
+                """Poll Gemini upload operation until done"""
+                from core.ai import get_genai_client
+
+                genai_client = get_genai_client()
+                start_time = time.time()
+                max_wait = 120  # Reduced from 300s to 120s (2 minutes)
+                
+                logger.info(f"   ⏳ Waiting for upload... (timeout: {max_wait}s)")
+                
+                while not operation.done:
+                    elapsed = time.time() - start_time
+                    if elapsed > max_wait:
+                        logger.error(f"   ❌ Timeout uploading ({elapsed:.0f}s)")
+                        # Cancel the operation to free resources
+                        try:
+                            genai_client.operations.cancel(operation.name)
+                            logger.info(f"   ✅ Cancelled stuck upload operation: {operation.name}")
+                        except Exception as cancel_err:
+                            logger.warning(f"   ⚠️ Could not cancel operation: {cancel_err}")
+                        return None
+                    
+                    logger.info(f"   ⏳ Waiting for upload... ({elapsed:.0f}s)")
+                    await asyncio.sleep(2)  # Reduced from 5s to 2s for more responsive checking
+                    
+                    operation = genai_client.operations.get(operation.name)
+                    
+                # Final check - if operation is still not done after max_wait, fail it
+                if not operation.done:
+                    logger.error(f"   ❌ Upload failed after timeout ({max_wait}s)")
+                    return None
+                
+                return await self._extractDocumentNameFromOperation(operation, job_context.store_name)
 
         store = get_file_search_store_by_display_name(genai_client, display_name=store_display_name)
         if not store:
@@ -608,46 +640,60 @@ class ProcessingService:
             ]
         }
 
-    def _deleteTemporaryFile(self, temp_file: str):
-        """Clean up temporary file"""
-        try:
-            os.unlink(temp_file)
-        except:
-            pass
-
     async def _waitForGeminiUploadCompletion(self, operation, job_context: JobContext) -> Optional[UploadResult]:
         """Poll Gemini upload operation until done"""
         from core.ai import get_genai_client
 
         genai_client = get_genai_client()
         start_time = time.time()
-        max_wait = 300
-
+        max_wait = 120  # Reduced from 300s to 120s (2 minutes)
+        
+        logger.info(f"   ⏳ Waiting for upload... (timeout: {max_wait}s)")
+        
         while not operation.done:
             elapsed = time.time() - start_time
             if elapsed > max_wait:
                 logger.error(f"   ❌ Timeout uploading ({elapsed:.0f}s)")
+                # Cancel the operation to free resources
+                try:
+                    genai_client.operations.cancel(operation.name)
+                    logger.info(f"   ✅ Cancelled stuck upload operation: {operation.name}")
+                except Exception as cancel_err:
+                    logger.warning(f"   ⚠️ Could not cancel operation: {cancel_err}")
                 return None
-
+            
             logger.info(f"   ⏳ Waiting for upload... ({elapsed:.0f}s)")
-            await asyncio.sleep(5)
-            operation = genai_client.operations.get(operation)
-
+            await asyncio.sleep(2)  # Reduced from 5s to 2s for more responsive checking
+            
+            operation = genai_client.operations.get(operation.name)
+            
+        # Final check - if operation is still not done after max_wait, fail it
+        if not operation.done:
+            logger.error(f"   ❌ Upload failed after timeout ({max_wait}s)")
+            return None
+        
         return await self._extractDocumentNameFromOperation(operation, job_context.store_name)
 
     async def _extractDocumentNameFromOperation(self, operation, store_name: str) -> Optional[UploadResult]:
-        """Extract document name from completed upload operation"""
-        if operation.done and hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
-            doc_name = operation.response.document_name
+        """Extract document name from operation"""
+        if operation.response and operation.response.status_code == 200:
+            doc_name = operation.response.json()['name']
             logger.info(f"   ✅ FileSearch document: {doc_name}")
             return UploadResult(
                 document_name=doc_name,
                 file_search_store_name=store_name,
                 uploaded_at=datetime.utcnow()
             )
-
+        
         logger.error(f"   ❌ Upload failed or invalid response")
         return None
+
+    async def _deleteTemporaryFile(self, temp_file: str):
+        """Clean up temporary file"""
+        try:
+            os.unlink(temp_file)
+        except:
+            pass
 
     # ==================== DATABASE LAYER ====================
 
