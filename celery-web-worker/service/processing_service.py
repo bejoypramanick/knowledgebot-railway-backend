@@ -609,6 +609,8 @@ class ProcessingService:
             from core.ai import get_genai_client
             from core.config import settings
             import json
+            import tempfile
+            import os
 
             genai_client = get_genai_client()
             if not genai_client:
@@ -628,151 +630,145 @@ class ProcessingService:
                 logger.error("❌ FileSearch store not found")
                 raise Exception("FileSearch store not found")
 
-            # Import required modules
-            import tempfile
-            import os
-
             logger.info(f"📤 Uploading {len(processed_pages)} pages individually to FileSearch")
 
-            try:
+            # Get admin user role ID for child page records
+            user_role_id = await self.scraping_dao.get_admin_user_role_id(user_email)
+            if not user_role_id:
+                logger.warning(f"⚠️ Could not find admin user role for {user_email}, child pages will have NULL user_role_id")
 
-                # Get admin user role ID for child page records
-                user_role_id = await self.scraping_dao.get_admin_user_role_id(user_email)
-                if not user_role_id:
-                    logger.warning(f"⚠️ Could not find admin user role for {user_email}, child pages will have NULL user_role_id")
+            uploaded_pages = []
+            failed_pages = []
 
-                uploaded_pages = []
-                failed_pages = []
+            # Upload each page individually
+            for idx, page in enumerate(processed_pages, 1):
+                page_url = page['url']
+                page_markdown = page['markdown']
 
-                # Upload each page individually
-                for idx, page in enumerate(processed_pages, 1):
-                    page_url = page['url']
-                    page_markdown = page['markdown']
+                logger.info(f"📄 [{idx}/{len(processed_pages)}] Uploading page: {page_url}")
 
-                    logger.info(f"📄 [{idx}/{len(processed_pages)}] Uploading page: {page_url}")
+                try:
+                    # Create temp file for this page
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as pf:
+                        pf.write(page_markdown)
+                        page_temp_file = pf.name
 
                     try:
-                        # Create temp file for this page
-                        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as pf:
-                            pf.write(page_markdown)
-                            page_temp_file = pf.name
+                        # Upload this page to FileSearch
+                        document_display_name = f"page_{website_id}_{int(time.time())}_{idx}"
+                        file_size = os.path.getsize(page_temp_file)
 
-                        try:
-                            # Upload this page to FileSearch
-                            document_display_name = f"page_{website_id}_{int(time.time())}_{idx}"
-                            file_size = os.path.getsize(page_temp_file)
+                        logger.info(f"   - Document: {document_display_name}")
+                        logger.info(f"   - Size: {file_size} bytes")
 
-                            logger.info(f"   - Document: {document_display_name}")
-                            logger.info(f"   - Size: {file_size} bytes")
+                        # Upload using async LRO pattern
+                        operation = genai_client.file_search_stores.upload_to_file_search_store(
+                            file=page_temp_file,
+                            file_search_store_name=file_search_store_name,
+                            config={
+                                'display_name': document_display_name,
+                                'mime_type': 'text/markdown',
+                                'custom_metadata': [
+                                    {'key': 'source_type', 'string_value': 'website'},
+                                    {'key': 'website_id', 'string_value': str(website_id)},
+                                    {'key': 'source_url', 'string_value': url},
+                                    {'key': 'page_url', 'string_value': page_url}
+                                ]
+                            }
+                        )
 
-                            # Upload using async LRO pattern
-                            operation = genai_client.file_search_stores.upload_to_file_search_store(
-                                file=page_temp_file,
-                                file_search_store_name=file_search_store_name,
-                                config={
-                                    'display_name': document_display_name,
-                                    'mime_type': 'text/markdown',
-                                    'custom_metadata': [
-                                        {'key': 'source_type', 'string_value': 'website'},
-                                        {'key': 'website_id', 'string_value': str(website_id)},
-                                        {'key': 'source_url', 'string_value': url},
-                                        {'key': 'page_url', 'string_value': page_url}
-                                    ]
-                                }
+                        if not operation:
+                            logger.error(f"   ❌ Failed to create upload operation for {page_url}")
+                            failed_pages.append(page_url)
+                            continue
+
+                        # Wait for upload to complete
+                        start_time = time.time()
+                        max_wait_time = 300  # 5 minutes
+                        document_name = None
+
+                        while not operation.done:
+                            elapsed = time.time() - start_time
+                            if elapsed > max_wait_time:
+                                logger.error(f"   ❌ Timeout uploading {page_url}")
+                                failed_pages.append(page_url)
+                                break
+
+                            await asyncio.sleep(5)
+                            operation = genai_client.operations.get(operation)
+
+                        if operation.done and hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
+                            document_name = operation.response.document_name
+                            logger.info(f"   ✅ Created FileSearch document: {document_name}")
+
+                            # Prepare metadata for this page
+                            file_search_metadata = {
+                                "type": "file_search",
+                                "file_search_store_name": file_search_store_name,
+                                "document_name": document_name,
+                                "uploaded_at": datetime.utcnow().isoformat()
+                            }
+
+                            # Record this page in database IMMEDIATELY
+                            child_page_id = await self.scraping_dao.record_child_page(
+                                parent_id=website_id,
+                                page_url=page_url,
+                                gemini_file_name=document_name,
+                                file_search_metadata=file_search_metadata,
+                                user_role_id=user_role_id
                             )
 
-                            if not operation:
-                                logger.error(f"   ❌ Failed to create upload operation for {page_url}")
-                                failed_pages.append(page_url)
-                                continue
-
-                            # Wait for upload to complete
-                            start_time = time.time()
-                            max_wait_time = 300  # 5 minutes
-                            document_name = None
-
-                            while not operation.done:
-                                elapsed = time.time() - start_time
-                                if elapsed > max_wait_time:
-                                    logger.error(f"   ❌ Timeout uploading {page_url}")
-                                    failed_pages.append(page_url)
-                                    break
-
-                                await asyncio.sleep(5)
-                                operation = genai_client.operations.get(operation)
-
-                            if operation.done and hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
-                                document_name = operation.response.document_name
-                                logger.info(f"   ✅ Created FileSearch document: {document_name}")
-
-                                # Prepare metadata for this page
-                                file_search_metadata = {
-                                    "type": "file_search",
-                                    "file_search_store_name": file_search_store_name,
+                            if child_page_id:
+                                logger.info(f"   ✅ Recorded child page ID: {child_page_id}")
+                                uploaded_pages.append({
+                                    "url": page_url,
+                                    "page_id": child_page_id,
                                     "document_name": document_name,
-                                    "uploaded_at": datetime.utcnow().isoformat()
-                                }
-
-                                # Record this page in database IMMEDIATELY
-                                child_page_id = await self.scraping_dao.record_child_page(
-                                    parent_id=website_id,
-                                    page_url=page_url,
-                                    gemini_file_name=document_name,
-                                    file_search_metadata=file_search_metadata,
-                                    user_role_id=user_role_id
-                                )
-
-                                if child_page_id:
-                                    logger.info(f"   ✅ Recorded child page ID: {child_page_id}")
-                                    uploaded_pages.append({
-                                        "url": page_url,
-                                        "page_id": child_page_id,
-                                        "document_name": document_name,
-                                        "metadata": file_search_metadata
-                                    })
-                                else:
-                                    logger.error(f"   ❌ Failed to record child page in database")
-                                    failed_pages.append(page_url)
+                                    "metadata": file_search_metadata
+                                })
                             else:
-                                logger.error(f"   ❌ FileSearch upload failed for {page_url}")
+                                logger.error(f"   ❌ Failed to record child page in database")
                                 failed_pages.append(page_url)
+                        else:
+                            logger.error(f"   ❌ FileSearch upload failed for {page_url}")
+                            failed_pages.append(page_url)
 
-                        finally:
-                            # Clean up temp file
-                            try:
-                                os.unlink(page_temp_file)
-                            except:
-                                pass
+                    finally:
+                        # Clean up temp file
+                        try:
+                            os.unlink(page_temp_file)
+                        except:
+                            pass
 
-                    except Exception as page_error:
-                        logger.error(f"   ❌ Error uploading page {page_url}: {page_error}")
-                        failed_pages.append(page_url)
-                        continue
+                except Exception as page_error:
+                    logger.error(f"   ❌ Error uploading page {page_url}: {page_error}")
+                    failed_pages.append(page_url)
+                    continue
 
-                # Summary
-                logger.info(f"\n📊 Upload Summary:")
-                logger.info(f"   - Pages uploaded: {len(uploaded_pages)}/{len(processed_pages)}")
-                logger.info(f"   - Failed: {len(failed_pages)}")
+            # Summary
+            logger.info(f"\n📊 Upload Summary:")
+            logger.info(f"   - Pages uploaded: {len(uploaded_pages)}/{len(processed_pages)}")
+            logger.info(f"   - Failed: {len(failed_pages)}")
 
-                if failed_pages:
-                    logger.warning(f"   - Failed pages: {', '.join(failed_pages)}")
+            if failed_pages:
+                logger.warning(f"   - Failed pages: {', '.join(failed_pages)}")
 
-                if not uploaded_pages:
-                    raise Exception(f"Failed to upload any pages. {len(failed_pages)} pages failed.")
+            if not uploaded_pages:
+                raise Exception(f"Failed to upload any pages. {len(failed_pages)} pages failed.")
 
-                # Return success with all uploaded pages info
-                return {
-                    "success": True,
-                    "pages_uploaded": len(uploaded_pages),
-                    "pages_failed": len(failed_pages),
-                    "uploaded_pages": uploaded_pages,
-                    "file_search_metadata": {
-                        "type": "file_search",
-                        "file_search_store_name": file_search_store_name,
-                        "pages_count": len(uploaded_pages),
-                        "uploaded_at": datetime.utcnow().isoformat()
-                    }
+            # Return success with all uploaded pages info
+            return {
+                "success": True,
+                "pages_uploaded": len(uploaded_pages),
+                "pages_failed": len(failed_pages),
+                "uploaded_pages": uploaded_pages,
+                "file_search_metadata": {
+                    "type": "file_search",
+                    "file_search_store_name": file_search_store_name,
+                    "pages_count": len(uploaded_pages),
+                    "uploaded_at": datetime.utcnow().isoformat()
                 }
+            }
 
             except Exception as e:
                 import traceback
