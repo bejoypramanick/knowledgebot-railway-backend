@@ -15,7 +15,7 @@ class WebCrawlDAO:
         pass  # No connection parameter - DAO manages its own connection
 
     async def create_website_record(self, url: str, user_role_id: int = None, task_id: str = None) -> Optional[int]:
-        """Create website record with Queued status."""
+        """Create website record with pending status."""
         import json
 
         # Build metadata for audit trail
@@ -27,7 +27,7 @@ class WebCrawlDAO:
 
         query = """
             INSERT INTO scraped_websites (original_url, processing_status, user_role_id, celery_task_id, metadata, created_at, updated_at)
-            VALUES ($1, 'Queued', $2, $3, $4::jsonb, NOW(), NOW())
+            VALUES ($1, 'pending', $2, $3, $4::jsonb, NOW(), NOW())
             RETURNING id
         """
         params = [url, user_role_id, task_id, json.dumps(metadata)]
@@ -49,7 +49,7 @@ class WebCrawlDAO:
                 return result
 
         except Exception as e:
-            logger.error(f"❌ [WEB_CREATE_ERROR] Failed to create website record: {e}", exc_info=True)
+            logger.error(f"❌ [WEB_CREATE_ERROR] Failed to create website record: {e}")
             logger.log_db_query(query, params, error=e)
             return None
 
