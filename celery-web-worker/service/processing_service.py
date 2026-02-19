@@ -755,15 +755,23 @@ class ProcessingService:
                             }
 
                             # Record this page in database IMMEDIATELY
-                            child_page_id = await self.scraping_dao.record_child_page(
-                                parent_id=website_id,
-                                page_url=page_url,
-                                gemini_file_name=document_name,
-                                file_search_metadata=file_search_metadata,
-                                user_role_id=user_role_id,
-                                file_size=file_size,
-                                char_count=char_count
-                            )
+                            # Skip child page recording if this is a depth=0 single-page scrape (root is the only page)
+                            is_root_page = (page_url == url)
+                            is_single_page_scrape = (max_depth == 0)
+
+                            if is_single_page_scrape and is_root_page:
+                                logger.info(f"   ℹ️  Skipping child page record (root page in single-page depth=0 scrape)")
+                                child_page_id = website_id  # Use parent ID since root IS the website
+                            else:
+                                child_page_id = await self.scraping_dao.record_child_page(
+                                    parent_id=website_id,
+                                    page_url=page_url,
+                                    gemini_file_name=document_name,
+                                    file_search_metadata=file_search_metadata,
+                                    user_role_id=user_role_id,
+                                    file_size=file_size,
+                                    char_count=char_count
+                                )
 
                             if child_page_id:
                                 logger.info(f"   ✅ Recorded child page ID: {child_page_id}")
