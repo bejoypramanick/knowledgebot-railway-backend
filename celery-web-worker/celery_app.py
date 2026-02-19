@@ -4,7 +4,7 @@ Handles async website scraping and crawling tasks
 """
 
 from celery import Celery
-from celery.signals import before_task_publish, task_prerun, task_postrun, task_failure, task_retry
+from celery.signals import before_task_publish, task_prerun, task_postrun, task_failure, task_retry, worker_process_init
 from shared.otel_logger import get_otel_logger
 import os
 import redis
@@ -129,6 +129,48 @@ def task_retry_handler(sender=None, task_id=None, args=None, reason=None, **kwar
         logger.warning(f"🔄 [TASK_RETRY] Task retrying - Task ID: {task_id}, Website ID: {website_id}, Reason: {reason}")
     except Exception as e:
         logger.error(f"❌ [TASK_RETRY] Error in retry handler: {e}")
+
+
+@worker_process_init.connect
+def init_worker_process(**kwargs):
+    """
+    Initialize database pool after worker process fork.
+    
+    This is critical for Celery prefork pool workers. When the parent process forks,
+    file descriptors (including database connections) are copied to child processes,
+    causing conflicts. We must close any inherited pools and create fresh ones.
+    """
+    logger.info("🔄 [WORKER_INIT] Worker process initializing after fork")
+    
+    try:
+        # Import here to avoid circular dependencies
+        from shared.db import DatabaseManager
+        import asyncio
+        
+        # Get the singleton instance
+        manager = DatabaseManager._instance
+        
+        if manager and manager._pool:
+            logger.warning("⚠️ [WORKER_INIT] Found inherited database pool from parent process, closing it")
+            # Close the inherited pool (don't use await since we're not in async context)
+            try:
+                # Force close without async - the pool is from parent process anyway
+                if manager._pool:
+                    manager._pool.terminate()
+            except Exception as e:
+                logger.warning(f"⚠️ [WORKER_INIT] Error terminating inherited pool: {e}")
+            
+            # Reset the pool so it will be recreated on first use
+            manager._pool = None
+            manager._event_loop_id = None
+            logger.info("✅ [WORKER_INIT] Inherited pool closed, will create fresh pool on first use")
+        else:
+            logger.info("✅ [WORKER_INIT] No inherited pool found, will create fresh pool on first use")
+            
+    except Exception as e:
+        logger.error(f"❌ [WORKER_INIT] Error in worker process init: {e}")
+        import traceback
+        logger.error(f"   Traceback: {traceback.format_exc()}")
 
 
 @celery_app.task(bind=True)

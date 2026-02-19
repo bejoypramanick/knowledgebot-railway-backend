@@ -21,7 +21,6 @@ class DatabaseManager:
     def __init__(self, connection_url: Optional[str] = None):
         self._pool: Optional[asyncpg.Pool] = None
         self._connection_url = connection_url or os.getenv("DATABASE_URL")
-        self._event_loop_id: Optional[int] = None  # Track which event loop owns the pool
         
         # Ensure SSL mode is properly configured for Railway
         if self._connection_url and 'sslmode=' not in self._connection_url:
@@ -45,16 +44,6 @@ class DatabaseManager:
         }
         self._last_health_check = 0
         self._health_check_interval = 30  # seconds
-
-    def _is_different_event_loop(self) -> bool:
-        """Check if we're in a different event loop than the one that created the pool."""
-        try:
-            current_loop = asyncio.get_running_loop()
-            current_loop_id = id(current_loop)
-            return self._event_loop_id is not None and self._event_loop_id != current_loop_id
-        except RuntimeError:
-            # No running event loop
-            return False
 
     @classmethod
     async def get_instance(cls) -> 'DatabaseManager':
@@ -82,25 +71,9 @@ class DatabaseManager:
         if not self._connection_url:
             raise RuntimeError("Database URL not configured")
         
-        # Close existing pool if we're in a different event loop
-        if self._pool and self._is_different_event_loop():
-            logger.warning("⚠️ Detected different event loop, closing old pool")
-            try:
-                await self._pool.close()
-            except Exception as e:
-                logger.warning(f"⚠️ Error closing old pool: {e}")
-            self._pool = None
-        
         logger.info(f"🆕 Initializing unified DB pool (min={self._pool_config['min_size']}, max={self._pool_config['max_size']})")
         
         try:
-            # Store the current event loop ID
-            try:
-                current_loop = asyncio.get_running_loop()
-                self._event_loop_id = id(current_loop)
-            except RuntimeError:
-                self._event_loop_id = None
-            
             self._pool = await asyncpg.create_pool(
                 dsn=self._connection_url,
                 **self._pool_config
@@ -111,23 +84,9 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"❌ Failed to initialize DB pool: {e}")
             self._pool = None
-            self._event_loop_id = None
             raise
 
     async def initialize(self):
-        # Check if we need to recreate the pool due to event loop change
-        if self._pool is not None and self._is_different_event_loop():
-            logger.warning("⚠️ Event loop changed, recreating pool")
-            async with self._lock:
-                if self._pool is not None:
-                    try:
-                        await self._pool.close()
-                    except Exception as e:
-                        logger.warning(f"⚠️ Error closing pool during event loop change: {e}")
-                    self._pool = None
-                    await self._create_pool()
-            return
-        
         if self._pool is not None:
             return
         async with self._lock:
@@ -136,12 +95,6 @@ class DatabaseManager:
 
     async def ensure_healthy(self):
         if self._pool is None:
-            await self.initialize()
-            return
-
-        # Check if we're in a different event loop
-        if self._is_different_event_loop():
-            logger.warning("⚠️ Event loop changed during health check, reinitializing pool")
             await self.initialize()
             return
 
@@ -163,7 +116,6 @@ class DatabaseManager:
                     logger.warning(f"⚠️ Error closing pool during recovery: {close_err}")
                 finally:
                     self._pool = None
-                    self._event_loop_id = None
                 await self._create_pool()
 
     @asynccontextmanager
