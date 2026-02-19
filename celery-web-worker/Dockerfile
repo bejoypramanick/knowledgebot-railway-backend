@@ -56,7 +56,17 @@ RUN pip install --no-cache-dir --no-warn-script-location \
 
 # Install Playwright browsers (required by Crawl4AI for web scraping)
 # Note: We skip 'install-deps' since we've already installed all system dependencies above
-RUN python -m playwright install chromium
+RUN python -m playwright install chromium && \
+    # Aggressive cleanup of build artifacts and caches
+    apt-get remove -y build-essential && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /tmp/* && \
+    find /usr/local/lib/python3.11 -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local/lib/python3.11 -type f -name '*.pyc' -delete && \
+    find /usr/local -type d -name tests -exec rm -rf {} + 2>/dev/null || true && \
+    find /usr/local -type d -name examples -exec rm -rf {} + 2>/dev/null || true
 
 # Copy only required directories (not entire repository)
 COPY celery-web-worker /app/celery-web-worker
