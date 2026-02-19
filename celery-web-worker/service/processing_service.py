@@ -18,7 +18,7 @@ class ProcessingService:
     """Handle website scraping and content processing"""
 
     def __init__(self):
-        from ..dao.scraping_dao import ScrapingDAO
+        from dao.scraping_dao import ScrapingDAO
         self.scraping_dao = ScrapingDAO()
 
     async def process_website_content(
