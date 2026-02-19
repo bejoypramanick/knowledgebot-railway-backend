@@ -139,6 +139,12 @@ class DatabaseManager:
             await self.initialize()
             return
 
+        # Check if we're in a different event loop
+        if self._is_different_event_loop():
+            logger.warning("⚠️ Event loop changed during health check, reinitializing pool")
+            await self.initialize()
+            return
+
         now = time.time()
         if now - self._last_health_check < self._health_check_interval:
             return
@@ -150,7 +156,14 @@ class DatabaseManager:
         except Exception as e:
             logger.warning(f"⚠️ DB pool health check failed: {e}. Attempting recovery...")
             async with self._lock:
-                await self.close()
+                try:
+                    if self._pool:
+                        await self._pool.close()
+                except Exception as close_err:
+                    logger.warning(f"⚠️ Error closing pool during recovery: {close_err}")
+                finally:
+                    self._pool = None
+                    self._event_loop_id = None
                 await self._create_pool()
 
     @asynccontextmanager
@@ -163,12 +176,30 @@ class DatabaseManager:
         cid_str = f" [{cid}]" if cid else ""
         
         logger.debug(f"🔌{cid_str} Acquiring database connection...")
-        try:
-            async with self._pool.acquire() as conn:
-                yield conn
-        except Exception as e:
-            logger.error(f"❌{cid_str} Failed to acquire DB connection: {e}")
-            raise
+        
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                async with self._pool.acquire() as conn:
+                    yield conn
+                return
+            except Exception as e:
+                logger.error(f"❌{cid_str} Failed to acquire DB connection (attempt {attempt + 1}/{max_retries}): {e}")
+                
+                # If it's an event loop error and we have retries left, try to reinitialize
+                if attempt < max_retries - 1 and ("Event loop is closed" in str(e) or "Bad file descriptor" in str(e)):
+                    logger.warning(f"⚠️{cid_str} Attempting to reinitialize pool due to event loop issue")
+                    async with self._lock:
+                        try:
+                            if self._pool:
+                                await self._pool.close()
+                        except:
+                            pass
+                        self._pool = None
+                        self._event_loop_id = None
+                        await self._create_pool()
+                else:
+                    raise
 
     async def close(self):
         if self._pool:
