@@ -51,11 +51,9 @@ RUN pip install --no-cache-dir --no-warn-script-location \
     -r /tmp/web-requirements.txt \
     -r /tmp/otel-requirements.txt
 
-# Install Playwright browsers and dependencies (required by Crawl4AI for web scraping)
-# Step 1: Install system dependencies needed for Chromium
-RUN python -m playwright install-deps chromium
-
-# Step 2: Download Chromium browser binary
+# Install Playwright browsers (required by Crawl4AI for web scraping)
+# Note: We've already installed all required system dependencies above
+# Just download the browser binary (skip install-deps to avoid deprecated font packages)
 RUN python -m playwright install chromium
 
 # Step 3: Cleanup build artifacts and caches
