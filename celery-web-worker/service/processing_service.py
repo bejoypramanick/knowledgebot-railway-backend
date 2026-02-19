@@ -139,6 +139,7 @@ class ProcessingService:
                 url=url,
                 processed_pages=processed_pages,
                 user_email=user_email,
+                user_role_id=user_role_id,
                 celery_task_id=celery_task_id
             )
 
@@ -606,6 +607,7 @@ class ProcessingService:
         url: str,
         processed_pages: List[Dict[str, str]],
         user_email: str,
+        user_role_id: int = None,
         celery_task_id: str = None
     ) -> Dict[str, Any]:
         """Upload website content to Gemini FileSearch"""
