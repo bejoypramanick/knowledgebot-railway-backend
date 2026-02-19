@@ -774,14 +774,14 @@ class ProcessingService:
                     }
                 }
 
-        except Exception as e:
-            import traceback
-            logger.error(f"❌ Gemini upload failed: {type(e).__name__}: {e}")
-            logger.error(f"   Traceback: {traceback.format_exc()}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            except Exception as e:
+                import traceback
+                logger.error(f"❌ Gemini upload failed: {type(e).__name__}: {e}")
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                return {
+                    "success": False,
+                    "error": str(e)
+                }
 
     async def _record_website_metadata(
         self,
