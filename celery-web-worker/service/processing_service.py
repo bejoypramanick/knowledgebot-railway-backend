@@ -856,7 +856,7 @@ class ProcessingService:
                     """UPDATE scraped_websites
                        SET pages_scraped = $1,
                            metadata = $2,
-                           size_bytes = $4,
+                           file_size = $4,
                            char_count = $5,
                            processing_status = 'completed',
                            updated_at = NOW()
