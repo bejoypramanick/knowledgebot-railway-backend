@@ -72,7 +72,7 @@ async def get_citation_hierarchy(urls: List[str]) -> Dict[str, Any]:
             records = await conn.fetch("""
                 SELECT id, original_url, parent_id, depth, crawl_session_id
                 FROM scraped_websites
-                WHERE original_url = ANY($1::text[])
+                WHERE original_url = ANY($1::text[]) AND processing_status != 'deleted'
                 ORDER BY depth, original_url
             """, urls)
 
