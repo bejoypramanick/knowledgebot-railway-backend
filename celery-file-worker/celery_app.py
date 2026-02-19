@@ -54,12 +54,12 @@ celery_app.conf.update(
     },
     # Result backend configuration
     result_expires=3600,  # Results expire after 1 hour
-    # Task timeout (30 minutes for large files)
-    task_soft_time_limit=1800,
-    task_time_limit=1900,
+    # Task timeout (6 hours for large file processing)
+    task_soft_time_limit=21600,  # 6 hours
+    task_time_limit=21700,  # 6 hours + 100s buffer
 )
 
-logger.info("✅ [CELERY_APP] Configuration updated - Task timeout: 30 minutes, Queue: 'file_processing'")
+logger.info("✅ [CELERY_APP] Configuration updated - Task timeout: 6 hours, Queue: 'file_processing'")
 
 # Import tasks module to register task definitions
 try:
