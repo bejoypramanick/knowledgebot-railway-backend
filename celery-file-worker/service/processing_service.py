@@ -600,7 +600,7 @@ async def process_file_content(
                 }
 
             except Exception as e:
-                logger.error(f"❌ [PROCESSING_ERROR] Error processing file {original_filename}: {e}", exc_info=True)
+                logger.error(f"❌ [PROCESSING_ERROR] Error processing file {original_filename}: {e}")
 
                 # Cleanup on failure
                 if tmp_path and os.path.exists(tmp_path):
@@ -615,7 +615,7 @@ async def process_file_content(
                 }
 
     except Exception as e:
-        logger.error(f"❌ Error processing file {original_filename}: {e}", exc_info=True)
+        logger.error(f"❌ Error processing file {original_filename}: {e}")
 
         # FAILURE: Log error (no Redis publish - UI will see DB updates)
         logger.info(f"🧹 [CLEANUP] Cleaning up S3 and temp files for {original_filename}")

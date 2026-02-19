@@ -188,7 +188,7 @@ class ProcessingService:
             return result
 
         except Exception as e:
-            logger.error(f"❌ Unexpected error processing website {website_id}: {e}", exc_info=True)
+            logger.error(f"❌ Unexpected error processing website {website_id}: {e}")
 
             # FAILURE: Publish error result to Redis
             try:
@@ -333,7 +333,7 @@ class ProcessingService:
             return pages
 
         except Exception as e:
-            logger.error(f"❌ Website scraping failed: {e}", exc_info=True)
+            logger.error(f"❌ Website scraping failed: {e}")
             return []
 
     async def _html_to_markdown(self, html_content: str) -> str:
@@ -447,7 +447,7 @@ class ProcessingService:
                     pass
 
         except Exception as e:
-            logger.error(f"❌ Gemini upload failed: {e}", exc_info=True)
+            logger.error(f"❌ Gemini upload failed: {e}")
             return {
                 "success": False,
                 "error": str(e)

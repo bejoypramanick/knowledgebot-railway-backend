@@ -38,7 +38,7 @@ try:
 
     redis_client.close()
 except Exception as e:
-    logger.error(f"❌ [REDIS] Connection test failed - {e}", exc_info=True)
+    logger.error(f"❌ [REDIS] Connection test failed - {e}")
 
 celery_app.conf.update(
     broker_url=redis_url,

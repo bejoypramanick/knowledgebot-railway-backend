@@ -96,7 +96,7 @@ class WebsiteService:
 
         except Exception as e:
             error_msg = f"Processing error: {str(e)}"
-            logger.error(f"❌ [CELERY] Unexpected error for website ID {website_id}: {e}", exc_info=True)
+            logger.error(f"❌ [CELERY] Unexpected error for website ID {website_id}: {e}")
             await self.update_website_status(website_id, "failed", error_msg)
 
     async def is_task_cancelled(self, celery_task_id: str) -> bool:

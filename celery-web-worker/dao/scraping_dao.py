@@ -59,7 +59,7 @@ class ScrapingDAO:
                 return result
 
         except Exception as e:
-            logger.error(f"❌ [WEB_UPDATE_ERROR] Failed to update website status: {e}", exc_info=True)
+            logger.error(f"❌ [WEB_UPDATE_ERROR] Failed to update website status: {e}")
             logger.log_db_query(query, params, error=e)
             raise
 
@@ -137,7 +137,7 @@ class ScrapingDAO:
                 logger.log_db_query(query, params, result)
                 return int(result) if result else None
         except Exception as e:
-            logger.error(f"❌ [WEB_INSERT_ERROR] Failed to record website metadata: {e}", exc_info=True)
+            logger.error(f"❌ [WEB_INSERT_ERROR] Failed to record website metadata: {e}")
             logger.error(f"   Query: {query}")
             logger.error(f"   Params: {params}")
             logger.log_db_query(query, params, error=e)
@@ -164,7 +164,7 @@ class ScrapingDAO:
                 logger.log_db_query(query, params, result)
                 return result
         except Exception as e:
-            logger.error(f"❌ [WEB_DELETE_ERROR] Failed to delete website record: {e}", exc_info=True)
+            logger.error(f"❌ [WEB_DELETE_ERROR] Failed to delete website record: {e}")
             logger.error(f"   Query: {query}")
             logger.error(f"   URL: {url}")
             logger.log_db_query(query, params, error=e)
