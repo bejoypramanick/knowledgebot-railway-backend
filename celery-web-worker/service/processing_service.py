@@ -622,6 +622,7 @@ class ProcessingService:
         logger.info(f"   ⏳ Waiting for upload... (timeout: {max_wait}s)")
         
         operation_name = operation if isinstance(operation, str) else (operation.name if hasattr(operation, 'name') else str(operation))
+        operation_result = None  # Track the actual operation object
         
         while True:
             elapsed = time.time() - start_time
@@ -651,12 +652,12 @@ class ProcessingService:
 
                 # 2. Now it's safe to check attributes because current_op is an OBJECT
                 if getattr(current_op, 'done', False):
-                    operation = current_op
+                    operation_result = current_op
                     break
                 
                 # Some versions use 'metadata' or 'response' to indicate progress
                 if hasattr(current_op, 'response') and current_op.response:
-                    operation = current_op
+                    operation_result = current_op
                     break
                 elif hasattr(current_op, 'error'):
                     # Operation has an error
@@ -666,6 +667,11 @@ class ProcessingService:
                     # Unknown operation state, continue waiting
                     continue
                     
+            except AttributeError as e:
+                # Specific handling for attribute errors (likely string instead of object)
+                logger.warning(f"   ⚠️ Error checking operation status (AttributeError): {e}")
+                # Continue waiting, the operation might still be processing
+                continue
             except Exception as e:
                 logger.warning(f"   ⚠️ Error checking operation status: {e}")
                 # If we can't check the operation, assume it's done after some time
@@ -679,14 +685,19 @@ class ProcessingService:
             final_op = await genai_client.operations.get(operation_name)
             if isinstance(final_op, str):
                 # If still getting a string, create a mock operation object
-                logger.warning(f"   ⚠️ Operation still pending as string, creating mock result")
+                logger.warning(f"   ⚠️ Operation still pending as string, cannot extract result")
                 return None
-            operation = final_op
+            operation_result = final_op
         except Exception as e:
             logger.error(f"   ❌ Failed to get final operation result: {e}")
             return None
         
-        return await self._extractDocumentNameFromOperation(operation, job_context.store_name)
+        # Only proceed if we have a valid operation object
+        if operation_result is None:
+            logger.error(f"   ❌ No valid operation result obtained")
+            return None
+            
+        return await self._extractDocumentNameFromOperation(operation_result, job_context.store_name)
 
     async def _extractDocumentNameFromOperation(self, operation, store_name: str) -> Optional[UploadResult]:
         """Extract document name from operation"""
