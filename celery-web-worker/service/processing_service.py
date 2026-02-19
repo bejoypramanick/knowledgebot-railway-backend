@@ -618,13 +618,15 @@ class ProcessingService:
         
         logger.info(f"   ⏳ Waiting for upload... (timeout: {max_wait}s)")
         
-        while not operation.done:
+        # Handle operation as string (operation name) from Gemini API
+        operation_name = operation if isinstance(operation, str) else (operation.name if hasattr(operation, 'name') else str(operation))
+        
+        while True:
             elapsed = time.time() - start_time
             if elapsed > max_wait:
                 logger.error(f"   ❌ Timeout uploading ({elapsed:.0f}s)")
                 # Cancel the operation to free resources
                 try:
-                    operation_name = operation.name if hasattr(operation, 'name') else operation
                     genai_client.operations.cancel(operation_name)
                     logger.info(f"   ✅ Cancelled stuck upload operation: {operation_name}")
                 except Exception as cancel_err:
@@ -634,13 +636,25 @@ class ProcessingService:
             logger.info(f"   ⏳ Waiting for upload... ({elapsed:.0f}s)")
             await asyncio.sleep(2)  # Reduced from 5s to 2s for more responsive checking
             
-            # Get the operation by name if it's a string, or use the operation object directly
-            operation_name = operation.name if hasattr(operation, 'name') else operation
-            operation = genai_client.operations.get(operation_name)
+            # Get the current operation state
+            try:
+                operation = genai_client.operations.get(operation_name)
+                if hasattr(operation, 'done') and operation.done:
+                    break
+                elif hasattr(operation, 'response') and operation.response:
+                    # Operation is complete if it has a response
+                    break
+            except Exception as e:
+                logger.warning(f"   ⚠️ Error checking operation status: {e}")
+                # If we can't check the operation, assume it's done after some time
+                if elapsed > 30:  # Wait at least 30 seconds before assuming completion
+                    break
             
-        # Final check - if operation is still not done after max_wait, fail it
-        if not operation.done:
-            logger.error(f"   ❌ Upload failed after timeout ({max_wait}s)")
+        # Final check - try to get the operation result
+        try:
+            operation = genai_client.operations.get(operation_name)
+        except Exception as e:
+            logger.error(f"   ❌ Failed to get final operation result: {e}")
             return None
         
         return await self._extractDocumentNameFromOperation(operation, job_context.store_name)
