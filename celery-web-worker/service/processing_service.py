@@ -153,7 +153,12 @@ class ProcessingService:
 
             logger.info(f"✅ Successfully uploaded to Gemini FileSearch")
 
-            # Step 5: Record metadata in database
+            # Step 5: Calculate aggregate size and char_count from all processed pages
+            total_size_bytes = sum(page.get('size_bytes', 0) for page in processed_pages)
+            total_char_count = sum(page.get('char_count', 0) for page in processed_pages)
+            logger.info(f"📊 [AGGREGATE] Total size: {total_size_bytes:,} bytes, Total chars: {total_char_count:,}")
+
+            # Step 6: Record metadata in database
             logger.info(f"💾 [DATABASE] Recording website metadata")
             db_result = await self._record_website_metadata(
                 website_id=website_id,
@@ -161,6 +166,8 @@ class ProcessingService:
                 gemini_file_name=file_search_result.get("gemini_file_name"),
                 file_search_metadata=file_search_result.get("file_search_metadata"),
                 page_count=len(processed_pages),
+                total_size_bytes=total_size_bytes,
+                total_char_count=total_char_count,
                 user_email=user_email
             )
 
@@ -826,7 +833,9 @@ class ProcessingService:
         gemini_file_name: str,
         file_search_metadata: Dict[str, Any],
         page_count: int,
-        user_email: str
+        total_size_bytes: int = 0,
+        total_char_count: int = 0,
+        user_email: str = None
     ) -> Dict[str, Any]:
         """
         Record website metadata in database.
@@ -847,16 +856,22 @@ class ProcessingService:
                     """UPDATE scraped_websites
                        SET pages_scraped = $1,
                            metadata = $2,
+                           size_bytes = $4,
+                           char_count = $5,
                            processing_status = 'completed',
                            updated_at = NOW()
                        WHERE id = $3""",
                     pages_uploaded,
                     json.dumps(file_search_metadata),
-                    website_id
+                    website_id,
+                    total_size_bytes,
+                    total_char_count
                 )
 
             logger.info(f"✅ Recorded metadata for website {website_id}")
             logger.info(f"   - Pages uploaded: {pages_uploaded}")
+            logger.info(f"   - Total size: {total_size_bytes:,} bytes")
+            logger.info(f"   - Total chars: {total_char_count:,}")
             logger.info(f"   - Status: completed")
 
             return {
