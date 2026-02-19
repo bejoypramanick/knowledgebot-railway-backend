@@ -695,9 +695,8 @@ class ProcessingService:
                         while not operation.done:
                             # CHECK FOR CANCELLATION WHILE WAITING FOR UPLOAD
                             if await self._is_task_cancelled(celery_task_id):
-                                logger.warning(f"❌ Task cancelled while uploading {page_url}")
-                                failed_pages.append(page_url)
-                                break
+                                logger.error(f"❌ TASK CANCELLED WHILE UPLOADING - STOPPING ENTIRE PROCESS")
+                                raise Exception("Task cancelled by admin during upload")
 
                             elapsed = time.time() - start_time
                             if elapsed > max_wait_time:
@@ -714,9 +713,8 @@ class ProcessingService:
 
                             # CHECK FOR CANCELLATION AFTER UPLOAD, BEFORE RECORDING
                             if await self._is_task_cancelled(celery_task_id):
-                                logger.warning(f"❌ Task cancelled after upload, before recording {page_url}")
-                                failed_pages.append(page_url)
-                                continue
+                                logger.error(f"❌ TASK CANCELLED AFTER UPLOAD - STOPPING ENTIRE PROCESS")
+                                raise Exception("Task cancelled by admin after upload")
 
                             # Prepare metadata for this page
                             file_search_metadata = {
