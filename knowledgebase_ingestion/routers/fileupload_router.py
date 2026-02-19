@@ -73,7 +73,7 @@ async def get_upload_constraints(request: Request = None):
     except Exception as e:
         logger.error("=" * 80)
         logger.error(f"❌ [CONSTRAINTS_ERROR] Error getting upload constraints: {e}")
-        logger.error("=" * 80, exc_info=True)
+        logger.error("=" * 80)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -291,7 +291,7 @@ async def delete_file(file_id: str, request: Request = None):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting file {file_id}: {e}", exc_info=True)
+        logger.error(f"Error deleting file {file_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -366,7 +366,7 @@ async def delete_all_knowledge_endpoint(request: Request = None):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ [DELETE_ALL_ERROR] Error deleting all knowledge: {e}", exc_info=True)
+        logger.error(f"❌ [DELETE_ALL_ERROR] Error deleting all knowledge: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -527,7 +527,7 @@ async def upload_file_async(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Error in async file upload: {e}", exc_info=True)
+        logger.error(f"❌ Error in async file upload: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

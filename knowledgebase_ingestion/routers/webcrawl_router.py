@@ -193,7 +193,7 @@ async def delete_web_item(website_id: str, request: Request = None):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting website {website_id}: {e}", exc_info=True)
+        logger.error(f"Error deleting website {website_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
