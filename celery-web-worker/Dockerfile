@@ -53,8 +53,8 @@ RUN pip install --no-cache-dir --no-warn-script-location \
     -r /tmp/otel-requirements.txt
 
 # Install Playwright browsers (required by Crawl4AI for web scraping)
-RUN python -m playwright install chromium && \
-    python -m playwright install-deps chromium
+# Note: We skip 'install-deps' since we've already installed all system dependencies above
+RUN python -m playwright install chromium
 
 # Copy only required directories (not entire repository)
 COPY celery-web-worker /app/celery-web-worker
