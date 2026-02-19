@@ -213,21 +213,40 @@ class FileSearchStoreManager:
                         else:
                             logger.info(f"   No files found in store")
 
-                        # Step 2: Now delete the (hopefully empty) store
-                        logger.info(f"   🗑️  Deleting now-empty store: {target_store.name}")
+                        # Step 2: Now delete the store with force=True (handles both empty and non-empty stores)
+                        logger.info(f"   🗑️  Deleting store with force=True: {target_store.name}")
                         try:
-                            client.file_search_stores.delete(name=target_store.name)
-                            store_deleted = True
-                            logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted: {target_store.name}")
-                        except Exception as delete_err:
-                            logger.warning(f"   ⚠️  Simple delete failed, trying with force=True anyway...")
+                            # Try with force parameter using DeleteFileSearchStoreConfig
                             try:
-                                # Last resort: try with force parameter (may not work, but worth trying)
-                                client.file_search_stores.delete(name=target_store.name, force=True)
+                                from google.genai.types import DeleteFileSearchStoreConfig
+                                logger.info("   Attempting delete with DeleteFileSearchStoreConfig(force=True)...")
+                                client.file_search_stores.delete(
+                                    name=target_store.name,
+                                    config=DeleteFileSearchStoreConfig(force=True)
+                                )
                                 store_deleted = True
-                                logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] Store deleted with force=True: {target_store.name}")
-                            except Exception as force_err:
-                                logger.error(f"   ❌ Both delete methods failed: {delete_err}")
+                                logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] Store deleted with force=True config: {target_store.name}")
+                            except ImportError:
+                                logger.warning("   DeleteFileSearchStoreConfig not available, trying dict approach...")
+                                # Fallback: try with dict
+                                client.file_search_stores.delete(
+                                    name=target_store.name,
+                                    config={'force': True}
+                                )
+                                store_deleted = True
+                                logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] Store deleted with force=True dict: {target_store.name}")
+                        except Exception as delete_err:
+                            logger.warning(f"   ⚠️  Delete with force failed: {delete_err}")
+                            logger.info(f"   Trying simple delete without force...")
+                            try:
+                                # Last resort: try simple delete (may work if all files were deleted)
+                                client.file_search_stores.delete(name=target_store.name)
+                                store_deleted = True
+                                logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] Store deleted (simple): {target_store.name}")
+                            except Exception as simple_delete_err:
+                                logger.error(f"   ❌ All delete methods failed")
+                                logger.error(f"      With force: {delete_err}")
+                                logger.error(f"      Simple: {simple_delete_err}")
                                 raise delete_err
 
                     except Exception as delete_err:
