@@ -120,101 +120,115 @@ class FileSearchStoreManager:
                 if target_store:
                     logger.info(f"✅ Found matching store: {target_store.name}")
 
-                    # Delete the store with force=True to automatically clear all documents and chunks
-                    logger.info(f"🗑️  [FILESEARCH_DELETE] Deleting store with force=True (will clear all documents): {target_store.name}")
+                    # Delete the store - manually clear all documents first since force parameter is not available
+                    logger.info(f"🗑️  [FILESEARCH_DELETE] Deleting store (will clear all documents): {target_store.name}")
+                    store_deleted = False
+
                     try:
-                        # Try to delete with force parameter (different SDK versions handle this differently)
-                        store_deleted = False
+                        # Step 1: List and delete all files/documents from the store
+                        logger.info("📄 [FILESEARCH_CLEAR] Clearing all documents from store first...")
+                        files = []
 
-                        # Try method 1: force as direct argument
+                        # Try list_files() (Gemini SDK)
                         try:
-                            logger.info("   Attempting delete with force=True (direct argument)...")
-                            client.file_search_stores.delete(
-                                name=target_store.name,
-                                force=True
-                            )
-                            store_deleted = True
-                            logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted with force=True: {target_store.name}")
-                            logger.info(f"   All documents and metadata automatically cleared")
-                        except TypeError as te:
-                            logger.warning(f"   ⚠️  force=True as direct argument failed: {te}")
+                            if hasattr(client.file_search_stores, 'list_files'):
+                                files = list(client.file_search_stores.list_files(
+                                    file_search_store_name=target_store.name
+                                ))
+                                logger.info(f"   ✅ Found {len(files)} files using list_files()")
+                        except Exception as e:
+                            logger.debug(f"   list_files() not available: {e}")
 
-                            # Try method 2: force in config/options object
+                        # Try list_documents() if list_files didn't work
+                        if not files:
                             try:
-                                logger.info("   Attempting delete with force in delete_options...")
-                                from google.protobuf.field_mask_pb2 import FieldMask
-                                from google.cloud import aiplatform_v1beta1
+                                if hasattr(client.file_search_stores, 'list_documents'):
+                                    files = list(client.file_search_stores.list_documents(
+                                        file_search_store_name=target_store.name
+                                    ))
+                                    logger.info(f"   ✅ Found {len(files)} documents using list_documents()")
+                            except Exception as e:
+                                logger.debug(f"   list_documents() not available: {e}")
 
-                                # Try using delete_options
-                                client.file_search_stores.delete(
-                                    name=target_store.name,
-                                    delete_options={'force': True}
-                                )
-                                store_deleted = True
-                                logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted with delete_options: {target_store.name}")
-                            except Exception as opts_err:
-                                logger.warning(f"   ⚠️  force in delete_options failed: {opts_err}")
+                        # Try list_rag_files() for Vertex AI
+                        if not files:
+                            try:
+                                if hasattr(client, 'list_rag_files'):
+                                    files = list(client.list_rag_files(parent=target_store.name))
+                                    logger.info(f"   ✅ Found {len(files)} RAG files using list_rag_files()")
+                            except Exception as e:
+                                logger.debug(f"   list_rag_files() not available: {e}")
 
-                                # Try method 3: Manual document clearing before delete
-                                logger.warning(f"   Falling back to manual document deletion...")
+                        # Delete each file/document
+                        if files:
+                            logger.info(f"   Found {len(files)} items to delete")
+                            for idx, file_item in enumerate(files, 1):
                                 try:
-                                    # List files using different possible method names
-                                    files = None
+                                    file_name = getattr(file_item, 'name', str(file_item))
+                                    logger.info(f"   📍 Deleting item {idx}/{len(files)}: {file_name}")
 
-                                    # Try list_files() first (Gemini SDK)
-                                    if hasattr(client.file_search_stores, 'list_files'):
-                                        files = list(client.file_search_stores.list_files(
-                                            file_search_store_name=target_store.name
-                                        ))
-                                        logger.info(f"   Found {len(files)} files using list_files()")
+                                    # Try different delete methods
+                                    deleted = False
 
-                                    # Try list_documents() if list_files didn't work
-                                    elif hasattr(client.file_search_stores, 'list_documents'):
-                                        files = list(client.file_search_stores.list_documents(
-                                            file_search_store_name=target_store.name
-                                        ))
-                                        logger.info(f"   Found {len(files)} documents using list_documents()")
+                                    # Try delete_file
+                                    try:
+                                        if hasattr(client.file_search_stores, 'delete_file'):
+                                            client.file_search_stores.delete_file(
+                                                file_search_store_name=target_store.name,
+                                                file_name=file_name
+                                            )
+                                            deleted = True
+                                    except Exception as e:
+                                        logger.debug(f"      delete_file() failed: {e}")
 
-                                    # Try list_rag_files() for Vertex AI
-                                    elif hasattr(client, 'list_rag_files'):
-                                        files = list(client.list_rag_files(parent=target_store.name))
-                                        logger.info(f"   Found {len(files)} RAG files using list_rag_files()")
+                                    # Try delete_document
+                                    if not deleted:
+                                        try:
+                                            if hasattr(client.file_search_stores, 'delete_document'):
+                                                client.file_search_stores.delete_document(
+                                                    file_search_store_name=target_store.name,
+                                                    document_name=file_name
+                                                )
+                                                deleted = True
+                                        except Exception as e:
+                                            logger.debug(f"      delete_document() failed: {e}")
 
-                                    if files:
-                                        logger.info(f"   Found {len(files)} items to delete")
-                                        for idx, file_item in enumerate(files, 1):
-                                            try:
-                                                file_name = getattr(file_item, 'name', str(file_item))
-                                                logger.info(f"   📍 Deleting item {idx}/{len(files)}: {file_name}")
+                                    # Try delete_rag_file
+                                    if not deleted:
+                                        try:
+                                            if hasattr(client, 'delete_rag_file'):
+                                                client.delete_rag_file(name=file_name)
+                                                deleted = True
+                                        except Exception as e:
+                                            logger.debug(f"      delete_rag_file() failed: {e}")
 
-                                                # Try different delete methods
-                                                if hasattr(client.file_search_stores, 'delete_file'):
-                                                    client.file_search_stores.delete_file(
-                                                        file_search_store_name=target_store.name,
-                                                        file_name=file_name
-                                                    )
-                                                elif hasattr(client.file_search_stores, 'delete_document'):
-                                                    client.file_search_stores.delete_document(
-                                                        file_search_store_name=target_store.name,
-                                                        document_name=file_name
-                                                    )
-                                                elif hasattr(client, 'delete_rag_file'):
-                                                    client.delete_rag_file(name=file_name)
+                                    if deleted:
+                                        logger.info(f"   ✅ Deleted: {file_name}")
+                                    else:
+                                        logger.warning(f"   ⚠️  Could not find method to delete {file_name}")
+                                except Exception as file_err:
+                                    logger.warning(f"   ⚠️  Error processing file: {file_err}")
 
-                                                logger.info(f"   ✅ Deleted: {file_name}")
-                                            except Exception as file_err:
-                                                logger.warning(f"   ⚠️  Could not delete {file_name}: {file_err}")
+                            logger.info(f"   ✅ Document deletion pass complete")
+                        else:
+                            logger.info(f"   No files found in store")
 
-                                        logger.info(f"   ✅ All files cleared from store")
-
-                                    # Now delete the (hopefully empty) store
-                                    logger.info(f"   Deleting now-empty store...")
-                                    client.file_search_stores.delete(name=target_store.name)
-                                    store_deleted = True
-                                    logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted: {target_store.name}")
-                                except Exception as manual_err:
-                                    logger.error(f"❌ [FILESEARCH_DELETE_ERROR] Error in manual deletion fallback: {manual_err}")
-                                    raise manual_err
+                        # Step 2: Now delete the (hopefully empty) store
+                        logger.info(f"   🗑️  Deleting now-empty store: {target_store.name}")
+                        try:
+                            client.file_search_stores.delete(name=target_store.name)
+                            store_deleted = True
+                            logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted: {target_store.name}")
+                        except Exception as delete_err:
+                            logger.warning(f"   ⚠️  Simple delete failed, trying with force=True anyway...")
+                            try:
+                                # Last resort: try with force parameter (may not work, but worth trying)
+                                client.file_search_stores.delete(name=target_store.name, force=True)
+                                store_deleted = True
+                                logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] Store deleted with force=True: {target_store.name}")
+                            except Exception as force_err:
+                                logger.error(f"   ❌ Both delete methods failed: {delete_err}")
+                                raise delete_err
 
                     except Exception as delete_err:
                         logger.error(f"❌ [FILESEARCH_DELETE_ERROR] Error deleting store {target_store.name}: {delete_err}")
