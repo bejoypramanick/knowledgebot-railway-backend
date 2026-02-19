@@ -301,3 +301,56 @@ class ScrapingDAO:
             logger.error(f"   Parent ID: {parent_id}")
             logger.log_db_query(query, params, error=e)
             return None
+
+    async def finalize_website_metadata(
+        self,
+        website_id: int,
+        page_count: int,
+        total_size_bytes: int,
+        total_char_count: int,
+        file_search_metadata: Dict[str, Any]
+    ) -> bool:
+        """
+        Update parent website record with aggregate stats after scraping completes.
+        Called once per job after all pages are processed.
+
+        Returns: True on success, False on failure
+        """
+        import json
+
+        logger.info(f"💾 [FINALIZE_START] Updating website record {website_id}")
+        logger.info(f"   Pages: {page_count}")
+        logger.info(f"   Size: {total_size_bytes:,} bytes")
+        logger.info(f"   Chars: {total_char_count:,}")
+
+        query = """
+            UPDATE scraped_websites
+            SET pages_scraped = $1,
+                metadata = $2,
+                file_size = $3,
+                char_count = $4,
+                processing_status = 'completed',
+                updated_at = NOW()
+            WHERE id = $5
+        """
+
+        params = [
+            page_count,
+            json.dumps(file_search_metadata),
+            total_size_bytes,
+            total_char_count,
+            website_id
+        ]
+
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                await conn.execute(query, *params)
+                logger.info(f"✅ [FINALIZE_SUCCESS] Website record updated")
+                logger.log_db_query(query, params, "UPDATE succeeded")
+                return True
+        except Exception as e:
+            logger.error(f"❌ [FINALIZE_ERROR] Failed to finalize website record: {e}")
+            logger.error(f"   Website ID: {website_id}")
+            logger.log_db_query(query, params, error=e)
+            return False

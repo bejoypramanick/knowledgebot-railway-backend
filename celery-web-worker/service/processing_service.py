@@ -613,26 +613,21 @@ class ProcessingService:
     async def _finalize_website_record(
         self, website_id: int, page_count: int, total_size: int, total_chars: int, store_name: str
     ):
-        """Update parent website record with aggregate stats"""
-        try:
-            from shared.db import get_db_connection
-            import json
+        """Update parent website record with aggregate stats via DAO"""
+        metadata = await self._build_finalize_metadata(page_count, store_name)
 
-            metadata = await self._build_finalize_metadata(page_count, store_name)
+        success = await self.scraping_dao.finalize_website_metadata(
+            website_id=website_id,
+            page_count=page_count,
+            total_size_bytes=total_size,
+            total_char_count=total_chars,
+            file_search_metadata=metadata
+        )
 
-            async with get_db_connection() as conn:
-                await conn.execute(
-                    """UPDATE scraped_websites
-                       SET pages_scraped = $1, metadata = $2, file_size = $3,
-                           char_count = $4, processing_status = 'completed', updated_at = NOW()
-                       WHERE id = $5""",
-                    page_count, json.dumps(metadata), total_size, total_chars, website_id
-                )
+        if not success:
+            raise Exception(f"Failed to finalize website record {website_id}")
 
-            logger.info(f"✅ Finalized website {website_id}: {page_count} pages, {total_size:,} bytes")
-        except Exception as e:
-            logger.error(f"❌ Failed to finalize: {e}")
-            raise
+        logger.info(f"✅ Finalized website {website_id}: {page_count} pages, {total_size:,} bytes")
 
     async def _build_finalize_metadata(self, page_count: int, store_name: str) -> Dict:
         """Build metadata for finalization"""
