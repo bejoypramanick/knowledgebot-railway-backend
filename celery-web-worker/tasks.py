@@ -45,10 +45,20 @@ def scrape_website_task(
 
         logger.info("🔍 [SERVICE_LOAD] Attempting to load WebsiteService...")
         try:
+            # Ensure celery-web-worker directory is in Python path
+            import sys
+            import os
+            worker_dir = os.path.dirname(__file__)
+            if worker_dir not in sys.path:
+                sys.path.insert(0, worker_dir)
+                logger.info(f"   Added to sys.path: {worker_dir}")
+
             from service.website_service import WebsiteService
             logger.info("✅ [SERVICE_LOAD_SUCCESS] WebsiteService imported successfully")
         except Exception as import_err:
-            logger.error(f"❌ [SERVICE_LOAD_ERROR] Failed to import WebsiteService: {import_err}", exc_info=True)
+            logger.error(f"❌ [SERVICE_LOAD_ERROR] Failed to import WebsiteService: {import_err}")
+            logger.error(f"   Error type: {type(import_err).__name__}")
+            logger.error(f"   Python path: {sys.path}")
             raise
 
         logger.info("🔧 [SERVICE_INIT] Instantiating WebsiteService...")
@@ -80,6 +90,7 @@ def scrape_website_task(
         logger.info(f"⏰ [TIMESTAMP] Task completed at: {__import__('datetime').datetime.utcnow().isoformat()}")
 
     except Exception as e:
+        import traceback
         logger.error("=" * 80)
         logger.error(f"❌ [CELERY_TASK_ERROR] ERROR in website scraping task {task_id}")
         logger.error("=" * 80)
@@ -89,7 +100,7 @@ def scrape_website_task(
         logger.error(f"🚨 [ERROR_TYPE] {type(e).__name__}")
         logger.error(f"🚨 [ERROR_MESSAGE] {str(e)}")
         logger.error(f"🚨 [ERROR_DETAILS] Full traceback:")
-        logger.error("", exc_info=True)
+        logger.error(traceback.format_exc())
         logger.error(f"🔄 [RETRY_INFO] Current Attempt: {retry_count + 1}, Max Retries: {self.max_retries}")
         logger.error(f"⏱️  [BACKOFF] Next retry in: {60 * (2 ** retry_count)}s (exponential backoff)")
 
