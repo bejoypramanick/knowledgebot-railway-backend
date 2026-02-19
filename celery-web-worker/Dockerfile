@@ -70,7 +70,6 @@ RUN apt-get remove -y build-essential && \
 # Copy only required directories (not entire repository)
 COPY celery-web-worker /app/celery-web-worker
 COPY shared /app/shared
-COPY knowledgebase_ingestion /app/knowledgebase_ingestion
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

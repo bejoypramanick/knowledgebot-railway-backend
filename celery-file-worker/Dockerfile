@@ -26,7 +26,6 @@ RUN pip install --no-cache-dir --no-warn-script-location \
 # Copy only required directories (not entire repository)
 COPY celery-file-worker /app/celery-file-worker
 COPY shared /app/shared
-COPY knowledgebase_ingestion /app/knowledgebase_ingestion
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1

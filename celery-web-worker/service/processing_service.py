@@ -435,8 +435,8 @@ class ProcessingService:
     ) -> Dict[str, Any]:
         """Upload website content to Gemini FileSearch"""
         try:
-            from knowledgebase_ingestion.core.ai import get_genai_client
-            from knowledgebase_ingestion.core.config import settings
+            from core.ai import get_genai_client
+            from core.config import settings
             import json
 
             genai_client = get_genai_client()

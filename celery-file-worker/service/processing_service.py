@@ -12,9 +12,9 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 
 from shared.otel_logger import get_otel_logger
-from knowledgebase_ingestion.core.ai import get_genai_client
-from knowledgebase_ingestion.core.config import settings
-from knowledgebase_ingestion.service.docling_integration import (
+from core.ai import get_genai_client
+from core.config import settings
+from shared.docling_integration import (
     process_with_docling,
     should_use_docling_for_file,
     create_markdown_temp_file
@@ -457,7 +457,7 @@ async def process_file_content(
         if processed_successfully or detected_mime_type == 'text/markdown':
             logger.info(f"🤖 [GEMINI] Uploading to FileSearch - Display: {file_display_name}, Original: {original_filename}, MIME: {detected_mime_type}...")
             try:
-                from knowledgebase_ingestion.core.ai import get_genai_client
+                from core.ai import get_genai_client
                 genai_client = get_genai_client()
                 if not genai_client:
                     logger.error("❌ Gemini client not available")
