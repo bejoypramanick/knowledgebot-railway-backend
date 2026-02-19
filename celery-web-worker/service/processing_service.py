@@ -621,7 +621,16 @@ class ProcessingService:
         
         logger.info(f"   ⏳ Waiting for upload... (timeout: {max_wait}s)")
         
-        operation_name = operation if isinstance(operation, str) else (operation.name if hasattr(operation, 'name') else str(operation))
+        # Extract operation name safely
+        if isinstance(operation, str):
+            operation_name = operation
+        else:
+            try:
+                operation_name = getattr(operation, 'name', str(operation))
+            except (AttributeError, Exception) as e:
+                logger.warning(f"   ⚠️ Could not extract operation name: {e}")
+                operation_name = str(operation)
+        
         operation_result = None  # Track the actual operation object
         
         while True:
