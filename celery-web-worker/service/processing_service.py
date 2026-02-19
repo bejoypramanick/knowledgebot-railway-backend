@@ -653,7 +653,7 @@ class ProcessingService:
             
             # 3. AWAIT get operation call
             try:
-                # This is the critical change for non-blocking I/O
+                # Get updated operation status - pass the operation object itself
                 current_op = await genai_client.operations.get(operation_name)
                 
                 # 1. FIX: If API returns ID (string) instead of object, 
@@ -662,30 +662,10 @@ class ProcessingService:
                     logger.info(f"   ⏳ Operation {operation_name} still pending...")
                     continue
 
-                # 2. Now it's safe to check attributes because current_op is an OBJECT
-                # Use getattr with default values to avoid AttributeError
-                try:
-                    is_done = getattr(current_op, 'done', False)
-                    response = getattr(current_op, 'response', None)
-                    error = getattr(current_op, 'error', None)
-                except AttributeError as attr_err:
-                    logger.warning(f"   ⚠️ AttributeError accessing operation attributes: {attr_err}")
-                    logger.warning(f"   ⚠️ Operation type: {type(current_op)}, value: {current_op}")
-                    continue
-                
-                if is_done:
+                # Check if operation is done
+                if getattr(current_op, 'done', False):
                     operation_result = current_op
                     break
-                
-                # Some versions use 'metadata' or 'response' to indicate progress
-                if response and not isinstance(response, str):
-                    operation_result = current_op
-                    break
-                
-                if error:
-                    # Operation has an error
-                    logger.error(f"   ❌ Operation failed: {error}")
-                    return None
                 
                 # Unknown operation state, continue waiting
                 continue
@@ -730,9 +710,10 @@ class ProcessingService:
         if isinstance(operation, str):
             logger.error(f"   ❌ Cannot extract document name from string operation: {operation}")
             return None
-            
-        if hasattr(operation, 'response') and operation.response and hasattr(operation.response, 'status_code') and operation.response.status_code == 200:
-            doc_name = operation.response.json()['name']
+        
+        # FileSearch upload returns result in response.document_name
+        if hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
+            doc_name = operation.response.document_name
             logger.info(f"   ✅ FileSearch document: {doc_name}")
             return UploadResult(
                 document_name=doc_name,
@@ -740,7 +721,7 @@ class ProcessingService:
                 uploaded_at=datetime.utcnow()
             )
         
-        logger.error(f"   ❌ Upload failed or invalid response")
+        logger.error(f"   ❌ Upload failed or invalid response - no document_name in operation.response")
         return None
 
     async def _deleteTemporaryFile(self, temp_file: str):
