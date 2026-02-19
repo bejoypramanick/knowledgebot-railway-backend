@@ -213,80 +213,74 @@ class FileSearchStoreManager:
                         else:
                             logger.info(f"   No files found in store")
 
-                        # Step 2: Now delete the store with force=True (handles both empty and non-empty stores)
-                        logger.info(f"   🗑️  Deleting store with force=True: {target_store.name}")
+                        # Step 2: Now delete the store with force=True with exponential backoff retry
+                        logger.info(f"   🗑️  Deleting store with force=True (with exponential backoff): {target_store.name}")
                         store_delete_error = None
+                        max_retries = 3
+                        retry_count = 0
+                        base_wait_time = 2  # Start with 2 seconds
 
-                        try:
-                            # Try method 1: with force parameter using DeleteFileSearchStoreConfig
+                        while retry_count <= max_retries and not store_deleted:
                             try:
-                                logger.info("   📍 Method 1: Trying DeleteFileSearchStoreConfig(force=True)...")
-                                try:
-                                    from google.genai.types import DeleteFileSearchStoreConfig
-                                    logger.info("      ✓ DeleteFileSearchStoreConfig imported successfully")
-                                    logger.info("      Calling client.file_search_stores.delete(...)")
-                                    client.file_search_stores.delete(
-                                        name=target_store.name,
-                                        config=DeleteFileSearchStoreConfig(force=True)
-                                    )
-                                    store_deleted = True
-                                    logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] Store deleted with DeleteFileSearchStoreConfig: {target_store.name}")
-                                except ImportError as import_err:
-                                    logger.info(f"      DeleteFileSearchStoreConfig not available: {import_err}")
-                                    raise import_err
-                            except Exception as method1_err:
-                                logger.warning(f"      ❌ Method 1 failed: {method1_err}")
-                                store_delete_error = method1_err
+                                if retry_count > 0:
+                                    wait_time = base_wait_time * (2 ** (retry_count - 1))
+                                    logger.info(f"   ⏳ Retry {retry_count}/{max_retries}: Waiting {wait_time} seconds before retrying...")
+                                    import time
+                                    time.sleep(wait_time)
 
-                            # Try method 2: with dict config (only if method 1 failed)
-                            if not store_deleted:
-                                try:
-                                    logger.info("   📍 Method 2: Trying config={'force': True}...")
-                                    client.file_search_stores.delete(
-                                        name=target_store.name,
-                                        config={'force': True}
-                                    )
-                                    store_deleted = True
-                                    logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] Store deleted with dict config: {target_store.name}")
-                                except Exception as method2_err:
-                                    logger.warning(f"      ❌ Method 2 failed: {method2_err}")
-                                    store_delete_error = method2_err
+                                # Use the correct syntax: config={'force': True}
+                                logger.info(f"   📍 Attempt {retry_count + 1}: Deleting with config={{'force': True}}...")
+                                logger.info(f"      Calling: client.file_search_stores.delete(name={target_store.name}, config={{'force': True}})")
 
-                            # Try method 3: with force as keyword argument (only if methods 1 & 2 failed)
-                            if not store_deleted:
-                                try:
-                                    logger.info("   📍 Method 3: Trying force=True as keyword argument...")
-                                    client.file_search_stores.delete(
-                                        name=target_store.name,
-                                        force=True
-                                    )
-                                    store_deleted = True
-                                    logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] Store deleted with force keyword: {target_store.name}")
-                                except Exception as method3_err:
-                                    logger.warning(f"      ❌ Method 3 failed: {method3_err}")
-                                    store_delete_error = method3_err
+                                client.file_search_stores.delete(
+                                    name=target_store.name,
+                                    config={'force': True}
+                                )
 
-                            # Last resort: simple delete (may work if all files were deleted)
-                            if not store_deleted:
-                                try:
-                                    logger.info("   📍 Method 4: Trying simple delete without force...")
-                                    client.file_search_stores.delete(name=target_store.name)
-                                    store_deleted = True
-                                    logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] Store deleted (simple): {target_store.name}")
-                                except Exception as method4_err:
-                                    logger.error(f"      ❌ Method 4 failed: {method4_err}")
-                                    store_delete_error = method4_err
+                                store_deleted = True
+                                logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] Store deleted successfully: {target_store.name}")
+                                break
 
-                            # All methods failed
-                            if not store_deleted:
-                                logger.error(f"   ❌❌❌ All 4 delete methods failed")
-                                logger.error(f"      Last error: {store_delete_error}")
-                                logger.error(f"   📝 Attempting to proceed with store recreation anyway")
+                            except Exception as delete_err:
+                                error_str = str(delete_err)
+                                error_code = getattr(delete_err, 'code', None)
 
-                        except Exception as final_err:
-                            logger.error(f"❌ [FILESEARCH_DELETE_ERROR] Unexpected error during deletion: {final_err}")
+                                logger.warning(f"      ❌ Attempt {retry_count + 1} failed")
+                                logger.warning(f"         Error: {error_str}")
+                                logger.warning(f"         Error code: {error_code}")
+
+                                # Check if this is a retryable error (503, 429, timeout, etc.)
+                                is_retryable = (
+                                    "503" in error_str or
+                                    "SERVICE_UNAVAILABLE" in error_str or
+                                    "429" in error_str or
+                                    "RESOURCE_EXHAUSTED" in error_str or
+                                    "timeout" in error_str.lower() or
+                                    "deadline" in error_str.lower()
+                                )
+
+                                if is_retryable and retry_count < max_retries:
+                                    logger.warning(f"      🔄 Retryable error detected, will retry...")
+                                    store_delete_error = delete_err
+                                    retry_count += 1
+                                else:
+                                    # Not retryable or max retries exceeded
+                                    if retry_count >= max_retries:
+                                        logger.error(f"      ❌ Max retries ({max_retries}) exceeded")
+                                    else:
+                                        logger.error(f"      ❌ Non-retryable error, stopping retries")
+
+                                    store_delete_error = delete_err
+                                    break
+
+                        # If all retries failed, log the final error
+                        if not store_deleted:
+                            logger.error(f"   ❌ Store deletion failed after {retry_count} retries")
+                            logger.error(f"      Final error: {store_delete_error}")
+                            logger.error(f"      Error type: {type(store_delete_error).__name__}")
                             import traceback
-                            logger.error(f"   Traceback: {traceback.format_exc()}")
+                            logger.error(f"      Traceback: {traceback.format_exc()}")
+                            logger.warning(f"   📝 Attempting to proceed with store recreation anyway")
 
                     except Exception as delete_err:
                         logger.error(f"❌ [FILESEARCH_DELETE_ERROR] Error deleting store {target_store.name}: {delete_err}")
