@@ -2,6 +2,7 @@
 Web Crawl Router
 Handles all website scraping related endpoints
 """
+import os
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
@@ -273,6 +274,42 @@ async def debug_redis_queue(request: Request = None):
         }
     except Exception as e:
         logger.error(f"Error checking Redis queue: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/debug/celery-test")
+async def debug_celery_test(request: Request = None):
+    """DEBUG: Test if Celery can dispatch a task"""
+    try:
+        extract_user_from_request(request)  # Verify auth
+
+        logger.info("=" * 80)
+        logger.info("🧪 [CELERY_TEST] Testing Celery dispatcher...")
+        logger.info("=" * 80)
+
+        # Try to dispatch a test task
+        logger.info("📤 [CELERY_TEST] Dispatching test debug_task...")
+        try:
+            result = web_celery.send_task('celery_app.debug_task', queue='web_crawling')
+            logger.info(f"✅ [CELERY_TEST] Task dispatched successfully!")
+            logger.info(f"   Task ID: {result.id}")
+            logger.info(f"   Result type: {type(result)}")
+
+            return {
+                "success": True,
+                "message": "Celery dispatcher test successful",
+                "task_id": result.id,
+                "broker_url": os.getenv('WEB_REDIS_URL', os.getenv('REDIS_URL', 'Not set')).split('@')[-1] if os.getenv('WEB_REDIS_URL') or os.getenv('REDIS_URL') else 'Not set'
+            }
+        except Exception as celery_err:
+            logger.error(f"❌ [CELERY_TEST] Celery dispatch failed: {celery_err}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(celery_err),
+                "broker_url": os.getenv('WEB_REDIS_URL', os.getenv('REDIS_URL', 'Not set')).split('@')[-1] if os.getenv('WEB_REDIS_URL') or os.getenv('REDIS_URL') else 'Not set'
+            }
+    except Exception as e:
+        logger.error(f"Error in Celery test: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
