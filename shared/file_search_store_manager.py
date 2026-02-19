@@ -76,6 +76,12 @@ class FileSearchStoreManager:
         Delete existing FileSearch store and create a new one.
         This effectively clears all documents from the store.
 
+        Steps:
+        1. Find the existing store
+        2. Delete all documents from the store (Gemini won't delete non-empty stores)
+        3. Delete the now-empty store
+        4. Create a new empty store
+
         Args:
             client: Gemini Client instance
             store_name: Optional store name (defaults to env var)
@@ -100,24 +106,54 @@ class FileSearchStoreManager:
                 logger.info(f"   Found {len(stores)} total FileSearch stores")
 
                 # Look for existing store by display name
+                target_store = None
                 for idx, store in enumerate(stores, 1):
                     store_display_name = getattr(store, 'display_name', 'N/A')
                     logger.info(f"   Store {idx}: {store.name} (display_name: {store_display_name})")
 
                     if hasattr(store, 'display_name') and store.display_name == store_name:
-                        logger.info(f"🗑️  [FILESEARCH_DELETE] Found matching store - deleting: {store.name}")
-                        try:
-                            client.file_search_stores.delete(name=store.name)
-                            store_deleted = True
-                            logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted: {store.name}")
-                        except Exception as delete_err:
-                            logger.error(f"❌ [FILESEARCH_DELETE_ERROR] Error deleting store {store.name}: {delete_err}")
-                            raise delete_err
+                        target_store = store
                         break
+
+                if target_store:
+                    logger.info(f"✅ Found matching store: {target_store.name}")
+
+                    # Step 1: Delete all documents from the store
+                    logger.info(f"📄 [FILESEARCH_CLEAR_DOCS] Deleting all documents from store...")
+                    try:
+                        documents = list(client.file_search_stores.list_documents(
+                            file_search_store_name=target_store.name
+                        ))
+                        logger.info(f"   Found {len(documents)} documents to delete")
+
+                        for idx, doc in enumerate(documents, 1):
+                            try:
+                                logger.info(f"   📍 Deleting document {idx}/{len(documents)}: {doc.name}")
+                                client.file_search_stores.delete_document(
+                                    file_search_store_name=target_store.name,
+                                    document_name=doc.name
+                                )
+                                logger.info(f"   ✅ Deleted: {doc.name}")
+                            except Exception as doc_err:
+                                logger.warning(f"   ⚠️  Could not delete document {doc.name}: {doc_err}")
+
+                        logger.info(f"✅ [FILESEARCH_CLEAR_SUCCESS] All documents deleted from store")
+                    except Exception as clear_err:
+                        logger.warning(f"⚠️  [FILESEARCH_CLEAR_WARNING] Could not clear documents: {clear_err}")
+
+                    # Step 2: Now delete the (empty) store
+                    logger.info(f"🗑️  [FILESEARCH_DELETE] Deleting now-empty store: {target_store.name}")
+                    try:
+                        client.file_search_stores.delete(name=target_store.name)
+                        store_deleted = True
+                        logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] FileSearch store deleted: {target_store.name}")
+                    except Exception as delete_err:
+                        logger.error(f"❌ [FILESEARCH_DELETE_ERROR] Error deleting store {target_store.name}: {delete_err}")
+                        raise delete_err
                 else:
                     logger.warning(f"⚠️  [FILESEARCH_NOT_FOUND] No existing store found with display_name='{store_name}'")
 
-                # Create new store
+                # Step 3: Create new store
                 logger.info(f"🔨 [FILESEARCH_CREATE] Creating new FileSearch store: {store_name}")
                 new_store = client.file_search_stores.create(
                     config={'display_name': store_name}
