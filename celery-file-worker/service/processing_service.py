@@ -22,6 +22,7 @@ from shared.docling_integration import (
 from shared.file_search import get_file_search_store_by_display_name
 from shared.html_processor import extract_content_from_html
 from shared.db import get_db_connection
+from shared.file_metrics import calculate_metrics
 
 from utils.validation import (
     validate_file_extension,
@@ -560,6 +561,18 @@ async def process_file_content(
 
             # STEP 7: DATABASE RECORD PHASE
             try:
+                # Calculate metrics from markdown content before recording
+                char_count = 0
+                if markdown_tmp_path and os.path.exists(markdown_tmp_path):
+                    try:
+                        with open(markdown_tmp_path, 'r', encoding='utf-8') as f:
+                            markdown_content = f.read()
+                        metrics = calculate_metrics(markdown_content)
+                        char_count = metrics.get('char_count', 0)
+                        logger.info(f"📊 [METRICS] Calculated for {original_filename}: {char_count:,} characters")
+                    except Exception as me:
+                        logger.warning(f"⚠️ Could not calculate metrics from markdown: {me}")
+
                 file_record_id = await file_service.record_metadata(
                     user_email=user_email,
                     original_filename=original_filename,
@@ -571,7 +584,8 @@ async def process_file_content(
                     final_state=final_state,
                     gemini_processed_at=gemini_processed_at,
                     mime_type=detected_mime_type,
-                    file_search_metadata=file_search_metadata
+                    file_search_metadata=file_search_metadata,
+                    char_count=char_count
                 )
 
                 if not file_record_id:
