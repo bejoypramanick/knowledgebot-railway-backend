@@ -8,6 +8,7 @@ import json
 from typing import Dict, List, Any, Optional
 from dao.file_dao import FileDAO
 from shared.otel_logger import get_otel_logger
+from shared.file_metrics import calculate_metrics
 
 logger = get_otel_logger("file_service", "celery-file-worker")
 
@@ -167,7 +168,8 @@ class FileService:
         final_state: str,
         gemini_processed_at: Any,
         mime_type: str,
-        file_search_metadata: Optional[Dict[str, Any]] = None
+        file_search_metadata: Optional[Dict[str, Any]] = None,
+        char_count: int = 0
     ) -> Optional[int]:
         """
         Record file metadata to database.
@@ -184,8 +186,8 @@ class FileService:
                     """INSERT INTO file_uploads
                        (user_role_id, original_filename, display_name, file_extension,
                         mime_type, file_size, sha256_hash, gemini_file_name, processing_status,
-                        gemini_processed_at, metadata, created_at)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+                        gemini_processed_at, metadata, char_count, created_at)
+                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
                        RETURNING id""",
                     user_role_id,
                     original_filename,
@@ -197,7 +199,8 @@ class FileService:
                     uploaded_file.name,
                     final_state,
                     gemini_processed_at,
-                    json.dumps(file_search_metadata) if file_search_metadata else None
+                    json.dumps(file_search_metadata) if file_search_metadata else None,
+                    char_count
                 )
 
                 logger.info(f"✅ Recorded metadata for {original_filename}, DB ID: {file_id}")

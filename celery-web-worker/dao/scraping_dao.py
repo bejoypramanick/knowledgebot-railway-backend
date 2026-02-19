@@ -246,7 +246,9 @@ class ScrapingDAO:
         page_url: str,
         gemini_file_name: str = None,
         file_search_metadata: Dict[str, Any] = None,
-        user_role_id: int = None
+        user_role_id: int = None,
+        file_size: int = 0,
+        char_count: int = 0
     ) -> Optional[int]:
         """
         Record a child page immediately after it's uploaded to Gemini.
@@ -264,10 +266,12 @@ class ScrapingDAO:
             INSERT INTO scraped_websites (
                 parent_id, original_url, processing_status,
                 gemini_file_name, metadata, depth, user_role_id,
+                file_size, char_count,
                 created_at, updated_at
             ) VALUES (
                 $1, $2, $3,
                 $4, $5::jsonb, $6, $7,
+                $8, $9,
                 NOW(), NOW()
             ) RETURNING id
         """
@@ -279,7 +283,9 @@ class ScrapingDAO:
             gemini_file_name,
             json.dumps(file_search_metadata) if file_search_metadata else None,
             1,  # depth = 1 (child of root)
-            user_role_id
+            user_role_id,
+            file_size,
+            char_count
         ]
 
         try:

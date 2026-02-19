@@ -13,6 +13,7 @@ from urllib.parse import urljoin, urlparse
 
 from shared.otel_logger import get_otel_logger
 from shared.file_search import get_file_search_store_by_display_name
+from shared.file_metrics import calculate_metrics
 
 logger = get_otel_logger("processing_service", "celery-web-worker")
 
@@ -659,12 +660,17 @@ class ProcessingService:
                         page_temp_file = pf.name
 
                     try:
+                        # Calculate metrics before upload
+                        metrics = calculate_metrics(page_markdown)
+                        char_count = metrics.get('char_count', 0)
+                        file_size = metrics.get('file_size_bytes', 0)
+
                         # Upload this page to FileSearch
                         document_display_name = f"page_{website_id}_{int(time.time())}_{idx}"
-                        file_size = os.path.getsize(page_temp_file)
 
                         logger.info(f"   - Document: {document_display_name}")
-                        logger.info(f"   - Size: {file_size} bytes")
+                        logger.info(f"   - Size: {file_size:,} bytes")
+                        logger.info(f"   - Characters: {char_count:,}")
 
                         # Upload using async LRO pattern
                         operation = genai_client.file_search_stores.upload_to_file_search_store(
@@ -730,7 +736,9 @@ class ProcessingService:
                                 page_url=page_url,
                                 gemini_file_name=document_name,
                                 file_search_metadata=file_search_metadata,
-                                user_role_id=user_role_id
+                                user_role_id=user_role_id,
+                                file_size=file_size,
+                                char_count=char_count
                             )
 
                             if child_page_id:
