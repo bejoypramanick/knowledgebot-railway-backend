@@ -642,6 +642,11 @@ class ProcessingService:
 
             # Upload each page individually
             for idx, page in enumerate(processed_pages, 1):
+                # CHECK FOR CANCELLATION BEFORE PROCESSING EACH PAGE
+                if await self._is_task_cancelled(celery_task_id):
+                    logger.warning(f"❌ Task cancelled before processing page {idx}/{len(processed_pages)}")
+                    raise Exception("Task cancelled by admin")
+
                 page_url = page['url']
                 page_markdown = page['markdown']
 
@@ -688,6 +693,12 @@ class ProcessingService:
                         document_name = None
 
                         while not operation.done:
+                            # CHECK FOR CANCELLATION WHILE WAITING FOR UPLOAD
+                            if await self._is_task_cancelled(celery_task_id):
+                                logger.warning(f"❌ Task cancelled while uploading {page_url}")
+                                failed_pages.append(page_url)
+                                break
+
                             elapsed = time.time() - start_time
                             if elapsed > max_wait_time:
                                 logger.error(f"   ❌ Timeout uploading {page_url}")
@@ -700,6 +711,12 @@ class ProcessingService:
                         if operation.done and hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
                             document_name = operation.response.document_name
                             logger.info(f"   ✅ Created FileSearch document: {document_name}")
+
+                            # CHECK FOR CANCELLATION AFTER UPLOAD, BEFORE RECORDING
+                            if await self._is_task_cancelled(celery_task_id):
+                                logger.warning(f"❌ Task cancelled after upload, before recording {page_url}")
+                                failed_pages.append(page_url)
+                                continue
 
                             # Prepare metadata for this page
                             file_search_metadata = {
