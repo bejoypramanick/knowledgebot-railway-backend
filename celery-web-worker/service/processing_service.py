@@ -645,18 +645,15 @@ class ProcessingService:
                 temp_file = f.name
 
             try:
-                # Upload to Gemini with explicit MIME type
+                # Upload to Gemini (files.upload doesn't support mime_type parameter)
                 mime_type = "text/markdown"
                 with open(temp_file, 'rb') as f:
                     file_size = os.path.getsize(temp_file)
                     logger.info(f"📤 Gemini files.upload:")
-                    logger.info(f"   - MIME type: {mime_type}")
+                    logger.info(f"   - File: {os.path.basename(temp_file)}")
                     logger.info(f"   - File size: {file_size} bytes")
 
-                    file_response = genai_client.files.upload(
-                        file=f,
-                        mime_type=mime_type
-                    )
+                    file_response = genai_client.files.upload(file=f)
                     gemini_file_name = file_response.name
 
                 logger.info(f"✅ Uploaded to Gemini: {gemini_file_name}")
