@@ -4,9 +4,12 @@ Handles all website scraping, content extraction, and Gemini FileSearch upload
 """
 import asyncio
 import time
+import os
+import tempfile
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 import logging
+from urllib.parse import urljoin, urlparse
 
 from shared.otel_logger import get_otel_logger
 from shared.file_search import get_file_search_store_by_display_name
@@ -100,6 +103,14 @@ class ProcessingService:
             for page_url, page_html in scraped_pages:
                 try:
                     markdown_content = await self._html_to_markdown(page_html)
+
+                    # If docling is enabled, also extract embedded files from the page
+                    markdown_content = await self._extract_embedded_files_if_docling_enabled(
+                        page_html,
+                        page_url,
+                        markdown_content
+                    )
+
                     processed_pages.append({
                         "url": page_url,
                         "markdown": markdown_content,
@@ -425,6 +436,162 @@ class ProcessingService:
         except Exception as e:
             logger.error(f"❌ HTML to Markdown conversion failed: {e}")
             raise
+
+    async def _extract_embedded_files_if_docling_enabled(
+        self,
+        html_content: str,
+        page_url: str,
+        page_markdown: str
+    ) -> str:
+        """
+        Extract embedded files (PDF, DOCX, etc.) from HTML if docling is enabled.
+        Process them through docling service and append to markdown.
+
+        Only runs if DOCLING_ENABLED is true.
+        """
+        from core.config import settings
+
+        # Only run if docling is enabled
+        if not settings.docling_enabled:
+            return page_markdown
+
+        try:
+            from bs4 import BeautifulSoup
+            import httpx
+
+            logger.info("📎 [DOCLING] Checking for embedded files since DOCLING_ENABLED=true")
+
+            # Parse HTML to find file links
+            soup = BeautifulSoup(html_content, 'lxml')
+            docling_supported = {'.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls'}
+
+            # Find all links to supported file types
+            file_links = []
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                # Skip if already absolute, make absolute
+                if not href.startswith(('http://', 'https://')):
+                    href = urljoin(page_url, href)
+
+                # Check if it's a supported file type
+                parsed_url = urlparse(href)
+                path_lower = parsed_url.path.lower()
+
+                if any(path_lower.endswith(ext) for ext in docling_supported):
+                    file_links.append({
+                        'url': href,
+                        'text': link.get_text(strip=True) or 'Document'
+                    })
+
+            if not file_links:
+                logger.info("📎 [DOCLING] No embedded files found in page")
+                return page_markdown
+
+            logger.info(f"📎 [DOCLING] Found {len(file_links)} embedded files in page")
+
+            # Limit to max 5 files per page to avoid overwhelming processing
+            max_files = 5
+            if len(file_links) > max_files:
+                logger.warning(f"⚠️ [DOCLING] Found {len(file_links)} files, limiting to {max_files}")
+                file_links = file_links[:max_files]
+
+            # Process each file through docling
+            extracted_docs = []
+
+            async with httpx.AsyncClient(timeout=60) as client:
+                for i, file_link in enumerate(file_links, 1):
+                    try:
+                        file_url = file_link['url']
+                        file_text = file_link['text']
+
+                        logger.info(f"📥 [DOCLING] Downloading file {i}/{len(file_links)}: {file_url}")
+
+                        # Download file with size limit (max 25MB per file)
+                        response = await client.get(file_url, timeout=30)
+
+                        if response.status_code != 200:
+                            logger.warning(f"⚠️ [DOCLING] Failed to download {file_url}: HTTP {response.status_code}")
+                            continue
+
+                        file_size = len(response.content)
+                        max_file_size = 25 * 1024 * 1024  # 25MB
+
+                        if file_size > max_file_size:
+                            logger.warning(f"⚠️ [DOCLING] File too large ({file_size/1024/1024:.1f}MB > 25MB): {file_url}")
+                            continue
+
+                        logger.info(f"📥 [DOCLING] Downloaded {file_size/1024:.1f}KB from {file_url}")
+
+                        # Save to temporary file
+                        _, file_ext = os.path.splitext(urlparse(file_url).path.lower())
+                        fd, temp_path = tempfile.mkstemp(suffix=file_ext)
+
+                        try:
+                            os.write(fd, response.content)
+                            os.close(fd)
+
+                            # Process through docling
+                            from shared.docling_integration import process_with_docling
+
+                            # Infer MIME type from extension
+                            mime_types = {
+                                '.pdf': 'application/pdf',
+                                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                                '.doc': 'application/msword',
+                                '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                                '.ppt': 'application/vnd.ms-powerpoint',
+                                '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                '.xls': 'application/vnd.ms-excel',
+                            }
+                            mime_type = mime_types.get(file_ext, 'application/octet-stream')
+
+                            filename = os.path.basename(urlparse(file_url).path)
+
+                            logger.info(f"🤖 [DOCLING] Processing {filename} through docling service...")
+
+                            markdown_content, metadata = await process_with_docling(
+                                temp_path,
+                                filename,
+                                mime_type,
+                                timeout_seconds=30
+                            )
+
+                            if markdown_content:
+                                logger.info(f"✅ [DOCLING] Successfully extracted {len(markdown_content)} chars from {filename}")
+                                extracted_docs.append({
+                                    'title': file_text,
+                                    'filename': filename,
+                                    'content': markdown_content
+                                })
+                            else:
+                                logger.warning(f"⚠️ [DOCLING] Failed to extract content from {filename}")
+
+                        finally:
+                            if os.path.exists(temp_path):
+                                os.unlink(temp_path)
+
+                    except Exception as e:
+                        logger.warning(f"⚠️ [DOCLING] Error processing {file_link['url']}: {e}")
+                        continue
+
+            # If we extracted any documents, append to markdown
+            if extracted_docs:
+                logger.info(f"✅ [DOCLING] Extracted {len(extracted_docs)} embedded files, appending to page markdown")
+
+                page_markdown += "\n\n---\n\n## Embedded Documents\n\n"
+
+                for doc in extracted_docs:
+                    page_markdown += f"### {doc['title']}\n"
+                    page_markdown += f"*Source: {doc['filename']}*\n\n"
+                    page_markdown += doc['content']
+                    page_markdown += "\n\n"
+
+            return page_markdown
+
+        except Exception as e:
+            logger.warning(f"⚠️ [DOCLING] Error extracting embedded files: {e}")
+            # Return original markdown if extraction fails
+            return page_markdown
 
     async def _upload_to_gemini(
         self,
