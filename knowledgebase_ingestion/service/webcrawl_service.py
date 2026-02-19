@@ -449,10 +449,11 @@ async def validate_scraping_request(request_data: Dict[str, Any]) -> Dict[str, A
         delay_between_requests = request_data.get('delay_between_requests', 0.0)
         
         # Validate parameter ranges
-        if max_depth < 1 or max_depth > 10:
+        # max_depth=0 is allowed (scans only main page, no child links)
+        if max_depth < 0 or max_depth > 10:
             return {
                 "valid": False,
-                "error": "max_depth must be between 1 and 10"
+                "error": "max_depth must be between 0 and 10 (0 = main page only)"
             }
         
         if max_pages < 1 or max_pages > 1000:
