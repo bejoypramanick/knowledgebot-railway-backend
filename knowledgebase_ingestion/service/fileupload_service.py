@@ -335,8 +335,18 @@ async def validate_file_upload(file: UploadFile, file_size: int) -> Dict[str, An
 
 async def delete_all_knowledge() -> Dict[str, Any]:
     """
-    Delete all files and websites from knowledge base.
-    Removes from Gemini FileSearch, clears Redis queues, and marks as deleted in database.
+    Soft delete all files and websites from knowledge base.
+
+    Operations performed:
+    1. Removes all files from Gemini FileSearch store
+    2. Clears Redis task queues (file_processing, web_crawling)
+    3. Marks all file records with status='deleted' (soft delete)
+    4. Marks all website records with status='deleted' (soft delete)
+
+    Database records are retained with status='deleted' for:
+    - Audit trail and compliance
+    - Recovery purposes
+    - Historical tracking
     """
     logger.info("=" * 80)
     logger.info("🗑️  [DELETE_ALL_START] Clearing entire knowledge base")
@@ -388,30 +398,30 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.error(f"❌ [REDIS_CLEAR_ERROR] Error clearing Redis: {e}", exc_info=True)
             errors.append(f"Redis clear failed: {e}")
 
-        # Step 3: Mark all files as deleted in database
-        logger.info("💾 [DB_DELETE_FILES] Marking all files as deleted in database...")
+        # Step 3: Mark all files as deleted in database (soft delete - don't remove records)
+        logger.info("💾 [DB_UPDATE_FILES] Marking all files as deleted in database...")
         try:
             async with get_db_connection() as conn:
                 result = await conn.execute(
-                    "DELETE FROM file_uploads"
+                    "UPDATE file_uploads SET processing_status = 'deleted', updated_at = NOW()"
                 )
-                logger.info(f"   ✅ All file records deleted from database")
+                logger.info(f"   ✅ All file records marked as deleted (status updated, records retained)")
         except Exception as e:
-            logger.error(f"❌ [DB_DELETE_FILES_ERROR] Error deleting file records: {e}", exc_info=True)
-            errors.append(f"File deletion failed: {e}")
+            logger.error(f"❌ [DB_UPDATE_FILES_ERROR] Error marking files as deleted: {e}", exc_info=True)
+            errors.append(f"File status update failed: {e}")
 
-        # Step 4: Delete all websites from database
-        logger.info("💾 [DB_DELETE_WEBSITES] Deleting all websites from database...")
+        # Step 4: Mark all websites as deleted in database (soft delete - don't remove records)
+        logger.info("💾 [DB_UPDATE_WEBSITES] Marking all websites as deleted in database...")
         try:
             async with get_db_connection() as conn:
                 websites = await conn.fetch("SELECT id, original_url FROM scraped_websites")
-                logger.info(f"   Found {len(websites)} websites to delete")
+                logger.info(f"   Found {len(websites)} websites to mark as deleted")
 
                 result = await conn.execute(
-                    "DELETE FROM scraped_websites"
+                    "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW()"
                 )
                 deleted_websites = len(websites)
-                logger.info(f"   ✅ All {deleted_websites} website records deleted from database")
+                logger.info(f"   ✅ All {deleted_websites} website records marked as deleted (status updated, records retained)")
         except Exception as e:
             logger.error(f"❌ [DB_DELETE_WEBSITES_ERROR] Error deleting websites: {e}", exc_info=True)
             errors.append(f"Website deletion failed: {e}")

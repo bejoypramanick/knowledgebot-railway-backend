@@ -246,10 +246,13 @@ async def delete_file(file_id: str, request: Request = None):
 async def delete_all_knowledge_endpoint(request: Request = None):
     """
     Delete all files and websites from knowledge base.
-    This operation:
+    This operation performs a SOFT DELETE (marks as deleted, doesn't remove records):
     1. Removes all files from Gemini FileSearch store
     2. Clears all Redis task queues (file_processing, web_crawling)
-    3. Deletes all file and website records from database
+    3. Marks all file records with status='deleted' (soft delete for audit trail)
+    4. Marks all website records with status='deleted' (soft delete for audit trail)
+
+    Records are retained in database with status='deleted' for audit and recovery purposes.
 
     REQUIRES: X-Confirm-Delete-All: true header (safety check to prevent accidental deletion)
     """
@@ -275,19 +278,23 @@ async def delete_all_knowledge_endpoint(request: Request = None):
 
         if result.get("success"):
             logger.info("=" * 80)
-            logger.info(f"✅ [DELETE_ALL_SUCCESS] Knowledge base deleted successfully")
+            logger.info(f"✅ [DELETE_ALL_SUCCESS] Knowledge base marked as deleted successfully")
             logger.info("=" * 80)
-            logger.info(f"   Files deleted from Gemini: {result.get('deleted_files')}")
-            logger.info(f"   Websites deleted from DB: {result.get('deleted_websites')}")
+            logger.info(f"   Files removed from Gemini: {result.get('deleted_files')}")
+            logger.info(f"   Files marked as deleted: {result.get('deleted_files')}")
+            logger.info(f"   Websites marked as deleted: {result.get('deleted_websites')}")
             logger.info(f"   Redis queues cleared: {result.get('redis_queues_cleared')}")
-            logger.info(f"   Deleted by: {user_email}")
+            logger.info(f"   Database records retained with status='deleted' for audit trail")
+            logger.info(f"   Marked as deleted by: {user_email}")
 
             return {
                 "success": True,
-                "message": "Knowledge base deleted successfully",
-                "deleted_files": result.get("deleted_files"),
-                "deleted_websites": result.get("deleted_websites"),
-                "redis_queues_cleared": result.get("redis_queues_cleared")
+                "message": "Knowledge base marked as deleted successfully (soft delete - records retained)",
+                "files_removed_from_gemini": result.get("deleted_files"),
+                "files_marked_deleted": result.get("deleted_files"),
+                "websites_marked_deleted": result.get("deleted_websites"),
+                "redis_queues_cleared": result.get("redis_queues_cleared"),
+                "note": "Database records retained with status='deleted' for audit trail and recovery"
             }
         else:
             logger.error("=" * 80)
