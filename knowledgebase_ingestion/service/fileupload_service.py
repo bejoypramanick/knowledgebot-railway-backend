@@ -176,42 +176,49 @@ async def queue_file_for_deletion(file_id: int) -> Dict[str, Any]:
         logger.info(f"🔄 [STATUS_CHECK] Current file status: {current_status}")
 
         if current_status in ('pending', 'processing'):
-            logger.info(f"📋 [QUEUE_DELETE] File is {current_status}, queueing for deletion...")
+            logger.info(f"📋 [QUEUE_DELETE] File is {current_status}, marking for deletion...")
 
-            # Generate task ID for deletion
-            import uuid
-            celery_task_id = str(uuid.uuid4())
-            logger.info(f"   Generated Celery Task ID: {celery_task_id}")
+            # Get existing task ID or generate new one
+            celery_task_id = file_record.get('celery_task_id') or str(__import__('uuid').uuid4())
+            logger.info(f"   Celery Task ID: {celery_task_id}")
 
             # Update file status to queued for deletion
             logger.info(f"💾 [STATUS_UPDATE] Updating file status to 'queued_for_deletion'...")
             status_updated = await update_file_status(file_id, 'queued_for_deletion')
             logger.info(f"   Status Update Result: {status_updated}")
 
-            # Queue deletion task
-            logger.info(f"📤 [QUEUE_TASK] Queuing file deletion task...")
-            success = await queue_file_for_processing(file_id, celery_task_id)
+            # Set Redis cancellation flag to signal worker to stop and delete
+            if celery_task_id:
+                import redis as redis_lib
+                import os
 
-            if success:
-                logger.info("=" * 80)
-                logger.info(f"✅ [DELETE_QUEUED] File deletion successfully queued")
-                logger.info("=" * 80)
-                logger.info(f"   File ID: {file_id}")
-                logger.info(f"   Task ID: {celery_task_id}")
-                logger.info(f"   Status: queued_for_deletion")
+                try:
+                    file_redis_url = os.getenv('FILE_REDIS_URL', 'redis://localhost:6379/0')
+                    redis_conn = redis_lib.from_url(file_redis_url, decode_responses=True, socket_connect_timeout=2)
 
-                return {
-                    "success": True,
-                    "message": "File deletion queued successfully",
-                    "task_id": celery_task_id,
-                    "file_id": str(file_id)
-                }
-            else:
-                logger.error(f"❌ [QUEUE_FAILED] Failed to queue deletion task for file {file_id}")
-                return {
-                    "success": False,
-                    "error": "Failed to queue deletion task"
-                }
+                    # Set flag to tell worker this task should be deleted
+                    redis_conn.setex(f"task_cancelled:{celery_task_id}", 300, "1")
+                    redis_conn.close()
+
+                    logger.info(f"   ✅ Set cancellation flag in Redis for task {celery_task_id}")
+                except Exception as flag_err:
+                    logger.warning(f"   ⚠️  Could not set Redis cancellation flag: {flag_err}")
+
+            logger.info("=" * 80)
+            logger.info(f"✅ [DELETE_QUEUED] File marked for deletion")
+            logger.info("=" * 80)
+            logger.info(f"   File ID: {file_id}")
+            logger.info(f"   Task ID: {celery_task_id}")
+            logger.info(f"   Status: queued_for_deletion")
+            logger.info(f"   The worker will delete this file when it detects the cancellation flag")
+
+            return {
+                "success": True,
+                "message": "File deletion queued successfully (worker will delete when current operation completes)",
+                "task_id": celery_task_id,
+                "file_id": str(file_id),
+                "status": "queued_for_deletion"
+            }
         else:
             # File is not processing, delete directly
             logger.info(f"⚡ [DIRECT_DELETE] File is {current_status}, deleting directly...")
