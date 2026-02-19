@@ -71,6 +71,91 @@ class FileSearchStoreManager:
             return store_full_name
 
     @classmethod
+    def delete_all_stores_with_display_name(cls, client: Client, base_display_name: str = None) -> Dict[str, Any]:
+        """
+        Delete ALL FileSearch stores that match the base display name pattern.
+        This handles multiple stores created during development/testing.
+        
+        Args:
+            client: Gemini Client instance
+            base_display_name: Base display name (defaults to env var)
+            
+        Returns:
+            Dict with deletion results
+        """
+        logger.info("=" * 80)
+        logger.info(f"🗑️ [DELETE_ALL_STORES] Deleting all stores matching '{base_display_name}'")
+        logger.info("=" * 80)
+        
+        # Get store name from parameter or environment
+        if not base_display_name:
+            base_display_name = os.getenv("GEMINI_FILE_SEARCH_STORE_NAME", "knowledgebot-search-store")
+        
+        deleted_stores = []
+        errors = []
+        
+        try:
+            # List all stores
+            if hasattr(client, 'file_search_stores'):
+                stores = list(client.file_search_stores.list())
+                logger.info(f"📋 [STORE_LIST] Found {len(stores)} total FileSearch stores")
+                
+                # Find all stores that match our base display name pattern
+                matching_stores = []
+                for idx, store in enumerate(stores, 1):
+                    store_display_name = getattr(store, 'display_name', 'N/A')
+                    logger.info(f"   Store {idx}: {store.name} (display_name: {store_display_name})")
+                    
+                    # Check if this store matches our pattern
+                    if (store_display_name == base_display_name or 
+                        store_display_name.startswith(base_display_name) or
+                        base_display_name in store_display_name):
+                        matching_stores.append(store)
+                        logger.info(f"   ✅ Match: {store.name} matches pattern '{base_display_name}'")
+                
+                logger.info(f"🎯 [STORE_MATCH] Found {len(matching_stores)} stores to delete")
+                
+                # Delete each matching store
+                for store in matching_stores:
+                    try:
+                        logger.info(f"🗑️ [DELETE_STORE] Deleting store: {store.name}")
+                        
+                        # Delete the store with force=True to clear all documents
+                        client.file_search_stores.delete(name=store.name, force=True)
+                        deleted_stores.append(store.name)
+                        logger.info(f"   ✅ Deleted store: {store.name}")
+                        
+                    except Exception as delete_err:
+                        error_msg = f"Failed to delete store {store.name}: {delete_err}"
+                        logger.error(f"   ❌ {error_msg}")
+                        errors.append(error_msg)
+                
+        except Exception as e:
+            error_msg = f"Error listing/deleting stores: {e}"
+            logger.error(f"❌ [DELETE_ALL_ERROR] {error_msg}")
+            errors.append(error_msg)
+        
+        result = {
+            "stores_deleted": len(deleted_stores),
+            "deleted_store_names": deleted_stores,
+            "errors": errors,
+            "success": len(errors) == 0
+        }
+        
+        logger.info("=" * 80)
+        if result["success"]:
+            logger.info(f"✅ [DELETE_ALL_SUCCESS] Deleted {len(deleted_stores)} FileSearch stores")
+            for store_name in deleted_stores:
+                logger.info(f"   - Deleted: {store_name}")
+        else:
+            logger.error(f"❌ [DELETE_ALL_FAILED] Failed to delete {len(errors)} stores")
+            for error in errors:
+                logger.error(f"   - Error: {error}")
+        logger.info("=" * 80)
+        
+        return result
+
+    @classmethod
     def delete_and_recreate_store(cls, client: Client, store_name: str = None) -> str:
         """
         Delete existing FileSearch store and create a new one.

@@ -385,10 +385,10 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.warning(f"⚠️ [TASK_CONTROL_ERROR] Error stopping tasks: {e}")
             # Don't add to errors - task termination is best-effort
 
-        # Step 2: Delete and recreate FileSearch store
-        logger.info("🤖 [FILESEARCH_RECREATE] Deleting and recreating Gemini FileSearch store...")
-        filesearch_store_deleted = False
-        filesearch_store_created = False
+        # Step 2: Delete ALL FileSearch stores matching our display name
+        logger.info("🤖 [FILESEARCH_DELETE_ALL] Deleting ALL FileSearch stores with our display name...")
+        filesearch_stores_deleted = 0
+        deleted_store_names = []
 
         try:
             genai_client = get_genai_client()
@@ -397,28 +397,35 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                 errors.append("Gemini client not available")
             else:
                 try:
-                    # Delete old store and create new one
-                    new_store_name = FileSearchStoreManager.delete_and_recreate_store(genai_client)
-
-                    # Verify the new store was created
-                    if new_store_name and new_store_name.startswith("fileSearchStores/"):
-                        # Got a proper store name back
-                        filesearch_store_deleted = True
-                        filesearch_store_created = True
-                        logger.info(f"   ✅ FileSearch store successfully deleted and recreated")
-                        logger.info(f"   New store name: {new_store_name}")
+                    # Delete ALL stores matching our display name pattern
+                    from knowledgebase_ingestion.core.config import settings
+                    base_display_name = settings.gemini_file_search_store_name or "knowledgebot-search-store"
+                    
+                    deletion_result = FileSearchStoreManager.delete_all_stores_with_display_name(
+                        genai_client, 
+                        base_display_name=base_display_name
+                    )
+                    
+                    if deletion_result["success"]:
+                        filesearch_stores_deleted = deletion_result["stores_deleted"]
+                        deleted_store_names = deletion_result["deleted_store_names"]
+                        logger.info(f"   ✅ Successfully deleted {filesearch_stores_deleted} FileSearch stores")
+                        for store_name in deleted_store_names:
+                            logger.info(f"      - Deleted: {store_name}")
                     else:
-                        logger.warning(f"   ⚠️  FileSearch store operation completed but store name format is unexpected: {new_store_name}")
+                        logger.error(f"   ❌ Failed to delete some stores: {deletion_result['errors']}")
+                        errors.extend(deletion_result['errors'])
+                        
                 except Exception as delete_err:
-                    logger.error(f"   ❌ Error in FileSearch store deletion/recreation: {delete_err}")
+                    logger.error(f"   ❌ Error in FileSearch stores deletion: {delete_err}")
                     import traceback
                     logger.error(f"   Traceback: {traceback.format_exc()}")
-                    errors.append(f"FileSearch store deletion/recreation failed: {delete_err}")
+                    errors.append(f"FileSearch stores deletion failed: {delete_err}")
         except Exception as e:
-            logger.error(f"❌ [FILESEARCH_RECREATE_ERROR] Unexpected error: {e}")
+            logger.error(f"❌ [FILESEARCH_DELETE_ALL_ERROR] Unexpected error: {e}")
             import traceback
             logger.error(f"   Traceback: {traceback.format_exc()}")
-            errors.append(f"FileSearch store recreation failed: {e}")
+            errors.append(f"FileSearch stores deletion failed: {e}")
 
         # Step 1b: Delete all raw Gemini files
         logger.info("📝 [GEMINI_RAW_DELETE] Deleting raw Gemini files...")
@@ -480,8 +487,8 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         logger.info(f"📊 [RESULT] Raw files deleted from Gemini: {deleted_files}")
         logger.info(f"📊 [RESULT] Websites marked as deleted: {deleted_websites}")
         logger.info(f"📊 [RESULT] Redis queues cleared: 2 (file_processing, web_crawling)")
-        logger.info(f"📊 [RESULT] FileSearch store deleted: {filesearch_store_deleted}")
-        logger.info(f"📊 [RESULT] FileSearch store recreated: {filesearch_store_created}")
+        logger.info(f"📊 [RESULT] FileSearch stores deleted: {filesearch_stores_deleted}")
+        logger.info(f"📊 [RESULT] Deleted store names: {deleted_store_names}")
 
         if errors:
             logger.warning(f"⚠️  [ERRORS] {len(errors)} error(s) occurred:")
@@ -489,13 +496,13 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                 logger.warning(f"   - {error}")
 
         return {
-            "success": len(errors) == 0 and filesearch_store_deleted and filesearch_store_created,
-            "message": "Knowledge base cleared successfully and FileSearch store recreated" if (len(errors) == 0 and filesearch_store_deleted and filesearch_store_created) else "Knowledge base cleared with errors",
+            "success": len(errors) == 0 and filesearch_stores_deleted > 0,
+            "message": f"Successfully deleted {filesearch_stores_deleted} FileSearch stores" if (len(errors) == 0 and filesearch_stores_deleted > 0) else "Knowledge base cleared with errors",
             "raw_files_deleted": deleted_files,
             "websites_marked_deleted": deleted_websites,
             "redis_queues_cleared": 2,
-            "filesearch_store_deleted": filesearch_store_deleted,
-            "filesearch_store_recreated": filesearch_store_created,
+            "filesearch_stores_deleted": filesearch_stores_deleted,
+            "deleted_store_names": deleted_store_names,
             "errors": errors if errors else None
         }
 
