@@ -374,17 +374,37 @@ async def delete_all_knowledge() -> Dict[str, Any]:
 
         # Step 1: Delete and recreate FileSearch store
         logger.info("🤖 [FILESEARCH_RECREATE] Deleting and recreating Gemini FileSearch store...")
+        filesearch_store_deleted = False
+        filesearch_store_created = False
+
         try:
             genai_client = get_genai_client()
-            if genai_client:
-                # Delete old store and create new one
-                new_store_name = FileSearchStoreManager.delete_and_recreate_store(genai_client)
-                logger.info(f"   ✅ FileSearch store deleted and recreated: {new_store_name}")
-            else:
+            if not genai_client:
                 logger.error("   ❌ Gemini client not available")
                 errors.append("Gemini client not available")
+            else:
+                try:
+                    # Delete old store and create new one
+                    new_store_name = FileSearchStoreManager.delete_and_recreate_store(genai_client)
+
+                    # Verify the new store was created
+                    if new_store_name and not new_store_name.startswith("fileSearchStores/"):
+                        # Got a proper store name back
+                        filesearch_store_deleted = True
+                        filesearch_store_created = True
+                        logger.info(f"   ✅ FileSearch store successfully deleted and recreated")
+                        logger.info(f"   New store name: {new_store_name}")
+                    else:
+                        logger.warning(f"   ⚠️  FileSearch store operation completed but store name format is unexpected: {new_store_name}")
+                except Exception as delete_err:
+                    logger.error(f"   ❌ Error in FileSearch store deletion/recreation: {delete_err}")
+                    import traceback
+                    logger.error(f"   Traceback: {traceback.format_exc()}")
+                    errors.append(f"FileSearch store deletion/recreation failed: {delete_err}")
         except Exception as e:
-            logger.error(f"❌ [FILESEARCH_RECREATE_ERROR] Error recreating FileSearch store: {e}")
+            logger.error(f"❌ [FILESEARCH_RECREATE_ERROR] Unexpected error: {e}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
             errors.append(f"FileSearch store recreation failed: {e}")
 
         # Step 1b: Delete all raw Gemini files
@@ -532,7 +552,8 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         logger.info(f"📊 [RESULT] Raw files deleted from Gemini: {deleted_files}")
         logger.info(f"📊 [RESULT] Websites marked as deleted: {deleted_websites}")
         logger.info(f"📊 [RESULT] Redis queues cleared: 2 (file_processing, web_crawling)")
-        logger.info(f"📊 [RESULT] FileSearch store: Deleted and recreated successfully")
+        logger.info(f"📊 [RESULT] FileSearch store deleted: {filesearch_store_deleted}")
+        logger.info(f"📊 [RESULT] FileSearch store recreated: {filesearch_store_created}")
 
         if errors:
             logger.warning(f"⚠️  [ERRORS] {len(errors)} error(s) occurred:")
@@ -540,12 +561,13 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                 logger.warning(f"   - {error}")
 
         return {
-            "success": len(errors) == 0,
-            "message": "Knowledge base cleared successfully and FileSearch store recreated" if not errors else "Knowledge base cleared with errors",
+            "success": len(errors) == 0 and filesearch_store_deleted and filesearch_store_created,
+            "message": "Knowledge base cleared successfully and FileSearch store recreated" if (len(errors) == 0 and filesearch_store_deleted and filesearch_store_created) else "Knowledge base cleared with errors",
             "raw_files_deleted": deleted_files,
             "websites_marked_deleted": deleted_websites,
             "redis_queues_cleared": 2,
-            "filesearch_store_recreated": True,
+            "filesearch_store_deleted": filesearch_store_deleted,
+            "filesearch_store_recreated": filesearch_store_created,
             "errors": errors if errors else None
         }
 
