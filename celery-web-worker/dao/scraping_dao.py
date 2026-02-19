@@ -208,3 +208,90 @@ class ScrapingDAO:
             logger.warning(f"⚠️  [WEB_DUPLICATE_CHECK_ERROR] Error checking for duplicate website: {e}")
             logger.log_db_query(query, params, error=e)
             return None
+
+    async def get_admin_user_role_id(self, user_email: str = None) -> Optional[int]:
+        """Get admin user role ID from database."""
+        try:
+            async with get_db_connection() as conn:
+                # Get admin role first
+                admin_role = await conn.fetchval(
+                    "SELECT id FROM roles WHERE role_name = 'admin' LIMIT 1"
+                )
+
+                if not admin_role:
+                    logger.warning("⚠️ Admin role not found in database")
+                    return None
+
+                # Get user role mapping for the admin email (join with users table)
+                email_to_search = user_email or 'globistaan@gmail.com'
+                user_role = await conn.fetchval(
+                    """SELECT urm.user_role_id
+                       FROM user_role_mapping urm
+                       JOIN users u ON urm.user_id = u.id
+                       WHERE u.email = $1 AND urm.role_id = $2 LIMIT 1""",
+                    email_to_search, admin_role
+                )
+
+                if not user_role:
+                    logger.warning(f"⚠️ No admin user role found for {email_to_search}")
+
+                return user_role
+        except Exception as e:
+            logger.warning(f"⚠️ Error getting admin user role: {e}")
+            return None
+
+    async def record_child_page(
+        self,
+        parent_id: int,
+        page_url: str,
+        gemini_file_name: str = None,
+        file_search_metadata: Dict[str, Any] = None,
+        user_role_id: int = None
+    ) -> Optional[int]:
+        """
+        Record a child page immediately after it's uploaded to Gemini.
+        This creates a new record in scraped_websites with parent_id set to the website.
+
+        Returns: page record id or None on failure
+        """
+        import json
+
+        logger.info(f"📄 [CHILD_PAGE_INSERT] Recording child page for parent {parent_id}")
+        logger.info(f"   URL: {page_url}")
+        logger.info(f"   Gemini File: {gemini_file_name}")
+
+        query = """
+            INSERT INTO scraped_websites (
+                parent_id, original_url, processing_status,
+                gemini_file_name, metadata, depth, user_role_id,
+                created_at, updated_at
+            ) VALUES (
+                $1, $2, $3,
+                $4, $5::jsonb, $6, $7,
+                NOW(), NOW()
+            ) RETURNING id
+        """
+
+        params = [
+            parent_id,
+            page_url,
+            'completed' if gemini_file_name else 'processing',
+            gemini_file_name,
+            json.dumps(file_search_metadata) if file_search_metadata else None,
+            1,  # depth = 1 (child of root)
+            user_role_id
+        ]
+
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.fetchval(query, *params)
+                logger.info(f"✅ [CHILD_PAGE_SUCCESS] Recorded child page with ID: {result}")
+                logger.log_db_query(query, params, result)
+                return int(result) if result else None
+        except Exception as e:
+            logger.error(f"❌ [CHILD_PAGE_ERROR] Failed to record child page: {e}")
+            logger.error(f"   URL: {page_url}")
+            logger.error(f"   Parent ID: {parent_id}")
+            logger.log_db_query(query, params, error=e)
+            return None
