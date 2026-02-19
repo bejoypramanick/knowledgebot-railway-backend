@@ -18,7 +18,9 @@ from shared.celery_dispatcher import web_celery
 
 logger = get_otel_logger("webcrawl_router", "knowledgebase-ingestion")
 
-router = APIRouter(prefix="/api/v1/gateway/knowledgebase", tags=["web-crawl"])
+# NOTE: Prefix is provided by include_router() in main.py
+# Do NOT include full path here to avoid double prefix (prefix=/api/v1/knowledgebase in include_router)
+router = APIRouter(tags=["web-crawl"])
 
 # =================================
 # WEBSITE STATUS ENDPOINTS

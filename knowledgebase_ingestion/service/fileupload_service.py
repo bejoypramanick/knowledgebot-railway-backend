@@ -331,3 +331,121 @@ async def validate_file_upload(file: UploadFile, file_size: int) -> Dict[str, An
             "error": f"Validation error: {str(e)}",
             "filename": file.filename or "unknown"
         }
+
+
+async def delete_all_knowledge() -> Dict[str, Any]:
+    """
+    Delete all files and websites from knowledge base.
+    Removes from Gemini FileSearch, clears Redis queues, and marks as deleted in database.
+    """
+    logger.info("=" * 80)
+    logger.info("🗑️  [DELETE_ALL_START] Clearing entire knowledge base")
+    logger.info("=" * 80)
+
+    deleted_files = 0
+    deleted_websites = 0
+    errors = []
+
+    try:
+        from shared.db import get_db_connection
+        from knowledgebase_ingestion.core.ai import get_genai_client
+
+        # Step 1: Delete all files from Gemini FileSearch
+        logger.info("📝 [GEMINI_DELETE] Deleting files from Gemini FileSearch...")
+        try:
+            async with get_db_connection() as conn:
+                # Get all files with gemini_file_name
+                files = await conn.fetch(
+                    "SELECT id, original_filename, gemini_file_name FROM file_uploads WHERE gemini_file_name IS NOT NULL"
+                )
+                logger.info(f"   Found {len(files)} files to delete from Gemini")
+
+                genai_client = get_genai_client()
+                if genai_client:
+                    for file_record in files:
+                        try:
+                            genai_client.files.delete(name=file_record['gemini_file_name'])
+                            deleted_files += 1
+                            logger.info(f"   ✅ Deleted from Gemini: {file_record['original_filename']}")
+                        except Exception as gem_err:
+                            logger.warning(f"   ⚠️  Could not delete from Gemini: {file_record['gemini_file_name']} - {gem_err}")
+                            errors.append(f"Gemini delete failed for {file_record['original_filename']}: {gem_err}")
+                else:
+                    logger.error("   ❌ Gemini client not available")
+                    errors.append("Gemini client not available")
+        except Exception as e:
+            logger.error(f"❌ [GEMINI_DELETE_ERROR] Error deleting from Gemini: {e}", exc_info=True)
+            errors.append(f"Gemini deletion failed: {e}")
+
+        # Step 2: Clear Redis queues
+        logger.info("🔴 [REDIS_CLEAR] Clearing Redis task queues...")
+        try:
+            redis_queue = RedisMessageQueue()
+            redis_queue.clear_file_task_queue()
+            redis_queue.clear_web_task_queue()
+            logger.info("   ✅ Redis queues cleared")
+        except Exception as e:
+            logger.error(f"❌ [REDIS_CLEAR_ERROR] Error clearing Redis: {e}", exc_info=True)
+            errors.append(f"Redis clear failed: {e}")
+
+        # Step 3: Mark all files as deleted in database
+        logger.info("💾 [DB_DELETE_FILES] Marking all files as deleted in database...")
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.execute(
+                    "DELETE FROM file_uploads"
+                )
+                logger.info(f"   ✅ All file records deleted from database")
+        except Exception as e:
+            logger.error(f"❌ [DB_DELETE_FILES_ERROR] Error deleting file records: {e}", exc_info=True)
+            errors.append(f"File deletion failed: {e}")
+
+        # Step 4: Delete all websites from database
+        logger.info("💾 [DB_DELETE_WEBSITES] Deleting all websites from database...")
+        try:
+            async with get_db_connection() as conn:
+                websites = await conn.fetch("SELECT id, original_url FROM scraped_websites")
+                logger.info(f"   Found {len(websites)} websites to delete")
+
+                result = await conn.execute(
+                    "DELETE FROM scraped_websites"
+                )
+                deleted_websites = len(websites)
+                logger.info(f"   ✅ All {deleted_websites} website records deleted from database")
+        except Exception as e:
+            logger.error(f"❌ [DB_DELETE_WEBSITES_ERROR] Error deleting websites: {e}", exc_info=True)
+            errors.append(f"Website deletion failed: {e}")
+
+        logger.info("=" * 80)
+        logger.info("✅ [DELETE_ALL_COMPLETE] Knowledge base clear completed")
+        logger.info("=" * 80)
+        logger.info(f"📊 [RESULT] Files deleted: {deleted_files}")
+        logger.info(f"📊 [RESULT] Websites deleted: {deleted_websites}")
+        logger.info(f"📊 [RESULT] Redis queues cleared: 2 (file_processing, web_crawling)")
+
+        if errors:
+            logger.warning(f"⚠️  [ERRORS] {len(errors)} error(s) occurred:")
+            for error in errors:
+                logger.warning(f"   - {error}")
+
+        return {
+            "success": len(errors) == 0,
+            "message": "Knowledge base cleared successfully" if not errors else "Knowledge base cleared with errors",
+            "deleted_files": deleted_files,
+            "deleted_websites": deleted_websites,
+            "redis_queues_cleared": 2,
+            "errors": errors if errors else None
+        }
+
+    except Exception as e:
+        logger.error("=" * 80)
+        logger.error(f"❌ [DELETE_ALL_ERROR] Error clearing knowledge base: {e}")
+        logger.error("=" * 80, exc_info=True)
+
+        return {
+            "success": False,
+            "message": f"Error clearing knowledge base: {str(e)}",
+            "deleted_files": deleted_files,
+            "deleted_websites": deleted_websites,
+            "errors": [str(e)]
+        }

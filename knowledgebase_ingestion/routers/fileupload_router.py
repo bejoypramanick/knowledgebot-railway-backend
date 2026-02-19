@@ -11,7 +11,7 @@ from knowledgebase_ingestion.utils.logging import get_otel_logger
 from knowledgebase_ingestion.service.fileupload_service import (
     get_fileupload_dao, get_pending_files, get_file_by_id,
     cancel_files, update_file_status, queue_file_for_deletion,
-    validate_file_upload
+    validate_file_upload, delete_all_knowledge
 )
 from knowledgebase_ingestion.service.file_service import get_file_service
 from knowledgebase_ingestion.dao.webcrawl_dao import WebCrawlDAO
@@ -20,7 +20,9 @@ from shared.celery_dispatcher import file_celery
 
 logger = get_otel_logger("fileupload_router", "knowledgebase-ingestion")
 
-router = APIRouter(prefix="/api/v1/gateway/knowledgebase", tags=["file-upload"])
+# NOTE: Prefix is provided by include_router() in main.py
+# Do NOT include full path here to avoid double prefix (prefix=/api/v1/knowledgebase in include_router)
+router = APIRouter(tags=["file-upload"])
 
 # =================================
 # FILE LISTING ENDPOINTS
@@ -237,6 +239,74 @@ async def delete_file(file_id: str, request: Request = None):
         raise
     except Exception as e:
         logger.error(f"Error deleting file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/clear-all")
+async def clear_all_knowledge(request: Request = None):
+    """
+    Delete all files and websites from knowledge base.
+    This operation:
+    1. Removes all files from Gemini FileSearch store
+    2. Clears all Redis task queues (file_processing, web_crawling)
+    3. Deletes all file and website records from database
+
+    REQUIRES: X-Confirm-Clear-All: true header (safety check to prevent accidental deletion)
+    """
+    try:
+        # Extract authenticated user information
+        user_email, user_id = extract_user_from_request(request)
+
+        # Safety check: require confirmation header
+        confirm_header = request.headers.get("X-Confirm-Clear-All")
+        if confirm_header != "true":
+            logger.warning(f"❌ [CLEAR_ALL_DENIED] Clear all requested without confirmation header by {user_email}")
+            raise HTTPException(
+                status_code=400,
+                detail="Clear all operation requires X-Confirm-Clear-All: true header"
+            )
+
+        logger.info("=" * 80)
+        logger.info(f"🔴 [CLEAR_ALL_REQUEST] Clear all knowledge base requested by {user_email}")
+        logger.info("=" * 80)
+
+        # Call delete all service function
+        result = await delete_all_knowledge()
+
+        if result.get("success"):
+            logger.info("=" * 80)
+            logger.info(f"✅ [CLEAR_ALL_SUCCESS] Knowledge base cleared successfully")
+            logger.info("=" * 80)
+            logger.info(f"   Files deleted from Gemini: {result.get('deleted_files')}")
+            logger.info(f"   Websites deleted from DB: {result.get('deleted_websites')}")
+            logger.info(f"   Redis queues cleared: {result.get('redis_queues_cleared')}")
+            logger.info(f"   Cleared by: {user_email}")
+
+            return {
+                "success": True,
+                "message": "Knowledge base cleared successfully",
+                "deleted_files": result.get("deleted_files"),
+                "deleted_websites": result.get("deleted_websites"),
+                "redis_queues_cleared": result.get("redis_queues_cleared")
+            }
+        else:
+            logger.error("=" * 80)
+            logger.error(f"❌ [CLEAR_ALL_FAILED] Knowledge base clear failed")
+            logger.error("=" * 80)
+            logger.error(f"   Message: {result.get('message')}")
+            if result.get("errors"):
+                for error in result.get("errors", []):
+                    logger.error(f"   Error: {error}")
+
+            raise HTTPException(
+                status_code=500,
+                detail=result.get("message", "Failed to clear knowledge base")
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ [CLEAR_ALL_ERROR] Error clearing all knowledge: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
