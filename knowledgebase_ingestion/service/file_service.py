@@ -549,23 +549,285 @@ class FileService:
         """Delete file by ID"""
         try:
             from shared.db import get_db_connection
-            
+
             async with get_db_connection() as conn:
                 # First get the file record
                 file_record = await self.get_file_by_id(file_id)
                 if not file_record:
                     logger.warning(f"File not found: {file_id}")
                     return False
-                
+
                 # Delete from database
                 await conn.execute("DELETE FROM file_uploads WHERE id = $1", int(file_id))
-                
+
                 logger.info(f"File deleted from database: {file_id}")
                 return True
-                
+
         except Exception as e:
             logger.error(f"Error deleting file: {e}")
             return False
+
+    async def delete_file_logic(self, file_id: str) -> Dict[str, Any]:
+        """
+        Delete a single file completely.
+
+        Operations:
+        1. Retrieves file record with all metadata
+        2. Deletes from Gemini (raw files and/or FileSearch store)
+        3. Marks record as deleted in database (soft delete for audit trail)
+
+        Returns:
+            {"success": bool, "message": str, ...details}
+        """
+        logger.info("=" * 80)
+        logger.info(f"🗑️  [DELETE_FILE_LOGIC] Deleting file ID: {file_id}")
+        logger.info("=" * 80)
+
+        try:
+            from shared.db import get_db_connection
+            from knowledgebase_ingestion.core.ai import get_genai_client
+            import json
+
+            # Step 1: Get file record
+            logger.info(f"🔍 [LOOKUP] Fetching file record...")
+            async with get_db_connection() as conn:
+                file_record = await conn.fetchrow(
+                    "SELECT id, original_filename, gemini_file_name, metadata FROM file_uploads WHERE id = $1",
+                    int(file_id)
+                )
+
+            if not file_record:
+                logger.error(f"❌ File not found: {file_id}")
+                return {
+                    "success": False,
+                    "message": "File not found",
+                    "file_id": file_id
+                }
+
+            logger.info(f"✅ File found: {file_record['original_filename']}")
+
+            # Step 2: Delete from Gemini
+            logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini...")
+            deleted_from_gemini = False
+            deleted_from_filesearch = False
+
+            try:
+                genai_client = get_genai_client()
+                if not genai_client:
+                    logger.warning("⚠️  Gemini client not available (file will still be marked as deleted in DB)")
+                else:
+                    # Delete raw file if it exists
+                    if file_record['gemini_file_name'] and not file_record['gemini_file_name'].startswith("documents/"):
+                        try:
+                            genai_client.files.delete(name=file_record['gemini_file_name'])
+                            deleted_from_gemini = True
+                            logger.info(f"✅ Deleted from Gemini raw files: {file_record['gemini_file_name']}")
+                        except Exception as e:
+                            logger.warning(f"⚠️  Could not delete from Gemini raw files: {e}")
+
+                    # Delete from FileSearch store if metadata contains FileSearch info
+                    metadata = file_record['metadata']
+                    if metadata:
+                        try:
+                            if isinstance(metadata, str):
+                                metadata = json.loads(metadata)
+
+                            if metadata.get('type') == 'file_search':
+                                store_name = metadata.get('file_search_store_name')
+                                document_name = metadata.get('document_name')
+
+                                if store_name and document_name:
+                                    try:
+                                        genai_client.file_search_stores.delete_document(
+                                            file_search_store_name=store_name,
+                                            document_name=document_name
+                                        )
+                                        deleted_from_filesearch = True
+                                        logger.info(f"✅ Deleted from FileSearch store: {document_name}")
+                                    except Exception as fs_err:
+                                        logger.warning(f"⚠️  Could not delete from FileSearch store: {fs_err}")
+                        except Exception as e:
+                            logger.warning(f"⚠️  Error processing metadata: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️  Error during Gemini deletion: {e}")
+
+            # Step 3: Mark as deleted in database (soft delete)
+            logger.info(f"💾 [DB_UPDATE] Marking file as deleted in database...")
+            try:
+                async with get_db_connection() as conn:
+                    await conn.execute(
+                        "UPDATE file_uploads SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
+                        int(file_id)
+                    )
+                logger.info(f"✅ File marked as deleted in database (record retained for audit trail)")
+            except Exception as e:
+                logger.error(f"❌ Error marking file as deleted: {e}")
+                raise
+
+            logger.info("=" * 80)
+            logger.info(f"✅ [DELETE_FILE_COMPLETE] File deletion completed")
+            logger.info("=" * 80)
+            logger.info(f"   File: {file_record['original_filename']}")
+            logger.info(f"   Deleted from Gemini raw: {deleted_from_gemini}")
+            logger.info(f"   Deleted from FileSearch: {deleted_from_filesearch}")
+            logger.info(f"   Marked as deleted in DB: Yes")
+
+            return {
+                "success": True,
+                "message": "File deleted successfully",
+                "file_id": file_id,
+                "filename": file_record['original_filename'],
+                "deleted_from_gemini": deleted_from_gemini,
+                "deleted_from_filesearch": deleted_from_filesearch
+            }
+
+        except Exception as e:
+            logger.error("=" * 80)
+            logger.error(f"❌ [DELETE_FILE_ERROR] Error deleting file: {e}")
+            logger.error("=" * 80)
+
+            return {
+                "success": False,
+                "message": f"Error deleting file: {str(e)}",
+                "file_id": file_id,
+                "error": str(e)
+            }
+
+    async def delete_website_logic(self, website_id: str) -> Dict[str, Any]:
+        """
+        Delete a single website and all its child pages.
+
+        Operations:
+        1. Retrieves website record and all child pages
+        2. Deletes all documents from Gemini FileSearch store
+        3. Marks website and all children as deleted in database (soft delete for audit trail)
+
+        Returns:
+            {"success": bool, "message": str, ...details}
+        """
+        logger.info("=" * 80)
+        logger.info(f"🗑️  [DELETE_WEBSITE_LOGIC] Deleting website ID: {website_id}")
+        logger.info("=" * 80)
+
+        try:
+            from shared.db import get_db_connection
+            from knowledgebase_ingestion.core.ai import get_genai_client
+            import json
+
+            # Step 1: Get website record and all child pages
+            logger.info(f"🔍 [LOOKUP] Fetching website and child pages...")
+            async with get_db_connection() as conn:
+                website_record = await conn.fetchrow(
+                    "SELECT id, original_url, metadata FROM scraped_websites WHERE id = $1",
+                    int(website_id)
+                )
+
+                if not website_record:
+                    logger.error(f"❌ Website not found: {website_id}")
+                    return {
+                        "success": False,
+                        "message": "Website not found",
+                        "website_id": website_id
+                    }
+
+                # Get all child pages
+                child_pages = await conn.fetch(
+                    "SELECT id, original_url, metadata FROM scraped_websites WHERE parent_id = $1",
+                    int(website_id)
+                )
+
+            logger.info(f"✅ Website found: {website_record['original_url']}")
+            logger.info(f"   Child pages: {len(child_pages)}")
+
+            # Step 2: Delete from Gemini FileSearch
+            logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini FileSearch...")
+            deleted_documents = 0
+
+            try:
+                genai_client = get_genai_client()
+                if not genai_client:
+                    logger.warning("⚠️  Gemini client not available (items will still be marked as deleted in DB)")
+                else:
+                    all_pages = [website_record] + child_pages
+
+                    for page in all_pages:
+                        metadata = page['metadata']
+                        if metadata:
+                            try:
+                                if isinstance(metadata, str):
+                                    metadata = json.loads(metadata)
+
+                                # Delete FileSearch document if metadata contains FileSearch info
+                                if metadata.get('type') == 'file_search' or 'file_search_store_name' in metadata:
+                                    store_name = metadata.get('file_search_store_name')
+                                    document_name = metadata.get('document_name')
+
+                                    if store_name and document_name:
+                                        try:
+                                            genai_client.file_search_stores.delete_document(
+                                                file_search_store_name=store_name,
+                                                document_name=document_name
+                                            )
+                                            deleted_documents += 1
+                                            logger.info(f"   ✅ Deleted from FileSearch: {page['original_url']}")
+                                        except Exception as fs_err:
+                                            logger.warning(f"   ⚠️  Could not delete document from FileSearch: {fs_err}")
+                            except Exception as e:
+                                logger.warning(f"   ⚠️  Error processing metadata: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️  Error during Gemini deletion: {e}")
+
+            # Step 3: Mark website and all children as deleted in database (soft delete)
+            logger.info(f"💾 [DB_UPDATE] Marking website and child pages as deleted...")
+            try:
+                async with get_db_connection() as conn:
+                    # Mark parent website as deleted
+                    await conn.execute(
+                        "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
+                        int(website_id)
+                    )
+
+                    # Mark all child pages as deleted
+                    if child_pages:
+                        await conn.execute(
+                            "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW() WHERE parent_id = $1",
+                            int(website_id)
+                        )
+
+                logger.info(f"✅ Website and all {len(child_pages)} child pages marked as deleted")
+                logger.info(f"   (Records retained in database for audit trail)")
+            except Exception as e:
+                logger.error(f"❌ Error marking website as deleted: {e}")
+                raise
+
+            logger.info("=" * 80)
+            logger.info(f"✅ [DELETE_WEBSITE_COMPLETE] Website deletion completed")
+            logger.info("=" * 80)
+            logger.info(f"   Website: {website_record['original_url']}")
+            logger.info(f"   Child pages deleted: {len(child_pages)}")
+            logger.info(f"   Documents deleted from FileSearch: {deleted_documents}")
+            logger.info(f"   Marked as deleted in DB: Yes")
+
+            return {
+                "success": True,
+                "message": "Website and all child pages deleted successfully",
+                "website_id": website_id,
+                "url": website_record['original_url'],
+                "child_pages_deleted": len(child_pages),
+                "documents_deleted_from_filesearch": deleted_documents
+            }
+
+        except Exception as e:
+            logger.error("=" * 80)
+            logger.error(f"❌ [DELETE_WEBSITE_ERROR] Error deleting website: {e}")
+            logger.error("=" * 80)
+
+            return {
+                "success": False,
+                "message": f"Error deleting website: {str(e)}",
+                "website_id": website_id,
+                "error": str(e)
+            }
 
     async def handle_duplicate_check(self, sha256_hash: str, original_filename: str, replace_existing: bool = False) -> dict:
         """Handle duplicate file checking logic"""
