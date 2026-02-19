@@ -1,7 +1,7 @@
 """
 Models package for celery-web-worker
 
-Contains value objects and data models
+Contains value objects, data models, and cancellation handling
 """
 from .value_objects import (
     CrawlConfig,
@@ -14,7 +14,14 @@ from .value_objects import (
     FinalizeRequest,
 )
 
+from .cancellation import (
+    CancellationToken,
+    CancellationCheckpoint,
+    CancellationException,
+)
+
 __all__ = [
+    # Value Objects
     "CrawlConfig",
     "JobContext",
     "PageData",
@@ -23,4 +30,8 @@ __all__ = [
     "AggregateMetrics",
     "ProcessingResult",
     "FinalizeRequest",
+    # Cancellation
+    "CancellationToken",
+    "CancellationCheckpoint",
+    "CancellationException",
 ]
