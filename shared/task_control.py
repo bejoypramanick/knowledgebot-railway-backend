@@ -186,6 +186,10 @@ class TaskControl:
             file_celery.control.purge()
             logger.info("   ✅ All file task queues purged")
 
+            # Note: purge() only clears queued tasks, not in-progress tasks.
+            # In-progress tasks will be terminated by Celery or detect Redis flag
+            # (set in individual stop_file_task calls). No global flag needed here.
+
             logger.info("=" * 80)
             logger.info("✅ [TASK_CONTROL_COMPLETE] All file tasks stopped")
             logger.info("=" * 80)
@@ -213,6 +217,10 @@ class TaskControl:
             logger.info("   🔪 Tier 1: Celery purge...")
             web_celery.control.purge()
             logger.info("   ✅ All web task queues purged")
+
+            # Note: purge() only clears queued tasks, not in-progress tasks.
+            # In-progress tasks will be terminated by Celery or detect Redis flag
+            # (set in individual stop_web_task calls). No global flag needed here.
 
             logger.info("=" * 80)
             logger.info("✅ [TASK_CONTROL_COMPLETE] All web tasks stopped")

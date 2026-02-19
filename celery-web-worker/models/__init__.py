@@ -9,10 +9,8 @@ from .value_objects import (
     PageData,
     UploadResult,
     PageMetrics,
-    AggregateMetrics,
     ProcessingResult,
     ProcessingRequest,
-    FinalizeRequest,
 )
 
 from .cancellation import (
@@ -28,10 +26,8 @@ __all__ = [
     "PageData",
     "UploadResult",
     "PageMetrics",
-    "AggregateMetrics",
     "ProcessingResult",
     "ProcessingRequest",
-    "FinalizeRequest",
     # Cancellation
     "CancellationToken",
     "CancellationCheckpoint",

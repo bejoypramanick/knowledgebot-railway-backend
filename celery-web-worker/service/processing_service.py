@@ -22,10 +22,8 @@ from models.value_objects import (
     PageData,
     UploadResult,
     PageMetrics,
-    AggregateMetrics,
     ProcessingResult,
     ProcessingRequest,
-    FinalizeRequest,
 )
 
 logger = get_otel_logger("processing_service", "celery-web-worker")
@@ -122,29 +120,32 @@ class ProcessingService:
             # - Old approach: crawl ALL → store in list → process all (500+ pages in RAM)
             # - New approach: crawl ONE → process ONE → record ONE → next (5 pages in RAM)
             # This achieves ~100x memory reduction for large sites.
+            #
+            # Returns: page count for logging only
+            # Aggregate stats are queried from child records in database on-demand
 
-            aggregate_metrics = await self._crawlWebsitePages(
+            pages_uploaded = await self._crawlWebsitePages(
                 crawl_config=request.crawl_config,
                 job_context=job_context
             )
 
             # ========== PHASE 3: BUILD SUCCESS RESULT ==========
-            # Compute total processing time and build result object.
-            # Result is returned to Celery task for logging/status updates.
-            # Note: WebsiteService also calls update_website_status() in database.
+            # Build simple success result for Celery task logging.
+            # Actual aggregate statistics are calculated from child records (SUM queries).
+            # WebsiteService also calls update_website_status() in database.
 
             processing_time = time.time() - start_time
             result = ProcessingResult(
                 success=True,
                 website_id=request.website_id,
-                message=f"Website processed successfully: {aggregate_metrics.total_pages_uploaded} pages",
-                page_count=aggregate_metrics.total_pages_uploaded,
-                total_size_bytes=aggregate_metrics.total_size_bytes,
-                total_char_count=aggregate_metrics.total_char_count,
+                message=f"Website processed successfully: {pages_uploaded} pages",
+                page_count=pages_uploaded,
+                total_size_bytes=0,
+                total_char_count=0,
                 processing_time_seconds=processing_time
             )
 
-            logger.info(f"✅ [COMPLETE] Website {request.website_id} processed: {aggregate_metrics.total_pages_uploaded} pages in {processing_time:.1f}s")
+            logger.info(f"✅ [COMPLETE] Website {request.website_id} processed: {pages_uploaded} pages in {processing_time:.1f}s")
 
             return result.to_dict()
 
@@ -172,23 +173,17 @@ class ProcessingService:
         self,
         crawl_config: CrawlConfig,
         job_context: JobContext
-    ) -> AggregateMetrics:
-        """Stream each page: crawl → process → upload → record"""
-        pages_uploaded = total_size = total_chars = 0
+    ) -> int:
+        """Stream each page: crawl → process → upload → record. Return page count only."""
+        pages_uploaded = 0
         start_time = time.time()
 
         logger.info(f"📄 [PIPELINE] Starting page-by-page streaming...")
 
         async for page_data in self._crawlPagesWithBFS(crawl_config, job_context):
-            if await self._isTaskCancelled(job_context.celery_task_id):
-                logger.warning(f"⏸️ Cancellation detected, stopping pipeline")
-                break
-
             metrics = await self._processPageInPipeline(page_data, job_context)
             if metrics:
                 pages_uploaded += 1
-                total_size += metrics.file_size_bytes
-                total_chars += metrics.char_count
 
         if pages_uploaded == 0:
             raise Exception("No pages successfully processed")
@@ -196,12 +191,7 @@ class ProcessingService:
         total_time = time.time() - start_time
         logger.info(f"✅ [PIPELINE] Completed: {pages_uploaded} pages in {total_time:.1f}s")
 
-        return AggregateMetrics(
-            total_pages_uploaded=pages_uploaded,
-            total_size_bytes=total_size,
-            total_char_count=total_chars,
-            total_time_seconds=total_time
-        )
+        return pages_uploaded
 
     async def _processPageInPipeline(
         self,
@@ -268,10 +258,6 @@ class ProcessingService:
         logger.info(f"🔄 Starting BFS crawl with max_depth={crawl_config.max_depth}, max_pages={crawl_config.max_pages}")
 
         while to_visit and pages_yielded < crawl_config.max_pages:
-            if await self._isTaskCancelled(job_context.celery_task_id):
-                logger.warning(f"⏸️ Crawling cancelled")
-                break
-
             current_url, current_depth = to_visit.pop(0)
 
             if not await self._validateURLForCrawl(current_url, current_depth, crawl_config.max_depth, visited_urls):
@@ -638,10 +624,6 @@ class ProcessingService:
         max_wait = 300
 
         while not operation.done:
-            if await self._isTaskCancelled(job_context.celery_task_id):
-                logger.error(f"   ❌ Task cancelled during upload polling")
-                return None
-
             elapsed = time.time() - start_time
             if elapsed > max_wait:
                 logger.error(f"   ❌ Timeout uploading ({elapsed:.0f}s)")
@@ -695,51 +677,6 @@ class ProcessingService:
     async def _isSinglePageMode(self, page_url: str, root_url: str) -> bool:
         """Check if child record should be skipped"""
         return page_url == root_url
-
-    async def _recordWebsiteToDB(self, finalize_request: FinalizeRequest):
-        """Update parent website record with aggregate stats via DAO"""
-        metadata = {
-            "type": "file_search",
-            "file_search_store_name": finalize_request.file_search_store_name,
-            "pages_count": finalize_request.page_count,
-            "uploaded_at": datetime.utcnow().isoformat()
-        }
-
-        success = await self.scraping_dao.finalize_website_metadata(
-            website_id=finalize_request.website_id,
-            page_count=finalize_request.page_count,
-            total_size_bytes=finalize_request.total_size_bytes,
-            total_char_count=finalize_request.total_char_count,
-            file_search_metadata=metadata
-        )
-
-        if not success:
-            raise Exception(f"Failed to finalize website record {finalize_request.website_id}")
-
-        logger.info(f"✅ Finalized: {finalize_request.page_count} pages, {finalize_request.total_size_bytes:,} bytes")
-
-    # ==================== CANCELLATION ====================
-
-    async def _isTaskCancelled(self, celery_task_id: str) -> bool:
-        """Check if task marked for cancellation via Redis"""
-        if not celery_task_id:
-            return False
-
-        try:
-            import redis as redis_lib
-            redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
-
-            try:
-                redis_conn = redis_lib.from_url(redis_url, socket_connect_timeout=2)
-                result = redis_conn.exists(f"task_cancelled:{celery_task_id}")
-                redis_conn.close()
-                return bool(result)
-            except redis_lib.ConnectionError:
-                logger.debug(f"ℹ️ Redis unavailable (OK in local dev)")
-                return False
-        except Exception as e:
-            logger.debug(f"ℹ️ Skipping cancellation check: {e}")
-            return False
 
     # ==================== UTILITIES ====================
 
