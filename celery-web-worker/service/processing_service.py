@@ -60,7 +60,7 @@ class ProcessingService:
             logger.info(f"   URL: {url}")
             logger.info(f"   Depth: {max_depth}, Max Pages: {max_pages}")
 
-            if await self._is_task_cancelled(celery_task_id):
+            if await self._isTaskCancelled(celery_task_id):
                 result = ProcessingResult(
                     success=False,
                     website_id=website_id,
@@ -81,8 +81,8 @@ class ProcessingService:
                 delay_between_requests=delay_between_requests
             )
 
-            store_name = await self._resolve_file_search_store()
-            resolved_user_role_id = await self._resolve_user_role_id(user_email, user_role_id)
+            store_name = await self._resolveFileSearchStore()
+            resolved_user_role_id = await self._resolveUserRoleID(user_email, user_role_id)
 
             job_context = JobContext(
                 website_id=website_id,
@@ -93,7 +93,7 @@ class ProcessingService:
             )
 
             # Process pages
-            aggregate_metrics = await self._indexPagesFromWebsite(
+            aggregate_metrics = await self._crawlWebsitePages(
                 crawl_config=crawl_config,
                 job_context=job_context
             )
@@ -106,7 +106,7 @@ class ProcessingService:
                 total_char_count=aggregate_metrics.total_char_count,
                 file_search_store_name=store_name
             )
-            await self._completeWebsiteIndexing(finalize_request)
+            await self._recordWebsiteToDB(finalize_request)
 
             # Build result
             processing_time = time.time() - start_time
@@ -142,7 +142,7 @@ class ProcessingService:
             await self._publishErrorToQueue(result, celery_task_id)
             return result.to_dict()
 
-    async def _indexPagesFromWebsite(
+    async def _crawlWebsitePages(
         self,
         crawl_config: CrawlConfig,
         job_context: JobContext
@@ -153,12 +153,12 @@ class ProcessingService:
 
         logger.info(f"📄 [PIPELINE] Starting page-by-page streaming...")
 
-        async for page_data in self._discoverPages(crawl_config, job_context):
-            if await self._is_task_cancelled(job_context.celery_task_id):
+        async for page_data in self._crawlPagesWithBFS(crawl_config, job_context):
+            if await self._isTaskCancelled(job_context.celery_task_id):
                 logger.warning(f"⏸️ Cancellation detected, stopping pipeline")
                 break
 
-            metrics = await self._processSinglePage(page_data, job_context)
+            metrics = await self._processPageInPipeline(page_data, job_context)
             if metrics:
                 pages_uploaded += 1
                 total_size += metrics.file_size_bytes
@@ -177,7 +177,7 @@ class ProcessingService:
             total_time_seconds=total_time
         )
 
-    async def _processSinglePage(
+    async def _processPageInPipeline(
         self,
         page_data: PageData,
         job_context: JobContext
@@ -189,7 +189,7 @@ class ProcessingService:
             start_time = time.time()
 
             # Convert
-            markdown = await self._preparePageContent(page_data.page_html, page_data.page_url)
+            markdown = await self._preparePageAsMarkdown(page_data.page_html, page_data.page_url)
             page_data = PageData(
                 page_url=page_data.page_url,
                 page_html=page_data.page_html,
@@ -197,7 +197,7 @@ class ProcessingService:
             )
 
             # Upload
-            upload_result = await self._indexPageInKnowledgeBase(page_data, job_context)
+            upload_result = await self._uploadPageToGemini(page_data, job_context)
             if not upload_result:
                 logger.warning(f"   ⚠️ Upload failed, skipping this page")
                 return None
@@ -205,7 +205,7 @@ class ProcessingService:
             logger.info(f"   ✅ Uploaded to Gemini: {upload_result.document_name}")
 
             # Record
-            await self._catalogPageRecord(page_data, upload_result, job_context)
+            await self._recordPageToDB(page_data, upload_result, job_context)
 
             # Metrics
             metrics = calculate_metrics(markdown)
@@ -248,7 +248,7 @@ class ProcessingService:
 
     # ==================== CRAWL LAYER ====================
 
-    async def _discoverPages(
+    async def _crawlPagesWithBFS(
         self,
         crawl_config: CrawlConfig,
         job_context: JobContext
@@ -268,18 +268,18 @@ class ProcessingService:
         logger.info(f"🔄 Starting BFS crawl with max_depth={crawl_config.max_depth}, max_pages={crawl_config.max_pages}")
 
         while to_visit and pages_yielded < crawl_config.max_pages:
-            if await self._is_task_cancelled(job_context.celery_task_id):
+            if await self._isTaskCancelled(job_context.celery_task_id):
                 logger.warning(f"⏸️ Crawling cancelled")
                 break
 
             current_url, current_depth = to_visit.pop(0)
 
-            if not await self._shouldProcessUrl(current_url, current_depth, crawl_config.max_depth, visited_urls):
+            if not await self._validateURLForCrawl(current_url, current_depth, crawl_config.max_depth, visited_urls):
                 continue
 
             visited_urls.add(self._normalize_url(current_url))
 
-            result = await self._downloadPageContent(current_url, semaphore, crawl_config.delay_between_requests)
+            result = await self._fetchPageHTML(current_url, semaphore, crawl_config.delay_between_requests)
             if result:
                 page_url, page_html = result
                 pages_yielded += 1
@@ -288,10 +288,10 @@ class ProcessingService:
                 yield PageData(page_url=page_url, page_html=page_html)
 
                 if current_depth < crawl_config.max_depth and pages_yielded < crawl_config.max_pages:
-                    new_links = await self._findChildPages(page_html, page_url, self._get_domain(job_context.root_url), visited_urls)
+                    new_links = await self._extractLinksFromHTML(page_html, page_url, self._get_domain(job_context.root_url), visited_urls)
                     to_visit.extend((link, current_depth + 1) for link in new_links if pages_yielded < crawl_config.max_pages)
 
-    async def _shouldProcessUrl(self, url: str, depth: int, max_depth: int, visited_urls: set) -> bool:
+    async def _validateURLForCrawl(self, url: str, depth: int, max_depth: int, visited_urls: set) -> bool:
         """Check if URL should be crawled"""
         normalized = self._normalize_url(url)
 
@@ -305,7 +305,7 @@ class ProcessingService:
 
         return True
 
-    async def _downloadPageContent(
+    async def _fetchPageHTML(
         self,
         page_url: str,
         semaphore: asyncio.Semaphore,
@@ -330,7 +330,7 @@ class ProcessingService:
                 logger.error(f"❌ Error fetching {page_url}: {e}")
                 return None
 
-    async def _findChildPages(
+    async def _extractLinksFromHTML(
         self, html: str, page_url: str, base_domain: str, visited_urls: set
     ) -> List[str]:
         """Parse HTML and return list of new, same-domain URLs"""
@@ -369,29 +369,29 @@ class ProcessingService:
 
     # ==================== CONTENT LAYER ====================
 
-    async def _preparePageContent(self, html: str, page_url: str) -> str:
+    async def _preparePageAsMarkdown(self, html: str, page_url: str) -> str:
         """Convert HTML to Markdown and extract embedded files"""
-        markdown = await self._extractPageText(html)
-        markdown = await self._extractEmbeddedDocuments(html, page_url, markdown)
+        markdown = await self._extractTextFromHTML(html)
+        markdown = await self._extractDocumentsFromPage(html, page_url, markdown)
         return markdown
 
-    async def _extractPageText(self, html_content: str) -> str:
+    async def _extractTextFromHTML(self, html_content: str) -> str:
         """Convert HTML to Markdown using trafilatura + cleanup"""
         try:
             import trafilatura
             from markdownify import markdownify as md
 
             extracted = trafilatura.extract(html_content, include_comments=False)
-            markdown = md(extracted, heading_style="atx") if extracted else await self._cleanPageTextManually(html_content)
+            markdown = md(extracted, heading_style="atx") if extracted else await self._cleanTextManually(html_content)
 
-            markdown = await self._normalizePageText(markdown)
+            markdown = await self._normalizeMarkdownText(markdown)
             logger.info(f"✅ [CONTENT] {len(markdown)} characters")
             return markdown
         except Exception as e:
             logger.error(f"❌ HTML to Markdown conversion failed: {e}")
             raise
 
-    async def _cleanPageTextManually(self, html_content: str) -> str:
+    async def _cleanTextManually(self, html_content: str) -> str:
         """Fallback: manual HTML cleaning if trafilatura fails"""
         from markdownify import markdownify as md
         from bs4 import BeautifulSoup
@@ -402,7 +402,7 @@ class ProcessingService:
 
         return md(str(soup), heading_style="atx")
 
-    async def _normalizePageText(self, markdown: str) -> str:
+    async def _normalizeMarkdownText(self, markdown: str) -> str:
         """Remove empty lines, noise, and excessive blank lines"""
         lines = [line.rstrip() for line in markdown.split('\n')]
         lines = [line for line in lines if line.strip()]
@@ -414,7 +414,7 @@ class ProcessingService:
 
         return markdown
 
-    async def _extractEmbeddedDocuments(
+    async def _extractDocumentsFromPage(
         self, html_content: str, page_url: str, page_markdown: str
     ) -> str:
         """Extract embedded files from HTML if docling enabled"""
@@ -424,17 +424,17 @@ class ProcessingService:
             return page_markdown
 
         try:
-            file_links = await self._findDocumentLinks(html_content, page_url)
+            file_links = await self._findDocumentLinksInHTML(html_content, page_url)
             if not file_links:
                 return page_markdown
 
-            extracted_docs = await self._processDocuments(file_links)
-            return await self._attachDocumentsToPage(page_markdown, extracted_docs)
+            extracted_docs = await self._processEmbeddedDocuments(file_links)
+            return await self._appendDocumentsToMarkdown(page_markdown, extracted_docs)
         except Exception as e:
             logger.warning(f"⚠️ [DOCLING] Error: {e}")
             return page_markdown
 
-    async def _findDocumentLinks(self, html_content: str, page_url: str) -> List[Dict]:
+    async def _findDocumentLinksInHTML(self, html_content: str, page_url: str) -> List[Dict]:
         """Find embedded files (PDF, DOCX, etc.) in HTML"""
         from bs4 import BeautifulSoup
 
@@ -453,20 +453,20 @@ class ProcessingService:
         logger.info(f"📎 [DOCLING] Found {len(file_links)} embedded files")
         return file_links[:5]
 
-    async def _processDocuments(self, file_links: List[Dict]) -> List[Dict]:
+    async def _processEmbeddedDocuments(self, file_links: List[Dict]) -> List[Dict]:
         """Process all files through docling service"""
         import httpx
 
         extracted_docs = []
         async with httpx.AsyncClient(timeout=60) as client:
             for file_link in file_links:
-                doc = await self._processDocument(client, file_link)
+                doc = await self._processEmbeddedDocument(client, file_link)
                 if doc:
                     extracted_docs.append(doc)
 
         return extracted_docs
 
-    async def _processDocument(self, client: Any, file_link: Dict) -> Optional[Dict]:
+    async def _processEmbeddedDocument(self, client: Any, file_link: Dict) -> Optional[Dict]:
         """Process single file through docling"""
         file_url = file_link['url']
 
@@ -480,12 +480,12 @@ class ProcessingService:
                 logger.warning(f"⚠️ File too large: {file_url}")
                 return None
 
-            return await self._downloadAndProcessDocument(response.content, file_url, file_link)
+            return await self._downloadAndDoclingProcess(response.content, file_url, file_link)
         except Exception as e:
             logger.warning(f"⚠️ Error processing {file_url}: {e}")
             return None
 
-    async def _downloadAndProcessDocument(self, file_bytes: bytes, file_url: str, file_link: Dict) -> Optional[Dict]:
+    async def _downloadAndDoclingProcess(self, file_bytes: bytes, file_url: str, file_link: Dict) -> Optional[Dict]:
         """Save file and process through docling"""
         _, file_ext = os.path.splitext(urlparse(file_url).path.lower())
         fd, temp_path = tempfile.mkstemp(suffix=file_ext)
@@ -520,7 +520,7 @@ class ProcessingService:
             if os.path.exists(temp_path):
                 os.unlink(temp_path)
 
-    async def _attachDocumentsToPage(self, page_markdown: str, extracted_docs: List[Dict]) -> str:
+    async def _appendDocumentsToMarkdown(self, page_markdown: str, extracted_docs: List[Dict]) -> str:
         """Append extracted documents to page markdown"""
         if not extracted_docs:
             return page_markdown
@@ -537,7 +537,7 @@ class ProcessingService:
 
     # ==================== UPLOAD LAYER ====================
 
-    async def _resolve_file_search_store(self) -> str:
+    async def _resolveFileSearchStore(self) -> str:
         """Resolve FileSearch store name (fail fast)"""
         from core.config import settings
         from core.ai import get_genai_client
@@ -557,7 +557,7 @@ class ProcessingService:
         logger.info(f"✅ Resolved FileSearch store: {store}")
         return store
 
-    async def _resolve_user_role_id(self, user_email: str, user_role_id: int = None) -> Optional[int]:
+    async def _resolveUserRoleID(self, user_email: str, user_role_id: int = None) -> Optional[int]:
         """Resolve user_role_id (allow NULL if not found)"""
         if user_role_id:
             logger.info(f"✅ Using provided user_role_id: {user_role_id}")
@@ -569,7 +569,7 @@ class ProcessingService:
 
         return user_role_id
 
-    async def _indexPageInKnowledgeBase(
+    async def _uploadPageToGemini(
         self,
         page_data: PageData,
         job_context: JobContext
@@ -595,14 +595,14 @@ class ProcessingService:
             operation = genai_client.file_search_stores.upload_to_file_search_store(
                 file=temp_file,
                 file_search_store_name=job_context.store_name,
-                config=await self._buildIndexingConfig(doc_name, job_context.website_id, page_data.page_url)
+                config=await self._buildGeminiUploadConfig(doc_name, job_context.website_id, page_data.page_url)
             )
 
             if not operation:
                 logger.error(f"   ❌ Failed to create upload operation")
                 return None
 
-            return await self._waitForIndexingCompletion(operation, job_context)
+            return await self._waitForGeminiUploadCompletion(operation, job_context)
         finally:
             try:
                 os.close(fd)
@@ -610,7 +610,7 @@ class ProcessingService:
                 pass
             self._deleteTemporaryFile(temp_file)
 
-    async def _buildIndexingConfig(self, doc_name: str, website_id: int, page_url: str) -> Dict:
+    async def _buildGeminiUploadConfig(self, doc_name: str, website_id: int, page_url: str) -> Dict:
         """Build Gemini upload configuration"""
         return {
             'display_name': doc_name,
@@ -629,7 +629,7 @@ class ProcessingService:
         except:
             pass
 
-    async def _waitForIndexingCompletion(self, operation, job_context: JobContext) -> Optional[UploadResult]:
+    async def _waitForGeminiUploadCompletion(self, operation, job_context: JobContext) -> Optional[UploadResult]:
         """Poll Gemini upload operation until done"""
         from core.ai import get_genai_client
 
@@ -638,7 +638,7 @@ class ProcessingService:
         max_wait = 300
 
         while not operation.done:
-            if await self._is_task_cancelled(job_context.celery_task_id):
+            if await self._isTaskCancelled(job_context.celery_task_id):
                 logger.error(f"   ❌ Task cancelled during upload polling")
                 return None
 
@@ -651,9 +651,9 @@ class ProcessingService:
             await asyncio.sleep(5)
             operation = genai_client.operations.get(operation)
 
-        return await self._extractDocumentIdentifier(operation, job_context.store_name)
+        return await self._extractDocumentNameFromOperation(operation, job_context.store_name)
 
-    async def _extractDocumentIdentifier(self, operation, store_name: str) -> Optional[UploadResult]:
+    async def _extractDocumentNameFromOperation(self, operation, store_name: str) -> Optional[UploadResult]:
         """Extract document name from completed upload operation"""
         if operation.done and hasattr(operation, 'response') and hasattr(operation.response, 'document_name'):
             doc_name = operation.response.document_name
@@ -669,14 +669,14 @@ class ProcessingService:
 
     # ==================== DATABASE LAYER ====================
 
-    async def _catalogPageRecord(
+    async def _recordPageToDB(
         self,
         page_data: PageData,
         upload_result: UploadResult,
         job_context: JobContext
     ) -> Optional[int]:
         """Record single page in database"""
-        if await self._isRootPageInSinglePageMode(page_data.page_url, job_context.root_url):
+        if await self._isSinglePageMode(page_data.page_url, job_context.root_url):
             logger.info(f"   ℹ️ Skipping child record (single-page depth=0)")
             return job_context.website_id
 
@@ -692,11 +692,11 @@ class ProcessingService:
 
         return child_page_id
 
-    async def _isRootPageInSinglePageMode(self, page_url: str, root_url: str) -> bool:
+    async def _isSinglePageMode(self, page_url: str, root_url: str) -> bool:
         """Check if child record should be skipped"""
         return page_url == root_url
 
-    async def _completeWebsiteIndexing(self, finalize_request: FinalizeRequest):
+    async def _recordWebsiteToDB(self, finalize_request: FinalizeRequest):
         """Update parent website record with aggregate stats via DAO"""
         metadata = {
             "type": "file_search",
@@ -720,7 +720,7 @@ class ProcessingService:
 
     # ==================== CANCELLATION ====================
 
-    async def _is_task_cancelled(self, celery_task_id: str) -> bool:
+    async def _isTaskCancelled(self, celery_task_id: str) -> bool:
         """Check if task marked for cancellation via Redis"""
         if not celery_task_id:
             return False
