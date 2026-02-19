@@ -112,7 +112,7 @@ class FileSearchStoreManager:
                         logger.info(f"🗑️ [DELETE_STORE] Deleting store: {store.name}")
                         
                         # Delete the entire store with force=True to clear all documents
-                        client.file_search_stores.delete(name=store.name, force=True)
+                        client.file_search_stores.delete(name=store.name, config={"force": True})
                         deleted_stores.append(store.name)
                         logger.info(f"   ✅ Deleted store: {store.name}")
                         
@@ -197,7 +197,7 @@ class FileSearchStoreManager:
 
                     # Delete the store with force=True to clear all documents
                     logger.info(f"🗑️ [FILESEARCH_DELETE] Deleting store with force=True: {target_store.name}")
-                    client.file_search_stores.delete(name=target_store.name, force=True)
+                    client.file_search_stores.delete(name=target_store.name, config={"force": True})
                     logger.info(f"✅ [FILESEARCH_DELETE_SUCCESS] Store deleted successfully: {target_store.name}")
                 else:
                     logger.warning(f"⚠️ No matching store found for pattern: {store_name}")
