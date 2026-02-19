@@ -654,11 +654,13 @@ class ProcessingService:
 
                 # Upload to FileSearch
                 document_name = f"website_{website_id}_{int(time.time())}"
-                file_search_response = genai_client.file_search_stores.documents.create(
-                    parent=file_search_store_name,
-                    display_name=document_name,
-                    mime_type="text/markdown"
-                )
+                with open(temp_file, 'rb') as f:
+                    file_search_response = genai_client.file_search_stores.documents.create(
+                        parent=file_search_store_name,
+                        display_name=document_name,
+                        mime_type="text/markdown",
+                        file=f
+                    )
 
                 logger.info(f"✅ Created FileSearch document: {file_search_response.name}")
 
