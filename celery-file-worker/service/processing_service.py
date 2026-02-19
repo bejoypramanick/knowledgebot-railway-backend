@@ -267,6 +267,10 @@ async def process_file_content(
             return None
 
     try:
+        # Log docling configuration at the start of processing
+        from core.config import settings
+        logger.info(f"⚙️  [CONFIG] DOCLING_ENABLED={settings.docling_enabled}")
+
         # STEP 1: Query database with celery_task_id to get file details
         logger.info(f"🔍 [DB_QUERY] Getting file details for task_id: {celery_task_id}")
         file_details = await get_file_details_by_task_id(celery_task_id)
@@ -449,8 +453,13 @@ async def process_file_content(
                     "error": f"Docling processing error: {str(e)}"
                 }
         else:
-            # For types that skip docling (txt, md, etc.), we mark as processed successfully
-            logger.info(f"📝 [ROUTING] Skipping special processing for {detected_mime_type}")
+            # For types that skip docling (txt, md, etc.) OR if DOCLING_ENABLED=false
+            # Mark as processed successfully and send file raw to Gemini API
+            from core.config import settings
+            if not settings.docling_enabled:
+                logger.info(f"📝 [ROUTING] DOCLING_ENABLED=false, sending {original_filename} raw to Gemini API")
+            else:
+                logger.info(f"📝 [ROUTING] File type {detected_mime_type} doesn't require docling processing, sending raw to Gemini API")
             processed_successfully = True
 
         # STEP 6: GEMINI UPLOAD PHASE
