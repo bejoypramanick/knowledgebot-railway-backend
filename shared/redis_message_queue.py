@@ -23,25 +23,45 @@ class RedisMessageQueue:
     WEB_RESULT_QUEUE = "web_crawling_results"      # web-worker → knowledgebase
 
     def __init__(self):
-        """Initialize Redis connection"""
-        self.redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-        self._connection = None
-        self._init_connection()
+        """Initialize Redis connections for both databases"""
+        # File processing: Redis DB 0 (EXPLICIT - never falls back to REDIS_URL)
+        self.file_redis_url = os.getenv('FILE_REDIS_URL', 'redis://localhost:6379/0')
+        # Web crawling: Redis DB 1 (EXPLICIT - never falls back to REDIS_URL)
+        self.web_redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
 
-    def _init_connection(self):
-        """Initialize Redis connection"""
+        self._file_connection = None
+        self._web_connection = None
+        self._init_connections()
+
+    def _init_connections(self):
+        """Initialize Redis connections for both databases"""
         try:
-            self._connection = redis.from_url(self.redis_url)
-            # Test connection
-            self._connection.ping()
-            logger.info(f"✅ Redis message queue initialized: {self.redis_url}")
+            self._file_connection = redis.from_url(self.file_redis_url)
+            self._file_connection.ping()
+            logger.info(f"✅ File Redis connection initialized: {self.file_redis_url}")
         except Exception as e:
-            logger.error(f"❌ Failed to initialize Redis connection: {e}")
-            self._connection = None
+            logger.error(f"❌ Failed to initialize file Redis connection: {e}")
+            self._file_connection = None
+
+        try:
+            self._web_connection = redis.from_url(self.web_redis_url)
+            self._web_connection.ping()
+            logger.info(f"✅ Web Redis connection initialized: {self.web_redis_url}")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize web Redis connection: {e}")
+            self._web_connection = None
 
     def is_available(self) -> bool:
-        """Check if Redis is available"""
-        return self._connection is not None
+        """Check if at least one Redis connection is available"""
+        return self._file_connection is not None or self._web_connection is not None
+
+    def _is_file_available(self) -> bool:
+        """Check if file Redis connection is available"""
+        return self._file_connection is not None
+
+    def _is_web_available(self) -> bool:
+        """Check if web Redis connection is available"""
+        return self._web_connection is not None
 
     # ========== FILE PROCESSING MESSAGES ==========
 
@@ -56,8 +76,8 @@ class RedisMessageQueue:
         Read by: celery-file-worker
         Note: file_id is optional - worker will create DB record and assign it
         """
-        if not self.is_available():
-            logger.error("❌ Redis not available, cannot publish task")
+        if not self._is_file_available():
+            logger.error("❌ File Redis not available, cannot publish task")
             return False
 
         try:
@@ -67,7 +87,7 @@ class RedisMessageQueue:
             }
 
             message_json = json.dumps(message)
-            self._connection.rpush(self.FILE_TASK_QUEUE, message_json)
+            self._file_connection.rpush(self.FILE_TASK_QUEUE, message_json)
 
             logger.info(f"📤 [FILE] Published task: {celery_task_id}")
             return True
@@ -82,12 +102,12 @@ class RedisMessageQueue:
         Called by: celery-file-worker
         Returns: Parsed message dict or None
         """
-        if not self.is_available():
+        if not self._is_file_available():
             return None
 
         try:
             # BLPOP with timeout in seconds
-            result = self._connection.blpop(self.FILE_TASK_QUEUE, timeout=timeout)
+            result = self._file_connection.blpop(self.FILE_TASK_QUEUE, timeout=timeout)
             if result:
                 _, message_json = result
                 message = json.loads(message_json)
@@ -105,8 +125,8 @@ class RedisMessageQueue:
         Called by: celery-file-worker
         Read by: knowledgebase_ingestion
         """
-        if not self.is_available():
-            logger.error("❌ Redis not available, cannot publish result")
+        if not self._is_file_available():
+            logger.error("❌ File Redis not available, cannot publish result")
             return False
 
         try:
@@ -116,7 +136,7 @@ class RedisMessageQueue:
             }
 
             message_json = json.dumps(message)
-            self._connection.rpush(self.FILE_RESULT_QUEUE, message_json)
+            self._file_connection.rpush(self.FILE_RESULT_QUEUE, message_json)
 
             logger.info(f"📤 [FILE_RESULT] Published: {celery_task_id}")
             return True
@@ -131,12 +151,12 @@ class RedisMessageQueue:
         Called by: knowledgebase_ingestion
         Returns: Parsed message dict or None
         """
-        if not self.is_available():
+        if not self._is_file_available():
             return None
 
         try:
             # BLPOP with timeout (0 = non-blocking)
-            result = self._connection.blpop(self.FILE_RESULT_QUEUE, timeout=timeout)
+            result = self._file_connection.blpop(self.FILE_RESULT_QUEUE, timeout=timeout)
             if result:
                 _, message_json = result
                 message = json.loads(message_json)
@@ -167,8 +187,8 @@ class RedisMessageQueue:
         Called by: knowledgebase_ingestion
         Read by: celery-web-worker
         """
-        if not self.is_available():
-            logger.error("❌ Redis not available, cannot publish task")
+        if not self._is_web_available():
+            logger.error("❌ Web Redis not available, cannot publish task")
             return False
 
         try:
@@ -186,7 +206,7 @@ class RedisMessageQueue:
             }
 
             message_json = json.dumps(message)
-            self._connection.rpush(self.WEB_TASK_QUEUE, message_json)
+            self._web_connection.rpush(self.WEB_TASK_QUEUE, message_json)
 
             logger.info(f"📤 [WEB] Published task: {celery_task_id} for {url}")
             return True
@@ -201,11 +221,11 @@ class RedisMessageQueue:
         Called by: celery-web-worker
         Returns: Parsed message dict or None
         """
-        if not self.is_available():
+        if not self._is_web_available():
             return None
 
         try:
-            result = self._connection.blpop(self.WEB_TASK_QUEUE, timeout=timeout)
+            result = self._web_connection.blpop(self.WEB_TASK_QUEUE, timeout=timeout)
             if result:
                 _, message_json = result
                 message = json.loads(message_json)
@@ -230,8 +250,8 @@ class RedisMessageQueue:
         Called by: celery-web-worker
         Read by: knowledgebase_ingestion
         """
-        if not self.is_available():
-            logger.error("❌ Redis not available, cannot publish result")
+        if not self._is_web_available():
+            logger.error("❌ Web Redis not available, cannot publish result")
             return False
 
         try:
@@ -246,7 +266,7 @@ class RedisMessageQueue:
             }
 
             message_json = json.dumps(message)
-            self._connection.rpush(self.WEB_RESULT_QUEUE, message_json)
+            self._web_connection.rpush(self.WEB_RESULT_QUEUE, message_json)
 
             logger.info(f"📤 [WEB_RESULT] Published: website_id={website_id}, status={status}")
             return True
@@ -261,11 +281,11 @@ class RedisMessageQueue:
         Called by: knowledgebase_ingestion
         Returns: Parsed message dict or None
         """
-        if not self.is_available():
+        if not self._is_web_available():
             return None
 
         try:
-            result = self._connection.blpop(self.WEB_RESULT_QUEUE, timeout=timeout)
+            result = self._web_connection.blpop(self.WEB_RESULT_QUEUE, timeout=timeout)
             if result:
                 _, message_json = result
                 message = json.loads(message_json)
@@ -283,26 +303,41 @@ class RedisMessageQueue:
         """
         Set Redis cancel flag for a task (replaces celery_app.control.revoke).
         Checked by processing_service at cancellation points.
+        Sets flag in both databases to ensure it's found regardless of task type.
         """
-        if not self.is_available():
-            return False
+        success = False
 
-        try:
-            self._connection.set(f"task_cancelled:{task_id}", "1", ex=3600)
+        # Try file Redis
+        if self._is_file_available():
+            try:
+                self._file_connection.set(f"task_cancelled:{task_id}", "1", ex=3600)
+                success = True
+            except Exception as e:
+                logger.error(f"❌ Error setting cancellation flag in file Redis: {e}")
+
+        # Try web Redis
+        if self._is_web_available():
+            try:
+                self._web_connection.set(f"task_cancelled:{task_id}", "1", ex=3600)
+                success = True
+            except Exception as e:
+                logger.error(f"❌ Error setting cancellation flag in web Redis: {e}")
+
+        if success:
             logger.info(f"🛑 Set cancellation flag for task: {task_id}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Error setting task cancellation flag: {e}")
-            return False
+        else:
+            logger.error(f"❌ Could not set cancellation flag in any Redis connection: {task_id}")
+
+        return success
 
     def clear_file_task_queue(self) -> bool:
         """Remove all pending file tasks from queue (replaces celery queue purge)."""
-        if not self.is_available():
+        if not self._is_file_available():
             return False
 
         try:
-            self._connection.delete(self.FILE_TASK_QUEUE)
-            logger.info(f"✅ Cleared file task queue: {self.FILE_TASK_QUEUE}")
+            self._file_connection.delete(self.FILE_TASK_QUEUE)
+            logger.info(f"✅ Cleared file task queue from DB 0: {self.FILE_TASK_QUEUE}")
             return True
         except Exception as e:
             logger.error(f"❌ Error clearing file task queue: {e}")
@@ -310,12 +345,12 @@ class RedisMessageQueue:
 
     def clear_web_task_queue(self) -> bool:
         """Remove all pending web tasks from queue (replaces celery queue purge)."""
-        if not self.is_available():
+        if not self._is_web_available():
             return False
 
         try:
-            self._connection.delete(self.WEB_TASK_QUEUE)
-            logger.info(f"✅ Cleared web task queue: {self.WEB_TASK_QUEUE}")
+            self._web_connection.delete(self.WEB_TASK_QUEUE)
+            logger.info(f"✅ Cleared web task queue from DB 1: {self.WEB_TASK_QUEUE}")
             return True
         except Exception as e:
             logger.error(f"❌ Error clearing web task queue: {e}")
@@ -324,28 +359,47 @@ class RedisMessageQueue:
     # ========== UTILITY METHODS ==========
 
     def get_queue_length(self, queue_name: str) -> int:
-        """Get number of messages in queue"""
-        if not self.is_available():
-            return 0
+        """Get number of messages in queue (checks both databases)"""
+        total = 0
 
-        try:
-            return self._connection.llen(queue_name)
-        except Exception as e:
-            logger.error(f"❌ Error getting queue length: {e}")
-            return 0
+        if self._is_file_available():
+            try:
+                total += self._file_connection.llen(queue_name)
+            except Exception as e:
+                logger.error(f"❌ Error getting queue length from file Redis: {e}")
+
+        if self._is_web_available():
+            try:
+                total += self._web_connection.llen(queue_name)
+            except Exception as e:
+                logger.error(f"❌ Error getting queue length from web Redis: {e}")
+
+        return total
 
     def clear_queue(self, queue_name: str) -> bool:
-        """Clear all messages from queue"""
-        if not self.is_available():
-            return False
+        """Clear all messages from queue (clears from both databases)"""
+        success = False
 
-        try:
-            self._connection.delete(queue_name)
+        if self._is_file_available():
+            try:
+                self._file_connection.delete(queue_name)
+                success = True
+            except Exception as e:
+                logger.error(f"❌ Error clearing queue from file Redis: {e}")
+
+        if self._is_web_available():
+            try:
+                self._web_connection.delete(queue_name)
+                success = True
+            except Exception as e:
+                logger.error(f"❌ Error clearing queue from web Redis: {e}")
+
+        if success:
             logger.info(f"✅ Cleared queue: {queue_name}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Error clearing queue: {e}")
-            return False
+        else:
+            logger.error(f"❌ Could not clear queue {queue_name} from any Redis connection")
+
+        return success
 
 
 # Global instance
