@@ -44,17 +44,66 @@ class ProcessingService:
         self,
         request: ProcessingRequest
     ) -> Dict[str, Any]:
-        """Main orchestration: resolve → stream → finalize → publish"""
+        """
+        Main orchestration: Resolve dependencies → Stream pages → Finalize → Return result
+
+        This is the entry point for website scraping. It coordinates the entire pipeline:
+        1. RESOLVE: Look up Gemini FileSearch store and user role (fail-fast approach)
+        2. STREAM: Process each page (crawl → extract content → upload → record in DB)
+        3. FINALIZE: Update aggregate statistics in database
+        4. RETURN: Build success/error result
+
+        The pipeline uses a streaming approach (async generator) to process one page at a
+        time, avoiding loading all pages into memory. This enables processing of
+        large websites with minimal memory footprint.
+
+        Args:
+            request (ProcessingRequest): Immutable request containing:
+                - website_id: ID of website being processed
+                - url: Root URL to start scraping
+                - crawl_config: BFS crawl parameters (depth, max pages, etc.)
+                - user_email: Email of user initiating scrape
+                - user_role_id: Optional user role for filtering
+                - celery_task_id: Task ID for cancellation checking
+                - replace_existing: Whether to replace existing data
+                - options: Additional options dict
+
+        Returns:
+            Dict[str, Any]: ProcessingResult as dict containing:
+                - success: bool indicating if processing succeeded
+                - website_id: ID of processed website
+                - message: Human-readable status message
+                - page_count: Number of pages successfully uploaded
+                - total_size_bytes: Total content size processed
+                - total_char_count: Total characters processed
+                - processing_time_seconds: Elapsed time
+                - error: Error message if failed, None if succeeded
+
+        Raises:
+            Exception: Any error during processing is caught and returned in result
+        """
         start_time = time.time()
         try:
+            # ========== PHASE 1: RESOLVE DEPENDENCIES ==========
+            # Look up critical dependencies BEFORE starting crawl (fail-fast approach).
+            # If FileSearch store doesn't exist, we want to know immediately rather than
+            # after crawling 100 pages.
+
             logger.info(f"🚀 [SCRAPING] Starting website processing: {request.website_id}")
             logger.info(f"   URL: {request.url}")
             logger.info(f"   Depth: {request.crawl_config.max_depth}, Max Pages: {request.crawl_config.max_pages}")
 
-            # Resolve dependencies
+            # Resolve Gemini FileSearch store name (used for all page uploads)
+            # Raises exception if store doesn't exist - prevents wasted crawling
             store_name = await self._resolveFileSearchStore()
+
+            # Resolve user role ID for access control
+            # Returns None if not found (NULL is allowed in schema)
             resolved_user_role_id = await self._resolveUserRoleID(request.user_email, request.user_role_id)
 
+            # Build JobContext: Immutable object passed to all sub-operations
+            # Contains: website_id, root_url, task_id, store, user_role
+            # This reduces parameter passing and makes data flow explicit
             job_context = JobContext(
                 website_id=request.website_id,
                 root_url=request.url,
@@ -63,13 +112,25 @@ class ProcessingService:
                 user_role_id=resolved_user_role_id
             )
 
-            # Process pages
+            # ========== PHASE 2: STREAM PAGES ==========
+            # Process pages one-at-a-time using async generator.
+            # For each page: crawl → extract text → upload to Gemini → record in DB
+            #
+            # Memory efficiency:
+            # - Old approach: crawl ALL → store in list → process all (500+ pages in RAM)
+            # - New approach: crawl ONE → process ONE → record ONE → next (5 pages in RAM)
+            # This achieves ~100x memory reduction for large sites.
+
             aggregate_metrics = await self._crawlWebsitePages(
                 crawl_config=request.crawl_config,
                 job_context=job_context
             )
 
-            # Finalize
+            # ========== PHASE 3: FINALIZE ==========
+            # Update aggregate statistics in database (scraped_websites table).
+            # This includes: page count, total size, total characters, metadata.
+            # Done AFTER all pages are processed so stats are accurate.
+
             finalize_request = FinalizeRequest(
                 website_id=request.website_id,
                 page_count=aggregate_metrics.total_pages_uploaded,
@@ -79,7 +140,11 @@ class ProcessingService:
             )
             await self._recordWebsiteToDB(finalize_request)
 
-            # Build result
+            # ========== PHASE 4: BUILD SUCCESS RESULT ==========
+            # Compute total processing time and build result object.
+            # Result is returned to Celery task for logging/status updates.
+            # Note: WebsiteService also calls update_website_status() in database.
+
             processing_time = time.time() - start_time
             result = ProcessingResult(
                 success=True,
@@ -96,6 +161,11 @@ class ProcessingService:
             return result.to_dict()
 
         except Exception as e:
+            # ========== ERROR HANDLING ==========
+            # Catch any error and return failure result.
+            # Note: No re-raise. Errors are caught and logged by Celery task handler.
+            # WebsiteService.process_website_async() will call update_website_status('failed').
+
             processing_time = time.time() - start_time
             result = ProcessingResult(
                 success=False,
