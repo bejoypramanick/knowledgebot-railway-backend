@@ -5,10 +5,10 @@ rootDirectory = "."
 [deploy]
 # Celery worker for web crawling queue
 # Note: WORKDIR in Dockerfile is /app/celery-web-worker, so no need for cd
-# Using gevent pool for better I/O concurrency without thread exhaustion
-# Parallel processing: 10 concurrent website crawls can be processed simultaneously
-# Concurrency: 10 workers (hardcoded, modify here to change)
-startCommand = "celery -A celery_app worker -Q web_crawling -l info --pool=gevent --concurrency=10 --max-tasks-per-child=50"
+# Using prefork pool for better asyncio compatibility
+# Parallel processing: 5 concurrent website crawls can be processed simultaneously
+# Concurrency: 5 workers (prefork processes)
+startCommand = "celery -A celery_app worker -Q web_crawling -l info --pool=prefork --concurrency=5 --max-tasks-per-child=50"
 
 # Restart policy for worker reliability
 restartPolicyType = "ON_FAILURE"

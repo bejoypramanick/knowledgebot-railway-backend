@@ -75,19 +75,8 @@ def scrape_website_task(
         logger.info(f"     - options: {options}")
         logger.info(f"     - celery_task_id: {task_id}")
 
-        # With gevent pool, we need to handle async code differently
-        # Use nest_asyncio to allow nested event loops
-        import nest_asyncio
-        nest_asyncio.apply()
-        
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            # No event loop in current thread, create one
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        loop.run_until_complete(
+        # With prefork pool, asyncio.run() works fine
+        asyncio.run(
             website_service.process_website_async(
                 website_id=website_id,
                 url=url,
@@ -139,17 +128,8 @@ def scrape_website_task(
                 from dao.scraping_dao import ScrapingDAO
                 dao = ScrapingDAO()
                 
-                # Use nest_asyncio to allow nested event loops with gevent
-                import nest_asyncio
-                nest_asyncio.apply()
-                
-                try:
-                    loop = asyncio.get_event_loop()
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                
-                loop.run_until_complete(
+                # With prefork pool, asyncio.run() works fine
+                asyncio.run(
                     dao.update_website_status(
                         website_id,
                         "failed",

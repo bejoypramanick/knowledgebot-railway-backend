@@ -73,19 +73,8 @@ def process_file_upload_task(
 
         logger.info("⚙️  [PROCESSING] Calling process_file_content() with all parameters...")
         
-        # With gevent pool, we need to handle async code differently
-        # Use nest_asyncio to allow nested event loops
-        import nest_asyncio
-        nest_asyncio.apply()
-        
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            # No event loop in current thread, create one
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        result = loop.run_until_complete(
+        # With prefork pool, asyncio.run() works fine
+        result = asyncio.run(
             process_file_content(
                 original_filename=original_filename,
                 file_display_name=file_display_name,
