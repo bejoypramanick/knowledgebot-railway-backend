@@ -28,6 +28,7 @@ bleach>=6.0.0
 celery[redis]>=5.3.0
 redis>=5.0.1
 gevent>=24.2.1
+nest-asyncio>=1.5.8
 # Google Generative AI (NEW SDK)
 google-genai>=1.60.0
 # OpenTelemetry

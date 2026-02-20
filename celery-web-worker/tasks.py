@@ -75,8 +75,11 @@ def scrape_website_task(
         logger.info(f"     - options: {options}")
         logger.info(f"     - celery_task_id: {task_id}")
 
-        # Use get_event_loop().run_until_complete() instead of asyncio.run()
-        # asyncio.run() doesn't work with gevent pool when multiple tasks run concurrently
+        # With gevent pool, we need to handle async code differently
+        # Use nest_asyncio to allow nested event loops
+        import nest_asyncio
+        nest_asyncio.apply()
+        
         try:
             loop = asyncio.get_event_loop()
         except RuntimeError:
@@ -136,7 +139,10 @@ def scrape_website_task(
                 from dao.scraping_dao import ScrapingDAO
                 dao = ScrapingDAO()
                 
-                # Use get_event_loop().run_until_complete() instead of asyncio.run()
+                # Use nest_asyncio to allow nested event loops with gevent
+                import nest_asyncio
+                nest_asyncio.apply()
+                
                 try:
                     loop = asyncio.get_event_loop()
                 except RuntimeError:

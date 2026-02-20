@@ -5,6 +5,7 @@ uvicorn[standard]==0.24.0
 celery[redis]>=5.3.0
 redis>=5.0.1
 gevent>=24.2.1
+nest-asyncio>=1.5.8
 asyncpg==0.29.0
 sqlalchemy==2.0.23
 google-genai>=1.60.0
