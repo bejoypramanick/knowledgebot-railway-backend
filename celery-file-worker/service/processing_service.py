@@ -250,7 +250,7 @@ async def process_file_content(
             from shared.db import get_db_connection
             async with get_db_connection() as conn:
                 record = await conn.fetchrow(
-                    "SELECT id, original_filename, file_display_name, s3_url, file_size, user_email "
+                    "SELECT id, original_filename, display_name, s3_url, file_size "
                     "FROM file_uploads WHERE celery_task_id = $1",
                     celery_task_id
                 )
@@ -258,10 +258,9 @@ async def process_file_content(
                     return {
                         "file_id": str(record["id"]),
                         "original_filename": record["original_filename"],
-                        "file_display_name": record["file_display_name"],
+                        "file_display_name": record["display_name"],
                         "s3_url": record["s3_url"],
-                        "file_size": record["file_size"],
-                        "user_email": record["user_email"]
+                        "file_size": record["file_size"]
                     }
                 return None
         except Exception as e:
