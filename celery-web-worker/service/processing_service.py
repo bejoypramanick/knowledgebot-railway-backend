@@ -748,6 +748,11 @@ class ProcessingService:
             crawl_session_id=page_data.session_id
         )
 
+        # Check if all children are completed and update parent if needed
+        if child_page_id:
+            logger.info(f"🔍 [PARENT_CHECK] Checking if parent {job_context.website_id} should be marked completed")
+            await self.scraping_dao.check_and_update_parent_completion(job_context.website_id)
+
         return child_page_id
 
     async def _isSinglePageMode(self, page_url: str, root_url: str) -> bool:

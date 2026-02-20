@@ -147,6 +147,7 @@ def init_worker_process(**kwargs):
     try:
         # Import here to avoid circular dependencies
         from shared.db import DatabaseManager
+        import asyncio
         
         # Get the singleton instance
         manager = DatabaseManager._instance
@@ -166,6 +167,22 @@ def init_worker_process(**kwargs):
             logger.info("✅ [WORKER_INIT] Inherited pool closed, will create fresh pool on first use")
         else:
             logger.info("✅ [WORKER_INIT] No inherited pool found, will create fresh pool on first use")
+        
+        # Close any inherited event loop to prevent "Bad file descriptor" errors
+        # This ensures each worker gets a fresh event loop without inherited sockets
+        try:
+            loop = asyncio.get_event_loop()
+            if loop and not loop.is_closed():
+                logger.info("🔄 [WORKER_INIT] Closing inherited event loop")
+                loop.close()
+        except RuntimeError:
+            # No event loop in current thread - this is fine
+            pass
+        
+        # Set a new event loop for this worker
+        new_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(new_loop)
+        logger.info("✅ [WORKER_INIT] Created fresh event loop for worker process")
             
     except Exception as e:
         logger.error(f"❌ [WORKER_INIT] Error in worker process init: {e}")

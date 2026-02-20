@@ -434,3 +434,97 @@ class ScrapingDAO:
             logger.error(f"   Traceback: {traceback.format_exc()}")
             logger.log_db_query(query, params, error=e)
             return False
+
+    async def check_and_update_parent_completion(self, parent_id: int) -> bool:
+        """
+        Check if all child pages of a parent website/sitemap are completed.
+        If all children are completed, update parent status to 'completed'.
+        
+        This is called after each child page is recorded to ensure parent
+        status is updated as soon as all children finish processing.
+        
+        Returns: True if parent was updated to completed, False otherwise
+        """
+        logger.info(f"🔍 [PARENT_CHECK] Checking completion status for parent {parent_id}")
+        
+        try:
+            async with get_db_connection() as conn:
+                # Get parent record
+                parent = await conn.fetchrow(
+                    "SELECT id, processing_status FROM scraped_websites WHERE id = $1",
+                    parent_id
+                )
+                
+                if not parent:
+                    logger.warning(f"⚠️ [PARENT_CHECK] Parent {parent_id} not found")
+                    return False
+                
+                # Skip if parent is already completed or failed
+                if parent['processing_status'] in ('completed', 'failed', 'cancelled', 'deleted'):
+                    logger.info(f"ℹ️ [PARENT_CHECK] Parent {parent_id} already in terminal state: {parent['processing_status']}")
+                    return False
+                
+                # Count total children and completed children
+                stats = await conn.fetchrow("""
+                    SELECT 
+                        COUNT(*) as total_children,
+                        COUNT(*) FILTER (WHERE processing_status = 'completed') as completed_children,
+                        COUNT(*) FILTER (WHERE processing_status IN ('failed', 'cancelled')) as failed_children
+                    FROM scraped_websites
+                    WHERE parent_id = $1
+                """, parent_id)
+                
+                total = stats['total_children']
+                completed = stats['completed_children']
+                failed = stats['failed_children']
+                
+                logger.info(f"📊 [PARENT_CHECK] Parent {parent_id} children status:")
+                logger.info(f"   Total: {total}")
+                logger.info(f"   Completed: {completed}")
+                logger.info(f"   Failed: {failed}")
+                logger.info(f"   In Progress: {total - completed - failed}")
+                
+                # If no children yet, parent is still being processed
+                if total == 0:
+                    logger.info(f"ℹ️ [PARENT_CHECK] Parent {parent_id} has no children yet")
+                    return False
+                
+                # If all children are completed, mark parent as completed
+                if completed == total:
+                    logger.info(f"✅ [PARENT_COMPLETE] All {total} children completed for parent {parent_id}")
+                    
+                    # Update parent status to completed
+                    await conn.execute("""
+                        UPDATE scraped_websites
+                        SET processing_status = 'completed',
+                            updated_at = NOW()
+                        WHERE id = $1
+                    """, parent_id)
+                    
+                    logger.info(f"✅ [PARENT_UPDATE] Parent {parent_id} marked as completed")
+                    return True
+                
+                # If all children are in terminal state (completed or failed), mark parent as completed
+                elif completed + failed == total:
+                    logger.info(f"⚠️ [PARENT_PARTIAL] Parent {parent_id}: {completed} completed, {failed} failed out of {total}")
+                    
+                    # Update parent status to completed (even with some failures)
+                    await conn.execute("""
+                        UPDATE scraped_websites
+                        SET processing_status = 'completed',
+                            updated_at = NOW()
+                        WHERE id = $1
+                    """, parent_id)
+                    
+                    logger.info(f"✅ [PARENT_UPDATE] Parent {parent_id} marked as completed (with {failed} failures)")
+                    return True
+                
+                else:
+                    logger.info(f"⏳ [PARENT_PENDING] Parent {parent_id} still has children in progress")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"❌ [PARENT_CHECK_ERROR] Failed to check parent completion: {e}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+            return False
