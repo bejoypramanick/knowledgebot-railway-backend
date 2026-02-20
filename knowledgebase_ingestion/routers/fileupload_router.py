@@ -517,7 +517,6 @@ async def upload_file_async(
             result = file_celery.send_task(
                 'tasks.process_file_upload_task',
                 args=[
-                    file_id,  # Pass file_id so worker can look up the record
                     validation_result['original_filename'],
                     file_display_name or validation_result['filename'],
                     s3_key,
@@ -532,7 +531,6 @@ async def upload_file_async(
             logger.info(f"✅ [CELERY_DISPATCH_SUCCESS] Task dispatched to Celery")
             logger.info(f"   Celery Task ID: {celery_task_id}")
             logger.info(f"   Args:")
-            logger.info(f"     - file_id: {file_id}")
             logger.info(f"     - original_filename: {validation_result['original_filename']}")
             logger.info(f"     - file_display_name: {file_display_name or validation_result['filename']}")
             logger.info(f"     - s3_key: {s3_key}")
@@ -544,7 +542,7 @@ async def upload_file_async(
             logger.info(f"💾 [DB_UPDATE] Updating DB with real Celery task ID: {celery_task_id}")
             dao = get_fileupload_dao()
             try:
-                await dao.update_celery_task_id(file_id, celery_task_id)
+                await dao.update_celery_task_id(int(file_id), celery_task_id)
                 logger.info(f"✅ [DB_UPDATE_SUCCESS] DB updated with Celery task ID")
             except Exception as db_err:
                 logger.error(f"❌ [DB_UPDATE_ERROR] Failed to update DB with task ID: {db_err}", exc_info=True)
