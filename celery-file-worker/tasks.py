@@ -54,7 +54,7 @@ def process_file_upload_task(
     logger.info(f"👤 [USER_INFO] Role ID: {user_role_id}")
 
     try:
-        logger.info("🔍 [PROCESSING] Loading ProcessingService...")
+        logger.info("🔍 [PROCESSING] Loading processing functions...")
         
         # Ensure celery-file-worker directory is in Python path (do this right before import)
         import sys
@@ -68,15 +68,12 @@ def process_file_upload_task(
         logger.info(f"🔍 [DEBUG] Current dir: {os.getcwd()}")
         logger.info(f"🔍 [DEBUG] Worker dir: {worker_dir}")
         
-        from service.processing_service import ProcessingService
-        logger.info("✅ [PROCESSING] ProcessingService loaded successfully")
-
-        processing_service = ProcessingService()
-        logger.info("✅ [PROCESSING] ProcessingService loaded successfully")
+        from service.processing_service import process_file_content
+        logger.info("✅ [PROCESSING] process_file_content loaded successfully")
 
         logger.info("⚙️  [PROCESSING] Calling process_file_content() with all parameters...")
         result = asyncio.run(
-            processing_service.process_file_content(
+            process_file_content(
                 original_filename=original_filename,
                 file_display_name=file_display_name,
                 s3_key=s3_key,
