@@ -18,7 +18,8 @@ class S3FileStorage:
 
     def __init__(self, bucket_name: str = None):
         # Use provided bucket or fall back to environment variables
-        self.bucket_name = bucket_name or os.getenv('PROCESSING_FILES_BUCKET', 'knowledgebot-files')
+        # Use the same bucket as widget images (RAILWAY_BUCKET_NAME)
+        self.bucket_name = bucket_name or os.getenv('RAILWAY_BUCKET_NAME') or os.getenv('RAILWAY_VOLUME_NAME') or os.getenv('PROCESSING_FILES_BUCKET', 'widget-images')
         self.region = os.getenv('RAILWAY_REGION', 'us-east-1')
         self.endpoint_url = os.getenv('RAILWAY_STORAGE_URL')
         self.access_key = os.getenv('RAILWAY_STORAGE_ACCESS_KEY')
