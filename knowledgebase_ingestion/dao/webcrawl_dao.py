@@ -302,9 +302,9 @@ class WebCrawlDAO:
 
                 logger.info(f"✨ [TREE_COMPLETE] Built complete hierarchy with {len(hierarchical_websites)} roots")
                 
-                # For Not Active tab, also fetch orphan pages (pages whose parent was deleted)
+                # For Not Active tab, also fetch orphan/deleted child pages
                 if include_inactive:
-                    logger.info("🔍 [ORPHAN_CHECK] Checking for orphan pages (parent_id IS NOT NULL but parent doesn't exist)")
+                    logger.info("🔍 [ORPHAN_CHECK] Checking for orphan/deleted child pages")
                     orphan_query = """
                         SELECT
                             id,
@@ -324,15 +324,11 @@ class WebCrawlDAO:
                             char_count
                         FROM scraped_websites
                         WHERE parent_id IS NOT NULL
-                        AND parent_id NOT IN (
-                            SELECT id FROM scraped_websites 
-                            WHERE processing_status IN ('pending', 'processing', 'queued', 'completed')
-                        )
                         AND processing_status NOT IN ('pending', 'processing', 'queued', 'completed')
                         ORDER BY created_at DESC
                     """
                     orphan_pages = await conn.fetch(orphan_query)
-                    logger.info(f"✅ [ORPHAN_RESULTS] Found {len(orphan_pages)} orphan pages")
+                    logger.info(f"✅ [ORPHAN_RESULTS] Found {len(orphan_pages)} orphan/deleted child pages")
                     
                     # Add orphan pages as root-level items (without parent)
                     for orphan in orphan_pages:
