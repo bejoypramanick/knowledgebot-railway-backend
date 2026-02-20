@@ -979,11 +979,6 @@ class ProcessingService:
             file_search_metadata=upload_result.file_search_metadata,
             mark_completed=mark_completed
         )
-            title=page_data.title,
-            description=page_data.description,
-            crawl_session_id=page_data.session_id,
-            file_search_metadata=upload_result.file_search_metadata
-        )
 
     # ==================== UTILITIES ====================
 
