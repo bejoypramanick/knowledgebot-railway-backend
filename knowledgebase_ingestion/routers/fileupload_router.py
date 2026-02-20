@@ -527,12 +527,8 @@ async def upload_file_async(
             result = file_celery.send_task(
                 'tasks.process_file_upload_task',
                 args=[
-                    validation_result['original_filename'],
-                    file_display_name or validation_result['filename'],
-                    s3_key,
-                    file_size,
-                    user_email,
-                    user_role_id  # Use user_role_id from database, not user_id from header
+                    int(file_id),  # Pass file_id instead of individual parameters
+                    user_email  # Keep user_email for logging context
                 ],
                 queue='file_processing'
             )
@@ -541,12 +537,8 @@ async def upload_file_async(
             logger.info(f"✅ [CELERY_DISPATCH_SUCCESS] Task dispatched to Celery")
             logger.info(f"   Celery Task ID: {celery_task_id}")
             logger.info(f"   Args:")
-            logger.info(f"     - original_filename: {validation_result['original_filename']}")
-            logger.info(f"     - file_display_name: {file_display_name or validation_result['filename']}")
-            logger.info(f"     - s3_key: {s3_key}")
-            logger.info(f"     - file_size: {file_size}")
+            logger.info(f"     - file_id: {file_id}")
             logger.info(f"     - user_email: {user_email}")
-            logger.info(f"     - user_role_id: {user_role_id}")
 
             # Update DB record with the real Celery task ID
             logger.info(f"💾 [DB_UPDATE] Updating DB with real Celery task ID: {celery_task_id}")
@@ -554,10 +546,6 @@ async def upload_file_async(
             try:
                 await dao.update_celery_task_id(int(file_id), celery_task_id)
                 logger.info(f"✅ [DB_UPDATE_SUCCESS] DB updated with Celery task ID")
-                
-                # Small delay to ensure database transaction is fully committed
-                import asyncio
-                await asyncio.sleep(0.1)
                 logger.info(f"⏱️  [DB_COMMIT_WAIT] Waited for DB commit")
             except Exception as db_err:
                 logger.error(f"❌ [DB_UPDATE_ERROR] Failed to update DB with task ID: {db_err}", exc_info=True)

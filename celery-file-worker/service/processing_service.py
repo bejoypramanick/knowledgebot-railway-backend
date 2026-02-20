@@ -220,19 +220,16 @@ async def query_gemini_file_existence(
 
 
 async def process_file_content(
-    original_filename: str,
-    file_display_name: str,
-    s3_key: str,
-    file_size: int,
+    file_id: int,
     user_email: str = "admin",
-    user_role_id: int = None,
     celery_task_id: str = None
 ) -> Dict[str, Any]:
     """
     Complete file processing pipeline:
-    1. Download from S3
-    2. Validation (extension, MIME, size, duplicates)
-    3. Format conversion (HTML→Markdown, PDF→Markdown via Docling)
+    1. Query database for file details
+    2. Download from S3
+    3. Validation (extension, MIME, size, duplicates)
+    4. Format conversion (HTML→Markdown, PDF→Markdown via Docling)
     4. Gemini upload
     5. Database record creation
     6. Delete from S3
@@ -297,42 +294,37 @@ async def process_file_content(
         from core.config import settings
         logger.info(f"⚙️  [CONFIG] DOCLING_ENABLED={settings.docling_enabled}")
 
-        # STEP 1: Query database with celery_task_id to get file details
-        # Retry up to 3 times with delays to handle race condition where
-        # DB record is created with placeholder task_id and updated with real task_id
-        logger.info(f"🔍 [DB_QUERY] Getting file details for task_id: {celery_task_id}")
+        # STEP 1: Query database with file_id to get file details
+        logger.info(f"🔍 [DB_QUERY] Getting file details for file_id: {file_id}")
         
-        file_details = None
-        max_retries = 3
-        retry_delays = [0.5, 1.0, 2.0]  # seconds
+        from shared.db import get_db_connection
         
-        for attempt in range(max_retries):
-            file_details = await get_file_details_by_task_id(celery_task_id)
-            
-            if file_details:
-                break
-            
-            if attempt < max_retries - 1:
-                delay = retry_delays[attempt]
-                logger.warning(f"⚠️ [DB_QUERY_RETRY] File not found (attempt {attempt + 1}/{max_retries}), retrying in {delay}s...")
-                await asyncio.sleep(delay)
-            else:
-                logger.error(f"❌ [DB_QUERY] No file found for task_id after {max_retries} attempts: {celery_task_id}")
+        async with get_db_connection() as conn:
+            file_record = await conn.fetchrow("""
+                SELECT id, user_role_id, original_filename, display_name, 
+                       s3_key, file_size, mime_type, processing_status
+                FROM file_uploads 
+                WHERE id = $1
+            """, file_id)
         
-        if not file_details:
-            logger.error(f"❌ [DB_QUERY] No file found for task_id: {celery_task_id}")
+        if not file_record:
+            logger.error(f"❌ [DB_QUERY] No file found for file_id: {file_id}")
             return {
                 "success": False,
-                "error": f"No file found for task_id: {celery_task_id}"
+                "error": f"No file found for file_id: {file_id}"
             }
         
         # Extract file details from database record
-        file_id = file_details.get("file_id")
-        original_filename = file_details.get("original_filename", original_filename)
-        file_display_name = file_details.get("file_display_name", file_display_name)
-        s3_key = file_details.get("s3_key")
-        file_size = file_details.get("file_size", file_size)
-        user_email = file_details.get("user_email", user_email)
+        original_filename = file_record['original_filename']
+        file_display_name = file_record['display_name']
+        s3_key = file_record['s3_key']
+        file_size = file_record['file_size']
+        user_role_id = file_record['user_role_id']
+        
+        logger.info(f"✅ [DB_QUERY] File found: {original_filename}")
+        logger.info(f"   Display name: {file_display_name}")
+        logger.info(f"   S3 key: {s3_key}")
+        logger.info(f"   Size: {file_size} bytes")
         
         # Validate s3_key is present
         if not s3_key:

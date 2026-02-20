@@ -15,18 +15,19 @@ logger = get_otel_logger("celery_tasks", "celery-file-worker")
 @celery_app.task(bind=True, max_retries=2)
 def process_file_upload_task(
     self,
-    original_filename: str,
-    file_display_name: str,
-    s3_key: str,
-    file_size: int,
-    user_email: str,
-    user_role_id: int = None
+    file_id: int,
+    user_email: str
 ):
     """
     Celery task for async file processing.
     Retries up to 2 times on failure with exponential backoff (60s, 120s).
 
+    Args:
+        file_id: Database ID of the file to process
+        user_email: User email for logging context
+
     Handles:
+    - Query database for file details
     - Download file from S3
     - File validation (extension, MIME type, size)
     - Duplicate detection (by SHA256 hash)
@@ -46,12 +47,8 @@ def process_file_upload_task(
     logger.info("=" * 80)
     logger.info(f"📋 [TASK_ID] Celery Task ID: {task_id}")
     logger.info(f"🔄 [RETRY_INFO] Retry Count: {retry_count}, Max Retries: {self.max_retries}")
-    logger.info(f"📄 [FILE_PARAMS] Original Filename: {original_filename}")
-    logger.info(f"📄 [FILE_PARAMS] Display Name: {file_display_name}")
-    logger.info(f"📄 [FILE_PARAMS] Size: {file_size} bytes")
-    logger.info(f"📄 [FILE_PARAMS] S3 Key: {s3_key}")
+    logger.info(f"📄 [FILE_PARAMS] File ID: {file_id}")
     logger.info(f"👤 [USER_INFO] Email: {user_email}")
-    logger.info(f"👤 [USER_INFO] Role ID: {user_role_id}")
 
     try:
         logger.info("🔍 [PROCESSING] Loading processing functions...")
@@ -71,7 +68,7 @@ def process_file_upload_task(
         from service.processing_service import process_file_content
         logger.info("✅ [PROCESSING] process_file_content loaded successfully")
 
-        logger.info("⚙️  [PROCESSING] Calling process_file_content() with all parameters...")
+        logger.info("⚙️  [PROCESSING] Calling process_file_content() with file_id...")
         
         # Get or create event loop for this worker process
         try:
@@ -86,12 +83,8 @@ def process_file_upload_task(
         # Run the async function
         result = loop.run_until_complete(
             process_file_content(
-                original_filename=original_filename,
-                file_display_name=file_display_name,
-                s3_key=s3_key,
-                file_size=file_size,
+                file_id=file_id,
                 user_email=user_email,
-                user_role_id=user_role_id,
                 celery_task_id=task_id
             )
         )
@@ -115,7 +108,7 @@ def process_file_upload_task(
         logger.error("=" * 80)
         logger.error(f"❌ [CELERY_TASK_ERROR] Error in file processing task {task_id}")
         logger.error("=" * 80)
-        logger.error(f"📄 [FILE] {original_filename}")
+        logger.error(f"📄 [FILE] File ID: {file_id}")
         logger.error(f"🚨 [ERROR] {type(e).__name__}: {str(e)}")
         logger.error(f"🔄 [RETRY_INFO] Current Attempt: {retry_count + 1}, Max Retries: {self.max_retries}")
         logger.error(f"⏱️  [BACKOFF] Next retry in: {60 * (2 ** retry_count)}s (exponential backoff)")
@@ -127,9 +120,9 @@ def process_file_upload_task(
             raise self.retry(exc=e, countdown=countdown)
         except Exception as retry_exc:
             logger.error("=" * 80)
-            logger.error(f"❌ [MAX_RETRIES_EXCEEDED] Failed to process file {original_filename}")
+            logger.error(f"❌ [MAX_RETRIES_EXCEEDED] Failed to process file ID: {file_id}")
             logger.error("=" * 80)
-            logger.error(f"📄 [FILE] {original_filename}")
+            logger.error(f"📄 [FILE] File ID: {file_id}")
             logger.error(f"🚨 [ERROR] {type(e).__name__}: {str(e)}")
             logger.error(f"🔄 [RETRY_INFO] Max retries exceeded after {self.max_retries} attempts")
 
