@@ -69,15 +69,15 @@ celery_app.conf.update(
     },
     # Result backend configuration
     result_expires=3600,  # Results expire after 1 hour
-    # Task timeout (1 hour for 5MB file processing with docling + Gemini upload)
-    task_soft_time_limit=3600,  # 1 hour
-    task_time_limit=3700,  # 1 hour + 100s buffer
+    # Task timeout (35 minutes: 30min docling timeout + 5min for S3/Gemini operations)
+    task_soft_time_limit=2100,  # 35 minutes
+    task_time_limit=2200,  # 35 minutes + 100s buffer
 )
 
 logger.info("✅ [CELERY_APP] Configuration updated")
 logger.info(f"   Concurrency: {worker_concurrency} parallel workers")
 logger.info(f"   Prefetch: 1 task per worker")
-logger.info(f"   Task timeout: 1 hour")
+logger.info(f"   Task timeout: 35 minutes")
 logger.info(f"   Queue: 'file_processing'")
 
 # Import tasks module to register task definitions
