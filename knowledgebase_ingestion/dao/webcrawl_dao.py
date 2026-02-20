@@ -350,6 +350,28 @@ class WebCrawlDAO:
                 except (json.JSONDecodeError, ValueError):
                     metadata = {}
 
+        # Determine file_type based on URL and metadata
+        url = record['original_url'].lower()
+        is_sitemap = (
+            url.endswith('sitemap.xml') or
+            url.endswith('sitemap.xml.gz') or
+            url.endswith('sitemap_index.xml') or
+            '/sitemap' in url and (url.endswith('.xml') or url.endswith('.xml.gz')) or
+            'sitemap' in url and url.endswith('.xml')
+        )
+        
+        # Extract source type from metadata
+        scraping_config = metadata.get('scraping_config', {}) if metadata else {}
+        source_type = scraping_config.get('source')
+        
+        # Map to display type
+        if is_sitemap or source_type == "sitemap":
+            file_type = "SITEMAP"
+        elif source_type == "single":
+            file_type = "WEBPAGE"
+        else:
+            file_type = "WEBSITE"
+
         return {
             "id": record['id'],
             "url": record['original_url'],
@@ -365,6 +387,7 @@ class WebCrawlDAO:
             "created_at": record['created_at'].isoformat() if record['created_at'] else None,
             "updated_at": record['updated_at'].isoformat() if record['updated_at'] else None,
             "celery_task_id": record['celery_task_id'],
-            "scraping_config": metadata.get('scraping_config') if metadata else None,
+            "scraping_config": scraping_config,
+            "file_type": file_type,  # Add file_type for UI display
             "children": []  # Will be populated by caller
         }
