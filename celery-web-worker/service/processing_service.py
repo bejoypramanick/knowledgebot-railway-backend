@@ -896,7 +896,8 @@ class ProcessingService:
 
             # Check if this is the root URL in multi-page mode
             # If so, update the parent record instead of creating a child
-            if page_data.page_url == job_context.root_url:
+            # Normalize both URLs for comparison to handle trailing slashes
+            if self._normalize_url(page_data.page_url) == self._normalize_url(job_context.root_url):
                 logger.info(f"   ℹ️ Root URL in multi-page mode: updating parent record")
                 
                 # Update the parent website record with the root page data
@@ -944,7 +945,8 @@ class ProcessingService:
             This prevents the first page of a multi-page crawl from being
             incorrectly treated as single-page mode.
             """
-            is_root_page = page_url == root_url
+            # Normalize URLs for comparison to handle trailing slashes
+            is_root_page = self._normalize_url(page_url) == self._normalize_url(root_url)
             is_depth_zero = crawl_config.max_depth == 0
 
             result = is_root_page and is_depth_zero
