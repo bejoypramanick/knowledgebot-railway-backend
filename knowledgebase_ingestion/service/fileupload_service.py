@@ -350,9 +350,10 @@ async def delete_all_knowledge() -> Dict[str, Any]:
     1. Delete the entire Gemini FileSearch store (removes all documents)
     2. Create a new FileSearch store (ready for new uploads)
     3. Delete all raw Gemini files
-    4. Clears Redis task queues (file_processing, web_crawling)
-    5. Marks all file records with status='deleted' (soft delete)
-    6. Marks all website records with status='deleted' (soft delete)
+    4. Delete all files from S3 storage
+    5. Clears Redis task queues (file_processing, web_crawling)
+    6. Marks all file records with status='deleted' (soft delete)
+    7. Marks all website records with status='deleted' (soft delete)
 
     Database records are retained with status='deleted' for:
     - Audit trail and compliance
@@ -365,6 +366,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
 
     deleted_files = 0
     deleted_websites = 0
+    s3_files_deleted = 0
     new_store_name = None
     errors = []
 
@@ -467,7 +469,36 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.error(f"❌ [GEMINI_RAW_DELETE_ERROR] Error deleting raw files: {e}")
             errors.append(f"Raw file deletion failed: {e}")
 
-        # Step 3: Mark all files as deleted in database (soft delete - don't remove records)
+        # Step 3: Delete all files from S3
+        logger.info("🪣 [S3_DELETE] Deleting all files from S3...")
+        s3_files_deleted = 0
+        try:
+            from shared.s3_file_storage import S3FileStorage
+            
+            async with get_db_connection() as conn:
+                # Get all files with S3 keys
+                files_with_s3 = await conn.fetch(
+                    "SELECT id, original_filename, s3_key FROM file_uploads WHERE s3_key IS NOT NULL"
+                )
+                logger.info(f"   Found {len(files_with_s3)} files to delete from S3")
+
+                if files_with_s3:
+                    s3_storage = S3FileStorage()
+                    s3_keys = [file_record['s3_key'] for file_record in files_with_s3]
+                    
+                    # Use batch delete for efficiency
+                    deleted_count, failed_count = await s3_storage.delete_files_batch(s3_keys)
+                    s3_files_deleted = deleted_count
+                    
+                    logger.info(f"   ✅ Deleted {deleted_count} files from S3")
+                    if failed_count > 0:
+                        logger.warning(f"   ⚠️  Failed to delete {failed_count} files from S3")
+                        errors.append(f"Failed to delete {failed_count} files from S3")
+        except Exception as e:
+            logger.error(f"❌ [S3_DELETE_ERROR] Error deleting files from S3: {e}")
+            errors.append(f"S3 deletion failed: {e}")
+
+        # Step 4: Mark all files as deleted in database (soft delete - don't remove records)
         logger.info("💾 [DB_UPDATE_FILES] Marking all files as deleted in database...")
         try:
             async with get_db_connection() as conn:
@@ -479,7 +510,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.error(f"❌ [DB_UPDATE_FILES_ERROR] Error marking files as deleted: {e}")
             errors.append(f"File status update failed: {e}")
 
-        # Step 4: Mark all websites as deleted in database (soft delete - don't remove records)
+        # Step 5: Mark all websites as deleted in database (soft delete - don't remove records)
         logger.info("💾 [DB_UPDATE_WEBSITES] Marking all websites as deleted in database...")
         try:
             async with get_db_connection() as conn:
@@ -499,6 +530,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         logger.info("✅ [DELETE_ALL_COMPLETE] Knowledge base clear completed")
         logger.info("=" * 80)
         logger.info(f"📊 [RESULT] Raw files deleted from Gemini: {deleted_files}")
+        logger.info(f"📊 [RESULT] Files deleted from S3: {s3_files_deleted}")
         logger.info(f"📊 [RESULT] Websites marked as deleted: {deleted_websites}")
         logger.info(f"📊 [RESULT] Redis queues cleared: 2 (file_processing, web_crawling)")
         logger.info(f"📊 [RESULT] FileSearch stores deleted: {filesearch_stores_deleted}")
@@ -514,6 +546,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             "success": len(errors) == 0 and filesearch_stores_deleted > 0 and new_store_name is not None,
             "message": f"Successfully deleted {filesearch_stores_deleted} FileSearch stores and created new store" if (len(errors) == 0 and filesearch_stores_deleted > 0 and new_store_name) else "Knowledge base cleared with errors",
             "raw_files_deleted": deleted_files,
+            "s3_files_deleted": s3_files_deleted,
             "websites_marked_deleted": deleted_websites,
             "redis_queues_cleared": 2,
             "filesearch_stores_deleted": filesearch_stores_deleted,
@@ -531,6 +564,7 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             "success": False,
             "message": f"Error clearing knowledge base: {str(e)}",
             "raw_files_deleted": deleted_files,
+            "s3_files_deleted": s3_files_deleted,
             "websites_marked_deleted": deleted_websites,
             "filesearch_stores_deleted": 0,
             "new_store_name": new_store_name,
