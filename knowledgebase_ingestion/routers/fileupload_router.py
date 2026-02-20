@@ -464,14 +464,65 @@ async def upload_file_async(
             logger.info(f"✅ [S3_UPLOAD_SUCCESS] File uploaded to S3")
             logger.info(f"   S3 Key: {s3_key}")
 
+            # Calculate file hash
+            file_sha256 = await calculate_file_hash(file_bytes)
+            logger.info(f"   SHA256 Hash: {file_sha256}")
+
+            # Construct full S3 URL from key
+            s3_url = f"s3://{s3_file_storage.bucket_name}/{s3_key}"
+            logger.info(f"   S3 URL: {s3_url}")
+
+            # Create file record in database FIRST with placeholder task_id
+            logger.info(f"💾 [DB_INSERT_START] Creating file record in database")
+            
+            import uuid
+            placeholder_task_id = str(uuid.uuid4())
+            logger.info(f"   Placeholder Task ID: {placeholder_task_id}")
+
+            record_data = {
+                'user_role_id': user_role_id,  # Use user_role_id from database
+                'original_filename': validation_result['original_filename'],
+                'file_display_name': file_display_name or validation_result['filename'],
+                'size_bytes': file_size,
+                'mime_type': validation_result['mime_type'],
+                'processing_status': 'pending',
+                'sha256_hash': file_sha256,
+                's3_url': s3_url,
+                's3_key': s3_key,
+                'celery_task_id': placeholder_task_id
+            }
+
+            logger.info(f"📝 [DB_INSERT_DATA] Record data:")
+            logger.info(f"   user_role_id: {record_data['user_role_id']}")
+            logger.info(f"   original_filename: {record_data['original_filename']}")
+            logger.info(f"   file_display_name: {record_data['file_display_name']}")
+            logger.info(f"   size_bytes: {record_data['size_bytes']}")
+            logger.info(f"   mime_type: {record_data['mime_type']}")
+            logger.info(f"   processing_status: {record_data['processing_status']}")
+            logger.info(f"   s3_url: {record_data['s3_url']}")
+            logger.info(f"   s3_key: {record_data['s3_key']}")
+            logger.info(f"   celery_task_id: {record_data['celery_task_id']}")
+
+            from knowledgebase_ingestion.service.fileupload_service import create_file_record
+            file_id = await create_file_record(record_data)
+
+            if not file_id:
+                logger.error(f"❌ [DB_INSERT_FAILED] Failed to create file record in database")
+                raise HTTPException(status_code=500, detail="Failed to create file record")
+
+            logger.info(f"✅ [DB_INSERT_SUCCESS] File record created in database")
+            logger.info(f"   File ID: {file_id}")
+
             # Dispatch to Celery worker — Celery assigns the task ID
             logger.info(f"📤 [CELERY_DISPATCH_START] Dispatching file task to Celery worker")
             logger.info(f"   Queue: file_processing")
             logger.info(f"   Task: tasks.process_file_upload_task")
+            logger.info(f"   File ID: {file_id}")
 
             result = file_celery.send_task(
                 'tasks.process_file_upload_task',
                 args=[
+                    file_id,  # Pass file_id so worker can look up the record
                     validation_result['original_filename'],
                     file_display_name or validation_result['filename'],
                     s3_key,
@@ -486,6 +537,7 @@ async def upload_file_async(
             logger.info(f"✅ [CELERY_DISPATCH_SUCCESS] Task dispatched to Celery")
             logger.info(f"   Celery Task ID: {celery_task_id}")
             logger.info(f"   Args:")
+            logger.info(f"     - file_id: {file_id}")
             logger.info(f"     - original_filename: {validation_result['original_filename']}")
             logger.info(f"     - file_display_name: {file_display_name or validation_result['filename']}")
             logger.info(f"     - s3_key: {s3_key}")
@@ -493,47 +545,15 @@ async def upload_file_async(
             logger.info(f"     - user_email: {user_email}")
             logger.info(f"     - user_role_id: {user_role_id}")
 
-            # Create file record in database with the Celery task ID
-            logger.info(f"💾 [DB_INSERT_START] Creating file record in database")
-
-            file_sha256 = await calculate_file_hash(file_bytes)
-            logger.info(f"   SHA256 Hash: {file_sha256}")
-
-            # Construct full S3 URL from key
-            s3_url = f"s3://{s3_file_storage.bucket_name}/{s3_key}"
-            logger.info(f"   S3 URL: {s3_url}")
-
-            record_data = {
-                'user_role_id': user_role_id,  # Use user_role_id from database
-                'original_filename': validation_result['original_filename'],
-                'file_display_name': file_display_name or validation_result['filename'],
-                'size_bytes': file_size,
-                'mime_type': validation_result['mime_type'],
-                'processing_status': 'pending',
-                'sha256_hash': file_sha256,
-                's3_url': s3_url,
-                'celery_task_id': celery_task_id
-            }
-
-            logger.info(f"📝 [DB_INSERT_DATA] Record data:")
-            logger.info(f"   user_role_id: {record_data['user_role_id']}")
-            logger.info(f"   original_filename: {record_data['original_filename']}")
-            logger.info(f"   file_display_name: {record_data['file_display_name']}")
-            logger.info(f"   size_bytes: {record_data['size_bytes']}")
-            logger.info(f"   mime_type: {record_data['mime_type']}")
-            logger.info(f"   processing_status: {record_data['processing_status']}")
-            logger.info(f"   s3_url: {record_data['s3_url']}")
-            logger.info(f"   celery_task_id: {record_data['celery_task_id']}")
-
-            from knowledgebase_ingestion.service.fileupload_service import create_file_record
-            file_id = await create_file_record(record_data)
-
-            if not file_id:
-                logger.error(f"❌ [DB_INSERT_FAILED] Failed to create file record in database")
-                raise HTTPException(status_code=500, detail="Failed to create file record")
-
-            logger.info(f"✅ [DB_INSERT_SUCCESS] File record created in database")
-            logger.info(f"   File ID: {file_id}")
+            # Update DB record with the real Celery task ID
+            logger.info(f"💾 [DB_UPDATE] Updating DB with real Celery task ID: {celery_task_id}")
+            dao = get_fileupload_dao()
+            try:
+                await dao.update_celery_task_id(file_id, celery_task_id)
+                logger.info(f"✅ [DB_UPDATE_SUCCESS] DB updated with Celery task ID")
+            except Exception as db_err:
+                logger.error(f"❌ [DB_UPDATE_ERROR] Failed to update DB with task ID: {db_err}", exc_info=True)
+                raise
 
             logger.info("=" * 80)
             logger.info("✨ [UPLOAD_COMPLETE] File upload process completed successfully")

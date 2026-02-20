@@ -36,9 +36,9 @@ class FileUploadDAO:
             INSERT INTO file_uploads (
                 user_role_id, original_filename, display_name, file_size,
                 mime_type, processing_status, gemini_file_name, gemini_file_uri,
-                gemini_state, sha256_hash, s3_url, celery_task_id, created_at
+                gemini_state, sha256_hash, s3_url, s3_key, celery_task_id, created_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW()
             ) RETURNING id
         """
         params = [
@@ -53,6 +53,7 @@ class FileUploadDAO:
             record_data.get('gemini_state'),
             record_data.get('sha256_hash'),
             record_data.get('s3_url'),
+            record_data.get('s3_key'),
             record_data.get('celery_task_id'),
         ]
 
@@ -70,7 +71,8 @@ class FileUploadDAO:
         logger.info(f"    $9 (gemini_state): {params[8]}")
         logger.info(f"    $10 (sha256_hash): {params[9]}")
         logger.info(f"    $11 (s3_url): {params[10]}")
-        logger.info(f"    $12 (celery_task_id): {params[11]}")
+        logger.info(f"    $12 (s3_key): {params[11]}")
+        logger.info(f"    $13 (celery_task_id): {params[12]}")
 
         try:
             logger.log_db_operation(query, params)
@@ -221,6 +223,41 @@ class FileUploadDAO:
 
         except Exception as e:
             logger.error(f"❌ [FILE_DAO_UPDATE_ERROR] Failed to update file status: {e}")
+            logger.log_db_query(query, params, error=e)
+            return False
+
+    async def update_celery_task_id(self, file_id: int, celery_task_id: str) -> bool:
+        """Update file record with real Celery task ID."""
+        logger.info(f"💾 [FILE_DAO_UPDATE_TASK_ID] Updating Celery task ID for file ID: {file_id}")
+
+        query = """
+            UPDATE file_uploads
+            SET celery_task_id = $2, updated_at = NOW()
+            WHERE id = $1
+        """
+        params = [file_id, celery_task_id]
+
+        logger.info(f"📝 [FILE_DAO_SQL] SQL Query:")
+        logger.info(f"    {query}")
+        logger.info(f"📊 [FILE_DAO_PARAMS] Parameters:")
+        logger.info(f"    $1 (id): {params[0]}")
+        logger.info(f"    $2 (celery_task_id): {params[1]}")
+
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, file_id, celery_task_id)
+                logger.log_db_query(query, params, result)
+
+                if result != "UPDATE 0":
+                    logger.info(f"✅ [FILE_DAO_UPDATE_SUCCESS] Celery task ID updated to: {celery_task_id}")
+                    return True
+                else:
+                    logger.warning(f"⚠️  [FILE_DAO_UPDATE_NO_ROWS] No rows updated (file_id {file_id} may not exist)")
+                    return False
+
+        except Exception as e:
+            logger.error(f"❌ [FILE_DAO_UPDATE_ERROR] Failed to update Celery task ID: {e}")
             logger.log_db_query(query, params, error=e)
             return False
 
