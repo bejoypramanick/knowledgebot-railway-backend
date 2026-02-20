@@ -122,7 +122,7 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
                 "name": f['original_filename'],
                 "processing_status": f['processing_status'],
                 "error_message": f['error_message'],
-                "size_bytes": f.get('size_bytes', 0),
+                "size_bytes": f.get('file_size', 0),  # Map file_size to size_bytes for UI
                 "char_count": f.get('char_count', 0),
                 "created_at": f['created_at'].isoformat() if f['created_at'] else None,
                 "updated_at": f['updated_at'].isoformat() if f['updated_at'] else None
@@ -586,7 +586,7 @@ async def upload_file_async(
                         "name": full_file.get('original_filename'),
                         "processing_status": full_file.get('processing_status', 'pending'),
                         "error_message": full_file.get('error_message'),
-                        "size_bytes": full_file.get('size_bytes', 0),
+                        "size_bytes": full_file.get('file_size', 0),  # Map file_size to size_bytes for UI
                         "char_count": full_file.get('char_count', 0),
                         "created_at": full_file.get('created_at').isoformat() if full_file.get('created_at') else None,
                         "updated_at": full_file.get('updated_at').isoformat() if full_file.get('updated_at') else None,
