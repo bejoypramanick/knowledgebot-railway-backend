@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # Docling Service Configuration (plug-and-play)
     docling_enabled: bool = True  # Set to False to disable docling and use raw uploads
-    docling_timeout_seconds: int = 300  # Processing timeout (5 minutes)
+    docling_timeout_seconds: int = 1800  # Processing timeout (30 minutes - handles queue wait time)
     docling_fallback_to_raw: bool = True  # Fallback to raw upload if docling fails/times out
 
     # Railway PostgreSQL Configuration (connection URL only)
