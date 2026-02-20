@@ -1,53 +1,15 @@
-# Sitemap Implementation Using Crawl4ai
+# Sitemap Implementation
 
-## Good News!
+## Implementation Approach
 
-Crawl4ai has built-in sitemap support through the `AsyncUrlSeeder` class. We don't need to write custom XML parsing!
+We use **direct XML parsing** to handle sitemaps because:
+- Sitemaps can be at custom paths (e.g., `/group/en/sitemap.xml`)
+- Crawl4ai's `AsyncUrlSeeder` only works with standard sitemap locations at domain root
+- Direct parsing gives us full control over sitemap discovery and URL extraction
 
-## How Crawl4ai Handles Sitemaps
+## How We Handle Sitemaps
 
-```python
-from crawl4ai import AsyncUrlSeeder, SeedingConfig
-
-# Discover URLs from sitemap
-async with AsyncUrlSeeder() as seeder:
-    config = SeedingConfig(
-        source="sitemap",           # Use sitemap as source
-        extract_head=True,          # Get page metadata
-        max_urls=100,               # Limit URLs
-        pattern="*",                # URL pattern filter
-        live_check=False            # Don't verify URLs (faster)
-    )
-    
-    urls = await seeder.urls("example.com", config)
-    
-    # urls is a list of dicts:
-    # [
-    #   {
-    #     "url": "https://example.com/page1",
-    #     "status": "valid",
-    #     "head_data": {...}
-    #   },
-    #   ...
-    # ]
-```
-
-## Features We Get For Free
-
-1. **Automatic Sitemap Detection**: Finds sitemap.xml automatically
-2. **Sitemap Index Support**: Handles sitemap indexes (sitemaps of sitemaps)
-3. **Parallel Processing**: Processes multiple sitemaps in parallel
-4. **Compressed Sitemaps**: Handles .xml.gz files
-5. **URL Filtering**: Built-in pattern matching
-6. **Metadata Extraction**: Can extract page titles, descriptions, etc.
-
-## Implementation Plan
-
-### Step 1: Detect Sitemap URLs
-Already done in `webcrawl_dao.py` and `scraping_dao.py`
-
-### Step 2: Add Sitemap URL Discovery Method
-Add to `processing_service.py`:
+We directly parse sitemap XML files using Python's built-in `xml.etree.ElementTree`:
 
 ```python
 async def _discoverSitemapURLs(
@@ -56,96 +18,48 @@ async def _discoverSitemapURLs(
     max_urls: int = 100
 ) -> List[str]:
     """
-    Discover URLs from a sitemap using crawl4ai's AsyncUrlSeeder.
+    Discover URLs from a sitemap by directly parsing the XML.
     
-    Args:
-        sitemap_url: URL of the sitemap
-        max_urls: Maximum URLs to extract
-        
-    Returns:
-        List of URLs found in the sitemap
+    Handles:
+    - Regular sitemaps with <url><loc> entries
+    - Sitemap indexes with <sitemap><loc> entries (recursive)
+    - Compressed sitemaps (.xml.gz)
+    - Custom sitemap paths (e.g., /group/en/sitemap.xml)
     """
-    try:
-        from crawl4ai import AsyncUrlSeeder, SeedingConfig
-        from urllib.parse import urlparse
-        
-        # Extract domain from sitemap URL
-        parsed = urlparse(sitemap_url)
-        domain = parsed.netloc
-        
-        logger.info(f"🗺️ [SITEMAP] Discovering URLs from {sitemap_url}")
-        
-        async with AsyncUrlSeeder() as seeder:
-            config = SeedingConfig(
-                source="sitemap",
-                max_urls=max_urls,
-                extract_head=False,  # Don't need metadata, just URLs
-                live_check=False,    # Don't verify (faster)
-                filter_nonsense_urls=True  # Filter out utility URLs
-            )
-            
-            # Discover URLs
-            url_results = await seeder.urls(domain, config)
-            
-            # Extract just the URL strings
-            urls = [result["url"] for result in url_results if result.get("status") != "not_valid"]
-            
-            logger.info(f"✅ [SITEMAP] Discovered {len(urls)} URLs from sitemap")
-            return urls
-            
-    except Exception as e:
-        logger.error(f"❌ [SITEMAP] Failed to discover URLs: {e}")
-        return []
 ```
 
-### Step 3: Modify BFS Crawl Logic
-Update `_crawlPagesWithBFS` to handle sitemaps:
+## Why Not AsyncUrlSeeder?
 
+Crawl4ai's `AsyncUrlSeeder` has a limitation:
+- It takes a **domain** parameter (e.g., "www.scania.com")
+- It only looks for sitemaps at standard locations: `/sitemap.xml`, `/sitemap_index.xml`
+- It **cannot** handle custom sitemap paths like `/group/en/sitemap.xml`
+
+Example of the limitation:
 ```python
-async def _crawlPagesWithBFS(
-    self,
-    crawl_config: CrawlConfig,
-    job_context: JobContext
-) -> AsyncGenerator[PageData, None]:
-    """Async generator yielding PageData one at a time"""
-    
-    # Check if root URL is a sitemap
-    is_sitemap = self._isSitemapURL(job_context.root_url)
-    
-    if is_sitemap:
-        logger.info(f"🗺️ [SITEMAP] Detected sitemap URL, using URL discovery")
-        
-        # Discover URLs from sitemap
-        sitemap_urls = await self._discoverSitemapURLs(
-            job_context.root_url,
-            max_urls=crawl_config.max_pages
-        )
-        
-        if not sitemap_urls:
-            logger.error("❌ [SITEMAP] No URLs discovered from sitemap")
-            return
-        
-        logger.info(f"📋 [SITEMAP] Will crawl {len(sitemap_urls)} URLs from sitemap")
-        
-        # Add all sitemap URLs to crawl queue
-        to_visit = [(url, 1) for url in sitemap_urls]  # depth=1 for all sitemap URLs
-        visited_urls = set()
-    else:
-        # Normal BFS crawl
-        visited_urls = set()
-        to_visit = [(job_context.root_url, 0)]
-    
-    # Rest of BFS logic remains the same...
-    semaphore = asyncio.Semaphore(crawl_config.max_concurrent)
-    pages_yielded = 0
-    
-    while to_visit and pages_yielded < crawl_config.max_pages:
-        current_url, current_depth = to_visit.pop(0)
-        
-        # ... existing crawl logic ...
+# This doesn't work for custom paths:
+async with AsyncUrlSeeder() as seeder:
+    config = SeedingConfig(source="sitemap")
+    # Looks for www.scania.com/sitemap.xml (404)
+    # Cannot find www.scania.com/group/en/sitemap.xml
+    urls = await seeder.urls("www.scania.com", config)
 ```
 
-### Step 4: Add Helper Method
+## Features We Get
+
+1. **Custom Sitemap Paths**: Handles sitemaps at any URL path
+2. **Sitemap Index Support**: Recursively processes sitemap indexes
+3. **Compressed Sitemaps**: Handles .xml.gz files
+4. **Namespace Handling**: Properly parses XML with namespaces
+5. **Error Recovery**: Graceful handling of fetch/parse errors
+
+## Implementation Details
+
+## Implementation Details
+
+### Step 1: Sitemap Detection
+Already implemented in `_isSitemapURL()`:
+
 ```python
 def _isSitemapURL(self, url: str) -> bool:
     """Check if URL is a sitemap"""
@@ -158,26 +72,82 @@ def _isSitemapURL(self, url: str) -> bool:
     )
 ```
 
+### Step 2: XML Parsing with Namespace Support
+The implementation handles the standard sitemap namespace:
+
+```python
+namespaces = {
+    'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9',
+    'xhtml': 'http://www.w3.org/1999/xhtml'
+}
+
+# Check for sitemap index
+sitemap_locs = root.findall('.//ns:sitemap/ns:loc', namespaces)
+
+# Extract regular URLs
+url_locs = root.findall('.//ns:url/ns:loc', namespaces)
+```
+
+### Step 3: Recursive Sitemap Index Handling
+When a sitemap index is detected, it recursively fetches sub-sitemaps:
+
+```python
+if sitemap_locs:
+    logger.info(f"📋 [SITEMAP] Found sitemap index with {len(sitemap_locs)} sub-sitemaps")
+    
+    for sitemap_loc in sitemap_locs[:10]:  # Limit to 10 sub-sitemaps
+        sub_sitemap_url = sitemap_loc.text.strip()
+        sub_urls = await self._discoverSitemapURLs(
+            sub_sitemap_url,
+            max_urls=max_urls - len(urls)
+        )
+        urls.extend(sub_urls)
+```
+
+### Step 4: Integration with BFS Crawl
+The sitemap URLs are integrated into the crawl queue:
+
+```python
+if is_sitemap:
+    logger.info(f"🗺️ [SITEMAP] Detected sitemap URL, using URL discovery")
+    
+    sitemap_urls = await self._discoverSitemapURLs(
+        job_context.root_url,
+        max_urls=crawl_config.max_pages
+    )
+    
+    # Add all sitemap URLs to crawl queue (depth=1 for all)
+    to_visit = [(url, 1) for url in sitemap_urls]
+    visited_urls = set()
+```
+
 ## Benefits
 
-✅ **No custom XML parsing needed**
-✅ **Handles sitemap indexes automatically**
-✅ **Supports compressed sitemaps**
-✅ **Built-in URL filtering**
-✅ **Parallel processing**
-✅ **Memory efficient**
+✅ **Handles custom sitemap paths** (e.g., `/group/en/sitemap.xml`)
+✅ **Recursive sitemap index support**
+✅ **Compressed sitemap support** (.xml.gz)
+✅ **Proper XML namespace handling**
+✅ **Memory efficient** (limits URLs and sub-sitemaps)
+✅ **Robust error handling**
+
+## Current Status
+
+✅ **IMPLEMENTED** - All features are working:
+- Sitemap detection via URL pattern matching
+- Direct XML parsing with namespace support
+- Recursive sitemap index handling
+- Integration with BFS crawl queue
+- Proper error handling and logging
 
 ## Testing
 
 Test with these URLs:
-- `https://www.scania.com/group/en/sitemap.xml`
-- `https://techcrunch.com/sitemap.xml`
-- `https://www.python.org/sitemap.xml`
+- `https://www.scania.com/group/en/sitemap.xml` - Custom path sitemap
+- `https://techcrunch.com/sitemap.xml` - Standard location
+- `https://www.python.org/sitemap.xml` - Standard location
 
-## Next Steps
+## Known Limitations
 
-1. Implement `_discoverSitemapURLs()` method
-2. Update `_crawlPagesWithBFS()` to detect and handle sitemaps
-3. Add `_isSitemapURL()` helper method
-4. Test with real sitemap URLs
-5. Update error handling for sitemap-specific errors
+1. **AsyncUrlSeeder not used**: Cannot handle custom sitemap paths
+2. **Sub-sitemap limit**: Maximum 10 sub-sitemaps to prevent excessive recursion
+3. **URL limit**: Respects `max_urls` parameter to control memory usage
