@@ -744,7 +744,11 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
 
                 logger.info(f"📤 Deleting from FileSearch store: {store_name}")
                 try:
-                    genai_client.file_search_stores.documents.delete(name=document_name)
+                    # Use force=True to delete document with all its parts/chunks
+                    genai_client.file_search_stores.documents.delete(
+                        name=document_name,
+                        config={"force": True}
+                    )
                     deletion_results["file_search"]["success"] = True
                     logger.info(f"✅ [FILESEARCH] Deleted document: {document_name}")
                 except Exception as e:

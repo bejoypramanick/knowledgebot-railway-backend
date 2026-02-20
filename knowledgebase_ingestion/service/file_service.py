@@ -698,8 +698,11 @@ class FileService:
                                 if store_name and document_name:
                                     try:
                                         logger.info(f"   📍 Deleting FileSearch document: {document_name} from store: {store_name}")
-                                        # Use the correct API method: file_search_stores.documents.delete
-                                        genai_client.file_search_stores.documents.delete(name=document_name)
+                                        # Use force=True to delete document with all its parts/chunks
+                                        genai_client.file_search_stores.documents.delete(
+                                            name=document_name,
+                                            config={"force": True}
+                                        )
 
                                         # Verify deletion: check if document still exists
                                         try:
@@ -911,8 +914,11 @@ class FileService:
                                     if store_name and document_name:
                                         try:
                                             logger.info(f"   📍 Deleting: {document_name} from store: {store_name}")
-                                            # Use the correct API method: file_search_stores.documents.delete
-                                            genai_client.file_search_stores.documents.delete(name=document_name)
+                                            # Use force=True to delete document with all its parts/chunks
+                                            genai_client.file_search_stores.documents.delete(
+                                                name=document_name,
+                                                config={"force": True}
+                                            )
 
                                             # Verify deletion: check if document still exists
                                             try:
