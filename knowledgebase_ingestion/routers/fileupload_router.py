@@ -118,6 +118,7 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
             {
                 "id": str(f['id']),
                 "type": "file",
+                "source": "upload",  # Add source field for UI filtering
                 "name": f['original_filename'],
                 "processing_status": f['processing_status'],
                 "error_message": f['error_message'],
