@@ -102,28 +102,11 @@ class WebsiteService:
             if result.get("success"):
                 logger.info(f"✅ [CELERY] Website ID {website_id} processed successfully")
                 
-                # Check if this is a sitemap - if so, keep it in "processing" state
+                # Don't mark parent as completed immediately
                 # The parent will be marked as "completed" by check_and_update_parent_completion()
-                # when all children finish
-                website_record = await self.scraping_dao.get_website_by_id(website_id)
-                if website_record:
-                    metadata = website_record.get('metadata', {})
-                    if isinstance(metadata, dict):
-                        scraping_config = metadata.get('scraping_config', {})
-                        source_type = scraping_config.get('source')
-                        
-                        if source_type == 'sitemap':
-                            logger.info(f"🗺️ [SITEMAP] Keeping parent {website_id} in 'processing' state until all children complete")
-                            # Don't update status - let check_and_update_parent_completion handle it
-                        else:
-                            # For website and single page, mark as completed immediately
-                            await self.update_website_status(website_id, "completed")
-                    else:
-                        # Fallback: mark as completed
-                        await self.update_website_status(website_id, "completed")
-                else:
-                    # Fallback: mark as completed
-                    await self.update_website_status(website_id, "completed")
+                # when all children finish processing
+                logger.info(f"📋 [PARENT] Keeping parent {website_id} in 'processing' state until all children complete")
+                # Status will be updated by check_and_update_parent_completion() in processing_service
             else:
                 error_msg = result.get("error", "Unknown processing error")
                 logger.error(f"❌ [CELERY] Website ID {website_id} processing failed: {error_msg}")
