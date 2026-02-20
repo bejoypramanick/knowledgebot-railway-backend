@@ -412,7 +412,12 @@ async def upload_file_async(
         logger.info("🔐 [AUTH] Extracting user information from request")
         user_email, user_id = extract_user_from_request(request)
         logger.info(f"   User Email: {user_email}")
-        logger.info(f"   User ID: {user_id}")
+        logger.info(f"   User ID (from header): {user_id}")
+        
+        # Look up user_role_id from database using email
+        from knowledgebase_ingestion.utils.auth import get_user_role_id_from_email
+        user_role_id = await get_user_role_id_from_email(user_email)
+        logger.info(f"   User Role ID (from DB): {user_role_id}")
 
         # Validate file
         logger.info(f"✔️  [VALIDATION] Validating file: {file.filename}")
@@ -472,7 +477,7 @@ async def upload_file_async(
                     s3_key,
                     file_size,
                     user_email,
-                    user_id
+                    user_role_id  # Use user_role_id from database, not user_id from header
                 ],
                 queue='file_processing'
             )
@@ -486,7 +491,7 @@ async def upload_file_async(
             logger.info(f"     - s3_key: {s3_key}")
             logger.info(f"     - file_size: {file_size}")
             logger.info(f"     - user_email: {user_email}")
-            logger.info(f"     - user_id: {user_id}")
+            logger.info(f"     - user_role_id: {user_role_id}")
 
             # Create file record in database with the Celery task ID
             logger.info(f"💾 [DB_INSERT_START] Creating file record in database")
@@ -499,7 +504,7 @@ async def upload_file_async(
             logger.info(f"   S3 URL: {s3_url}")
 
             record_data = {
-                'user_role_id': user_id,
+                'user_role_id': user_role_id,  # Use user_role_id from database
                 'original_filename': validation_result['original_filename'],
                 'file_display_name': file_display_name or validation_result['filename'],
                 'size_bytes': file_size,

@@ -4,6 +4,7 @@ Authentication utilities for knowledgebase ingestion
 from typing import Tuple, Optional
 from fastapi import Request, HTTPException
 from shared.otel_logger import get_otel_logger
+from shared.db import get_db_connection
 
 logger = get_otel_logger("auth", "knowledgebase-ingestion")
 
@@ -32,6 +33,39 @@ def extract_user_from_request(request: Request) -> Tuple[str, Optional[str]]:
     except Exception as e:
         logger.error(f"Error extracting user from request: {e}")
         raise HTTPException(status_code=401, detail="Authentication failed")
+
+
+async def get_user_role_id_from_email(user_email: str) -> Optional[int]:
+    """
+    Look up user_role_id from user_role_mapping table using email.
+    
+    Args:
+        user_email: User's email address
+        
+    Returns:
+        user_role_id if found, None otherwise
+    """
+    try:
+        query = """
+            SELECT user_role_id 
+            FROM user_role_mapping 
+            WHERE email = $1 
+            LIMIT 1
+        """
+        
+        async with get_db_connection() as conn:
+            user_role_id = await conn.fetchval(query, user_email)
+            
+            if user_role_id:
+                logger.info(f"✅ Found user_role_id {user_role_id} for email {user_email}")
+            else:
+                logger.warning(f"⚠️ No user_role_id found for email {user_email}")
+            
+            return user_role_id
+            
+    except Exception as e:
+        logger.error(f"❌ Error looking up user_role_id for {user_email}: {e}")
+        return None
 
 
 def validate_user_access(user_email: str, resource_owner_email: str) -> bool:
