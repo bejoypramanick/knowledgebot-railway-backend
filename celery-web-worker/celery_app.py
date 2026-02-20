@@ -44,6 +44,9 @@ except redis.ConnectionError as conn_err:
 except Exception as e:
     logger.error(f"❌ [REDIS] Unexpected error during connection test: {e}")
 
+# Get concurrency from environment variable with default of 5
+worker_concurrency = int(os.getenv('CELERY_WEB_CONCURRENCY', '5'))
+
 celery_app.conf.update(
     broker_url=redis_url,
     result_backend=redis_url,
@@ -53,11 +56,13 @@ celery_app.conf.update(
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
-    # Performance tuning for web crawling (lower prefetch, fewer concurrent)
-    worker_prefetch_multiplier=1,
-    worker_max_tasks_per_child=100,
-    task_acks_late=True,
-    task_reject_on_worker_lost=True,
+    # Performance tuning for web crawling
+    # Concurrency is configurable via CELERY_WEB_CONCURRENCY environment variable
+    worker_prefetch_multiplier=1,  # Each worker prefetches only 1 task
+    worker_max_tasks_per_child=100,  # Restart worker after 100 tasks to prevent memory leaks
+    worker_concurrency=worker_concurrency,  # Parallel worker processes (configurable)
+    task_acks_late=True,  # Acknowledge task only after completion
+    task_reject_on_worker_lost=True,  # Requeue task if worker dies
     # Task routing
     task_routes={
         'tasks.scrape_website_task': {'queue': 'web_crawling'},
@@ -69,7 +74,11 @@ celery_app.conf.update(
     task_time_limit=21700,  # 6 hours + 100s buffer
 )
 
-logger.info("✅ [CELERY_APP] Configuration updated - Task timeout: 6 hours, Queue: 'web_crawling'")
+logger.info("✅ [CELERY_APP] Configuration updated")
+logger.info(f"   Concurrency: {worker_concurrency} parallel workers")
+logger.info(f"   Prefetch: 1 task per worker")
+logger.info(f"   Task timeout: 6 hours")
+logger.info(f"   Queue: 'web_crawling'")
 
 # Import tasks module to register task definitions
 try:

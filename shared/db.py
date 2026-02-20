@@ -26,10 +26,19 @@ class DatabaseManager:
         if self._connection_url and 'sslmode=' not in self._connection_url:
             self._connection_url += '&sslmode=require' if '?' in self._connection_url else '?sslmode=require'
         
-        # Optimized for Railway memory limits and reliability
+        # Get pool size from environment variables with sensible defaults
+        # DB_POOL_MIN_SIZE: Minimum connections per worker (default: 1)
+        # DB_POOL_MAX_SIZE: Maximum connections per worker (default: 3)
+        min_size = int(os.getenv('DB_POOL_MIN_SIZE', '1'))
+        max_size = int(os.getenv('DB_POOL_MAX_SIZE', '3'))
+        
+        # Optimized for Railway memory limits and Celery concurrency
+        # With 5 parallel workers, each needs enough connections for its tasks
+        # Setting max_size=3 per worker allows 2 concurrent operations + 1 for health checks
+        # Total across all workers: 5 workers * 3 connections = 15 connections max
         self._pool_config = {
-            'min_size': 1,
-            'max_size': 5,
+            'min_size': min_size,
+            'max_size': max_size,
             'command_timeout': 15.0,
             'max_inactive_connection_lifetime': 120.0,
             'max_queries': 10000,
@@ -44,6 +53,8 @@ class DatabaseManager:
         }
         self._last_health_check = 0
         self._health_check_interval = 30  # seconds
+        
+        logger.info(f"📊 [DB_POOL_CONFIG] Pool size: min={min_size}, max={max_size}")
 
     @classmethod
     async def get_instance(cls) -> 'DatabaseManager':

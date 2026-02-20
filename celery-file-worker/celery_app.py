@@ -4,7 +4,7 @@ Handles async file processing tasks
 """
 
 from celery import Celery
-from celery.signals import before_task_publish, task_prerun, task_postrun, task_failure, task_retry
+from celery.signals import before_task_publish, task_prerun, task_postrun, task_failure, task_retry, worker_process_init
 from shared.otel_logger import get_otel_logger
 import os
 import redis
@@ -37,6 +37,9 @@ except redis.ConnectionError as conn_err:
 except Exception as e:
     logger.error(f"❌ [REDIS] Unexpected error during connection test: {e}")
 
+# Get concurrency from environment variable with default of 5
+worker_concurrency = int(os.getenv('CELERY_FILE_CONCURRENCY', '5'))
+
 celery_app.conf.update(
     broker_url=redis_url,
     result_backend=redis_url,
@@ -46,11 +49,13 @@ celery_app.conf.update(
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
-    # Performance tuning for heavy workloads
-    worker_prefetch_multiplier=1,
-    worker_max_tasks_per_child=1000,
-    task_acks_late=True,
-    task_reject_on_worker_lost=True,
+    # Performance tuning for file processing
+    # Concurrency is configurable via CELERY_FILE_CONCURRENCY environment variable
+    worker_prefetch_multiplier=1,  # Each worker prefetches only 1 task
+    worker_max_tasks_per_child=1000,  # Restart worker after 1000 tasks
+    worker_concurrency=worker_concurrency,  # Parallel worker processes (configurable)
+    task_acks_late=True,  # Acknowledge task only after completion
+    task_reject_on_worker_lost=True,  # Requeue task if worker dies
     # Task routing
     task_routes={
         'tasks.process_file_upload_task': {'queue': 'file_processing'},
@@ -62,7 +67,11 @@ celery_app.conf.update(
     task_time_limit=3700,  # 1 hour + 100s buffer
 )
 
-logger.info("✅ [CELERY_APP] Configuration updated - Task timeout: 1 hour, Queue: 'file_processing'")
+logger.info("✅ [CELERY_APP] Configuration updated")
+logger.info(f"   Concurrency: {worker_concurrency} parallel workers")
+logger.info(f"   Prefetch: 1 task per worker")
+logger.info(f"   Task timeout: 1 hour")
+logger.info(f"   Queue: 'file_processing'")
 
 # Import tasks module to register task definitions
 try:
@@ -122,6 +131,46 @@ def task_retry_handler(sender=None, task_id=None, args=None, reason=None, **kwar
         logger.warning(f"🔄 [TASK_RETRY] Task retrying - Task ID: {task_id}, File: {filename}, Reason: {reason}")
     except Exception as e:
         logger.error(f"❌ [TASK_RETRY] Error in retry handler: {e}")
+
+
+@worker_process_init.connect
+def init_worker_process(**kwargs):
+    """
+    Initialize database pool after worker process fork.
+    
+    This is critical for Celery prefork pool workers. When the parent process forks,
+    file descriptors (including database connections) are copied to child processes,
+    causing conflicts. We must close any inherited pools and create fresh ones.
+    """
+    logger.info("🔄 [WORKER_INIT] Worker process initializing after fork")
+    
+    try:
+        # Import here to avoid circular dependencies
+        from shared.db import DatabaseManager
+        
+        # Get the singleton instance
+        manager = DatabaseManager._instance
+        
+        if manager and manager._pool:
+            logger.warning("⚠️ [WORKER_INIT] Found inherited database pool from parent process, closing it")
+            # Close the inherited pool (don't use await since we're not in async context)
+            try:
+                # Force close without async - the pool is from parent process anyway
+                if manager._pool:
+                    manager._pool.terminate()
+            except Exception as e:
+                logger.warning(f"⚠️ [WORKER_INIT] Error terminating inherited pool: {e}")
+            
+            # Reset the pool so it will be recreated on first use
+            manager._pool = None
+            logger.info("✅ [WORKER_INIT] Inherited pool closed, will create fresh pool on first use")
+        else:
+            logger.info("✅ [WORKER_INIT] No inherited pool found, will create fresh pool on first use")
+            
+    except Exception as e:
+        logger.error(f"❌ [WORKER_INIT] Error in worker process init: {e}")
+        import traceback
+        logger.error(f"   Traceback: {traceback.format_exc()}")
 
 
 @celery_app.task(bind=True)
