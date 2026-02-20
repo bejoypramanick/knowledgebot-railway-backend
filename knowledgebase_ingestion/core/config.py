@@ -14,7 +14,6 @@ class Settings(BaseSettings):
     knowledgebase_ingestion_url: str = "http://localhost:8001"
     website_crawling_url: str = "http://localhost:8002"
     chatbot_orchestration_url: str = "http://localhost:8003"
-    docling_service_url: str = "http://localhost:8004"
     
     # API Gateway
     api_gateway_port: int = 8000
@@ -25,11 +24,6 @@ class Settings(BaseSettings):
 
     # Gemini FileSearch Store Configuration (required from Railway env)
     gemini_file_search_store_name: Optional[str] = None  # FileSearch store display name - MUST be set in Railway env
-
-    # Docling Service Configuration (plug-and-play)
-    docling_enabled: bool = True  # Set to False to disable docling and use raw uploads
-    docling_timeout_seconds: int = 300  # Processing timeout (5 minutes)
-    docling_fallback_to_raw: bool = True  # Fallback to raw upload if docling fails/times out
 
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None

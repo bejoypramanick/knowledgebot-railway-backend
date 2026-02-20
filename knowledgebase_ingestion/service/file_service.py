@@ -185,82 +185,6 @@ class FileService:
             logger.error(f"Error checking admin user role ID: {e}")
             return None
 
-    async def record_metadata(self, user_email: str, original_filename: str, file_display_name: str,
-                             file_ext: str, uploaded_file: Any,
-                             file_size: int, sha256_hash: str,
-                             final_state: str, gemini_processed_at: Any, mime_type: str, version: int = 1,
-                             file_search_metadata: Dict[str, Any] = None):
-        """Persist file metadata and metrics to the PostgreSQL database.
-
-        Args:
-            user_email: The user's email address
-            original_filename: Original name of the uploaded file
-            file_display_name: Display name for the file
-            file_ext: File extension
-            uploaded_file: The uploaded file object
-            file_size: File size in bytes
-            sha256_hash: SHA256 hash of the file
-            final_state: Gemini processing state
-            gemini_processed_at: Timestamp when Gemini processed the file
-            mime_type: MIME type of the file
-            version: File version number (default: 1)
-            file_search_metadata: FileSearch store metadata for deletion (contains store_name, document_name)
-        """
-        try:
-            logger.info(f"🗄️ [DB] Saving metadata for {original_filename} (version {version}) - Size: {file_size} bytes")
-
-            # Use the new DatabaseManager pattern
-            from shared.db import get_db_connection
-            import json
-
-            # Verify user has admin role and get the user_role_id
-            user_role_id = await self.get_admin_user_role_id(user_email)
-
-            if user_role_id is None:
-                raise PermissionError(f"User {user_email} does not have admin privileges to upload files")
-
-            db_record_id = None
-            try:
-                async with get_db_connection() as conn:
-                    # Prepare metadata JSON
-                    metadata = file_search_metadata or {}
-                    metadata_json = json.dumps(metadata)
-
-                    db_record_id = await conn.fetchval(
-                        """INSERT INTO file_uploads (user_role_id, original_filename, display_name, file_extension,
-                           gemini_file_name, gemini_file_uri, mime_type, file_size, sha256_hash,
-                           gemini_state, version, metadata, created_at)
-                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, NOW()) RETURNING id""",
-                        user_role_id, original_filename, file_display_name, file_ext.lstrip('.'),  # Use admin user_role_id
-                        uploaded_file.name, getattr(uploaded_file, 'uri', None), mime_type,
-                        file_size, sha256_hash, final_state, version, metadata_json
-                    )
-                    
-                    logger.info(f"✅ [DB] Record created with ID: {db_record_id}, Size: {file_size} bytes")
-
-                    # Log metric (non-critical - ignore errors)
-                    try:
-                        import json
-                        await conn.execute(
-                            """INSERT INTO metrics (metric_type, metric_name, value, unit, tags, created_at)
-                               VALUES ($1, $2, $3, $4, $5::jsonb, NOW())
-                               ON CONFLICT (metric_type, metric_name) DO NOTHING""",
-                            'file_upload', 'file_size_bytes', file_size, 'bytes',
-                            json.dumps({'user_email': user_email, 'file_id': db_record_id, 'filename': original_filename})
-                        )
-                    except Exception as metric_error:
-                        logger.warning(f"⚠️ Failed to log metric (non-critical): {metric_error}")
-            except Exception as db_error:
-                logger.error(f"❌ [DB] Database error during metadata recording: {db_error}")
-                return None
-            
-            logger.info(f"✅ [DB] Record created with ID: {db_record_id} (version {version})")
-            return db_record_id
-            
-        except Exception as e:
-            logger.error(f"❌ [DB] Error recording metadata: {e}")
-            raise
-
     async def find_file_record(self, file_id: str):
         """Find file record by ID across multiple tables"""
         try:
@@ -326,19 +250,6 @@ class FileService:
                 await conn.execute(f"DELETE FROM {table_name} WHERE id = $1", numeric_id)
         except Exception as e:
             logger.error(f"Error deleting file record: {e}")
-            raise
-
-    async def process_file_upload(self, file_data: dict, user_email: str) -> dict:
-        """Process single file upload with business logic"""
-        try:
-            # Check for duplicate file
-            duplicate = await self.check_duplicate_file(file_data['sha256'], user_email)
-            if duplicate:
-                return {"success": False, "message": "Duplicate file", "file_id": duplicate['id']}
-            
-            return {"success": True, "message": "File processed successfully"}
-        except Exception as e:
-            logger.error(f"Error processing file upload: {e}")
             raise
 
     async def get_all_files(self) -> list:
