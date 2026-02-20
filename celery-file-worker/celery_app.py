@@ -37,8 +37,8 @@ except redis.ConnectionError as conn_err:
 except Exception as e:
     logger.error(f"❌ [REDIS] Unexpected error during connection test: {e}")
 
-# Get concurrency from environment variable with default of 5
-worker_concurrency = int(os.getenv('CELERY_FILE_CONCURRENCY', '5'))
+# Get concurrency from environment variable with default of 10 for gevent pool
+worker_concurrency = int(os.getenv('CELERY_FILE_CONCURRENCY', '10'))
 
 celery_app.conf.update(
     broker_url=redis_url,
@@ -52,8 +52,8 @@ celery_app.conf.update(
     # Performance tuning for file processing
     # Concurrency is configurable via CELERY_FILE_CONCURRENCY environment variable
     worker_prefetch_multiplier=1,  # Each worker prefetches only 1 task
-    worker_max_tasks_per_child=1000,  # Restart worker after 1000 tasks
-    worker_concurrency=worker_concurrency,  # Parallel worker processes (configurable)
+    worker_max_tasks_per_child=100,  # Restart worker after 100 tasks to prevent memory leaks
+    worker_concurrency=worker_concurrency,  # Parallel greenlets (configurable)
     task_acks_late=True,  # Acknowledge task only after completion
     task_reject_on_worker_lost=True,  # Requeue task if worker dies
     # Task routing
