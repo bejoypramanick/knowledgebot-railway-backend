@@ -1,6 +1,5 @@
 import os
 import re
-import puremagic
 from typing import Optional, Tuple
 
 from ..utils.constants import (ALLOWED_FILE_EXTENSIONS, ALLOWED_MIME_TYPES,
