@@ -135,7 +135,11 @@ class ProcessingService:
             # ========== PHASE 2.5: CHECK PARENT COMPLETION ==========
             # Now that ALL pages have been discovered and processed, check if parent should be marked completed
             # This must happen AFTER crawling finishes to avoid premature completion
-            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] All pages crawled, checking parent completion status")
+            # Add a small delay to ensure all database writes are committed
+            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] All pages crawled, waiting for DB commits...")
+            await asyncio.sleep(1.0)  # Give time for any pending DB writes to complete
+            
+            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] Checking parent completion status")
             await self.scraping_dao.check_and_update_parent_completion(job_context.website_id)
 
             # ========== PHASE 3: BUILD SUCCESS RESULT ==========
