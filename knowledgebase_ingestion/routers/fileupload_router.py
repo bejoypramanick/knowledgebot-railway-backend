@@ -499,7 +499,7 @@ async def upload_file_async(
             logger.info(f"   S3 URL: {s3_url}")
 
             record_data = {
-                'user_id': user_id,
+                'user_role_id': user_id,
                 'original_filename': validation_result['original_filename'],
                 'file_display_name': file_display_name or validation_result['filename'],
                 'size_bytes': file_size,

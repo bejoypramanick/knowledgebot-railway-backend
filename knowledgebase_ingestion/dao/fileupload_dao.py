@@ -34,28 +34,24 @@ class FileUploadDAO:
 
         query = """
             INSERT INTO file_uploads (
-                user_id, original_filename, file_display_name, size_bytes,
+                user_role_id, original_filename, display_name, file_size,
                 mime_type, processing_status, gemini_file_name, gemini_file_uri,
-                gemini_state, gemini_processed_at, source, sha256_hash,
-                file_search_metadata, s3_url, celery_task_id, created_at
+                gemini_state, sha256_hash, s3_url, celery_task_id, created_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW()
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
             ) RETURNING id
         """
         params = [
-            record_data.get('user_id'),
+            record_data.get('user_role_id') or record_data.get('user_id'),
             record_data.get('original_filename'),
-            record_data.get('file_display_name'),
-            record_data.get('size_bytes'),
+            record_data.get('file_display_name') or record_data.get('display_name'),
+            record_data.get('size_bytes') or record_data.get('file_size'),
             record_data.get('mime_type'),
             record_data.get('processing_status'),
             record_data.get('gemini_file_name'),
             record_data.get('gemini_file_uri'),
             record_data.get('gemini_state'),
-            record_data.get('gemini_processed_at'),
-            record_data.get('source'),
             record_data.get('sha256_hash'),
-            record_data.get('file_search_metadata'),
             record_data.get('s3_url'),
             record_data.get('celery_task_id'),
         ]
@@ -63,21 +59,18 @@ class FileUploadDAO:
         logger.info(f"📝 [FILE_DAO_SQL] SQL Query:")
         logger.info(f"    {query}")
         logger.info(f"📊 [FILE_DAO_PARAMS] Parameters:")
-        logger.info(f"    $1 (user_id): {params[0]}")
+        logger.info(f"    $1 (user_role_id): {params[0]}")
         logger.info(f"    $2 (original_filename): {params[1]}")
-        logger.info(f"    $3 (file_display_name): {params[2]}")
-        logger.info(f"    $4 (size_bytes): {params[3]}")
+        logger.info(f"    $3 (display_name): {params[2]}")
+        logger.info(f"    $4 (file_size): {params[3]}")
         logger.info(f"    $5 (mime_type): {params[4]}")
         logger.info(f"    $6 (processing_status): {params[5]}")
         logger.info(f"    $7 (gemini_file_name): {params[6]}")
         logger.info(f"    $8 (gemini_file_uri): {params[7]}")
         logger.info(f"    $9 (gemini_state): {params[8]}")
-        logger.info(f"    $10 (gemini_processed_at): {params[9]}")
-        logger.info(f"    $11 (source): {params[10]}")
-        logger.info(f"    $12 (sha256_hash): {params[11]}")
-        logger.info(f"    $13 (file_search_metadata): {params[12]}")
-        logger.info(f"    $14 (s3_url): {params[13]}")
-        logger.info(f"    $15 (celery_task_id): {params[14]}")
+        logger.info(f"    $10 (sha256_hash): {params[9]}")
+        logger.info(f"    $11 (s3_url): {params[10]}")
+        logger.info(f"    $12 (celery_task_id): {params[11]}")
 
         try:
             logger.log_db_operation(query, params)

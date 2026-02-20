@@ -6,7 +6,7 @@
 ALTER TABLE public.file_uploads 
 ADD COLUMN IF NOT EXISTS s3_url TEXT NULL;
 
--- Add celery_task_id column to file_uploads table
+-- Add celery_task_id column to file_uploads table (for tracking async processing)
 ALTER TABLE public.file_uploads 
 ADD COLUMN IF NOT EXISTS celery_task_id VARCHAR(255) NULL;
 
