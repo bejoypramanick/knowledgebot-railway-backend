@@ -242,19 +242,19 @@ class WebCrawlDAO:
         Returns only root-level websites (parent_id IS NULL) with their children recursively populated.
         
         Args:
-            include_inactive: If False (default), returns pending, processing, and completed items.
-                            If True, returns items that are NOT pending, processing, and NOT completed.
+            include_inactive: If False (default), returns pending, processing, queued, and completed items.
+                            If True, returns items that are NOT pending, processing, queued, and NOT completed.
         """
         logger.info("🌳 [TREE_START] get_hierarchical_websites() called")
 
         # Build WHERE clause based on include_inactive flag
         where_clause = "WHERE parent_id IS NULL"
         if not include_inactive:
-            # Active: pending, processing, and completed
-            where_clause += " AND processing_status IN ('pending', 'processing', 'completed')"
+            # Active: pending, processing, queued, and completed
+            where_clause += " AND processing_status IN ('pending', 'processing', 'queued', 'completed')"
         else:
-            # Not Active: everything except pending, processing, and completed
-            where_clause += " AND processing_status NOT IN ('pending', 'processing', 'completed')"
+            # Not Active: everything except pending, processing, queued, and completed
+            where_clause += " AND processing_status NOT IN ('pending', 'processing', 'queued', 'completed')"
 
         query = f"""
             SELECT
@@ -313,17 +313,17 @@ class WebCrawlDAO:
         Recursively fetch all children of a website.
         
         Args:
-            include_inactive: If False (default), returns pending, processing, and completed items.
-                            If True, returns items that are NOT pending, processing, and NOT completed.
+            include_inactive: If False (default), returns pending, processing, queued, and completed items.
+                            If True, returns items that are NOT pending, processing, queued, and NOT completed.
         """
         # Build WHERE clause based on include_inactive flag
         where_clause = "WHERE parent_id = $1"
         if not include_inactive:
-            # Active: pending, processing, and completed
-            where_clause += " AND processing_status IN ('pending', 'processing', 'completed')"
+            # Active: pending, processing, queued, and completed
+            where_clause += " AND processing_status IN ('pending', 'processing', 'queued', 'completed')"
         else:
-            # Not Active: everything except pending, processing, and completed
-            where_clause += " AND processing_status NOT IN ('pending', 'processing', 'completed')"
+            # Not Active: everything except pending, processing, queued, and completed
+            where_clause += " AND processing_status NOT IN ('pending', 'processing', 'queued', 'completed')"
         
         query = f"""
             SELECT

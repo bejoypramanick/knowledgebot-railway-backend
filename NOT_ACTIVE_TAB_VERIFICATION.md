@@ -11,22 +11,22 @@ Added two new methods:
 
 ```python
 async def get_inactive_files(self) -> List[Dict[str, Any]]:
-    """Get all files that are not pending, processing, and not completed."""
+    """Get all files that are not pending, processing, queued, and not completed."""
     query = """
         SELECT id, original_filename, processing_status, error_message, created_at, updated_at
         FROM file_uploads
-        WHERE processing_status NOT IN ('pending', 'processing', 'completed')
+        WHERE processing_status NOT IN ('pending', 'processing', 'queued', 'completed')
         ORDER BY updated_at DESC
     """
 ```
 
 ```python
 async def get_active_files(self) -> List[Dict[str, Any]]:
-    """Get all files that are pending, processing, or completed."""
+    """Get all files that are pending, processing, queued, or completed."""
     query = """
         SELECT id, original_filename, processing_status, error_message, created_at, updated_at
         FROM file_uploads
-        WHERE processing_status IN ('pending', 'processing', 'completed')
+        WHERE processing_status IN ('pending', 'processing', 'queued', 'completed')
         ORDER BY updated_at DESC
     """
 ```
@@ -39,8 +39,8 @@ Updated methods to support filtering:
 async def get_hierarchical_websites(self, include_inactive: bool = False) -> List[Dict[str, Any]]:
     """
     Args:
-        include_inactive: If False (default), returns pending, processing, and completed items.
-                        If True, returns items that are NOT pending, processing, and NOT completed.
+        include_inactive: If False (default), returns pending, processing, queued, and completed items.
+                        If True, returns items that are NOT pending, processing, queued, and NOT completed.
     """
 ```
 
@@ -184,6 +184,7 @@ GET /api/v1/gateway/knowledgebase/files?status=inactive
 Shows items with status:
 - `pending`
 - `processing`
+- `queued`
 - `completed`
 
 ### Not Active Tab
@@ -191,7 +192,6 @@ Shows items with status:
 - `cancelled`
 - `deleted`
 - `failed`
-- `queued`
 
 ## Performance Optimization
 
