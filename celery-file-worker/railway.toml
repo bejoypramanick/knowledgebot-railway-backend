@@ -5,7 +5,8 @@ rootDirectory = "."
 [deploy]
 # Celery worker for file processing queue
 # Note: WORKDIR in Dockerfile is /app/celery-file-worker, so no need for cd
-startCommand = "celery -A celery_app worker -Q file_processing -l info -c 2 --max-tasks-per-child=1000"
+# Concurrency is controlled by CELERY_FILE_CONCURRENCY env var (default: 5)
+startCommand = "celery -A celery_app worker -Q file_processing -l info --max-tasks-per-child=1000"
 
 # Restart policy for worker reliability
 restartPolicyType = "ON_FAILURE"
