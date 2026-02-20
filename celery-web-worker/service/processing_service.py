@@ -892,6 +892,23 @@ class ProcessingService:
 
                 return job_context.website_id
 
+            # Check if this is the root URL in multi-page mode
+            # If so, update the parent record instead of creating a child
+            if page_data.page_url == job_context.root_url:
+                logger.info(f"   ℹ️ Root URL in multi-page mode: updating parent record")
+                
+                # Update the parent website record with the root page data
+                await self._updateWebsiteWithPageData(
+                    website_id=job_context.website_id,
+                    page_data=page_data,
+                    upload_result=upload_result,
+                    file_size=metrics.get('file_size_bytes', 0),
+                    char_count=metrics.get('char_count', 0)
+                )
+
+                return job_context.website_id
+
+            # This is a child page - record it as such
             child_page_id = await self.scraping_dao.record_child_page(
                 parent_id=job_context.website_id,
                 page_url=page_data.page_url,
