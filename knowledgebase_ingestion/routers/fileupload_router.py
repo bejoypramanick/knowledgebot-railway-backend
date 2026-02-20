@@ -88,32 +88,30 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
     
     Query Parameters:
         status: Optional filter for item status
-            - 'inactive': Returns only cancelled, deleted, or failed items
-            - None (default): Returns all active items (completed, processing, pending, queued)
+            - 'inactive': Returns items that are NOT pending and NOT completed (processing, cancelled, deleted, failed, queued)
+            - None (default): Returns only pending and completed items
     """
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
-        # Get all uploaded files with their current status
-        files = await get_pending_files()
-
-        # Get all hierarchical websites (NEW)
-        webcrawl_dao = WebCrawlDAO()
-        websites = await webcrawl_dao.get_hierarchical_websites()
-
-        # Define inactive statuses
-        inactive_statuses = ['cancelled', 'deleted', 'failed']
+        # Get files based on status parameter
+        from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
+        fileupload_dao = FileUploadDAO()
         
-        # Filter files based on status parameter
         if status == 'inactive':
-            # Return only inactive items
-            filtered_files = [f for f in files if f.get('processing_status', '').lower() in inactive_statuses]
-            filtered_websites = [w for w in websites if w.get('processing_status', '').lower() in inactive_statuses]
+            # Get items that are NOT pending and NOT completed
+            files = await fileupload_dao.get_inactive_files()
         else:
-            # Return only active items (exclude inactive)
-            filtered_files = [f for f in files if f.get('processing_status', '').lower() not in inactive_statuses]
-            filtered_websites = [w for w in websites if w.get('processing_status', '').lower() not in inactive_statuses]
+            # Get items that are pending or completed
+            files = await fileupload_dao.get_active_files()
+
+        # Get hierarchical websites based on status parameter
+        webcrawl_dao = WebCrawlDAO()
+        if status == 'inactive':
+            websites = await webcrawl_dao.get_hierarchical_websites(include_inactive=True)
+        else:
+            websites = await webcrawl_dao.get_hierarchical_websites(include_inactive=False)
 
         # Format files for response
         files_list = [
@@ -126,17 +124,17 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
                 "created_at": f['created_at'].isoformat() if f['created_at'] else None,
                 "updated_at": f['updated_at'].isoformat() if f['updated_at'] else None
             }
-            for f in filtered_files
+            for f in files
         ]
 
         return {
             "success": True,
             "files": files_list,
-            "websites": filtered_websites,  # hierarchical website tree (filtered)
+            "websites": websites,  # hierarchical website tree (filtered)
             "count": len(files_list),
             "sources": {
                 "upload": len(files_list),
-                "scrape": len(filtered_websites)  # Count of root-level websites
+                "scrape": len(websites)  # Count of root-level websites
             }
         }
     except Exception as e:

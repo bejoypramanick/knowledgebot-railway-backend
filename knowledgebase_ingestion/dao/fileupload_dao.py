@@ -137,6 +137,42 @@ class FileUploadDAO:
             logger.log_db_query(query, error=e)
             return []
 
+    async def get_inactive_files(self) -> List[Dict[str, Any]]:
+        """Get all files that are not pending and not completed (processing, cancelled, deleted, failed, queued)."""
+        query = """
+            SELECT id, original_filename, processing_status, error_message, created_at, updated_at
+            FROM file_uploads
+            WHERE processing_status NOT IN ('pending', 'completed')
+            ORDER BY updated_at DESC
+        """
+        try:
+            logger.log_db_operation(query)
+            async with get_db_connection() as conn:
+                result = await conn.fetch(query)
+                logger.log_db_query(query, result=result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, error=e)
+            return []
+
+    async def get_active_files(self) -> List[Dict[str, Any]]:
+        """Get all files that are pending or completed."""
+        query = """
+            SELECT id, original_filename, processing_status, error_message, created_at, updated_at
+            FROM file_uploads
+            WHERE processing_status IN ('pending', 'completed')
+            ORDER BY updated_at DESC
+        """
+        try:
+            logger.log_db_operation(query)
+            async with get_db_connection() as conn:
+                result = await conn.fetch(query)
+                logger.log_db_query(query, result=result)
+                return result
+        except Exception as e:
+            logger.log_db_query(query, error=e)
+            return []
+
     async def get_pending_files(self) -> List[Dict[str, Any]]:
         """Get all files with pending or processing status."""
         query = """

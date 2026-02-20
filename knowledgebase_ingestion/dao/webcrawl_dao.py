@@ -236,14 +236,27 @@ class WebCrawlDAO:
             logger.log_db_query(query, params, error=e)
             return None
 
-    async def get_hierarchical_websites(self) -> List[Dict[str, Any]]:
+    async def get_hierarchical_websites(self, include_inactive: bool = False) -> List[Dict[str, Any]]:
         """
         Get all websites with hierarchical structure (parent-child relationships).
         Returns only root-level websites (parent_id IS NULL) with their children recursively populated.
+        
+        Args:
+            include_inactive: If False (default), returns pending and completed items.
+                            If True, returns items that are NOT pending and NOT completed.
         """
         logger.info("🌳 [TREE_START] get_hierarchical_websites() called")
 
-        query = """
+        # Build WHERE clause based on include_inactive flag
+        where_clause = "WHERE parent_id IS NULL"
+        if not include_inactive:
+            # Active: pending and completed
+            where_clause += " AND processing_status IN ('pending', 'completed')"
+        else:
+            # Not Active: everything except pending and completed
+            where_clause += " AND processing_status NOT IN ('pending', 'completed')"
+
+        query = f"""
             SELECT
                 id,
                 original_url,
@@ -261,7 +274,7 @@ class WebCrawlDAO:
                 celery_task_id,
                 char_count
             FROM scraped_websites
-            WHERE parent_id IS NULL AND processing_status != 'deleted'
+            {where_clause}
             ORDER BY depth ASC, created_at DESC
         """
         try:
@@ -281,7 +294,7 @@ class WebCrawlDAO:
                     website_dict = self._format_website_record(root)
                     logger.info(f"📝 [TREE_FORMAT] Formatted root website: {website_dict.get('id')} -> {website_dict.get('url')}")
 
-                    children = await self._get_website_children(conn, root['id'])
+                    children = await self._get_website_children(conn, root['id'], include_inactive=include_inactive)
                     logger.info(f"👶 [TREE_CHILDREN] Fetched {len(children)} children for root ID={root['id']}")
 
                     website_dict['children'] = children
@@ -295,11 +308,24 @@ class WebCrawlDAO:
             logger.log_db_query(query, error=e)
             return []
 
-    async def _get_website_children(self, conn, parent_id: int, level: int = 0) -> List[Dict[str, Any]]:
+    async def _get_website_children(self, conn, parent_id: int, level: int = 0, include_inactive: bool = False) -> List[Dict[str, Any]]:
         """
         Recursively fetch all children of a website.
+        
+        Args:
+            include_inactive: If False (default), returns pending and completed items.
+                            If True, returns items that are NOT pending and NOT completed.
         """
-        query = """
+        # Build WHERE clause based on include_inactive flag
+        where_clause = "WHERE parent_id = $1"
+        if not include_inactive:
+            # Active: pending and completed
+            where_clause += " AND processing_status IN ('pending', 'completed')"
+        else:
+            # Not Active: everything except pending and completed
+            where_clause += " AND processing_status NOT IN ('pending', 'completed')"
+        
+        query = f"""
             SELECT
                 id,
                 original_url,
@@ -317,7 +343,7 @@ class WebCrawlDAO:
                 celery_task_id,
                 char_count
             FROM scraped_websites
-            WHERE parent_id = $1 AND processing_status != 'deleted'
+            {where_clause}
             ORDER BY depth ASC, created_at ASC
         """
         try:
@@ -327,7 +353,7 @@ class WebCrawlDAO:
             result = []
             for child in children:
                 child_dict = self._format_website_record(child)
-                grandchildren = await self._get_website_children(conn, child['id'], level + 1)
+                grandchildren = await self._get_website_children(conn, child['id'], level + 1, include_inactive=include_inactive)
                 child_dict['children'] = grandchildren
                 result.append(child_dict)
 
