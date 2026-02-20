@@ -33,14 +33,14 @@ class FileService:
         return error_message
 
     async def check_duplicate_file(self, original_filename: str) -> Optional[Dict[str, Any]]:
-        """Check if a file with the same name already exists (excluding deleted records)."""
+        """Check if a file with the same name already exists (only active files)."""
         try:
             from shared.db import get_db_connection
 
             async with get_db_connection() as conn:
-                # Check by filename only - exclude deleted records
+                # Check by filename only - only consider active files (exclude failed, deleted, cancelled)
                 existing_by_name = await conn.fetchrow(
-                    "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status != 'deleted'",
+                    "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
                     original_filename
                 )
                 if existing_by_name:
