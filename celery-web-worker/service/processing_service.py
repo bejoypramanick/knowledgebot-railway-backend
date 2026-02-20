@@ -132,6 +132,12 @@ class ProcessingService:
                 job_context=job_context
             )
 
+            # ========== PHASE 2.5: CHECK PARENT COMPLETION ==========
+            # Now that ALL pages have been discovered and processed, check if parent should be marked completed
+            # This must happen AFTER crawling finishes to avoid premature completion
+            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] All pages crawled, checking parent completion status")
+            await self.scraping_dao.check_and_update_parent_completion(job_context.website_id)
+
             # ========== PHASE 3: BUILD SUCCESS RESULT ==========
             # Build simple success result for Celery task logging.
             # Actual aggregate statistics are calculated from child records (SUM queries).
@@ -886,10 +892,8 @@ class ProcessingService:
             crawl_session_id=page_data.session_id
         )
 
-        # Check if all children are completed and update parent if needed
-        if child_page_id:
-            logger.info(f"🔍 [PARENT_CHECK] Checking if parent {job_context.website_id} should be marked completed")
-            await self.scraping_dao.check_and_update_parent_completion(job_context.website_id)
+        # Don't check parent completion here - it will be checked after ALL pages are crawled
+        # Checking here causes premature completion when not all pages have been discovered yet
 
         return child_page_id
 
