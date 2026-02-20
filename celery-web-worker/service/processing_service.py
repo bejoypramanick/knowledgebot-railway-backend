@@ -260,60 +260,93 @@ class ProcessingService:
         max_urls: int = 100
     ) -> List[str]:
         """
-        Discover URLs from a sitemap using crawl4ai's AsyncUrlSeeder.
+        Discover URLs from a sitemap by directly parsing the XML.
         
         Args:
-            sitemap_url: URL of the sitemap
+            sitemap_url: Full URL of the sitemap
             max_urls: Maximum URLs to extract
             
         Returns:
             List of URLs found in the sitemap
         """
         try:
-            from crawl4ai import AsyncUrlSeeder, SeedingConfig
-            from urllib.parse import urlparse
-            
-            # Extract domain from sitemap URL
-            parsed = urlparse(sitemap_url)
-            domain = parsed.netloc
+            import xml.etree.ElementTree as ET
+            import aiohttp
+            import gzip
+            from io import BytesIO
             
             logger.info(f"🗺️ [SITEMAP] Discovering URLs from {sitemap_url}")
-            logger.info(f"   Domain: {domain}")
             logger.info(f"   Max URLs: {max_urls}")
             
-            async with AsyncUrlSeeder() as seeder:
-                config = SeedingConfig(
-                    source="sitemap",
-                    max_urls=max_urls,
-                    extract_head=False,  # Don't need metadata, just URLs
-                    live_check=False,    # Don't verify (faster)
-                    filter_nonsense_urls=True,  # Filter out utility URLs
-                    verbose=False
-                )
-                
-                # Discover URLs
-                url_results = await seeder.urls(domain, config)
-                
-                # Extract just the URL strings, filter out invalid ones
-                urls = [
-                    result["url"] 
-                    for result in url_results 
-                    if result.get("status") != "not_valid"
-                ]
-                
-                logger.info(f"✅ [SITEMAP] Discovered {len(urls)} URLs from sitemap")
-                
-                # Log first few URLs as sample
-                if urls:
-                    logger.info(f"📋 [SITEMAP] Sample URLs:")
-                    for url in urls[:3]:
-                        logger.info(f"   - {url}")
-                
-                return urls
-                
-        except ImportError as ie:
-            logger.error(f"❌ [SITEMAP] crawl4ai AsyncUrlSeeder not available: {ie}")
-            return []
+            # Fetch the sitemap
+            async with aiohttp.ClientSession() as session:
+                async with session.get(sitemap_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    if response.status != 200:
+                        logger.error(f"❌ [SITEMAP] Failed to fetch sitemap: HTTP {response.status}")
+                        return []
+                    
+                    content = await response.read()
+                    
+                    # Handle compressed sitemaps
+                    if sitemap_url.endswith('.gz'):
+                        logger.info(f"📦 [SITEMAP] Decompressing gzipped sitemap")
+                        content = gzip.decompress(content)
+                    
+                    # Parse XML
+                    try:
+                        root = ET.fromstring(content)
+                    except ET.ParseError as e:
+                        logger.error(f"❌ [SITEMAP] Failed to parse XML: {e}")
+                        return []
+                    
+                    # Extract URLs from sitemap
+                    urls = []
+                    
+                    # Handle namespace
+                    namespaces = {
+                        'ns': 'http://www.sitemaps.org/schemas/sitemap/0.9',
+                        'xhtml': 'http://www.w3.org/1999/xhtml'
+                    }
+                    
+                    # Check if this is a sitemap index (contains other sitemaps)
+                    sitemap_locs = root.findall('.//ns:sitemap/ns:loc', namespaces)
+                    if sitemap_locs:
+                        logger.info(f"📋 [SITEMAP] Found sitemap index with {len(sitemap_locs)} sub-sitemaps")
+                        
+                        # Recursively fetch sub-sitemaps
+                        for sitemap_loc in sitemap_locs[:10]:  # Limit to 10 sub-sitemaps
+                            if len(urls) >= max_urls:
+                                break
+                            
+                            sub_sitemap_url = sitemap_loc.text.strip()
+                            logger.info(f"   Fetching sub-sitemap: {sub_sitemap_url}")
+                            
+                            sub_urls = await self._discoverSitemapURLs(
+                                sub_sitemap_url,
+                                max_urls=max_urls - len(urls)
+                            )
+                            urls.extend(sub_urls)
+                    else:
+                        # Regular sitemap - extract <loc> elements
+                        url_locs = root.findall('.//ns:url/ns:loc', namespaces)
+                        
+                        for url_loc in url_locs:
+                            if len(urls) >= max_urls:
+                                break
+                            
+                            url = url_loc.text.strip()
+                            urls.append(url)
+                    
+                    logger.info(f"✅ [SITEMAP] Discovered {len(urls)} URLs from sitemap")
+                    
+                    # Log first few URLs as sample
+                    if urls:
+                        logger.info(f"📋 [SITEMAP] Sample URLs:")
+                        for url in urls[:3]:
+                            logger.info(f"   - {url}")
+                    
+                    return urls
+                    
         except Exception as e:
             logger.error(f"❌ [SITEMAP] Failed to discover URLs: {e}")
             import traceback
