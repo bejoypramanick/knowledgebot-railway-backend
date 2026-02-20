@@ -94,7 +94,7 @@ async def queue_website_for_scraping(
 ) -> Dict[str, Any]:
     """
     Queue website for scraping via Celery.
-    Flow: create DB record → dispatch to Celery with website_id → update DB with real task_id.
+    Flow: check duplicates → create DB record → dispatch to Celery with website_id → update DB with real task_id.
 
     Args:
         url: Website URL to scrape
@@ -113,6 +113,34 @@ async def queue_website_for_scraping(
 
     try:
         import uuid
+        from shared.db import get_db_connection
+
+        # Check for duplicate URL (only active crawls)
+        logger.info(f"🔍 [DUPLICATE_CHECK] Checking for existing crawls of URL: {url}")
+        async with get_db_connection() as conn:
+            # Get all websites with this URL
+            all_websites = await conn.fetch(
+                "SELECT id, original_url, processing_status FROM scraped_websites WHERE original_url = $1 ORDER BY id DESC",
+                url
+            )
+            logger.info(f"🔍 [DUPLICATE_CHECK_ALL] Found {len(all_websites)} total websites with URL '{url}':")
+            for w in all_websites:
+                logger.info(f"   - ID={w['id']}, status={w['processing_status']}")
+            
+            # Check for active crawls (exclude failed, deleted, cancelled)
+            existing_active = await conn.fetchrow(
+                "SELECT id, original_url, processing_status FROM scraped_websites WHERE original_url = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
+                url
+            )
+            
+            if existing_active:
+                logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE crawl: ID={existing_active['id']}, url={existing_active['original_url']}, status={existing_active['processing_status']}")
+                return {
+                    "success": False,
+                    "error": f"Website is already being crawled or has been crawled (ID: {existing_active['id']}, Status: {existing_active['processing_status']})"
+                }
+            else:
+                logger.info(f"🔍 [DUPLICATE_CHECK] No active crawl found for: {url}")
 
         # Build options dict for the Celery task
         options = {
