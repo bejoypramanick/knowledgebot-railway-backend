@@ -6,14 +6,50 @@ All API Gateway endpoints in one file for easier debugging
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse, Response, JSONResponse
 import logging
+import asyncio
 from typing import Dict, Any
 from httpx import AsyncClient
+import httpx
 
 from ..core.firebase_auth import verify_firebase_token, get_user_from_firestore
 from ..core.config import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+async def check_config_service_with_retry(config_service_url: str, max_retries: int = 2) -> Dict[str, Any]:
+    """
+    Check configuration service with retry logic for connection failures.
+    Returns config dict or None if all attempts fail.
+    """
+    retry_delays = [0.5, 1.0]  # Quick retries for better UX
+    
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                response = await client.get(
+                    f"{config_service_url}/api/v1/configuration/widgetConfig",
+                    timeout=3.0
+                )
+                
+                if response.status_code == 200:
+                    return response.json()
+                    
+        except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
+            if attempt < max_retries - 1:
+                delay = retry_delays[attempt]
+                logger.warning(f"⚠️ Config service connection failed (attempt {attempt + 1}/{max_retries}), retrying in {delay}s...")
+                await asyncio.sleep(delay)
+                continue
+            else:
+                logger.error(f"❌ Config service unavailable after {max_retries} attempts")
+                return None
+        except Exception as e:
+            logger.error(f"❌ Unexpected error checking config service: {e}")
+            return None
+    
+    return None
 
 # =================================
 # DOMAIN VALIDATION HELPER FUNCTIONS
@@ -117,30 +153,21 @@ async def public_chat_stream(request: Request):
         if session_id and not hasattr(request.state, 'chat_status_checked'):
             config_service_url = "http://configuration.railway.internal:8080"  # Internal service URL
             
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    response = await client.get(
-                        f"{config_service_url}/api/v1/configuration/widgetConfig",
-                        timeout=5.0
-                    )
-                    
-                    if response.status_code == 200:
-                        config = response.json()
-                        chat_enabled = config.get("display_chatbot", True)
-                        
-                        # Store the result in request state for subsequent requests
-                        request.state.chat_status_checked = True
-                        request.state.chat_enabled = chat_enabled
-                        
-                        if not chat_enabled:
-                            logger.info("Chat is disabled - blocking request")
-                            raise HTTPException(status_code=403, detail="Chat is currently disabled")
-                        else:
-                            logger.info(f"Chat is enabled for session {session_id}")
-                            
-            except Exception as e:
-                logger.error(f"Error checking chat enabled status: {e}")
+            config = await check_config_service_with_retry(config_service_url)
+            
+            if config:
+                chat_enabled = config.get("display_chatbot", True)
+                request.state.chat_status_checked = True
+                request.state.chat_enabled = chat_enabled
+                
+                if not chat_enabled:
+                    logger.info("Chat is disabled - blocking request")
+                    raise HTTPException(status_code=403, detail="Chat is currently disabled")
+                else:
+                    logger.info(f"Chat is enabled for session {session_id}")
+            else:
                 # If we can't check the status, allow the request (fail open)
+                logger.warning("⚠️ Could not verify chat status, allowing request (fail open)")
                 request.state.chat_status_checked = True
                 request.state.chat_enabled = True
         
@@ -148,26 +175,19 @@ async def public_chat_stream(request: Request):
         elif not hasattr(request.state, 'chat_status_checked'):
             config_service_url = "http://configuration.railway.internal:8080"  # Internal service URL
             
-            try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    response = await client.get(
-                        f"{config_service_url}/api/v1/configuration/widgetConfig",
-                        timeout=5.0
-                    )
-                    
-                    if response.status_code == 200:
-                        config = response.json()
-                        chat_enabled = config.get("display_chatbot", True)
-                        request.state.chat_status_checked = True
-                        request.state.chat_enabled = chat_enabled
-                        
-                        if not chat_enabled:
-                            logger.info("Chat is disabled - blocking request")
-                            raise HTTPException(status_code=403, detail="Chat is currently disabled")
-                            
-            except Exception as e:
-                logger.error(f"Error checking chat enabled status: {e}")
+            config = await check_config_service_with_retry(config_service_url)
+            
+            if config:
+                chat_enabled = config.get("display_chatbot", True)
+                request.state.chat_status_checked = True
+                request.state.chat_enabled = chat_enabled
+                
+                if not chat_enabled:
+                    logger.info("Chat is disabled - blocking request")
+                    raise HTTPException(status_code=403, detail="Chat is currently disabled")
+            else:
                 # If we can't check the status, allow the request (fail open)
+                logger.warning("⚠️ Could not verify chat status, allowing request (fail open)")
                 request.state.chat_status_checked = True
                 request.state.chat_enabled = True
         
