@@ -7,7 +7,7 @@ rootDirectory = "."
 # Note: WORKDIR in Dockerfile is /app/celery-file-worker, so no need for cd
 # Using gevent pool for better I/O concurrency without thread exhaustion
 # Concurrency is controlled by CELERY_FILE_CONCURRENCY env var (default: 10)
-startCommand = "export PYTHONPATH=/app:/app/celery-file-worker && celery -A celery_app worker -Q file_processing -l info --pool=gevent --concurrency=10 --max-tasks-per-child=100"
+startCommand = "sh -c 'export PYTHONPATH=/app:/app/celery-file-worker && celery -A celery_app worker -Q file_processing -l info --pool=gevent --concurrency=10 --max-tasks-per-child=100'"
 
 # Restart policy for worker reliability
 restartPolicyType = "ON_FAILURE"
