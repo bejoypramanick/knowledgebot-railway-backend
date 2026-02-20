@@ -243,6 +243,15 @@ async def process_file_content(
     start_time = time.perf_counter()
     tmp_path = None
     markdown_tmp_path = None
+    
+    # Initialize Docling tracking variables
+    processed_by_docling = False
+    docling_processing_time_ms = None
+    docling_images_extracted = 0
+    docling_images_with_ocr = 0
+    original_file_extension = None
+    original_mime_type = None
+    char_count = 0
 
     async def get_file_details_by_task_id(celery_task_id: str) -> Optional[Dict[str, Any]]:
         """Query database to get file details using celery_task_id"""
@@ -380,6 +389,10 @@ async def process_file_content(
         sha256_hash = calculate_sha256(tmp_path)
         detected_mime_type = detect_mime_type_from_extension(original_filename, "", tmp_path)
         
+        # Store original file info before any conversion
+        original_file_extension = original_filename.rsplit('.', 1)[-1] if '.' in original_filename else ''
+        original_mime_type = detected_mime_type
+        
         logger.info(f"🔍 [ROUTING] Detected MIME: {detected_mime_type} for {original_filename}")
 
         # STEP 4: Check for duplicates
@@ -454,6 +467,15 @@ async def process_file_content(
                 )
 
                 if markdown_content:
+                    # Capture Docling metadata
+                    processed_by_docling = True
+                    docling_processing_time_ms = docling_metadata.get('processing_time_ms', 0)
+                    docling_images_extracted = docling_metadata.get('images_extracted', 0)
+                    docling_images_with_ocr = docling_metadata.get('images_with_ocr', 0)
+                    
+                    logger.info(f"📊 [DOCLING_METADATA] Processing time: {docling_processing_time_ms}ms, "
+                              f"Images: {docling_images_extracted}, OCR: {docling_images_with_ocr}")
+                    
                     markdown_tmp_path = await create_markdown_temp_file(markdown_content)
                     # Switch to markdown artifact
                     original_tmp_path = tmp_path
@@ -587,42 +609,58 @@ async def process_file_content(
                 logger.error(f"❌ [GEMINI] Error uploading to FileSearch: {e}")
                 raise
 
-            # STEP 7: DATABASE RECORD PHASE
+            # STEP 7: DATABASE UPDATE PHASE
             try:
-                # Calculate metrics from markdown content before recording
-                char_count = 0
+                # Calculate char_count from markdown content
                 if markdown_tmp_path and os.path.exists(markdown_tmp_path):
                     try:
                         with open(markdown_tmp_path, 'r', encoding='utf-8') as f:
                             markdown_content = f.read()
-                        metrics = calculate_metrics(markdown_content)
-                        char_count = metrics.get('char_count', 0)
+                        char_count = len(markdown_content)
                         logger.info(f"📊 [METRICS] Calculated for {original_filename}: {char_count:,} characters")
                     except Exception as me:
-                        logger.warning(f"⚠️ Could not calculate metrics from markdown: {me}")
+                        logger.warning(f"⚠️ Could not calculate char_count from markdown: {me}")
 
-                file_record_id = await file_service.record_metadata(
-                    user_email=user_email,
-                    original_filename=original_filename,
-                    file_display_name=file_display_name,
-                    file_ext=original_filename.rsplit('.', 1)[-1] if '.' in original_filename else '',
-                    uploaded_file=uploaded_file,
+                # Use the new DAO to update file record with ALL processing data
+                from dao.fileupload_dao import FileUploadDAO
+                dao = FileUploadDAO()
+                
+                # First update status to processing
+                await dao.update_file_status(int(file_id), 'processing')
+                
+                # Extract document URI if available
+                document_uri = None
+                if hasattr(uploaded_file, 'uri'):
+                    document_uri = uploaded_file.uri
+                
+                # Update with all processing data
+                success = await dao.update_file_with_processing_data(
+                    file_id=int(file_id),
+                    gemini_file_name=document_name,
+                    gemini_file_uri=document_uri,
+                    gemini_state=final_state,
                     file_size=file_size,
-                    sha256_hash=sha256_hash,
-                    final_state=final_state,
-                    gemini_processed_at=gemini_processed_at,
-                    mime_type=detected_mime_type,
-                    file_search_metadata=file_search_metadata,
                     char_count=char_count,
-                    user_role_id=user_role_id
+                    sha256_hash=sha256_hash,
+                    metadata={
+                        'type': 'file_search',
+                        'file_search_store_name': file_search_store_name,
+                        'document_name': document_name,
+                        'uploaded_at': gemini_processed_at.isoformat() if gemini_processed_at else None
+                    },
+                    processed_by_docling=processed_by_docling,
+                    docling_processing_time_ms=docling_processing_time_ms,
+                    docling_images_extracted=docling_images_extracted,
+                    docling_images_with_ocr=docling_images_with_ocr,
+                    original_file_extension=original_file_extension,
+                    original_mime_type=original_mime_type
                 )
 
-                if not file_record_id:
-                    logger.error(f"❌ [DB_ERROR] Database returned no ID for {original_filename}")
-                    logger.error(f"⚠️ File is in Gemini (ID: {uploaded_file.name}) but NOT in database!")
-                    raise Exception("Database metadata recording failed - file orphaned in Gemini")
+                if not success:
+                    logger.error(f"❌ [DB_ERROR] Failed to update file record for {original_filename}")
+                    raise Exception("Database update failed - file orphaned in Gemini")
 
-                logger.info(f"✅ [DB_RECORD] Recorded metadata for {original_filename}, DB ID: {file_record_id}")
+                logger.info(f"✅ [DB_UPDATE] Updated file record with all processing data, File ID: {file_id}")
 
                 # STEP 8: S3 CLEANUP PHASE
                 if tmp_path and os.path.exists(tmp_path):
@@ -632,27 +670,44 @@ async def process_file_content(
 
                 processing_time = time.perf_counter() - start_time
                 logger.info(f"✅ [SUCCESS] File processing completed: {original_filename}")
-                logger.info(f"   📁 Gemini File ID: {uploaded_file.name}")
-                logger.info(f"   🗄️  Database ID: {file_record_id}")
+                logger.info(f"   📁 Gemini Document: {document_name}")
+                logger.info(f"   🗄️  Database ID: {file_id}")
                 logger.info(f"   ⏱️  Time: {processing_time:.2f}s")
                 logger.info(f"   📊 Size: {file_size} bytes")
+                logger.info(f"   📝 Char Count: {char_count:,}")
+                logger.info(f"   🔧 Docling: {processed_by_docling}")
+                if processed_by_docling:
+                    logger.info(f"   ⏱️  Docling Time: {docling_processing_time_ms}ms")
+                    logger.info(f"   🖼️  Images: {docling_images_extracted} (OCR: {docling_images_with_ocr})")
                 logger.info(f"   🔐 Hash: {sha256_hash}")
 
                 return {
                     "success": True,
-                    "file_id": str(file_record_id),
+                    "file_id": str(file_id),
                     "status": final_state,
                     "processing_time_seconds": processing_time,
-                    "gemini_file_id": uploaded_file.name,
+                    "gemini_document_name": document_name,
                     "original_filename": original_filename,
                     "file_display_name": file_display_name,
                     "file_size": file_size,
                     "mime_type": detected_mime_type,
-                    "sha256_hash": sha256_hash
+                    "sha256_hash": sha256_hash,
+                    "char_count": char_count,
+                    "processed_by_docling": processed_by_docling
                 }
 
             except Exception as e:
                 logger.error(f"❌ [PROCESSING_ERROR] Error processing file {original_filename}: {e}")
+                
+                # Update status to failed in database
+                if file_id:
+                    try:
+                        from dao.fileupload_dao import FileUploadDAO
+                        dao = FileUploadDAO()
+                        await dao.update_file_status(int(file_id), 'failed', error_message=str(e))
+                        logger.info(f"✅ [DB_UPDATE] Updated file status to 'failed'")
+                    except Exception as db_error:
+                        logger.error(f"❌ [DB_ERROR] Failed to update status to 'failed': {db_error}")
 
                 # Cleanup on failure
                 if tmp_path and os.path.exists(tmp_path):
