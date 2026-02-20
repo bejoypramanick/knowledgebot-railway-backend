@@ -4,8 +4,20 @@ Provides structured logging with OTel span context integration for all services
 """
 import logging
 from typing import Dict, Any, Optional
+from contextvars import ContextVar
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
+
+# Context variable to store task ID for logging
+task_id_ctx_var: ContextVar[Optional[str]] = ContextVar("task_id", default=None)
+
+def set_task_id(task_id: str) -> None:
+    """Set the task ID for the current context (will appear in all logs)"""
+    task_id_ctx_var.set(task_id)
+
+def get_task_id() -> Optional[str]:
+    """Get the current task ID from context"""
+    return task_id_ctx_var.get()
 
 class OpenTelemetryLogger:
     """Enhanced logger with OpenTelemetry integration for Railway"""
@@ -15,11 +27,28 @@ class OpenTelemetryLogger:
         self.service_name = service_name
         self.tracer = trace.get_tracer(f"{service_name}.{name}")
         
+    def _format_message(self, message: str) -> str:
+        """Add task ID prefix to message if available"""
+        task_id = get_task_id()
+        if task_id:
+            # Show first 8 characters of task ID for readability
+            return f"[{task_id[:8]}] {message}"
+        return message
+        
     def _log_with_context(self, level: int, message: str, extra: Dict[str, Any] = None):
         """Log message with OpenTelemetry context using standard logging"""
+        # Add task ID to message
+        formatted_message = self._format_message(message)
+        
+        # Add task ID to extra fields
+        extra = extra or {}
+        task_id = get_task_id()
+        if task_id:
+            extra['task_id'] = task_id
+        
         # Standard logger automatically includes otelTraceID and otelSpanID 
         # from shared/telemetry.py LoggingInstrumentor
-        self.logger.log(level, message, extra=extra or {})
+        self.logger.log(level, formatted_message, extra=extra)
         
         # Add span attributes if span exists
         span = trace.get_current_span()
@@ -30,7 +59,8 @@ class OpenTelemetryLogger:
                     "log.level": logging.getLevelName(level),
                     "log.message": message,
                     "log.logger": self.logger.name,
-                    "service.name": self.service_name
+                    "service.name": self.service_name,
+                    **({"task_id": task_id} if task_id else {})
                 }
             )
     

@@ -7,7 +7,7 @@ import asyncio
 from typing import Dict, Any
 
 from celery_app import celery_app
-from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger, set_task_id
 
 logger = get_otel_logger("celery_tasks", "celery-web-worker")
 
@@ -25,6 +25,9 @@ def scrape_website_task(
     """
     task_id = self.request.id
     retry_count = self.request.retries
+
+    # Set task ID in context so it appears in all logs
+    set_task_id(task_id)
 
     logger.info("=" * 80)
     logger.info("🚀 [CELERY_TASK_RECEIVED] Website scraping task RECEIVED by worker")
