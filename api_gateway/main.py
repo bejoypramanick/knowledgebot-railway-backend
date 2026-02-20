@@ -52,10 +52,20 @@ async def lifespan(app: FastAPI):
             from shared.db import DatabaseManager
             db_manager = await DatabaseManager.get_instance()
             await db_manager.initialize()
-            logger.info("✅ Database connection pool initialized")
+            
+            # Verify pool is working with a test query
+            from shared.db import get_db_connection
+            async with get_db_connection() as conn:
+                await conn.execute("SELECT 1")
+            
+            logger.info("✅ Database connection pool initialized and verified")
         except Exception as e:
             logger.error(f"❌ Error initializing database pool: {e}")
-            logger.warning("⚠️ Services will continue but database operations may fail on first request")
+            logger.error(f"   Error type: {type(e).__name__}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+            # Re-raise to prevent startup if DB is critical
+            raise RuntimeError(f"Failed to initialize database pool: {e}") from e
 
         # Initialize Gemini FileSearch Store (create if doesn't exist)
         logger.info("📂 Initializing Gemini FileSearch store...")
