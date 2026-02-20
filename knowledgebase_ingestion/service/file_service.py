@@ -422,6 +422,21 @@ class FileService:
                         # Detect if URL is a sitemap
                         url = website['original_url'].lower()
                         is_sitemap = url.endswith('sitemap.xml')
+                        
+                        # Extract source type from metadata.scraping_config
+                        metadata = website['metadata']
+                        source_type = None
+                        if metadata and isinstance(metadata, dict):
+                            scraping_config = metadata.get('scraping_config', {})
+                            source_type = scraping_config.get('source')  # 'website', 'single', or 'sitemap'
+                        
+                        # Determine file_type based on source_type
+                        if is_sitemap:
+                            file_type = "SITEMAP"
+                        elif source_type == "single":
+                            file_type = "WEBPAGE"
+                        else:
+                            file_type = "WEBSITE"
 
                         node = {
                             "id": str(website['id']),
@@ -429,7 +444,7 @@ class FileService:
                             "display_name": website['title'] or website['domain'] or website['original_url'],
                             "file_extension": "URL",
                             "mime_type": "text/html",
-                            "file_type": "SITEMAP" if is_sitemap else "WEBSITE",
+                            "file_type": file_type,
                             "size_bytes": website['file_size'] or 0,  # Markdown file size in bytes
                             "sha256_hash": None,
                             "gemini_state": "completed",
