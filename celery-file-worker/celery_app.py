@@ -3,10 +3,17 @@ Celery application configuration for File Processing Worker
 Handles async file processing tasks
 """
 
+import sys
+import os
+
+# Ensure celery-file-worker directory is in Python path for module imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
 from celery import Celery
 from celery.signals import before_task_publish, task_prerun, task_postrun, task_failure, task_retry, worker_process_init
 from shared.otel_logger import get_otel_logger
-import os
 import redis
 
 logger = get_otel_logger("celery_app", "celery-file-worker")
