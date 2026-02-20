@@ -505,20 +505,18 @@ async def upload_file_async(
                 'size_bytes': file_size,
                 'mime_type': validation_result['mime_type'],
                 'processing_status': 'pending',
-                'source': 'upload',
                 'sha256_hash': file_sha256,
                 's3_url': s3_url,
                 'celery_task_id': celery_task_id
             }
 
             logger.info(f"📝 [DB_INSERT_DATA] Record data:")
-            logger.info(f"   user_id: {record_data['user_id']}")
+            logger.info(f"   user_role_id: {record_data['user_role_id']}")
             logger.info(f"   original_filename: {record_data['original_filename']}")
             logger.info(f"   file_display_name: {record_data['file_display_name']}")
             logger.info(f"   size_bytes: {record_data['size_bytes']}")
             logger.info(f"   mime_type: {record_data['mime_type']}")
             logger.info(f"   processing_status: {record_data['processing_status']}")
-            logger.info(f"   source: {record_data['source']}")
             logger.info(f"   s3_url: {record_data['s3_url']}")
             logger.info(f"   celery_task_id: {record_data['celery_task_id']}")
 
