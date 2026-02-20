@@ -7,8 +7,8 @@ rootDirectory = "."
 # Note: WORKDIR in Dockerfile is /app/celery-file-worker, so no need for cd
 # Using gevent pool for better I/O concurrency without thread exhaustion
 # Parallel processing: 10 concurrent file uploads can be processed simultaneously
-# To change concurrency, set CELERY_FILE_CONCURRENCY environment variable in Railway
-startCommand = "celery -A celery_app worker -Q file_processing -l info --pool=gevent --concurrency=${CELERY_FILE_CONCURRENCY:-10} --max-tasks-per-child=50"
+# Concurrency: 10 workers (hardcoded, modify here to change)
+startCommand = "celery -A celery_app worker -Q file_processing -l info --pool=gevent --concurrency=10 --max-tasks-per-child=50"
 
 # Restart policy for worker reliability
 restartPolicyType = "ON_FAILURE"
