@@ -218,3 +218,4 @@ def debug_task(self):
     """Debug task to verify Celery is working"""
     logger.info(f"🧪 [DEBUG_TASK] Debug task invoked - Task ID: {self.request.id}")
     print(f'Request: {self.request!r}')
+# Deployment trigger: Fri Feb 20 13:38:35 CET 2026
