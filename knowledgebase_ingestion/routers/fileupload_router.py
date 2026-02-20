@@ -560,11 +560,46 @@ async def upload_file_async(
             logger.info("✨ [UPLOAD_COMPLETE] File upload process completed successfully")
             logger.info("=" * 80)
 
+            # Fetch the complete file record for UI population (like webcrawl does)
+            try:
+                from knowledgebase_ingestion.dao.fileupload_dao import FileUploadDAO
+                dao = FileUploadDAO()
+                full_file = await dao.get_file_by_id(int(file_id))
+                
+                if full_file:
+                    logger.info(f"✅ [FILE_FETCH] Fetched full file record for UI")
+                    return {
+                        "success": True,
+                        "message": "File processing task queued successfully",
+                        "task_id": celery_task_id,
+                        "file_id": str(file_id),
+                        "id": str(file_id),
+                        "type": "file",
+                        "source": "upload",
+                        "name": full_file.get('original_filename'),
+                        "processing_status": full_file.get('processing_status', 'pending'),
+                        "error_message": full_file.get('error_message'),
+                        "created_at": full_file.get('created_at').isoformat() if full_file.get('created_at') else None,
+                        "updated_at": full_file.get('updated_at').isoformat() if full_file.get('updated_at') else None,
+                        "status": "Queued"
+                    }
+            except Exception as fetch_err:
+                logger.warning(f"⚠️ Could not fetch full file record: {fetch_err}")
+
+            # Fallback response if fetch fails
             return {
                 "success": True,
                 "message": "File processing task queued successfully",
                 "task_id": celery_task_id,
-                "file_id": file_id,
+                "file_id": str(file_id),
+                "id": str(file_id),
+                "type": "file",
+                "source": "upload",
+                "name": validation_result['original_filename'],
+                "processing_status": "pending",
+                "error_message": None,
+                "created_at": None,
+                "updated_at": None,
                 "status": "Queued"
             }
 
