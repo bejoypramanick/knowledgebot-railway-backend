@@ -16,6 +16,14 @@ END $$;
 -- Ensure processing_status column exists with correct constraint
 DO $$ 
 BEGIN
+    -- Add processing_status column if it doesn't exist
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                   WHERE table_name = 'file_uploads' AND column_name = 'processing_status') THEN
+        ALTER TABLE file_uploads ADD COLUMN processing_status varchar(20) DEFAULT 'pending' NULL;
+        CREATE INDEX idx_file_uploads_processing_status ON file_uploads USING btree (processing_status);
+        COMMENT ON COLUMN file_uploads.processing_status IS 'Current processing status of the file';
+    END IF;
+    
     -- Drop old constraints if they exist
     ALTER TABLE file_uploads DROP CONSTRAINT IF EXISTS valid_file_processing_status;
     ALTER TABLE file_uploads DROP CONSTRAINT IF EXISTS valid_processing_status;
