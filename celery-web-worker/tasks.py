@@ -75,8 +75,18 @@ def scrape_website_task(
         logger.info(f"     - options: {options}")
         logger.info(f"     - celery_task_id: {task_id}")
 
-        # With prefork pool, asyncio.run() works fine
-        asyncio.run(
+        # Get or create event loop for this worker process
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Run the async function
+        loop.run_until_complete(
             website_service.process_website_async(
                 website_id=website_id,
                 url=url,
@@ -128,8 +138,18 @@ def scrape_website_task(
                 from dao.scraping_dao import ScrapingDAO
                 dao = ScrapingDAO()
                 
-                # With prefork pool, asyncio.run() works fine
-                asyncio.run(
+                # Get or create event loop for this worker process
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_closed():
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                # Run the async function
+                loop.run_until_complete(
                     dao.update_website_status(
                         website_id,
                         "failed",

@@ -73,8 +73,18 @@ def process_file_upload_task(
 
         logger.info("⚙️  [PROCESSING] Calling process_file_content() with all parameters...")
         
-        # With prefork pool, asyncio.run() works fine
-        result = asyncio.run(
+        # Get or create event loop for this worker process
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Run the async function
+        result = loop.run_until_complete(
             process_file_content(
                 original_filename=original_filename,
                 file_display_name=file_display_name,
