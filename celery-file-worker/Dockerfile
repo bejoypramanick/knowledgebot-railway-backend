@@ -29,7 +29,7 @@ COPY shared /app/shared
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH="/app"
+ENV PYTHONPATH="/app:/app/celery-file-worker"
 
 # Change to service directory and start Celery worker for file_processing queue
 WORKDIR /app/celery-file-worker
