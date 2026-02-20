@@ -38,6 +38,7 @@ def extract_user_from_request(request: Request) -> Tuple[str, Optional[str]]:
 async def get_user_role_id_from_email(user_email: str) -> Optional[int]:
     """
     Look up user_role_id from user_role_mapping table using email.
+    Joins with users table to match email to user_id.
     
     Args:
         user_email: User's email address
@@ -47,9 +48,10 @@ async def get_user_role_id_from_email(user_email: str) -> Optional[int]:
     """
     try:
         query = """
-            SELECT user_role_id 
-            FROM user_role_mapping 
-            WHERE email = $1 
+            SELECT urm.user_role_id 
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            WHERE u.email = $1 
             LIMIT 1
         """
         
