@@ -285,6 +285,26 @@ class ScrapingDAO:
         logger.info(f"   Gemini File: {gemini_file_name}")
         logger.info(f"   Title: {title}")
 
+        # Determine child page type based on URL
+        url_lower = page_url.lower()
+        is_sitemap = (
+            url_lower.endswith('sitemap.xml') or
+            url_lower.endswith('sitemap.xml.gz') or
+            url_lower.endswith('sitemap_index.xml') or
+            '/sitemap' in url_lower and url_lower.endswith('.xml')
+        )
+        
+        # Child pages are either sitemaps or webpages (never "website")
+        child_source_type = "sitemap" if is_sitemap else "single"
+        
+        logger.info(f"   Child Type: {child_source_type}")
+        
+        # Prepare metadata with scraping_config for proper UI classification
+        child_metadata = file_search_metadata or {}
+        if 'scraping_config' not in child_metadata:
+            child_metadata['scraping_config'] = {}
+        child_metadata['scraping_config']['source'] = child_source_type
+
         query = """
             INSERT INTO scraped_websites (
                 parent_id, original_url, processing_status,
@@ -307,7 +327,7 @@ class ScrapingDAO:
             'completed' if gemini_file_name else 'processing',
             gemini_file_name,
             gemini_file_uri,
-            json.dumps(file_search_metadata) if file_search_metadata else None,
+            json.dumps(child_metadata),
             1,  # depth = 1 (child of root)
             user_role_id,
             file_size,

@@ -311,21 +311,24 @@ class ProcessingService:
                     # Check if this is a sitemap index (contains other sitemaps)
                     sitemap_locs = root.findall('.//ns:sitemap/ns:loc', namespaces)
                     if sitemap_locs:
-                        logger.info(f"📋 [SITEMAP] Found sitemap index with {len(sitemap_locs)} sub-sitemaps")
+                        total_sitemaps = len(sitemap_locs)
+                        logger.info(f"📋 [SITEMAP] Found sitemap index with {total_sitemaps} sub-sitemaps")
                         
-                        # Recursively fetch sub-sitemaps
-                        for sitemap_loc in sitemap_locs[:10]:  # Limit to 10 sub-sitemaps
+                        # Process all sub-sitemaps (no arbitrary limit)
+                        for idx, sitemap_loc in enumerate(sitemap_locs, 1):
                             if len(urls) >= max_urls:
+                                logger.info(f"⚠️  [SITEMAP] Reached max_urls limit ({max_urls}), stopping at sub-sitemap {idx}/{total_sitemaps}")
                                 break
                             
                             sub_sitemap_url = sitemap_loc.text.strip()
-                            logger.info(f"   Fetching sub-sitemap: {sub_sitemap_url}")
+                            logger.info(f"   [{idx}/{total_sitemaps}] Fetching sub-sitemap: {sub_sitemap_url}")
                             
                             sub_urls = await self._discoverSitemapURLs(
                                 sub_sitemap_url,
                                 max_urls=max_urls - len(urls)
                             )
                             urls.extend(sub_urls)
+                            logger.info(f"   [{idx}/{total_sitemaps}] Got {len(sub_urls)} URLs (total: {len(urls)}/{max_urls})")
                     else:
                         # Regular sitemap - extract <loc> elements
                         url_locs = root.findall('.//ns:url/ns:loc', namespaces)

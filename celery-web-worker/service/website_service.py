@@ -81,7 +81,7 @@ class WebsiteService:
             # Build ProcessingRequest with CrawlConfig
             crawl_config = CrawlConfig(
                 max_depth=options.get("max_depth", 2),
-                max_pages=options.get("max_pages", 100),
+                max_pages=options.get("max_pages", 1000),  # Increased default for sitemaps
                 max_concurrent=options.get("max_concurrent", 10),
                 delay_between_requests=options.get("delay_between_requests", 0.0)
             )
