@@ -5,6 +5,7 @@ Handles async file processing with database status tracking
 
 import asyncio
 from typing import Dict, Any
+from celery.exceptions import SoftTimeLimitExceeded
 
 from celery_app import celery_app
 from shared.otel_logger import get_otel_logger, set_task_id
@@ -103,6 +104,33 @@ def process_file_upload_task(
             logger.warning("⚠️ [RESULT] Result is None - processing may have failed")
 
         return result
+
+    except SoftTimeLimitExceeded:
+        logger.error("=" * 80)
+        logger.error(f"⏱️  [TIMEOUT] Task exceeded time limit (35 minutes)")
+        logger.error("=" * 80)
+        logger.error(f"📄 [FILE] File ID: {file_id}")
+        logger.error(f"⏱️  [TIMEOUT] Task was killed due to timeout")
+        logger.error(f"💡 [HINT] File may be too large or docling queue is backed up")
+        
+        # Mark file as failed in database
+        try:
+            from dao.fileupload_dao import FileUploadDAO
+            dao = FileUploadDAO()
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(
+                dao.update_file_status(file_id, "failed", "Processing timeout (35 minutes)")
+            )
+            logger.info(f"✅ [DB_UPDATE] Marked file {file_id} as failed due to timeout")
+        except Exception as db_err:
+            logger.error(f"❌ [DB_UPDATE] Failed to update file status: {db_err}")
+        
+        return {
+            "success": False,
+            "error": "Processing timeout (35 minutes) - file may be too large or docling queue is backed up"
+        }
 
     except Exception as e:
         logger.error("=" * 80)
