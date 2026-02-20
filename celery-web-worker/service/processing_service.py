@@ -244,6 +244,82 @@ class ProcessingService:
 
     # ==================== CRAWL LAYER ====================
 
+    def _isSitemapURL(self, url: str) -> bool:
+        """Check if URL is a sitemap"""
+        url_lower = url.lower()
+        return (
+            url_lower.endswith('sitemap.xml') or
+            url_lower.endswith('sitemap.xml.gz') or
+            url_lower.endswith('sitemap_index.xml') or
+            '/sitemap' in url_lower and url_lower.endswith('.xml')
+        )
+
+    async def _discoverSitemapURLs(
+        self,
+        sitemap_url: str,
+        max_urls: int = 100
+    ) -> List[str]:
+        """
+        Discover URLs from a sitemap using crawl4ai's AsyncUrlSeeder.
+        
+        Args:
+            sitemap_url: URL of the sitemap
+            max_urls: Maximum URLs to extract
+            
+        Returns:
+            List of URLs found in the sitemap
+        """
+        try:
+            from crawl4ai import AsyncUrlSeeder, SeedingConfig
+            from urllib.parse import urlparse
+            
+            # Extract domain from sitemap URL
+            parsed = urlparse(sitemap_url)
+            domain = parsed.netloc
+            
+            logger.info(f"🗺️ [SITEMAP] Discovering URLs from {sitemap_url}")
+            logger.info(f"   Domain: {domain}")
+            logger.info(f"   Max URLs: {max_urls}")
+            
+            async with AsyncUrlSeeder() as seeder:
+                config = SeedingConfig(
+                    source="sitemap",
+                    max_urls=max_urls,
+                    extract_head=False,  # Don't need metadata, just URLs
+                    live_check=False,    # Don't verify (faster)
+                    filter_nonsense_urls=True,  # Filter out utility URLs
+                    verbose=False
+                )
+                
+                # Discover URLs
+                url_results = await seeder.urls(domain, config)
+                
+                # Extract just the URL strings, filter out invalid ones
+                urls = [
+                    result["url"] 
+                    for result in url_results 
+                    if result.get("status") != "not_valid"
+                ]
+                
+                logger.info(f"✅ [SITEMAP] Discovered {len(urls)} URLs from sitemap")
+                
+                # Log first few URLs as sample
+                if urls:
+                    logger.info(f"📋 [SITEMAP] Sample URLs:")
+                    for url in urls[:3]:
+                        logger.info(f"   - {url}")
+                
+                return urls
+                
+        except ImportError as ie:
+            logger.error(f"❌ [SITEMAP] crawl4ai AsyncUrlSeeder not available: {ie}")
+            return []
+        except Exception as e:
+            logger.error(f"❌ [SITEMAP] Failed to discover URLs: {e}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+            return []
+
     async def _crawlPagesWithBFS(
         self,
         crawl_config: CrawlConfig,
@@ -256,12 +332,36 @@ class ProcessingService:
             logger.error(f"❌ crawl4ai not available: {ie}")
             return
 
-        visited_urls = set()
-        to_visit = [(job_context.root_url, 0)]
+        # Check if root URL is a sitemap
+        is_sitemap = self._isSitemapURL(job_context.root_url)
+        
+        if is_sitemap:
+            logger.info(f"🗺️ [SITEMAP] Detected sitemap URL, using URL discovery")
+            
+            # Discover URLs from sitemap
+            sitemap_urls = await self._discoverSitemapURLs(
+                job_context.root_url,
+                max_urls=crawl_config.max_pages
+            )
+            
+            if not sitemap_urls:
+                logger.error("❌ [SITEMAP] No URLs discovered from sitemap")
+                return
+            
+            logger.info(f"📋 [SITEMAP] Will crawl {len(sitemap_urls)} URLs from sitemap")
+            
+            # Add all sitemap URLs to crawl queue (depth=1 for all)
+            to_visit = [(url, 1) for url in sitemap_urls]
+            visited_urls = set()
+        else:
+            # Normal BFS crawl
+            visited_urls = set()
+            to_visit = [(job_context.root_url, 0)]
+
         semaphore = asyncio.Semaphore(crawl_config.max_concurrent)
         pages_yielded = 0
 
-        logger.info(f"🔄 Starting BFS crawl with max_depth={crawl_config.max_depth}, max_pages={crawl_config.max_pages}")
+        logger.info(f"🔄 Starting {'sitemap' if is_sitemap else 'BFS'} crawl with max_depth={crawl_config.max_depth}, max_pages={crawl_config.max_pages}")
 
         while to_visit and pages_yielded < crawl_config.max_pages:
             current_url, current_depth = to_visit.pop(0)
@@ -275,7 +375,7 @@ class ProcessingService:
             if result:
                 page_url, page_html, title, description, session_id = result
                 pages_yielded += 1
-                logger.info(f"✅ [BFS] Yielded page {pages_yielded}/{crawl_config.max_pages}")
+                logger.info(f"✅ [{'SITEMAP' if is_sitemap else 'BFS'}] Yielded page {pages_yielded}/{crawl_config.max_pages}")
 
                 yield PageData(
                     page_url=page_url,
@@ -285,7 +385,9 @@ class ProcessingService:
                     session_id=session_id
                 )
 
-                if current_depth < crawl_config.max_depth and pages_yielded < crawl_config.max_pages:
+                # For sitemap crawls, don't follow links (we already have all URLs)
+                # For normal BFS, continue following links
+                if not is_sitemap and current_depth < crawl_config.max_depth and pages_yielded < crawl_config.max_pages:
                     new_links = await self._extractLinksFromHTML(page_html, page_url, self._get_domain(job_context.root_url), visited_urls)
                     to_visit.extend((link, current_depth + 1) for link in new_links if pages_yielded < crawl_config.max_pages)
 
