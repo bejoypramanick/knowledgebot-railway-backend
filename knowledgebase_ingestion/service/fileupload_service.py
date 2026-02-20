@@ -510,8 +510,12 @@ async def delete_all_knowledge() -> Dict[str, Any]:
                                 deleted_files += 1
                                 logger.info(f"   ✅ Deleted raw file from Gemini: {file_record['original_filename']}")
                             except Exception as gem_err:
-                                logger.warning(f"   ⚠️  Could not delete from Gemini: {file_record['gemini_file_name']} - {gem_err}")
-                                errors.append(f"Raw file delete failed for {file_record['original_filename']}: {gem_err}")
+                                # 404 is expected for FileSearch files (they don't have raw files)
+                                if "404" in str(gem_err) or "Not Found" in str(gem_err):
+                                    logger.info(f"   ℹ️  File not found (expected for FileSearch): {file_record['original_filename']}")
+                                else:
+                                    logger.warning(f"   ⚠️  Could not delete from Gemini: {file_record['gemini_file_name']} - {gem_err}")
+                                    errors.append(f"Raw file delete failed for {file_record['original_filename']}: {gem_err}")
         except Exception as e:
             logger.error(f"❌ [GEMINI_RAW_DELETE_ERROR] Error deleting raw files: {e}")
             errors.append(f"Raw file deletion failed: {e}")
