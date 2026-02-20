@@ -59,7 +59,7 @@ celery_app.conf.update(
     # Performance tuning for web crawling
     # Concurrency is configurable via CELERY_WEB_CONCURRENCY environment variable
     worker_prefetch_multiplier=1,  # Each worker prefetches only 1 task
-    worker_max_tasks_per_child=100,  # Restart worker after 100 tasks to prevent memory leaks
+    worker_max_tasks_per_child=50,  # Restart worker after 50 tasks to prevent memory leaks
     worker_concurrency=worker_concurrency,  # Parallel worker processes (configurable)
     task_acks_late=True,  # Acknowledge task only after completion
     task_reject_on_worker_lost=True,  # Requeue task if worker dies
