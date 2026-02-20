@@ -790,23 +790,24 @@ class FileService:
 
         Operations (in order):
         1. Retrieves website record and all child pages
-        2. (Optional) Revokes Celery worker tasks - only for "delete all" operations
-        3. Deletes all documents from Gemini FileSearch store
-        4. Verifies deletion from Gemini FileSearch
-        5. ONLY THEN marks website and all children as deleted in database (atomic transaction)
+        2. Force kills parent's Celery task (if parent row and task exists)
+        3. (Optional) Revokes child Celery tasks - only for "delete all" operations
+        4. Deletes all documents from Gemini FileSearch store
+        5. Verifies deletion from Gemini FileSearch
+        6. ONLY THEN marks website and all children as deleted in database (atomic transaction)
         
         If Gemini deletion fails, the database is NOT updated (rollback).
 
         Args:
             website_id: ID of website/page to delete
-            revoke_celery_tasks: If True, revoke Celery tasks (only for "delete all")
+            revoke_celery_tasks: If True, revoke child Celery tasks (only for "delete all")
 
         Returns:
             {"success": bool, "message": str, ...details}
         """
         logger.info("=" * 80)
         logger.info(f"🗑️  [DELETE_WEBSITE_LOGIC] Deleting website ID: {website_id}")
-        logger.info(f"   Revoke Celery tasks: {revoke_celery_tasks}")
+        logger.info(f"   Revoke child Celery tasks: {revoke_celery_tasks}")
         logger.info("=" * 80)
 
         try:
@@ -843,49 +844,68 @@ class FileService:
             logger.info(f"   Type: {'Child Page' if is_child else 'Parent Website'}")
             logger.info(f"   Child pages: {len(child_pages)}")
 
-            # Step 2: Optionally revoke Celery tasks (only for "delete all")
+            # Step 2: ALWAYS force kill parent's Celery task if this is a parent row
             revoked_tasks = 0
-            if revoke_celery_tasks:
-                logger.info(f"🔪 [CELERY_REVOKE] Revoking Celery worker tasks...")
+            if not is_child and website_record['celery_task_id']:
+                logger.info(f"🔪 [PARENT_TASK_KILL] Force killing parent's Celery task...")
                 from shared.celery_dispatcher import web_celery
                 from shared.redis_message_queue import RedisMessageQueue
                 
-                task_ids_to_revoke = []
+                parent_task_id = website_record['celery_task_id']
+                try:
+                    logger.info(f"   🔪 Force killing parent task: {parent_task_id}")
+                    web_celery.control.revoke(parent_task_id, terminate=True, signal='SIGKILL')
+                    revoked_tasks += 1
+                    logger.info(f"   ✅ Parent task killed: {parent_task_id}")
+                except Exception as e:
+                    logger.warning(f"   ⚠️  Could not kill parent task {parent_task_id}: {e}")
 
-                # Collect all task IDs (parent + children)
-                if website_record['celery_task_id']:
-                    task_ids_to_revoke.append(website_record['celery_task_id'])
-
-                for child in child_pages:
-                    if child['celery_task_id']:
-                        task_ids_to_revoke.append(child['celery_task_id'])
-
-                # Revoke all Celery tasks
-                for task_id in task_ids_to_revoke:
-                    try:
-                        logger.info(f"   🔪 Revoking Celery task: {task_id}")
-                        web_celery.control.revoke(task_id, terminate=True, signal='SIGKILL')
-                        revoked_tasks += 1
-                        logger.info(f"   ✅ Task revoked: {task_id}")
-                    except Exception as e:
-                        logger.warning(f"   ⚠️  Could not revoke task {task_id}: {e}")
-
-                # Set Redis cancellation flags for in-progress tasks
-                logger.info(f"🚩 [REDIS_FLAGS] Setting task cancellation flags...")
+                # Set Redis cancellation flag for parent task
+                logger.info(f"🚩 [PARENT_FLAG] Setting cancellation flag for parent task...")
                 try:
                     redis_queue = RedisMessageQueue()
-                    for task_id in task_ids_to_revoke:
+                    redis_queue.set_task_cancelled(parent_task_id)
+                    logger.info(f"   ✅ Set cancellation flag for parent task: {parent_task_id}")
+                except Exception as e:
+                    logger.warning(f"   ⚠️  Could not set cancellation flag for parent: {e}")
+
+            # Step 3: Optionally revoke child Celery tasks (only for "delete all")
+            if revoke_celery_tasks and child_pages:
+                logger.info(f"🔪 [CHILD_TASKS_REVOKE] Revoking child Celery worker tasks...")
+                from shared.celery_dispatcher import web_celery
+                from shared.redis_message_queue import RedisMessageQueue
+                
+                child_task_ids = []
+                for child in child_pages:
+                    if child['celery_task_id']:
+                        child_task_ids.append(child['celery_task_id'])
+
+                # Revoke all child Celery tasks
+                for task_id in child_task_ids:
+                    try:
+                        logger.info(f"   🔪 Revoking child task: {task_id}")
+                        web_celery.control.revoke(task_id, terminate=True, signal='SIGKILL')
+                        revoked_tasks += 1
+                        logger.info(f"   ✅ Child task revoked: {task_id}")
+                    except Exception as e:
+                        logger.warning(f"   ⚠️  Could not revoke child task {task_id}: {e}")
+
+                # Set Redis cancellation flags for child tasks
+                logger.info(f"🚩 [CHILD_FLAGS] Setting task cancellation flags for children...")
+                try:
+                    redis_queue = RedisMessageQueue()
+                    for task_id in child_task_ids:
                         try:
                             redis_queue.set_task_cancelled(task_id)
-                            logger.info(f"   ✅ Set cancellation flag for task: {task_id}")
+                            logger.info(f"   ✅ Set cancellation flag for child task: {task_id}")
                         except Exception as e:
                             logger.warning(f"   ⚠️  Could not set cancellation flag for {task_id}: {e}")
                 except Exception as e:
                     logger.warning(f"⚠️  Error setting Redis cancellation flags: {e}")
-            else:
-                logger.info(f"ℹ️  [CELERY_SKIP] Skipping Celery task revocation (individual delete)")
+            elif not revoke_celery_tasks:
+                logger.info(f"ℹ️  [CHILD_TASKS_SKIP] Skipping child task revocation (individual delete)")
 
-            # Step 3: Delete from Gemini FileSearch and verify (BEFORE DB update)
+            # Step 4: Delete from Gemini FileSearch and verify (BEFORE DB update)
             logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini FileSearch and verifying...")
             deleted_documents = 0
             failed_deletes = []
