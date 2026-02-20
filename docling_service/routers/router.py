@@ -96,6 +96,11 @@ async def process_document(request: Request, file: UploadFile = File(...)) -> Do
                 os.unlink(temp_file_path)
             except Exception as e:
                 logger.warning(f"⚠️ Failed to cleanup temp file {temp_file_path}: {e}")
+        
+        # Force garbage collection to free memory
+        import gc
+        gc.collect()
+        logger.debug("🧹 Garbage collection completed")
 
 
 @router.get("/health")
