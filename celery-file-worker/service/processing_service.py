@@ -380,8 +380,21 @@ async def process_file_content(
         # STEP 4: Check for duplicates
         duplicate_check = await file_service.handle_duplicate_check(sha256_hash, original_filename, False)
         if not duplicate_check.get("allow", True):
+            # Update database status to failed with duplicate error message
+            if file_id:
+                try:
+                    from dao.fileupload_dao import FileUploadDAO
+                    dao = FileUploadDAO()
+                    error_msg = f"Duplicate file: {duplicate_check.get('detail', 'File already exists')}"
+                    await dao.update_file_status(int(file_id), 'failed', error_message=error_msg)
+                    logger.info(f"✅ [DB_UPDATE] Updated file status to 'failed' (duplicate)")
+                except Exception as db_error:
+                    logger.error(f"❌ [DB_ERROR] Failed to update status for duplicate: {db_error}")
+            
+            # Cleanup temp file
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+            
             return {
                 "success": False,
                 "error": f"Duplicate file: {duplicate_check.get('detail', 'File already exists')}"
