@@ -775,14 +775,17 @@ class FileService:
 
     async def delete_website_logic(self, website_id: str) -> Dict[str, Any]:
         """
-        Delete a single website and all its child pages.
+        Delete a single website and all its child pages with ATOMIC transaction.
 
-        Operations:
+        Operations (in order):
         1. Retrieves website record and all child pages with Celery task IDs
         2. Revokes Celery worker tasks (kills running scrapers)
         3. Sets Redis task cancellation flags
-        4. Deletes all documents from Gemini FileSearch store and verifies deletion
-        5. Marks website and all children as deleted in database (soft delete for audit trail)
+        4. Deletes all documents from Gemini FileSearch store
+        5. Verifies deletion from Gemini FileSearch
+        6. ONLY THEN marks website and all children as deleted in database (atomic transaction)
+        
+        If Gemini deletion fails, the database is NOT updated (rollback).
 
         Returns:
             {"success": bool, "message": str, ...details}
@@ -803,7 +806,7 @@ class FileService:
             logger.info(f"🔍 [LOOKUP] Fetching website, child pages, and task IDs...")
             async with get_db_connection() as conn:
                 website_record = await conn.fetchrow(
-                    "SELECT id, original_url, metadata, celery_task_id FROM scraped_websites WHERE id = $1",
+                    "SELECT id, original_url, metadata, celery_task_id, parent_id FROM scraped_websites WHERE id = $1",
                     int(website_id)
                 )
 
@@ -815,15 +818,19 @@ class FileService:
                         "website_id": website_id
                     }
 
-                # Get all child pages with their task IDs
-                child_pages = await conn.fetch(
-                    "SELECT id, original_url, metadata, celery_task_id FROM scraped_websites WHERE parent_id = $1",
-                    int(website_id)
-                )
+                # Get all child pages with their task IDs (only if this is a parent)
+                child_pages = []
+                if website_record['parent_id'] is None:
+                    child_pages = await conn.fetch(
+                        "SELECT id, original_url, metadata, celery_task_id FROM scraped_websites WHERE parent_id = $1",
+                        int(website_id)
+                    )
 
+            is_child = website_record['parent_id'] is not None
             logger.info(f"✅ Website found: {website_record['original_url']}")
+            logger.info(f"   Type: {'Child Page' if is_child else 'Parent Website'}")
             logger.info(f"   Child pages: {len(child_pages)}")
-            logger.info(f"   Parent Celery task ID: {website_record['celery_task_id']}")
+            logger.info(f"   Celery task ID: {website_record['celery_task_id']}")
 
             # Step 2: Revoke Celery tasks and set cancellation flags
             logger.info(f"🔪 [CELERY_REVOKE] Killing Celery worker tasks...")
@@ -861,15 +868,17 @@ class FileService:
             except Exception as e:
                 logger.warning(f"⚠️  Error setting Redis cancellation flags: {e}")
 
-            # Step 3: Delete from Gemini FileSearch and verify
+            # Step 3: Delete from Gemini FileSearch and verify (BEFORE DB update)
             logger.info(f"🤖 [GEMINI_DELETE] Deleting from Gemini FileSearch and verifying...")
             deleted_documents = 0
-            failed_deletes = 0
+            failed_deletes = []
+            gemini_deletion_successful = True
 
             try:
                 genai_client = get_genai_client()
                 if not genai_client:
-                    logger.warning("⚠️  Gemini client not available (items will still be marked as deleted in DB)")
+                    logger.warning("⚠️  Gemini client not available - skipping FileSearch deletion")
+                    gemini_deletion_successful = False
                 else:
                     all_pages = [website_record] + child_pages
 
@@ -900,71 +909,110 @@ class FileService:
                                                 )
                                                 doc_exists = any(doc.name == document_name for doc in documents)
                                                 if doc_exists:
-                                                    logger.warning(f"   ⚠️  Verification FAILED: Document still exists in FileSearch: {document_name}")
-                                                    failed_deletes += 1
+                                                    error_msg = f"Document still exists after deletion: {document_name}"
+                                                    logger.error(f"   ❌ VERIFICATION FAILED: {error_msg}")
+                                                    failed_deletes.append({
+                                                        "url": page['original_url'],
+                                                        "document": document_name,
+                                                        "error": error_msg
+                                                    })
+                                                    gemini_deletion_successful = False
                                                 else:
                                                     deleted_documents += 1
                                                     logger.info(f"   ✅ Verified deleted from FileSearch: {page['original_url']}")
                                             except Exception as verify_err:
-                                                logger.warning(f"   ⚠️  Could not verify deletion: {verify_err}")
-                                                # Assume delete was successful if no error on delete itself
-                                                deleted_documents += 1
+                                                error_msg = f"Could not verify deletion: {verify_err}"
+                                                logger.error(f"   ❌ {error_msg}")
+                                                failed_deletes.append({
+                                                    "url": page['original_url'],
+                                                    "document": document_name,
+                                                    "error": error_msg
+                                                })
+                                                gemini_deletion_successful = False
                                         except Exception as fs_err:
-                                            logger.warning(f"   ❌ Failed to delete document from FileSearch: {fs_err}")
-                                            failed_deletes += 1
+                                            error_msg = f"Failed to delete from FileSearch: {fs_err}"
+                                            logger.error(f"   ❌ {error_msg}")
+                                            failed_deletes.append({
+                                                "url": page['original_url'],
+                                                "document": document_name,
+                                                "error": error_msg
+                                            })
+                                            gemini_deletion_successful = False
                             except Exception as e:
                                 logger.warning(f"   ⚠️  Error processing metadata: {e}")
             except Exception as e:
-                logger.warning(f"⚠️  Error during Gemini deletion: {e}")
+                logger.error(f"❌ Error during Gemini deletion: {e}")
+                gemini_deletion_successful = False
 
-            # Step 4: Mark website and all children as deleted in database (soft delete)
-            logger.info(f"💾 [DB_UPDATE] Marking website and child pages as deleted...")
+            # Step 4: ONLY mark as deleted in DB if Gemini deletion was successful
+            if not gemini_deletion_successful:
+                logger.error("=" * 80)
+                logger.error(f"❌ [ATOMIC_ROLLBACK] Gemini deletion failed - NOT updating database")
+                logger.error("=" * 80)
+                logger.error(f"   Failed deletes: {len(failed_deletes)}")
+                for fail in failed_deletes:
+                    logger.error(f"   - {fail['url']}: {fail['error']}")
+                
+                return {
+                    "success": False,
+                    "message": "Gemini FileSearch deletion failed - database not updated (atomic rollback)",
+                    "website_id": website_id,
+                    "url": website_record['original_url'],
+                    "failed_deletes": failed_deletes,
+                    "documents_deleted_from_filesearch": deleted_documents
+                }
+
+            logger.info(f"💾 [DB_UPDATE] All Gemini deletions verified - marking as deleted in database...")
             try:
                 async with get_db_connection() as conn:
-                    # Mark parent website as deleted
-                    await conn.execute(
-                        "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
-                        int(website_id)
-                    )
-
-                    # Mark all child pages as deleted
-                    if child_pages:
+                    async with conn.transaction():
+                        # Mark the website/page as deleted
                         await conn.execute(
-                            "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW() WHERE parent_id = $1",
+                            "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
                             int(website_id)
                         )
 
-                logger.info(f"✅ Website and all {len(child_pages)} child pages marked as deleted")
+                        # Mark all child pages as deleted (only if this is a parent)
+                        if child_pages:
+                            await conn.execute(
+                                "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW() WHERE parent_id = $1",
+                                int(website_id)
+                            )
+
+                logger.info(f"✅ {'Website and all child pages' if child_pages else 'Page'} marked as deleted")
                 logger.info(f"   (Records retained in database for audit trail)")
             except Exception as e:
-                logger.error(f"❌ Error marking website as deleted: {e}")
+                logger.error(f"❌ Error marking as deleted in database: {e}")
                 raise
 
             logger.info("=" * 80)
-            logger.info(f"✅ [DELETE_WEBSITE_COMPLETE] Website deletion completed")
+            logger.info(f"✅ [DELETE_COMPLETE] Atomic deletion completed successfully")
             logger.info("=" * 80)
-            logger.info(f"   Website: {website_record['original_url']}")
+            logger.info(f"   URL: {website_record['original_url']}")
+            logger.info(f"   Type: {'Child Page' if is_child else 'Parent Website'}")
             logger.info(f"   Child pages deleted: {len(child_pages)}")
             logger.info(f"   Celery tasks revoked: {revoked_tasks}")
             logger.info(f"   Documents deleted from FileSearch: {deleted_documents}")
-            logger.info(f"   Failed FileSearch deletes: {failed_deletes}")
             logger.info(f"   Marked as deleted in DB: Yes")
 
             return {
                 "success": True,
-                "message": "Website and all child pages deleted successfully",
+                "message": f"{'Website and all child pages' if child_pages else 'Page'} deleted successfully (atomic)",
                 "website_id": website_id,
                 "url": website_record['original_url'],
+                "is_child": is_child,
                 "child_pages_deleted": len(child_pages),
                 "celery_tasks_revoked": revoked_tasks,
                 "documents_deleted_from_filesearch": deleted_documents,
-                "failed_filesearch_deletes": failed_deletes
+                "failed_filesearch_deletes": 0
             }
 
         except Exception as e:
             logger.error("=" * 80)
-            logger.error(f"❌ [DELETE_WEBSITE_ERROR] Error deleting website: {e}")
+            logger.error(f"❌ [DELETE_ERROR] Error during deletion: {e}")
             logger.error("=" * 80)
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
 
             return {
                 "success": False,
