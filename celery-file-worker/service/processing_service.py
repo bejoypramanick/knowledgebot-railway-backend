@@ -280,7 +280,6 @@ async def process_file_content(
                 except Exception as conn_err:
                     if attempt < max_retries - 1:
                         logger.warning(f"⚠️ [DB_RETRY] Connection error (attempt {attempt + 1}/{max_retries}): {conn_err}")
-                        import asyncio
                         await asyncio.sleep(0.5 * (attempt + 1))  # Exponential backoff
                         continue
                     else:
