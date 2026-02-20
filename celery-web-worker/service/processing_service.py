@@ -135,12 +135,18 @@ class ProcessingService:
             # ========== PHASE 2.5: CHECK PARENT COMPLETION ==========
             # Now that ALL pages have been discovered and processed, check if parent should be marked completed
             # This must happen AFTER crawling finishes to avoid premature completion
-            # Add a small delay to ensure all database writes are committed
-            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] All pages crawled, waiting for DB commits...")
-            await asyncio.sleep(1.0)  # Give time for any pending DB writes to complete
+            # Add delay to ensure all database writes are fully committed and visible
+            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] All {pages_uploaded} pages crawled")
+            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] Waiting 3 seconds for all DB writes to commit...")
+            await asyncio.sleep(3.0)  # Increased delay to ensure DB consistency
             
-            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] Checking parent completion status")
-            await self.scraping_dao.check_and_update_parent_completion(job_context.website_id)
+            logger.info(f"🔍 [PARENT_COMPLETION_CHECK] Now checking parent completion status for website {job_context.website_id}")
+            parent_completed = await self.scraping_dao.check_and_update_parent_completion(job_context.website_id)
+            
+            if parent_completed:
+                logger.info(f"✅ [PARENT_COMPLETION_CHECK] Parent {job_context.website_id} marked as completed")
+            else:
+                logger.info(f"ℹ️  [PARENT_COMPLETION_CHECK] Parent {job_context.website_id} not marked as completed (may have children still processing)")
 
             # ========== PHASE 3: BUILD SUCCESS RESULT ==========
             # Build simple success result for Celery task logging.
