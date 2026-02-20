@@ -83,14 +83,14 @@ class FileService:
             logger.debug(f"ℹ️ Skipping cancellation check: {e}")
             return False
 
-    async def handle_duplicate_check(self, sha256_hash: str, original_filename: str, replace_existing: bool = False) -> Dict[str, Any]:
+    async def handle_duplicate_check(self, original_filename: str, replace_existing: bool = False) -> Dict[str, Any]:
         """
-        Check for duplicate files by hash.
+        Check for duplicate files by filename.
         Returns: {"allow": bool, "reason": str, "detail": str}
         """
         try:
-            # Check if file with same hash exists
-            duplicate = await self.check_duplicate_file(sha256_hash)
+            # Check if file with same name exists
+            duplicate = await self.check_duplicate_file(original_filename)
 
             if duplicate:
                 if replace_existing:
@@ -98,22 +98,22 @@ class FileService:
                     return {"allow": True, "reason": "replaced", "detail": "File will replace existing duplicate"}
                 else:
                     logger.warning(f"⚠️ Duplicate file detected: {original_filename}")
-                    return {"allow": False, "reason": "duplicate", "detail": f"File with same content already exists"}
+                    return {"allow": False, "reason": "duplicate", "detail": f"File with same name already exists"}
 
             return {"allow": True, "reason": "new", "detail": "File is new"}
         except Exception as e:
             logger.error(f"❌ Error checking duplicates: {e}")
             raise
 
-    async def check_duplicate_file(self, sha256_hash: str) -> Optional[Dict[str, Any]]:
-        """Check if file with same hash exists in database."""
+    async def check_duplicate_file(self, original_filename: str) -> Optional[Dict[str, Any]]:
+        """Check if file with same name exists in database."""
         try:
             from shared.db import get_db_connection
 
             async with get_db_connection() as conn:
                 record = await conn.fetchrow(
-                    "SELECT id, original_filename FROM file_uploads WHERE sha256_hash = $1 LIMIT 1",
-                    sha256_hash
+                    "SELECT id, original_filename FROM file_uploads WHERE original_filename = $1 AND processing_status != 'deleted' LIMIT 1",
+                    original_filename
                 )
                 return record
         except Exception as e:

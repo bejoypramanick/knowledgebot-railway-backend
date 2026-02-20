@@ -377,8 +377,8 @@ async def process_file_content(
         
         logger.info(f"🔍 [ROUTING] Detected MIME: {detected_mime_type} for {original_filename}")
 
-        # STEP 4: Check for duplicates
-        duplicate_check = await file_service.handle_duplicate_check(sha256_hash, original_filename, False)
+        # STEP 4: Check for duplicates by filename
+        duplicate_check = await file_service.handle_duplicate_check(original_filename, False)
         if not duplicate_check.get("allow", True):
             # Update database status to failed with duplicate error message
             if file_id:
