@@ -552,6 +552,11 @@ async def upload_file_async(
             try:
                 await dao.update_celery_task_id(int(file_id), celery_task_id)
                 logger.info(f"✅ [DB_UPDATE_SUCCESS] DB updated with Celery task ID")
+                
+                # Small delay to ensure database transaction is fully committed
+                import asyncio
+                await asyncio.sleep(0.1)
+                logger.info(f"⏱️  [DB_COMMIT_WAIT] Waited for DB commit")
             except Exception as db_err:
                 logger.error(f"❌ [DB_UPDATE_ERROR] Failed to update DB with task ID: {db_err}", exc_info=True)
                 raise

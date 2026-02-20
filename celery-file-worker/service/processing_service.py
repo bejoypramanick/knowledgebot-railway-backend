@@ -257,21 +257,37 @@ async def process_file_content(
         """Query database to get file details using celery_task_id"""
         try:
             from shared.db import get_db_connection
-            async with get_db_connection() as conn:
-                record = await conn.fetchrow(
-                    "SELECT id, original_filename, display_name, s3_key, file_size "
-                    "FROM file_uploads WHERE celery_task_id = $1",
-                    celery_task_id
-                )
-                if record:
-                    return {
-                        "file_id": str(record["id"]),
-                        "original_filename": record["original_filename"],
-                        "file_display_name": record["display_name"],
-                        "s3_key": record["s3_key"],
-                        "file_size": record["file_size"]
-                    }
-                return None
+            
+            # Add retry logic for database connection issues
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    async with get_db_connection() as conn:
+                        record = await conn.fetchrow(
+                            "SELECT id, original_filename, display_name, s3_key, file_size "
+                            "FROM file_uploads WHERE celery_task_id = $1",
+                            celery_task_id
+                        )
+                        if record:
+                            logger.info(f"✅ [DB_QUERY_SUCCESS] Found file record for task_id: {celery_task_id}")
+                            logger.info(f"   File ID: {record['id']}, S3 Key: {record['s3_key']}")
+                            return {
+                                "file_id": str(record["id"]),
+                                "original_filename": record["original_filename"],
+                                "file_display_name": record["display_name"],
+                                "s3_key": record["s3_key"],
+                                "file_size": record["file_size"]
+                            }
+                        logger.warning(f"⚠️ [DB_QUERY_EMPTY] No file record found for task_id: {celery_task_id}")
+                        return None
+                except Exception as conn_err:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"⚠️ [DB_RETRY] Connection error (attempt {attempt + 1}/{max_retries}): {conn_err}")
+                        import asyncio
+                        await asyncio.sleep(0.5 * (attempt + 1))  # Exponential backoff
+                        continue
+                    else:
+                        raise
         except Exception as e:
             logger.error(f"❌ Error querying file details by task_id: {e}")
             return None
