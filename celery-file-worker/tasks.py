@@ -3,8 +3,15 @@ Celery tasks for file processing worker
 Handles async file processing with database status tracking
 """
 
+import sys
+import os
 import asyncio
 from typing import Dict, Any
+
+# Ensure celery-file-worker directory is in Python path BEFORE any local imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
 from celery_app import celery_app
 from shared.otel_logger import get_otel_logger, set_task_id
@@ -55,6 +62,10 @@ def process_file_upload_task(
 
     try:
         logger.info("🔍 [PROCESSING] Loading ProcessingService...")
+        logger.info(f"🔍 [DEBUG] sys.path: {sys.path[:3]}")  # Log first 3 paths
+        logger.info(f"🔍 [DEBUG] Current dir: {os.getcwd()}")
+        logger.info(f"🔍 [DEBUG] __file__: {__file__}")
+        
         from service.processing_service import ProcessingService
 
         processing_service = ProcessingService()
