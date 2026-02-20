@@ -451,6 +451,30 @@ class ScrapingDAO:
         logger.info(f"   File Size: {file_size:,} bytes")
         logger.info(f"   Char Count: {char_count:,}")
 
+        # First, get the existing metadata to preserve scraping_config
+        get_query = "SELECT metadata FROM scraped_websites WHERE id = $1"
+        existing_metadata = {}
+        
+        try:
+            async with get_db_connection() as conn:
+                result = await conn.fetchval(get_query, website_id)
+                if result:
+                    if isinstance(result, dict):
+                        existing_metadata = result
+                    elif isinstance(result, str):
+                        try:
+                            existing_metadata = json.loads(result)
+                        except (json.JSONDecodeError, ValueError):
+                            existing_metadata = {}
+        except Exception as e:
+            logger.warning(f"⚠️ Could not fetch existing metadata: {e}")
+        
+        # Merge existing metadata with file_search_metadata
+        # Preserve scraping_config from existing metadata
+        merged_metadata = {**existing_metadata, **file_search_metadata}
+        
+        logger.info(f"   Merged metadata: {merged_metadata}")
+
         query = """
             UPDATE scraped_websites
             SET gemini_file_name = $1,
@@ -476,7 +500,7 @@ class ScrapingDAO:
             description,
             crawl_session_id,
             1,  # pages_scraped = 1 for single page
-            json.dumps(file_search_metadata),
+            json.dumps(merged_metadata),
             website_id
         ]
 
