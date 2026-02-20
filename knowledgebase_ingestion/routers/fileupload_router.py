@@ -399,14 +399,22 @@ async def delete_all_knowledge_endpoint(request: Request = None):
 async def upload_file_async(
     file: UploadFile = Form(...),
     file_display_name: Optional[str] = Form(None),
+    replace_existing: bool = Form(False),
     request: Request = None
 ):
     """
     Async file upload endpoint with Celery task queue - returns immediately with pending status.
+    
+    Args:
+        file: The file to upload
+        file_display_name: Optional display name for the file
+        replace_existing: If True, replace existing file with same name (marks old as deleted)
+        request: HTTP request object
     """
     logger.info("=" * 80)
     logger.info("📥 [UPLOAD_START] New file upload request received")
     logger.info("=" * 80)
+    logger.info(f"   Replace existing: {replace_existing}")
 
     try:
         # Extract authenticated user information
@@ -425,7 +433,7 @@ async def upload_file_async(
         file_size_initial = await get_file_size(file)
         logger.info(f"   File Size: {file_size_initial} bytes")
 
-        validation_result = await validate_file_upload(file, file_size_initial)
+        validation_result = await validate_file_upload(file, file_size_initial, replace_existing)
         if not validation_result['valid']:
             logger.error(f"❌ [VALIDATION_FAILED] {validation_result['error']}")
             raise HTTPException(status_code=400, detail=validation_result['error'])

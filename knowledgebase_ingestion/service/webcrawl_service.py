@@ -90,7 +90,8 @@ async def queue_website_for_scraping(
     max_depth: int = 2,
     max_pages: int = 100,
     max_concurrent: int = 10,
-    delay_between_requests: float = 0.0
+    delay_between_requests: float = 0.0,
+    replace_existing: bool = False
 ) -> Dict[str, Any]:
     """
     Queue website for scraping via Celery.
@@ -103,6 +104,7 @@ async def queue_website_for_scraping(
         max_pages: Maximum pages to crawl
         max_concurrent: Maximum concurrent requests
         delay_between_requests: Delay between requests in seconds
+        replace_existing: If True, mark existing crawl as deleted and allow new crawl
     """
     logger.info("=" * 80)
     logger.info("🌐 [SCRAPE_START] Queue website for scraping - START")
@@ -110,6 +112,7 @@ async def queue_website_for_scraping(
     logger.info(f"📍 [INPUT] URL: {url}")
     logger.info(f"👤 [INPUT] User Role ID: {user_role_id}")
     logger.info(f"⚙️  [INPUT] Options: max_depth={max_depth}, max_pages={max_pages}, max_concurrent={max_concurrent}, delay={delay_between_requests}")
+    logger.info(f"🔄 [INPUT] Replace existing: {replace_existing}")
 
     try:
         import uuid
@@ -134,11 +137,21 @@ async def queue_website_for_scraping(
             )
             
             if existing_active:
-                logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE crawl: ID={existing_active['id']}, url={existing_active['original_url']}, status={existing_active['processing_status']}")
-                return {
-                    "success": False,
-                    "error": f"Website is already being crawled or has been crawled (ID: {existing_active['id']}, Status: {existing_active['processing_status']})"
-                }
+                if replace_existing:
+                    # Mark existing website as deleted
+                    logger.info(f"🔄 [REPLACE] Marking existing website as deleted: ID={existing_active['id']}")
+                    await conn.execute(
+                        "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
+                        existing_active['id']
+                    )
+                    logger.info(f"✅ [REPLACE] Existing website marked as deleted, allowing new crawl")
+                else:
+                    logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE crawl: ID={existing_active['id']}, url={existing_active['original_url']}, status={existing_active['processing_status']}")
+                    return {
+                        "success": False,
+                        "error": f"Website is already being crawled or has been crawled (ID: {existing_active['id']}, Status: {existing_active['processing_status']}). Set replace_existing=true to replace it.",
+                        "duplicate_website_id": existing_active['id']
+                    }
             else:
                 logger.info(f"🔍 [DUPLICATE_CHECK] No active crawl found for: {url}")
 

@@ -232,7 +232,8 @@ async def scrape_website_async_endpoint(request: Request = None):
             max_depth=validation_result.get('max_depth', 2),
             max_pages=validation_result.get('max_pages', 100),
             max_concurrent=validation_result.get('max_concurrent', 10),
-            delay_between_requests=validation_result.get('delay_between_requests', 0.0)
+            delay_between_requests=validation_result.get('delay_between_requests', 0.0),
+            replace_existing=validation_result.get('replace_existing', False)
         )
         
         if result.get('success'):

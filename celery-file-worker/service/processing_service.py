@@ -377,32 +377,7 @@ async def process_file_content(
         
         logger.info(f"🔍 [ROUTING] Detected MIME: {detected_mime_type} for {original_filename}")
 
-        # STEP 4: Check for duplicates by filename (exclude current file)
-        duplicate_check = await file_service.handle_duplicate_check(original_filename, False, exclude_file_id=file_id)
-        if not duplicate_check.get("allow", True):
-            # Update database status to failed with duplicate error message
-            if file_id:
-                try:
-                    from dao.fileupload_dao import FileUploadDAO
-                    dao = FileUploadDAO()
-                    error_msg = f"Duplicate file: {duplicate_check.get('detail', 'File already exists')}"
-                    await dao.update_file_status(int(file_id), 'failed', error_message=error_msg)
-                    logger.info(f"✅ [DB_UPDATE] Updated file status to 'failed' (duplicate)")
-                except Exception as db_error:
-                    logger.error(f"❌ [DB_ERROR] Failed to update status for duplicate: {db_error}")
-            
-            # Cleanup temp file
-            if tmp_path and os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-            
-            return {
-                "success": False,
-                "error": f"Duplicate file: {duplicate_check.get('detail', 'File already exists')}"
-            }
-
-        replaced = duplicate_check.get("reason") == "replaced"
-
-        # STEP 5: FORMAT CONVERSION PHASE
+        # STEP 4: FORMAT CONVERSION PHASE (duplicate check removed - now handled in API gateway)
         markdown_tmp_path = None
         processed_successfully = False
 

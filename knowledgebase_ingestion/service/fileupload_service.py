@@ -252,11 +252,18 @@ async def queue_file_for_deletion(file_id: int) -> Dict[str, Any]:
         }
 
 
-async def validate_file_upload(file: UploadFile, file_size: int) -> Dict[str, Any]:
+async def validate_file_upload(file: UploadFile, file_size: int, replace_existing: bool = False) -> Dict[str, Any]:
     """
     Validate file upload and return validation result.
+    Includes duplicate check against active files.
+    
+    Args:
+        file: The uploaded file
+        file_size: Size of the file in bytes
+        replace_existing: If True, mark existing file as deleted and allow upload
     """
     logger.info("✔️  [VALIDATION_START] Starting file validation")
+    logger.info(f"   Replace existing: {replace_existing}")
 
     try:
         # Sanitize filename
@@ -310,6 +317,46 @@ async def validate_file_upload(file: UploadFile, file_size: int) -> Dict[str, An
             }
 
         logger.info(f"✅ [SIZE_VALID] File size is valid")
+
+        # Check for duplicate filename (only active files)
+        logger.info(f"🔍 [DUPLICATE_CHECK] Checking for existing files with name: {original_filename}")
+        from shared.db import get_db_connection
+        
+        async with get_db_connection() as conn:
+            # Get all files with this name
+            all_files = await conn.fetch(
+                "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 ORDER BY id DESC",
+                original_filename
+            )
+            logger.info(f"🔍 [DUPLICATE_CHECK_ALL] Found {len(all_files)} total files with name '{original_filename}':")
+            for f in all_files:
+                logger.info(f"   - ID={f['id']}, status={f['processing_status']}")
+            
+            # Check for active files (exclude failed, deleted, cancelled)
+            existing_active = await conn.fetchrow(
+                "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
+                original_filename
+            )
+            
+            if existing_active:
+                if replace_existing:
+                    # Mark existing file as deleted
+                    logger.info(f"🔄 [REPLACE] Marking existing file as deleted: ID={existing_active['id']}")
+                    await conn.execute(
+                        "UPDATE file_uploads SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
+                        existing_active['id']
+                    )
+                    logger.info(f"✅ [REPLACE] Existing file marked as deleted, allowing new upload")
+                else:
+                    logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE file: ID={existing_active['id']}, filename={existing_active['original_filename']}, status={existing_active['processing_status']}")
+                    return {
+                        "valid": False,
+                        "error": f"File '{original_filename}' already exists (ID: {existing_active['id']}, Status: {existing_active['processing_status']}). Set replace_existing=true to replace it.",
+                        "filename": sanitized_filename,
+                        "duplicate_file_id": existing_active['id']
+                    }
+            else:
+                logger.info(f"🔍 [DUPLICATE_CHECK] No active duplicate found for: {original_filename}")
 
         logger.info("=" * 80)
         logger.info("✅ [VALIDATION_SUCCESS] All file validations passed")
