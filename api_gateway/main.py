@@ -46,6 +46,17 @@ async def lifespan(app: FastAPI):
         logger.info(f"🚀 API Gateway starting up...")
         logger.info(f"({settings.service_identity})")
 
+        # Initialize database connection pool
+        logger.info("💾 Initializing database connection pool...")
+        try:
+            from shared.db import DatabaseManager
+            db_manager = await DatabaseManager.get_instance()
+            await db_manager.initialize()
+            logger.info("✅ Database connection pool initialized")
+        except Exception as e:
+            logger.error(f"❌ Error initializing database pool: {e}")
+            logger.warning("⚠️ Services will continue but database operations may fail on first request")
+
         # Initialize Gemini FileSearch Store (create if doesn't exist)
         logger.info("📂 Initializing Gemini FileSearch store...")
         try:
@@ -118,6 +129,16 @@ async def lifespan(app: FastAPI):
         yield
         # Shutdown
         logger.info("🛑 API Gateway shutting down")
+        
+        # Close database pool
+        try:
+            from shared.db import DatabaseManager
+            db_manager = await DatabaseManager.get_instance()
+            await db_manager.close()
+            logger.info("✅ Database connection pool closed")
+        except Exception as e:
+            logger.error(f"❌ Error closing database pool: {e}")
+            
     except Exception as e:
         logger.error(f"❌ Error in lifespan handler: {e}")
         raise
