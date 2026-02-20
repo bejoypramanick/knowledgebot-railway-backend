@@ -341,11 +341,30 @@ class ScrapingDAO:
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
+                # First, check if parent exists
+                parent_check_query = "SELECT id FROM scraped_websites WHERE id = $1"
+                parent_exists = await conn.fetchval(parent_check_query, parent_id)
+                
+                if not parent_exists:
+                    logger.warning(f"⚠️  [CHILD_PAGE_SKIP] Parent ID {parent_id} not found, skipping child page")
+                    logger.warning(f"   URL: {page_url}")
+                    logger.warning(f"   Parent may have been deleted or failed to create")
+                    return None
+                
+                # Parent exists, proceed with insert
                 result = await conn.fetchval(query, *params)
                 logger.info(f"✅ [CHILD_PAGE_SUCCESS] Recorded child page with ID: {result}")
                 logger.log_db_query(query, params, result)
                 return int(result) if result else None
         except Exception as e:
+            # Check if it's a foreign key constraint error
+            if "foreign key constraint" in str(e) and "parent_id" in str(e):
+                logger.warning(f"⚠️  [CHILD_PAGE_SKIP] Parent was deleted during processing")
+                logger.warning(f"   URL: {page_url}")
+                logger.warning(f"   Parent ID: {parent_id}")
+                logger.warning(f"   This can happen if parent was deleted while children were being scraped")
+                return None
+            
             logger.error(f"❌ [CHILD_PAGE_ERROR] Failed to record child page: {e}")
             logger.error(f"   URL: {page_url}")
             logger.error(f"   Parent ID: {parent_id}")
