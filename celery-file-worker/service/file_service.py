@@ -83,14 +83,19 @@ class FileService:
             logger.debug(f"ℹ️ Skipping cancellation check: {e}")
             return False
 
-    async def handle_duplicate_check(self, original_filename: str, replace_existing: bool = False) -> Dict[str, Any]:
+    async def handle_duplicate_check(self, original_filename: str, replace_existing: bool = False, exclude_file_id: int = None) -> Dict[str, Any]:
         """
         Check for duplicate files by filename.
         Returns: {"allow": bool, "reason": str, "detail": str}
+        
+        Args:
+            original_filename: Name of the file to check
+            replace_existing: Whether to allow replacing existing files
+            exclude_file_id: File ID to exclude from duplicate check (typically the current file being processed)
         """
         try:
             # Check if file with same name exists
-            duplicate = await self.check_duplicate_file(original_filename)
+            duplicate = await self.check_duplicate_file(original_filename, exclude_file_id)
 
             if duplicate:
                 if replace_existing:
@@ -105,7 +110,7 @@ class FileService:
             logger.error(f"❌ Error checking duplicates: {e}")
             raise
 
-    async def check_duplicate_file(self, original_filename: str) -> Optional[Dict[str, Any]]:
+    async def check_duplicate_file(self, original_filename: str, exclude_file_id: int = None) -> Optional[Dict[str, Any]]:
         """Check if file with same name exists in database (only active files)."""
         try:
             from shared.db import get_db_connection
@@ -121,10 +126,19 @@ class FileService:
                     logger.info(f"   - ID={f['id']}, status={f['processing_status']}")
                 
                 # Only check active files (exclude failed, deleted, cancelled)
-                record = await conn.fetchrow(
-                    "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
-                    original_filename
-                )
+                # Also exclude the current file being processed
+                if exclude_file_id:
+                    record = await conn.fetchrow(
+                        "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 AND id != $2 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
+                        original_filename, exclude_file_id
+                    )
+                    logger.info(f"🔍 [DUPLICATE_CHECK] Excluding current file ID={exclude_file_id} from check")
+                else:
+                    record = await conn.fetchrow(
+                        "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
+                        original_filename
+                    )
+                
                 if record:
                     logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE duplicate: ID={record['id']}, filename={record['original_filename']}, status={record['processing_status']}")
                 else:
