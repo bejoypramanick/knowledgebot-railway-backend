@@ -52,6 +52,7 @@ async def process_with_docling(
 ) -> Tuple[Optional[str], dict]:
     """
     Call docling service to convert document to markdown.
+    Retries connection failures up to 3 times with exponential backoff.
 
     Args:
         file_path: Path to the file to process
@@ -67,62 +68,90 @@ async def process_with_docling(
     if timeout_seconds is None:
         timeout_seconds = settings.docling_timeout_seconds
 
-    try:
-        # Prepare multipart form data
-        with open(file_path, 'rb') as f:
-            files = {'file': (original_filename, f, mime_type)}
+    max_retries = 3
+    retry_delays = [2, 5, 10]  # seconds between retries
+    
+    for attempt in range(max_retries):
+        try:
+            # Prepare multipart form data
+            with open(file_path, 'rb') as f:
+                files = {'file': (original_filename, f, mime_type)}
 
-            async with httpx.AsyncClient(timeout=timeout_seconds + 10) as client:
-                logger.info(
-                    f"📄 [DOCLING] Calling docling service: {settings.docling_service_url} "
-                    f"for {original_filename}"
-                )
-
-                response = await client.post(
-                    f"{settings.docling_service_url}/api/v1/docling/process",
-                    files=files,
-                    timeout=timeout_seconds
-                )
-
-                logger.info(f"📄 [DOCLING] Response status: {response.status_code}")
-
-                if response.status_code == 200:
-                    result = response.json()
-
-                    if result.get("success"):
-                        markdown_content = result.get("content")
-                        metadata = result.get("metadata", {})
-
+                async with httpx.AsyncClient(timeout=timeout_seconds + 10) as client:
+                    if attempt > 0:
                         logger.info(
-                            f"✅ [DOCLING] Successfully converted {original_filename}: "
-                            f"{len(markdown_content)} chars, "
-                            f"{metadata.get('images_with_ocr', 0)} images OCR'd"
+                            f"🔄 [DOCLING] Retry attempt {attempt + 1}/{max_retries} for {original_filename}"
                         )
+                    
+                    logger.info(
+                        f"📄 [DOCLING] Calling docling service: {settings.docling_service_url} "
+                        f"for {original_filename}"
+                    )
 
-                        return markdown_content, metadata
+                    response = await client.post(
+                        f"{settings.docling_service_url}/api/v1/docling/process",
+                        files=files,
+                        timeout=timeout_seconds
+                    )
+
+                    logger.info(f"📄 [DOCLING] Response status: {response.status_code}")
+
+                    if response.status_code == 200:
+                        result = response.json()
+
+                        if result.get("success"):
+                            markdown_content = result.get("content")
+                            metadata = result.get("metadata", {})
+
+                            logger.info(
+                                f"✅ [DOCLING] Successfully converted {original_filename}: "
+                                f"{len(markdown_content)} chars, "
+                                f"{metadata.get('images_with_ocr', 0)} images OCR'd"
+                            )
+
+                            return markdown_content, metadata
+                        else:
+                            error = result.get("error", "Unknown error")
+                            logger.warning(
+                                f"⚠️ [DOCLING] Conversion failed for {original_filename}: {error}"
+                            )
+                            return None, {"error": error}
                     else:
-                        error = result.get("error", "Unknown error")
-                        logger.warning(
-                            f"⚠️ [DOCLING] Conversion failed for {original_filename}: {error}"
-                        )
-                        return None, {"error": error}
-                else:
-                    error_msg = f"HTTP {response.status_code}: {response.text}"
-                    logger.warning(f"⚠️ [DOCLING] Request failed for {original_filename}: {error_msg}")
-                    return None, {"error": error_msg}
+                        error_msg = f"HTTP {response.status_code}: {response.text}"
+                        logger.warning(f"⚠️ [DOCLING] Request failed for {original_filename}: {error_msg}")
+                        return None, {"error": error_msg}
 
-    except asyncio.TimeoutError:
-        logger.warning(
-            f"⚠️ [DOCLING] Timeout processing {original_filename} "
-            f"(timeout={timeout_seconds}s)"
-        )
-        return None, {"error": "Docling processing timeout"}
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"⚠️ [DOCLING] Timeout processing {original_filename} "
+                f"(timeout={timeout_seconds}s)"
+            )
+            return None, {"error": "Docling processing timeout"}
 
-    except Exception as e:
-        logger.warning(
-            f"⚠️ [DOCLING] Error calling docling service for {original_filename}: {e}"
-        )
-        return None, {"error": str(e)}
+        except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
+            # Connection errors - retry with backoff
+            if attempt < max_retries - 1:
+                delay = retry_delays[attempt]
+                logger.warning(
+                    f"⚠️ [DOCLING] Connection failed for {original_filename} (attempt {attempt + 1}/{max_retries}): {e}"
+                )
+                logger.info(f"⏳ [DOCLING] Retrying in {delay}s... (docling service may still be starting)")
+                await asyncio.sleep(delay)
+                continue
+            else:
+                logger.warning(
+                    f"⚠️ [DOCLING] All connection attempts failed for {original_filename}: {e}"
+                )
+                return None, {"error": f"Connection failed after {max_retries} attempts: {str(e)}"}
+
+        except Exception as e:
+            logger.warning(
+                f"⚠️ [DOCLING] Error calling docling service for {original_filename}: {e}"
+            )
+            return None, {"error": str(e)}
+    
+    # Should not reach here, but just in case
+    return None, {"error": "Max retries exceeded"}
 
 
 async def should_use_docling_for_file(
