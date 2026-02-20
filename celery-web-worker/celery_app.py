@@ -209,34 +209,3 @@ def debug_task(self):
     """Debug task to verify Celery is working"""
     logger.info(f"🧪 [DEBUG_TASK] Debug task invoked - Task ID: {self.request.id}")
     print(f'Request: {self.request!r}')
-
-
-# Keep-alive heartbeat to ensure worker stays running
-def start_heartbeat():
-    """Start a background heartbeat to keep worker alive"""
-    import threading
-    import time
-
-    def heartbeat():
-        logger.info("❤️  [HEARTBEAT_START] Worker heartbeat monitor started")
-        while True:
-            try:
-                time.sleep(30)  # Log every 30 seconds
-                import redis
-                r = redis.from_url(redis_url, decode_responses=True)
-                queue_len = r.llen('web_crawling')
-                r.close()
-                logger.info(f"❤️  [HEARTBEAT] Worker alive - Queue depth: {queue_len} tasks")
-            except Exception as e:
-                logger.warning(f"⚠️  [HEARTBEAT] Error in heartbeat: {e}")
-
-    thread = threading.Thread(target=heartbeat, daemon=True)
-    thread.start()
-    logger.info("✅ [HEARTBEAT] Heartbeat thread started (daemon)")
-
-
-# Start heartbeat when app is imported
-try:
-    start_heartbeat()
-except Exception as e:
-    logger.warning(f"⚠️  [HEARTBEAT] Could not start heartbeat: {e}")
