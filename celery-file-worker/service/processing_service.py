@@ -417,7 +417,7 @@ async def process_file_content(
                 }
 
         # 2. Route PDFs and other Docling-supported files
-        elif should_use_docling_for_file(original_filename, detected_mime_type, file_size):
+        elif await should_use_docling_for_file(original_filename, detected_mime_type, file_size):
             logger.info(f"📄 [ROUTING] Routing {original_filename} to Docling (PDF/DOCX) pipeline")
             # Strict check: Never send HTML to Docling
             if detected_mime_type == 'text/html' or original_filename.lower().endswith(('.html', '.htm')):
