@@ -531,18 +531,29 @@ async def process_file_content(
                     logger.error(f"❌ FileSearch store '{settings.gemini_file_search_store_name}' not found")
                     raise Exception(f"FileSearch store '{settings.gemini_file_search_store_name}' not found")
 
+                logger.info(f"✅ Found store: {file_search_store_name}")
+
                 logger.info(f"📤 Uploading to FileSearch store: {file_search_store_name}")
+                
+                # Build config with mime_type inside (like web worker does)
+                upload_config = {
+                    'display_name': gemini_display_name,
+                    'custom_metadata': [
+                        {'key': 'original_filename', 'string_value': original_filename},
+                        {'key': 'user_email', 'string_value': user_email or 'admin'},
+                        {'key': 'celery_task_id', 'string_value': celery_task_id}
+                    ]
+                }
+                
+                # Explicitly set MIME type for markdown files (inside config, like web worker)
+                if detected_mime_type == 'text/markdown' or tmp_path.endswith('.md'):
+                    upload_config['mime_type'] = 'text/markdown'
+                    logger.info(f"📝 [MIME] Explicitly setting mime_type='text/markdown' for {original_filename}")
+                
                 operation = genai_client.file_search_stores.upload_to_file_search_store(
                     file=tmp_path,
                     file_search_store_name=file_search_store_name,
-                    config={
-                        'display_name': gemini_display_name,
-                        'custom_metadata': [
-                            {'key': 'original_filename', 'string_value': original_filename},
-                            {'key': 'user_email', 'string_value': user_email or 'admin'},
-                            {'key': 'celery_task_id', 'string_value': celery_task_id}
-                        ]
-                    }
+                    config=upload_config
                 )
 
                 if not operation:

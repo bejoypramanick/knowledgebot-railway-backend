@@ -87,10 +87,15 @@ def process_file_upload_task(
         logger.info("=" * 80)
         logger.info("✅ [CELERY_TASK_COMPLETE] File processing completed successfully")
         logger.info("=" * 80)
-        logger.info(f"📊 [RESULT] File ID: {result.get('file_id')}")
-        logger.info(f"📊 [RESULT] Status: {result.get('status')}")
-        logger.info(f"📊 [RESULT] Processing Time: {result.get('processing_time_seconds')}s")
-        logger.info(f"📊 [RESULT] Success: {result.get('success')}")
+        
+        # Safely handle result - it might be None if exception occurred
+        if result:
+            logger.info(f"📊 [RESULT] File ID: {result.get('file_id')}")
+            logger.info(f"📊 [RESULT] Status: {result.get('status')}")
+            logger.info(f"📊 [RESULT] Processing Time: {result.get('processing_time_seconds')}s")
+            logger.info(f"📊 [RESULT] Success: {result.get('success')}")
+        else:
+            logger.warning("⚠️ [RESULT] Result is None - processing may have failed")
 
         return result
 
