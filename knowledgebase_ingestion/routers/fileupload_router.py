@@ -88,8 +88,8 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
     
     Query Parameters:
         status: Optional filter for item status
-            - 'inactive': Returns items that are NOT pending and NOT completed (processing, cancelled, deleted, failed, queued)
-            - None (default): Returns only pending and completed items
+            - 'inactive': Returns items that are NOT pending, processing, and NOT completed (cancelled, deleted, failed, queued)
+            - None (default): Returns pending, processing, and completed items
     """
     try:
         # Extract authenticated user information
