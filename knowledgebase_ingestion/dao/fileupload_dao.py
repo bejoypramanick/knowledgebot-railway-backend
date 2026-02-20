@@ -37,9 +37,9 @@ class FileUploadDAO:
                 user_id, original_filename, file_display_name, size_bytes,
                 mime_type, processing_status, gemini_file_name, gemini_file_uri,
                 gemini_state, gemini_processed_at, source, sha256_hash,
-                file_search_metadata, s3_url, created_at
+                file_search_metadata, s3_url, celery_task_id, created_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW()
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW()
             ) RETURNING id
         """
         params = [
@@ -57,6 +57,7 @@ class FileUploadDAO:
             record_data.get('sha256_hash'),
             record_data.get('file_search_metadata'),
             record_data.get('s3_url'),
+            record_data.get('celery_task_id'),
         ]
 
         logger.info(f"📝 [FILE_DAO_SQL] SQL Query:")
@@ -76,6 +77,7 @@ class FileUploadDAO:
         logger.info(f"    $12 (sha256_hash): {params[11]}")
         logger.info(f"    $13 (file_search_metadata): {params[12]}")
         logger.info(f"    $14 (s3_url): {params[13]}")
+        logger.info(f"    $15 (celery_task_id): {params[14]}")
 
         try:
             logger.log_db_operation(query, params)
