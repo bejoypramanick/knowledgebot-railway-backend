@@ -189,74 +189,77 @@ class ProcessingService:
             return result.to_dict()
 
     async def _crawlWebsitePages(
-        self,
-        crawl_config: CrawlConfig,
-        job_context: JobContext
-    ) -> int:
-        """Stream each page: crawl → process → upload → record. Return page count only."""
-        pages_uploaded = 0
-        start_time = time.time()
-
-        logger.info(f"📄 [PIPELINE] Starting page-by-page streaming...")
-
-        async for page_data in self._crawlPagesWithBFS(crawl_config, job_context):
-            metrics = await self._processPageInPipeline(page_data, job_context)
-            if metrics:
-                pages_uploaded += 1
-
-        if pages_uploaded == 0:
-            raise Exception("No pages successfully processed")
-
-        total_time = time.time() - start_time
-        logger.info(f"✅ [PIPELINE] Completed: {pages_uploaded} pages in {total_time:.1f}s")
-
-        return pages_uploaded
-
-    async def _processPageInPipeline(
-        self,
-        page_data: PageData,
-        job_context: JobContext
-    ) -> Optional[PageMetrics]:
-        """Process one page: convert → upload → record"""
-        logger.info(f"📄 [PIPELINE] Processing: {page_data.page_url}")
-
-        try:
+            self,
+            crawl_config: CrawlConfig,
+            job_context: JobContext
+        ) -> int:
+            """Stream each page: crawl → process → upload → record. Return page count only."""
+            pages_uploaded = 0
             start_time = time.time()
 
-            # Convert
-            markdown = await self._preparePageAsMarkdown(page_data.page_html, page_data.page_url)
-            page_data = PageData(
-                page_url=page_data.page_url,
-                page_html=page_data.page_html,
-                markdown=markdown,
-                title=page_data.title,
-                description=page_data.description,
-                session_id=page_data.session_id
-            )
+            logger.info(f"📄 [PIPELINE] Starting page-by-page streaming...")
 
-            # Upload
-            upload_result = await self._uploadPageToGemini(page_data, job_context)
-            if not upload_result:
-                logger.warning(f"   ⚠️ Upload failed, skipping this page")
+            async for page_data in self._crawlPagesWithBFS(crawl_config, job_context):
+                metrics = await self._processPageInPipeline(page_data, job_context, crawl_config)
+                if metrics:
+                    pages_uploaded += 1
+
+            if pages_uploaded == 0:
+                raise Exception("No pages successfully processed")
+
+            total_time = time.time() - start_time
+            logger.info(f"✅ [PIPELINE] Completed: {pages_uploaded} pages in {total_time:.1f}s")
+
+            return pages_uploaded
+
+
+    async def _processPageInPipeline(
+            self,
+            page_data: PageData,
+            job_context: JobContext,
+            crawl_config: CrawlConfig
+        ) -> Optional[PageMetrics]:
+            """Process one page: convert → upload → record"""
+            logger.info(f"📄 [PIPELINE] Processing: {page_data.page_url}")
+
+            try:
+                start_time = time.time()
+
+                # Convert
+                markdown = await self._preparePageAsMarkdown(page_data.page_html, page_data.page_url)
+                page_data = PageData(
+                    page_url=page_data.page_url,
+                    page_html=page_data.page_html,
+                    markdown=markdown,
+                    title=page_data.title,
+                    description=page_data.description,
+                    session_id=page_data.session_id
+                )
+
+                # Upload
+                upload_result = await self._uploadPageToGemini(page_data, job_context)
+                if not upload_result:
+                    logger.warning(f"   ⚠️ Upload failed, skipping this page")
+                    return None
+
+                logger.info(f"   ✅ Uploaded to Gemini: {upload_result.document_name}")
+
+                # Record
+                await self._recordPageToDB(page_data, upload_result, job_context, crawl_config)
+
+                # Metrics
+                metrics = calculate_metrics(markdown)
+                processing_time = time.time() - start_time
+
+                return PageMetrics(
+                    file_size_bytes=metrics.get('file_size_bytes', 0),
+                    char_count=metrics.get('char_count', 0),
+                    processing_time_seconds=processing_time
+                )
+            except Exception as e:
+                logger.error(f"   ❌ Error: {e}")
                 return None
 
-            logger.info(f"   ✅ Uploaded to Gemini: {upload_result.document_name}")
-
-            # Record
-            await self._recordPageToDB(page_data, upload_result, job_context)
-
-            # Metrics
-            metrics = calculate_metrics(markdown)
-            processing_time = time.time() - start_time
-
-            return PageMetrics(
-                file_size_bytes=metrics.get('file_size_bytes', 0),
-                char_count=metrics.get('char_count', 0),
-                processing_time_seconds=processing_time
-            )
-        except Exception as e:
-            logger.error(f"   ❌ Error: {e}")
-            return None
 
     # ==================== CRAWL LAYER ====================
 
@@ -866,50 +869,70 @@ class ProcessingService:
     # ==================== DATABASE LAYER ====================
 
     async def _recordPageToDB(
-        self,
-        page_data: PageData,
-        upload_result: UploadResult,
-        job_context: JobContext
-    ) -> Optional[int]:
-        """Record single page in database"""
-        metrics = calculate_metrics(page_data.markdown)
-        
-        if await self._isSinglePageMode(page_data.page_url, job_context.root_url):
-            logger.info(f"   ℹ️ Single-page mode: updating parent record with page data")
-            
-            # Update the parent website record with the page data
-            await self._updateWebsiteWithPageData(
-                website_id=job_context.website_id,
-                page_data=page_data,
-                upload_result=upload_result,
-                file_size=metrics.get('file_size_bytes', 0),
-                char_count=metrics.get('char_count', 0)
+            self,
+            page_data: PageData,
+            upload_result: UploadResult,
+            job_context: JobContext,
+            crawl_config: CrawlConfig
+        ) -> Optional[int]:
+            """Record single page in database"""
+            metrics = calculate_metrics(page_data.markdown)
+
+            if await self._isSinglePageMode(page_data.page_url, job_context.root_url, crawl_config):
+                logger.info(f"   ℹ️ Single-page mode: updating parent record with page data")
+
+                # Update the parent website record with the page data
+                await self._updateWebsiteWithPageData(
+                    website_id=job_context.website_id,
+                    page_data=page_data,
+                    upload_result=upload_result,
+                    file_size=metrics.get('file_size_bytes', 0),
+                    char_count=metrics.get('char_count', 0)
+                )
+
+                return job_context.website_id
+
+            child_page_id = await self.scraping_dao.record_child_page(
+                parent_id=job_context.website_id,
+                page_url=page_data.page_url,
+                gemini_file_name=upload_result.document_name,
+                gemini_file_uri=upload_result.gemini_file_uri,
+                file_search_metadata=upload_result.file_search_metadata,
+                user_role_id=job_context.user_role_id,
+                file_size=calculate_metrics(page_data.markdown).get('file_size_bytes', 0),
+                char_count=calculate_metrics(page_data.markdown).get('char_count', 0),
+                title=page_data.title,
+                description=page_data.description,
+                crawl_session_id=page_data.session_id
             )
-            
-            return job_context.website_id
 
-        child_page_id = await self.scraping_dao.record_child_page(
-            parent_id=job_context.website_id,
-            page_url=page_data.page_url,
-            gemini_file_name=upload_result.document_name,
-            gemini_file_uri=upload_result.gemini_file_uri,
-            file_search_metadata=upload_result.file_search_metadata,
-            user_role_id=job_context.user_role_id,
-            file_size=calculate_metrics(page_data.markdown).get('file_size_bytes', 0),
-            char_count=calculate_metrics(page_data.markdown).get('char_count', 0),
-            title=page_data.title,
-            description=page_data.description,
-            crawl_session_id=page_data.session_id
-        )
+            # Don't check parent completion here - it will be checked after ALL pages are crawled
+            # Checking here causes premature completion when not all pages have been discovered yet
 
-        # Don't check parent completion here - it will be checked after ALL pages are crawled
-        # Checking here causes premature completion when not all pages have been discovered yet
+            return child_page_id
 
-        return child_page_id
 
-    async def _isSinglePageMode(self, page_url: str, root_url: str) -> bool:
-        """Check if child record should be skipped"""
-        return page_url == root_url
+    async def _isSinglePageMode(self, page_url: str, root_url: str, crawl_config: CrawlConfig) -> bool:
+            """
+            Check if this is truly single-page mode.
+
+            Single-page mode means:
+            1. The page URL matches the root URL (it's the first/only page)
+            2. AND max_depth is 0 (no crawling of child pages)
+
+            This prevents the first page of a multi-page crawl from being
+            incorrectly treated as single-page mode.
+            """
+            is_root_page = page_url == root_url
+            is_depth_zero = crawl_config.max_depth == 0
+
+            result = is_root_page and is_depth_zero
+
+            if is_root_page and not is_depth_zero:
+                logger.info(f"   ℹ️ Root page detected but max_depth={crawl_config.max_depth} - NOT single-page mode")
+
+            return result
+
 
     async def _updateWebsiteWithPageData(
         self,
