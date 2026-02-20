@@ -36,9 +36,9 @@ class FileUploadDAO:
             INSERT INTO file_uploads (
                 user_role_id, original_filename, display_name, file_size,
                 mime_type, processing_status, gemini_file_name, gemini_file_uri,
-                gemini_state, sha256_hash, s3_url, s3_key, celery_task_id, created_at
+                gemini_state, sha256_hash, s3_key, celery_task_id, created_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW()
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW()
             ) RETURNING id
         """
         params = [
@@ -52,7 +52,6 @@ class FileUploadDAO:
             record_data.get('gemini_file_uri'),
             record_data.get('gemini_state'),
             record_data.get('sha256_hash'),
-            record_data.get('s3_url'),
             record_data.get('s3_key'),
             record_data.get('celery_task_id'),
         ]
@@ -70,9 +69,8 @@ class FileUploadDAO:
         logger.info(f"    $8 (gemini_file_uri): {params[7]}")
         logger.info(f"    $9 (gemini_state): {params[8]}")
         logger.info(f"    $10 (sha256_hash): {params[9]}")
-        logger.info(f"    $11 (s3_url): {params[10]}")
-        logger.info(f"    $12 (s3_key): {params[11]}")
-        logger.info(f"    $13 (celery_task_id): {params[12]}")
+        logger.info(f"    $11 (s3_key): {params[10]}")
+        logger.info(f"    $12 (celery_task_id): {params[11]}")
 
         try:
             logger.log_db_operation(query, params)

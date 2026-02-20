@@ -468,10 +468,6 @@ async def upload_file_async(
             file_sha256 = await calculate_file_hash(file_bytes)
             logger.info(f"   SHA256 Hash: {file_sha256}")
 
-            # Construct full S3 URL from key
-            s3_url = f"s3://{s3_file_storage.bucket_name}/{s3_key}"
-            logger.info(f"   S3 URL: {s3_url}")
-
             # Create file record in database FIRST with placeholder task_id
             logger.info(f"💾 [DB_INSERT_START] Creating file record in database")
             
@@ -487,7 +483,6 @@ async def upload_file_async(
                 'mime_type': validation_result['mime_type'],
                 'processing_status': 'pending',
                 'sha256_hash': file_sha256,
-                's3_url': s3_url,
                 's3_key': s3_key,
                 'celery_task_id': placeholder_task_id
             }
@@ -499,7 +494,6 @@ async def upload_file_async(
             logger.info(f"   size_bytes: {record_data['size_bytes']}")
             logger.info(f"   mime_type: {record_data['mime_type']}")
             logger.info(f"   processing_status: {record_data['processing_status']}")
-            logger.info(f"   s3_url: {record_data['s3_url']}")
             logger.info(f"   s3_key: {record_data['s3_key']}")
             logger.info(f"   celery_task_id: {record_data['celery_task_id']}")
 

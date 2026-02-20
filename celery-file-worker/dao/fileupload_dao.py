@@ -128,7 +128,7 @@ class FileUploadDAO:
         """Get file record by celery_task_id."""
         query = """
             SELECT id, user_role_id, original_filename, display_name, file_extension,
-                   s3_url, file_size, mime_type, sha256_hash, processing_status,
+                   s3_key, file_size, mime_type, sha256_hash, processing_status,
                    celery_task_id, created_at, updated_at
             FROM file_uploads 
             WHERE celery_task_id = $1
