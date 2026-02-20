@@ -18,6 +18,8 @@ restartPolicyMaxRetries = 10
 # - REDIS_URL=redis://redis.railway.internal:6379/1  (or WEB_REDIS_URL)
 # - DATABASE_URL=postgresql://...
 # - GEMINI_API_KEY=...
+# - DOCLING_SERVICE_URL=http://docling.railway.internal:8080
+# - GEMINI_FILE_SEARCH_STORE_NAME=knowledgebotsearchstore-xxxxx
 #
 # This worker processes:
 # - Website scraping (scrape_website_task)
