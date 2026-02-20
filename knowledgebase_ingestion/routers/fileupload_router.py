@@ -494,6 +494,10 @@ async def upload_file_async(
             file_sha256 = await calculate_file_hash(file_bytes)
             logger.info(f"   SHA256 Hash: {file_sha256}")
 
+            # Construct full S3 URL from key
+            s3_url = f"s3://{s3_file_storage.bucket_name}/{s3_key}"
+            logger.info(f"   S3 URL: {s3_url}")
+
             record_data = {
                 'user_id': user_id,
                 'original_filename': validation_result['original_filename'],
@@ -503,7 +507,7 @@ async def upload_file_async(
                 'processing_status': 'pending',
                 'source': 'upload',
                 'sha256_hash': file_sha256,
-                's3_key': s3_key,
+                's3_url': s3_url,
                 'celery_task_id': celery_task_id
             }
 
@@ -515,7 +519,7 @@ async def upload_file_async(
             logger.info(f"   mime_type: {record_data['mime_type']}")
             logger.info(f"   processing_status: {record_data['processing_status']}")
             logger.info(f"   source: {record_data['source']}")
-            logger.info(f"   s3_key: {record_data['s3_key']}")
+            logger.info(f"   s3_url: {record_data['s3_url']}")
             logger.info(f"   celery_task_id: {record_data['celery_task_id']}")
 
             from knowledgebase_ingestion.service.fileupload_service import create_file_record
