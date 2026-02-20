@@ -111,13 +111,22 @@ class FileService:
             from shared.db import get_db_connection
 
             async with get_db_connection() as conn:
+                # First, log ALL files with this name to debug
+                all_files = await conn.fetch(
+                    "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 ORDER BY id DESC",
+                    original_filename
+                )
+                logger.info(f"🔍 [DUPLICATE_CHECK_ALL] Found {len(all_files)} total files with name '{original_filename}':")
+                for f in all_files:
+                    logger.info(f"   - ID={f['id']}, status={f['processing_status']}")
+                
                 # Only check active files (exclude failed, deleted, cancelled)
                 record = await conn.fetchrow(
                     "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
                     original_filename
                 )
                 if record:
-                    logger.info(f"🔍 [DUPLICATE_CHECK] Found existing file: ID={record['id']}, filename={record['original_filename']}, status={record['processing_status']}")
+                    logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE duplicate: ID={record['id']}, filename={record['original_filename']}, status={record['processing_status']}")
                 else:
                     logger.info(f"🔍 [DUPLICATE_CHECK] No active duplicate found for: {original_filename}")
                 return record
