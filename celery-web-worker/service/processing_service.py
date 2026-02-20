@@ -882,12 +882,14 @@ class ProcessingService:
                 logger.info(f"   ℹ️ Single-page mode: updating parent record with page data")
 
                 # Update the parent website record with the page data
+                # Mark as completed since single-page mode has no children
                 await self._updateWebsiteWithPageData(
                     website_id=job_context.website_id,
                     page_data=page_data,
                     upload_result=upload_result,
                     file_size=metrics.get('file_size_bytes', 0),
-                    char_count=metrics.get('char_count', 0)
+                    char_count=metrics.get('char_count', 0),
+                    mark_completed=True  # Single-page mode - mark as completed
                 )
 
                 return job_context.website_id
@@ -898,12 +900,14 @@ class ProcessingService:
                 logger.info(f"   ℹ️ Root URL in multi-page mode: updating parent record")
                 
                 # Update the parent website record with the root page data
+                # Do NOT mark as completed - children are still being processed
                 await self._updateWebsiteWithPageData(
                     website_id=job_context.website_id,
                     page_data=page_data,
                     upload_result=upload_result,
                     file_size=metrics.get('file_size_bytes', 0),
-                    char_count=metrics.get('char_count', 0)
+                    char_count=metrics.get('char_count', 0),
+                    mark_completed=False  # Multi-page mode - keep status as 'processing'
                 )
 
                 return job_context.website_id
@@ -957,7 +961,8 @@ class ProcessingService:
         page_data: PageData,
         upload_result: UploadResult,
         file_size: int,
-        char_count: int
+        char_count: int,
+        mark_completed: bool = True
     ) -> bool:
         """Update parent website record with single page data"""
         logger.info(f"💾 [UPDATE_WEBSITE] Updating website {website_id} with page data")
@@ -968,6 +973,12 @@ class ProcessingService:
             gemini_file_uri=upload_result.gemini_file_uri,
             file_size=file_size,
             char_count=char_count,
+            title=page_data.title,
+            description=page_data.description,
+            crawl_session_id=page_data.session_id,
+            file_search_metadata=upload_result.file_search_metadata,
+            mark_completed=mark_completed
+        )
             title=page_data.title,
             description=page_data.description,
             crawl_session_id=page_data.session_id,

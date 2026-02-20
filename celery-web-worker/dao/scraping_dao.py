@@ -434,13 +434,15 @@ class ScrapingDAO:
         title: str,
         description: str,
         crawl_session_id: str,
-        file_search_metadata: Dict[str, Any]
+        file_search_metadata: Dict[str, Any],
+        mark_completed: bool = True
     ) -> bool:
         """
         Update parent website record with single page data.
-        Used for single-page scrapes (depth=0).
         
-        Marks the website as 'completed' since single-page mode has no children.
+        Args:
+            mark_completed: If True, marks status as 'completed'. 
+                          If False, keeps current status (for multi-page crawls where parent should stay 'processing')
 
         Returns: True on success, False on failure
         """
@@ -450,6 +452,7 @@ class ScrapingDAO:
         logger.info(f"   Title: {title}")
         logger.info(f"   File Size: {file_size:,} bytes")
         logger.info(f"   Char Count: {char_count:,}")
+        logger.info(f"   Mark as completed: {mark_completed}")
 
         # First, get the existing metadata to preserve scraping_config
         get_query = "SELECT metadata FROM scraped_websites WHERE id = $1"
@@ -475,21 +478,39 @@ class ScrapingDAO:
         
         logger.info(f"   Merged metadata: {merged_metadata}")
 
-        query = """
-            UPDATE scraped_websites
-            SET gemini_file_name = $1,
-                gemini_file_uri = $2,
-                file_size = $3,
-                char_count = $4,
-                title = $5,
-                description = $6,
-                crawl_session_id = $7,
-                pages_scraped = $8,
-                metadata = $9::jsonb,
-                processing_status = 'completed',
-                updated_at = NOW()
-            WHERE id = $10
-        """
+        # Build query based on mark_completed flag
+        if mark_completed:
+            query = """
+                UPDATE scraped_websites
+                SET gemini_file_name = $1,
+                    gemini_file_uri = $2,
+                    file_size = $3,
+                    char_count = $4,
+                    title = $5,
+                    description = $6,
+                    crawl_session_id = $7,
+                    pages_scraped = $8,
+                    metadata = $9::jsonb,
+                    processing_status = 'completed',
+                    updated_at = NOW()
+                WHERE id = $10
+            """
+        else:
+            # Don't update processing_status - keep it as 'processing' for multi-page crawls
+            query = """
+                UPDATE scraped_websites
+                SET gemini_file_name = $1,
+                    gemini_file_uri = $2,
+                    file_size = $3,
+                    char_count = $4,
+                    title = $5,
+                    description = $6,
+                    crawl_session_id = $7,
+                    pages_scraped = $8,
+                    metadata = $9::jsonb,
+                    updated_at = NOW()
+                WHERE id = $10
+            """
 
         params = [
             gemini_file_name,
@@ -508,7 +529,10 @@ class ScrapingDAO:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 await conn.execute(query, *params)
-                logger.info(f"✅ [UPDATE_WEBSITE_PAGE_SUCCESS] Website record updated and marked as completed")
+                if mark_completed:
+                    logger.info(f"✅ [UPDATE_WEBSITE_PAGE_SUCCESS] Website record updated and marked as completed")
+                else:
+                    logger.info(f"✅ [UPDATE_WEBSITE_PAGE_SUCCESS] Website record updated (status unchanged)")
                 logger.log_db_query(query, params, "UPDATE succeeded")
                 return True
         except Exception as e:
