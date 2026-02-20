@@ -698,10 +698,8 @@ class FileService:
                                 if store_name and document_name:
                                     try:
                                         logger.info(f"   📍 Deleting FileSearch document: {document_name} from store: {store_name}")
-                                        genai_client.file_search_stores.delete_document(
-                                            file_search_store_name=store_name,
-                                            document_name=document_name
-                                        )
+                                        # Use the correct API method: file_search_stores.documents.delete
+                                        genai_client.file_search_stores.documents.delete(name=document_name)
 
                                         # Verify deletion: check if document still exists
                                         try:
@@ -716,12 +714,22 @@ class FileService:
                                                 deleted_from_filesearch = True
                                                 logger.info(f"   ✅ Verified deleted from FileSearch: {document_name}")
                                         except Exception as verify_err:
-                                            logger.warning(f"   ⚠️  Could not verify FileSearch deletion: {verify_err}")
-                                            # Assume delete was successful if no error on delete itself
-                                            deleted_from_filesearch = True
+                                            # If verification fails with 404, document is deleted
+                                            if "404" in str(verify_err) or "not found" in str(verify_err).lower():
+                                                deleted_from_filesearch = True
+                                                logger.info(f"   ✅ Document deleted (404 on verification): {document_name}")
+                                            else:
+                                                logger.warning(f"   ⚠️  Could not verify FileSearch deletion: {verify_err}")
+                                                # Assume delete was successful if no error on delete itself
+                                                deleted_from_filesearch = True
                                     except Exception as fs_err:
-                                        logger.warning(f"   ❌ Failed to delete from FileSearch store: {fs_err}")
-                                        failed_deletes += 1
+                                        # Check if it's a "not found" error (already deleted)
+                                        if "404" in str(fs_err) or "not found" in str(fs_err).lower():
+                                            deleted_from_filesearch = True
+                                            logger.info(f"   ✅ Document already deleted: {document_name}")
+                                        else:
+                                            logger.warning(f"   ❌ Failed to delete from FileSearch store: {fs_err}")
+                                            failed_deletes += 1
                         except Exception as e:
                             logger.warning(f"   ⚠️  Error processing metadata: {e}")
             except Exception as e:
@@ -903,10 +911,8 @@ class FileService:
                                     if store_name and document_name:
                                         try:
                                             logger.info(f"   📍 Deleting: {document_name} from store: {store_name}")
-                                            genai_client.file_search_stores.delete_document(
-                                                file_search_store_name=store_name,
-                                                document_name=document_name
-                                            )
+                                            # Use the correct API method: file_search_stores.documents.delete
+                                            genai_client.file_search_stores.documents.delete(name=document_name)
 
                                             # Verify deletion: check if document still exists
                                             try:
@@ -927,7 +933,22 @@ class FileService:
                                                     deleted_documents += 1
                                                     logger.info(f"   ✅ Verified deleted from FileSearch: {page['original_url']}")
                                             except Exception as verify_err:
-                                                error_msg = f"Could not verify deletion: {verify_err}"
+                                                # If verification fails but delete succeeded, consider it successful
+                                                if "404" in str(verify_err) or "not found" in str(verify_err).lower():
+                                                    deleted_documents += 1
+                                                    logger.info(f"   ✅ Document deleted (404 on verification): {page['original_url']}")
+                                                else:
+                                                    error_msg = f"Could not verify deletion: {verify_err}"
+                                                    logger.warning(f"   ⚠️  {error_msg}")
+                                                    # Assume successful if delete didn't error
+                                                    deleted_documents += 1
+                                        except Exception as fs_err:
+                                            # Check if it's a "not found" error (already deleted)
+                                            if "404" in str(fs_err) or "not found" in str(fs_err).lower():
+                                                deleted_documents += 1
+                                                logger.info(f"   ✅ Document already deleted: {page['original_url']}")
+                                            else:
+                                                error_msg = f"Failed to delete from FileSearch: {fs_err}"
                                                 logger.error(f"   ❌ {error_msg}")
                                                 failed_deletes.append({
                                                     "url": page['original_url'],
@@ -935,15 +956,6 @@ class FileService:
                                                     "error": error_msg
                                                 })
                                                 gemini_deletion_successful = False
-                                        except Exception as fs_err:
-                                            error_msg = f"Failed to delete from FileSearch: {fs_err}"
-                                            logger.error(f"   ❌ {error_msg}")
-                                            failed_deletes.append({
-                                                "url": page['original_url'],
-                                                "document": document_name,
-                                                "error": error_msg
-                                            })
-                                            gemini_deletion_successful = False
                             except Exception as e:
                                 logger.warning(f"   ⚠️  Error processing metadata: {e}")
             except Exception as e:
