@@ -298,8 +298,26 @@ async def process_file_content(
         logger.info(f"⚙️  [CONFIG] DOCLING_ENABLED={settings.docling_enabled}")
 
         # STEP 1: Query database with celery_task_id to get file details
+        # Retry up to 3 times with delays to handle race condition where
+        # DB record is created with placeholder task_id and updated with real task_id
         logger.info(f"🔍 [DB_QUERY] Getting file details for task_id: {celery_task_id}")
-        file_details = await get_file_details_by_task_id(celery_task_id)
+        
+        file_details = None
+        max_retries = 3
+        retry_delays = [0.5, 1.0, 2.0]  # seconds
+        
+        for attempt in range(max_retries):
+            file_details = await get_file_details_by_task_id(celery_task_id)
+            
+            if file_details:
+                break
+            
+            if attempt < max_retries - 1:
+                delay = retry_delays[attempt]
+                logger.warning(f"⚠️ [DB_QUERY_RETRY] File not found (attempt {attempt + 1}/{max_retries}), retrying in {delay}s...")
+                await asyncio.sleep(delay)
+            else:
+                logger.error(f"❌ [DB_QUERY] No file found for task_id after {max_retries} attempts: {celery_task_id}")
         
         if not file_details:
             logger.error(f"❌ [DB_QUERY] No file found for task_id: {celery_task_id}")
