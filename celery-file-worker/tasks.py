@@ -72,7 +72,17 @@ def process_file_upload_task(
         logger.info("✅ [PROCESSING] process_file_content loaded successfully")
 
         logger.info("⚙️  [PROCESSING] Calling process_file_content() with all parameters...")
-        result = asyncio.run(
+        
+        # Use get_event_loop().run_until_complete() instead of asyncio.run()
+        # asyncio.run() doesn't work with gevent pool when multiple tasks run concurrently
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # No event loop in current thread, create one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        result = loop.run_until_complete(
             process_file_content(
                 original_filename=original_filename,
                 file_display_name=file_display_name,

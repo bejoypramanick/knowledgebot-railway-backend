@@ -75,7 +75,16 @@ def scrape_website_task(
         logger.info(f"     - options: {options}")
         logger.info(f"     - celery_task_id: {task_id}")
 
-        asyncio.run(
+        # Use get_event_loop().run_until_complete() instead of asyncio.run()
+        # asyncio.run() doesn't work with gevent pool when multiple tasks run concurrently
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # No event loop in current thread, create one
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        loop.run_until_complete(
             website_service.process_website_async(
                 website_id=website_id,
                 url=url,
@@ -126,7 +135,15 @@ def scrape_website_task(
                 logger.info("💾 [DB_UPDATE] Updating website status to failed in database...")
                 from dao.scraping_dao import ScrapingDAO
                 dao = ScrapingDAO()
-                asyncio.run(
+                
+                # Use get_event_loop().run_until_complete() instead of asyncio.run()
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                loop.run_until_complete(
                     dao.update_website_status(
                         website_id,
                         "failed",
