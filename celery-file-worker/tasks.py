@@ -117,7 +117,6 @@ def process_file_upload_task(
         try:
             from dao.fileupload_dao import FileUploadDAO
             dao = FileUploadDAO()
-            import asyncio
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             loop.run_until_complete(
