@@ -250,7 +250,7 @@ async def process_file_content(
             from shared.db import get_db_connection
             async with get_db_connection() as conn:
                 record = await conn.fetchrow(
-                    "SELECT id, original_filename, file_display_name, s3_key, file_size, user_email "
+                    "SELECT id, original_filename, file_display_name, s3_url, file_size, user_email "
                     "FROM file_uploads WHERE celery_task_id = $1",
                     celery_task_id
                 )
@@ -259,7 +259,7 @@ async def process_file_content(
                         "file_id": str(record["id"]),
                         "original_filename": record["original_filename"],
                         "file_display_name": record["file_display_name"],
-                        "s3_key": record["s3_key"],
+                        "s3_url": record["s3_url"],
                         "file_size": record["file_size"],
                         "user_email": record["user_email"]
                     }
@@ -288,9 +288,37 @@ async def process_file_content(
         file_id = file_details.get("file_id")
         original_filename = file_details.get("original_filename", original_filename)
         file_display_name = file_details.get("file_display_name", file_display_name)
-        s3_key = file_details.get("s3_key", s3_key)
+        s3_url = file_details.get("s3_url")
         file_size = file_details.get("file_size", file_size)
         user_email = file_details.get("user_email", user_email)
+        
+        # Extract s3_key from s3_url if available, otherwise use provided s3_key
+        if s3_url:
+            # Parse s3://bucket/key format to extract key
+            if s3_url.startswith("s3://"):
+                # Remove s3:// prefix and split by first /
+                parts = s3_url[5:].split("/", 1)
+                if len(parts) == 2:
+                    s3_key = parts[1]  # Get everything after bucket name
+                    logger.info(f"📋 [S3_URL] Extracted s3_key from s3_url: {s3_key}")
+                else:
+                    logger.error(f"❌ [S3_URL] Invalid s3_url format: {s3_url}")
+                    return {
+                        "success": False,
+                        "error": f"Invalid s3_url format: {s3_url}"
+                    }
+            else:
+                logger.error(f"❌ [S3_URL] s3_url doesn't start with s3://: {s3_url}")
+                return {
+                    "success": False,
+                    "error": f"Invalid s3_url format: {s3_url}"
+                }
+        elif not s3_key:
+            logger.error(f"❌ [S3] No s3_url or s3_key found for file_id: {file_id}")
+            return {
+                "success": False,
+                "error": "No S3 location found for file"
+            }
         
         logger.info(f"📋 [FILE_DETAILS] Retrieved: file_id={file_id}, filename={original_filename}, s3_key={s3_key}")
 
