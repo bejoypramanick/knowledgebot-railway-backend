@@ -439,6 +439,7 @@ class WebCrawlDAO:
         return {
             "id": record['id'],
             "url": record['original_url'],
+            "source": "scrape",  # Add source field for UI filtering
             "depth": record['depth'] or 0,
             "parent_id": record['parent_id'],
             "domain": record['domain'],
