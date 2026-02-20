@@ -411,7 +411,6 @@ async def delete_all_knowledge() -> Dict[str, Any]:
     logger.info("🗑️  [DELETE_ALL_START] Clearing entire knowledge base")
     logger.info("=" * 80)
 
-    deleted_files = 0
     deleted_websites = 0
     s3_files_deleted = 0
     new_store_name = None
@@ -490,35 +489,10 @@ async def delete_all_knowledge() -> Dict[str, Any]:
             logger.error(f"   Traceback: {traceback.format_exc()}")
             errors.append(f"FileSearch stores deletion failed: {e}")
 
-        # Step 1b: Delete all raw Gemini files
-        logger.info("📝 [GEMINI_RAW_DELETE] Deleting raw Gemini files...")
-        try:
-            async with get_db_connection() as conn:
-                # Get all files with gemini_file_name (non-FileSearch files)
-                files = await conn.fetch(
-                    "SELECT id, original_filename, gemini_file_name FROM file_uploads WHERE gemini_file_name IS NOT NULL"
-                )
-                logger.info(f"   Found {len(files)} files to delete from Gemini")
-
-                genai_client = get_genai_client()
-                if genai_client:
-                    for file_record in files:
-                        # Only delete raw files (those not starting with "documents/")
-                        if not file_record['gemini_file_name'].startswith("documents/"):
-                            try:
-                                genai_client.files.delete(name=file_record['gemini_file_name'])
-                                deleted_files += 1
-                                logger.info(f"   ✅ Deleted raw file from Gemini: {file_record['original_filename']}")
-                            except Exception as gem_err:
-                                # 404 is expected for FileSearch files (they don't have raw files)
-                                if "404" in str(gem_err) or "Not Found" in str(gem_err):
-                                    logger.info(f"   ℹ️  File not found (expected for FileSearch): {file_record['original_filename']}")
-                                else:
-                                    logger.warning(f"   ⚠️  Could not delete from Gemini: {file_record['gemini_file_name']} - {gem_err}")
-                                    errors.append(f"Raw file delete failed for {file_record['original_filename']}: {gem_err}")
-        except Exception as e:
-            logger.error(f"❌ [GEMINI_RAW_DELETE_ERROR] Error deleting raw files: {e}")
-            errors.append(f"Raw file deletion failed: {e}")
+        # Step 1b: Skip raw Gemini file deletion - already deleted with FileSearch store
+        # When we delete the FileSearch store above, all documents inside are automatically deleted
+        # No need to delete individual raw files
+        logger.info("ℹ️  [GEMINI_RAW_DELETE] Skipping raw file deletion - already deleted with FileSearch store")
 
         # Step 3: Delete all files from S3
         logger.info("🪣 [S3_DELETE] Deleting all files from S3...")
@@ -580,7 +554,8 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         logger.info("=" * 80)
         logger.info("✅ [DELETE_ALL_COMPLETE] Knowledge base clear completed")
         logger.info("=" * 80)
-        logger.info(f"📊 [RESULT] Raw files deleted from Gemini: {deleted_files}")
+        logger.info(f"📊 [RESULT] FileSearch stores deleted: {filesearch_stores_deleted}")
+        logger.info(f"📊 [RESULT] New FileSearch store created: {new_store_name}")
         logger.info(f"📊 [RESULT] Files deleted from S3: {s3_files_deleted}")
         logger.info(f"📊 [RESULT] Websites marked as deleted: {deleted_websites}")
         logger.info(f"📊 [RESULT] Redis queues cleared: 2 (file_processing, web_crawling)")
@@ -596,11 +571,10 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         return {
             "success": len(errors) == 0 and filesearch_stores_deleted > 0 and new_store_name is not None,
             "message": f"Successfully deleted {filesearch_stores_deleted} FileSearch stores and created new store" if (len(errors) == 0 and filesearch_stores_deleted > 0 and new_store_name) else "Knowledge base cleared with errors",
-            "raw_files_deleted": deleted_files,
+            "filesearch_stores_deleted": filesearch_stores_deleted,
             "s3_files_deleted": s3_files_deleted,
             "websites_marked_deleted": deleted_websites,
             "redis_queues_cleared": 2,
-            "filesearch_stores_deleted": filesearch_stores_deleted,
             "deleted_store_names": deleted_store_names,
             "new_store_name": new_store_name,
             "errors": errors if errors else None
@@ -614,11 +588,10 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         return {
             "success": False,
             "message": f"Error clearing knowledge base: {str(e)}",
-            "raw_files_deleted": deleted_files,
-            "s3_files_deleted": s3_files_deleted,
-            "websites_marked_deleted": deleted_websites,
             "filesearch_stores_deleted": 0,
-            "new_store_name": new_store_name,
+            "s3_files_deleted": 0,
+            "websites_marked_deleted": 0,
+            "new_store_name": None,
             "errors": [str(e)]
         }
 
