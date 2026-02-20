@@ -113,9 +113,13 @@ class FileService:
             async with get_db_connection() as conn:
                 # Only check active files (exclude failed, deleted, cancelled)
                 record = await conn.fetchrow(
-                    "SELECT id, original_filename FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
+                    "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
                     original_filename
                 )
+                if record:
+                    logger.info(f"🔍 [DUPLICATE_CHECK] Found existing file: ID={record['id']}, filename={record['original_filename']}, status={record['processing_status']}")
+                else:
+                    logger.info(f"🔍 [DUPLICATE_CHECK] No active duplicate found for: {original_filename}")
                 return record
         except Exception as e:
             logger.error(f"❌ Error checking duplicate: {e}")
