@@ -439,6 +439,8 @@ class ScrapingDAO:
         """
         Update parent website record with single page data.
         Used for single-page scrapes (depth=0).
+        
+        Marks the website as 'completed' since single-page mode has no children.
 
         Returns: True on success, False on failure
         """
@@ -460,6 +462,7 @@ class ScrapingDAO:
                 crawl_session_id = $7,
                 pages_scraped = $8,
                 metadata = $9::jsonb,
+                processing_status = 'completed',
                 updated_at = NOW()
             WHERE id = $10
         """
@@ -481,7 +484,7 @@ class ScrapingDAO:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
                 await conn.execute(query, *params)
-                logger.info(f"✅ [UPDATE_WEBSITE_PAGE_SUCCESS] Website record updated")
+                logger.info(f"✅ [UPDATE_WEBSITE_PAGE_SUCCESS] Website record updated and marked as completed")
                 logger.log_db_query(query, params, "UPDATE succeeded")
                 return True
         except Exception as e:
