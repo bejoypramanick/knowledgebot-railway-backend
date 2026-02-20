@@ -62,9 +62,23 @@ def process_file_upload_task(
 
     try:
         logger.info("🔍 [PROCESSING] Loading ProcessingService...")
-        logger.info(f"🔍 [DEBUG] sys.path: {sys.path[:3]}")  # Log first 3 paths
+        
+        # Ensure current directory is in sys.path
+        current_task_dir = os.path.dirname(os.path.abspath(__file__))
+        if current_task_dir not in sys.path:
+            sys.path.insert(0, current_task_dir)
+            logger.info(f"🔍 [DEBUG] Added to sys.path: {current_task_dir}")
+        
+        logger.info(f"🔍 [DEBUG] sys.path (first 5): {sys.path[:5]}")
         logger.info(f"🔍 [DEBUG] Current dir: {os.getcwd()}")
         logger.info(f"🔍 [DEBUG] __file__: {__file__}")
+        logger.info(f"🔍 [DEBUG] Looking for service module in: {current_task_dir}")
+        
+        # Check if service directory exists
+        service_dir = os.path.join(current_task_dir, 'service')
+        logger.info(f"🔍 [DEBUG] Service directory exists: {os.path.exists(service_dir)}")
+        if os.path.exists(service_dir):
+            logger.info(f"🔍 [DEBUG] Service directory contents: {os.listdir(service_dir)[:5]}")
         
         from service.processing_service import ProcessingService
 
