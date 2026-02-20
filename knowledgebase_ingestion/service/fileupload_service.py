@@ -283,7 +283,7 @@ async def validate_file_upload(file: UploadFile, file_size: int) -> Dict[str, An
 
         # Validate MIME type
         logger.info(f"🔍 [MIME_CHECK] Validating MIME type: {file.content_type}")
-        mime_valid, mime_error = validate_mime_type(file.content_type or "")
+        mime_valid, mime_error = validate_mime_type(file.content_type or "", sanitized_filename)
         logger.info(f"   MIME type valid: {mime_valid}")
 
         if not mime_valid:
