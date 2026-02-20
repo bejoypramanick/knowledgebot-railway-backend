@@ -5,8 +5,9 @@ rootDirectory = "."
 [deploy]
 # Celery worker for web crawling queue
 # Note: WORKDIR in Dockerfile is /app/celery-web-worker, so no need for cd
-# Concurrency is controlled by CELERY_WEB_CONCURRENCY env var (default: 5)
-startCommand = "celery -A celery_app worker -Q web_crawling -l info --max-tasks-per-child=100"
+# Reduced concurrency to prevent thread exhaustion
+# Concurrency is controlled by CELERY_WEB_CONCURRENCY env var (default: 2)
+startCommand = "celery -A celery_app worker -Q web_crawling -l info --max-tasks-per-child=50 --pool=solo"
 
 # Restart policy for worker reliability
 restartPolicyType = "ON_FAILURE"

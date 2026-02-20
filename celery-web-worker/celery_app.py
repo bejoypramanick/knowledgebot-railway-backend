@@ -44,8 +44,8 @@ except redis.ConnectionError as conn_err:
 except Exception as e:
     logger.error(f"❌ [REDIS] Unexpected error during connection test: {e}")
 
-# Get concurrency from environment variable with default of 5
-worker_concurrency = int(os.getenv('CELERY_WEB_CONCURRENCY', '5'))
+# Get concurrency from environment variable with default of 2 (reduced to prevent thread exhaustion)
+worker_concurrency = int(os.getenv('CELERY_WEB_CONCURRENCY', '2'))
 
 celery_app.conf.update(
     broker_url=redis_url,
