@@ -419,9 +419,15 @@ class FileService:
                     session_root_nodes = []
 
                     for website in session_websites:
-                        # Detect if URL is a sitemap
+                        # Detect if URL is a sitemap (multiple patterns)
                         url = website['original_url'].lower()
-                        is_sitemap = url.endswith('sitemap.xml')
+                        is_sitemap = (
+                            url.endswith('sitemap.xml') or
+                            url.endswith('sitemap.xml.gz') or
+                            url.endswith('sitemap_index.xml') or
+                            '/sitemap' in url and (url.endswith('.xml') or url.endswith('.xml.gz')) or
+                            'sitemap' in url and url.endswith('.xml')
+                        )
                         
                         # Extract source type from metadata.scraping_config
                         metadata = website['metadata']
@@ -431,7 +437,7 @@ class FileService:
                             source_type = scraping_config.get('source')  # 'website', 'single', or 'sitemap'
                         
                         # Determine file_type based on source_type
-                        if is_sitemap:
+                        if is_sitemap or source_type == "sitemap":
                             file_type = "SITEMAP"
                         elif source_type == "single":
                             file_type = "WEBPAGE"

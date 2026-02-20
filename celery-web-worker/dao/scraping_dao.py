@@ -85,13 +85,31 @@ class ScrapingDAO:
         from urllib.parse import urlparse
 
         # Determine source type: use provided url_type or detect from URL
-        # Domain only (https://www.globistaan.com or https://www.globistaan.com/) → "website"
-        # With path (https://www.globistaan.com/index.html or /about) → "single"
+        # Priority: sitemap > domain only > specific page
         url_type = record_data.get('url_type')
         if not url_type:
-            parsed_url = urlparse(record_data.get('original_url', ''))
+            url = record_data.get('original_url', '')
+            parsed_url = urlparse(url)
             path = parsed_url.path.strip('/')
-            url_type = "website" if not path else "single"
+            url_lower = url.lower()
+            
+            # Check for sitemap first (multiple patterns)
+            is_sitemap = (
+                url_lower.endswith('sitemap.xml') or
+                url_lower.endswith('sitemap.xml.gz') or
+                url_lower.endswith('sitemap_index.xml') or
+                '/sitemap' in url_lower and (url_lower.endswith('.xml') or url_lower.endswith('.xml.gz')) or
+                'sitemap' in path.lower() and path.lower().endswith('.xml')
+            )
+            
+            if is_sitemap:
+                url_type = "sitemap"
+            elif not path:
+                # Domain only (https://www.globistaan.com or https://www.globistaan.com/) → "website"
+                url_type = "website"
+            else:
+                # With path (https://www.globistaan.com/index.html or /about) → "single"
+                url_type = "single"
 
         logger.info(f"🌐 [WEB_INSERT_START] Recording scraped website metadata")
         logger.info(f"   URL: {record_data.get('original_url')}")

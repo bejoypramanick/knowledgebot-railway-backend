@@ -20,17 +20,34 @@ class WebCrawlDAO:
         from urllib.parse import urlparse
 
         # Determine source type based on URL structure
-        # Domain only (https://www.globistaan.com or https://www.globistaan.com/) → "website"
-        # With path (https://www.globistaan.com/index.html or /about) → "single"
+        # Priority: sitemap > domain only > specific page
         parsed_url = urlparse(url)
         path = parsed_url.path.strip('/')
         domain = parsed_url.netloc or url  # Extract domain from URL
-        source_type = "website" if not path else "single"
+        url_lower = url.lower()
+        
+        # Check for sitemap first (multiple patterns)
+        is_sitemap = (
+            url_lower.endswith('sitemap.xml') or
+            url_lower.endswith('sitemap.xml.gz') or
+            url_lower.endswith('sitemap_index.xml') or
+            '/sitemap' in url_lower and (url_lower.endswith('.xml') or url_lower.endswith('.xml.gz')) or
+            'sitemap' in path.lower() and path.lower().endswith('.xml')
+        )
+        
+        if is_sitemap:
+            source_type = "sitemap"
+        elif not path:
+            # Domain only (https://www.globistaan.com or https://www.globistaan.com/) → "website"
+            source_type = "website"
+        else:
+            # With path (https://www.globistaan.com/index.html or /about) → "single"
+            source_type = "single"
 
         # Build metadata for audit trail
         metadata = {
             "scraping_config": {
-                "source": source_type  # "website" for domain, "single" for specific pages
+                "source": source_type  # "sitemap", "website", or "single"
             }
         }
 
