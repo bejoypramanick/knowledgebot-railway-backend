@@ -160,7 +160,11 @@ def init_worker_process(**kwargs):
             loop = asyncio.get_event_loop()
             if loop and not loop.is_closed():
                 logger.info("🔄 [WORKER_INIT] Closing inherited event loop")
-                # Close all transports and connections
+                # Cancel all pending tasks
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                # Close the loop
                 loop.stop()
                 loop.close()
         except RuntimeError:
@@ -175,29 +179,34 @@ def init_worker_process(**kwargs):
         # Now handle database pool
         from shared.db import DatabaseManager
         
-        # Get the singleton instance
-        manager = DatabaseManager._instance
-        
-        if manager and manager._pool:
-            logger.warning("⚠️ [WORKER_INIT] Found inherited database pool from parent process, closing it")
-            # Force close without async - the pool is from parent process anyway
-            try:
-                if manager._pool:
-                    manager._pool.terminate()
-            except Exception as e:
-                logger.warning(f"⚠️ [WORKER_INIT] Error terminating inherited pool: {e}")
+        # Reset the singleton instance to force recreation
+        if DatabaseManager._instance:
+            logger.warning("⚠️ [WORKER_INIT] Found inherited DatabaseManager instance from parent process")
             
-            # Reset the pool so it will be recreated on first use
-            manager._pool = None
-            manager._event_loop_id = None
-            logger.info("✅ [WORKER_INIT] Inherited pool closed, will create fresh pool on first use")
+            # Try to close the pool gracefully if it exists
+            if DatabaseManager._instance._pool:
+                try:
+                    # Don't use async close - just terminate the pool
+                    # The pool is from the parent process and shouldn't be used anyway
+                    DatabaseManager._instance._pool.terminate()
+                    logger.info("✅ [WORKER_INIT] Terminated inherited database pool")
+                except Exception as e:
+                    logger.warning(f"⚠️ [WORKER_INIT] Error terminating inherited pool: {e}")
+            
+            # Reset the singleton to None so it will be recreated
+            DatabaseManager._instance = None
+            logger.info("✅ [WORKER_INIT] Reset DatabaseManager singleton, will create fresh instance on first use")
         else:
-            logger.info("✅ [WORKER_INIT] No inherited pool found, will create fresh pool on first use")
+            logger.info("✅ [WORKER_INIT] No inherited DatabaseManager found")
         
         # Force garbage collection to clean up any lingering file descriptors
         gc.collect()
-        logger.info("✅ [WORKER_INIT] Garbage collection completed")
+        logger.info("✅ [WORKER_INIT] Worker process initialization complete")
             
+    except Exception as e:
+        logger.error(f"❌ [WORKER_INIT] Error during worker initialization: {e}")
+        import traceback
+        logger.error(f"   Traceback: {traceback.format_exc()}")
     except Exception as e:
         logger.error(f"❌ [WORKER_INIT] Error in worker process init: {e}")
         import traceback
