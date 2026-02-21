@@ -119,6 +119,13 @@ class EnhancedDoclingProcessor:
                 return False
             
             # Initialize converter with advanced options using new docling structure
+            pipeline_options = None
+            if InputFormat is not None and PdfPipelineOptions is not None:
+                pipeline_options = PdfPipelineOptions()
+                logger.info("✅ PdfPipelineOptions initialized successfully")
+            elif InputFormat is not None:
+                logger.warning("⚠️ PdfPipelineOptions not available, using basic pipeline")
+            
             if InputFormat is not None and PdfPipelineOptions is not None:
                 # Check available attributes before using them
                 if pipeline_options is not None:
@@ -269,18 +276,38 @@ class EnhancedDoclingProcessor:
                     if self.enable_export_to_dict:
                         docling_dict = conversion_result.document.export_to_dict()
                         logger.info(f"✅ [ENHANCED] Export to dict successful")
-                        json_content = json.dumps(docling_dict, indent=2, ensure_ascii=False)
-                        logger.info(f"✅ [ENHANCED] JSON content generated: {len(json_content)} chars")
                         
-                        # Extract layout information
+                        # Extract TEXT content for RAG (not raw JSON dump)
+                        if 'content' in docling_dict and 'text' in docling_dict['content']:
+                            json_content = docling_dict['content']['text']
+                            logger.info(f"✅ [RAG] Extracted text content for RAG: {len(json_content)} chars")
+                        else:
+                            logger.warning("⚠️ [RAG] No text content found in docling_dict, using fallback")
+                            json_content = json.dumps(docling_dict, indent=2, ensure_ascii=False)
+                            logger.info(f"⚠️ [RAG] Using full JSON dump as fallback: {len(json_content)} chars")
+                        
+                        # Extract layout information (minimal for RAG)
                         if self.enable_layout_analysis and docling_dict:
-                            layout_info = self._extract_layout_info(docling_dict)
-                            logger.info(f"📐 [LAYOUT] Found {len(layout_info.get('elements', []))} layout elements")
+                            layout_info = {
+                                'element_count': len(docling_dict.get('layout', {}).get('elements', [])),
+                                'has_tables': bool(docling_dict.get('layout', {}).get('tables', []))
+                            }
+                            logger.info(f"📐 [LAYOUT] Found {layout_info['element_count']} elements")
                         
-                        # Extract table information
+                        # Extract table information (minimal for RAG)
                         if self.enable_table_structure and docling_dict:
-                            table_info = self._extract_table_info(docling_dict)
-                            logger.info(f"📊 [TABLES] Found {len(table_info.get('tables', []))} tables")
+                            table_info = {
+                                'table_count': len(docling_dict.get('structure', {}).get('tables', [])),
+                                'has_headers': bool(docling_dict.get('structure', {}).get('tables', []))
+                            }
+                            logger.info(f"📊 [TABLES] Found {table_info['table_count']} tables")
+                    
+                    # Return JSON content as primary output
+                    if json_content:
+                        logger.info(f"✅ [RAG] Using text content for Gemini FileStore: {len(json_content)} chars")
+                    else:
+                        logger.warning("⚠️ [RAG] No content extracted, using empty JSON")
+                        json_content = "{}"
                     
                     # Return JSON content as primary output
                     if json_content:
