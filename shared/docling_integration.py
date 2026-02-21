@@ -29,11 +29,13 @@ def _get_settings():
     try:
         # Try to import from the caller's context (worker or knowledgebase_ingestion)
         from core.config import settings
+        logger.info(f"🔧 [DOCLING] Using settings from core.config (timeout: {settings.docling_timeout_seconds}s)")
         return settings
     except ImportError:
         try:
             # Fallback for knowledgebase_ingestion
             from knowledgebase_ingestion.core.config import settings
+            logger.info(f"🔧 [DOCLING] Using settings from knowledgebase_ingestion.core.config (timeout: {settings.docling_timeout_seconds}s)")
             return settings
         except ImportError:
             # Create minimal settings from environment
@@ -42,6 +44,7 @@ def _get_settings():
                 docling_timeout_seconds = int(os.getenv("DOCLING_TIMEOUT_SECONDS", "1800"))
                 docling_service_url = os.getenv("DOCLING_SERVICE_URL", "http://localhost:8004")
                 docling_fallback_to_raw = os.getenv("DOCLING_FALLBACK_TO_RAW", "true").lower() == "true"
+            logger.info(f"🔧 [DOCLING] Using minimal settings from environment (timeout: {MinimalSettings.docling_timeout_seconds}s)")
             return MinimalSettings()
 
 
