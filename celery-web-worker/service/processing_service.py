@@ -251,7 +251,7 @@ class ProcessingService:
                 await self._recordPageToDB(page_data, upload_result, job_context, crawl_config)
 
                 # Metrics
-                metrics = calculate_metrics(markdown)
+                metrics = calculate_metrics(markdown_content)
                 processing_time = time.time() - start_time
 
                 return PageMetrics(
