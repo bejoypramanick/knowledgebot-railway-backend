@@ -624,6 +624,7 @@ async def process_file_content(
 
                 if not success:
                     logger.error(f"❌ [DB_ERROR] Failed to update file record for {original_filename}")
+                    logger.error(f"❌ [DB_ERROR] All variables: file_id={file_id}, document_name={document_name}, document_uri={document_uri}")
                     raise Exception("Database update failed - file orphaned in Gemini")
 
                 logger.info(f"✅ [DB_UPDATE] Updated file record with all processing data, File ID: {file_id}")
