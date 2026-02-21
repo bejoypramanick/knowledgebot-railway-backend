@@ -97,6 +97,7 @@ async def process_with_docling(
                     )
                 
                 # Choose request method based on whether we have a presigned URL
+                logger.info(f"🔍 [DOCLING] presigned_url value: {presigned_url}")
                 if presigned_url:
                     logger.info(
                         f"📄 [DOCLING] Calling docling service with presigned URL: {settings.docling_service_url} "
