@@ -112,21 +112,17 @@ class SimpleDoclingProcessor:
             
             # Check if conversion was successful
             if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
-                # Extract markdown content - use document property from ConversionResult
+                # Extract markdown content - use render_as_markdown method from ConversionResult
                 try:
-                    # Access the document from conversion result
-                    docling_document = conversion_result.document
-                    logger.info(f"🔧 [PROCESSOR] Got document object: {type(docling_document)}")
-                    
-                    # Try to export markdown from document
-                    markdown_content = docling_document.export_to_markdown()
-                    logger.info(f"✅ [PROCESSOR] Document export worked, got {len(markdown_content) if markdown_content else 0} chars")
+                    # Try render_as_markdown method directly on ConversionResult
+                    markdown_content = conversion_result.render_as_markdown()
+                    logger.info(f"✅ [PROCESSOR] render_as_markdown worked, got {len(markdown_content) if markdown_content else 0} chars")
                 except AttributeError as e:
-                    logger.error(f"❌ [PROCESSOR] Document export failed: {e}")
+                    logger.error(f"❌ [PROCESSOR] render_as_markdown failed: {e}")
                     logger.error(f"❌ [PROCESSOR] Available attributes: {[attr for attr in dir(conversion_result) if not attr.startswith('_')]}")
                     logger.error(f"❌ [PROCESSOR] Conversion result dir: {dir(conversion_result)}")
                     logger.error(f"❌ [PROCESSOR] Presigned URL conversion unsuccessful for: {presigned_url}")
-                    return None, {"error": f"Document export error: {e}", "filename": original_filename}
+                    return None, {"error": f"render_as_markdown error: {e}", "filename": original_filename}
                 
                 # Build simple metadata
                 metadata = {
