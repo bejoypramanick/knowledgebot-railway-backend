@@ -243,21 +243,43 @@ class EnhancedDoclingProcessor:
             
             # Initialize converter with advanced options
             if InputFormat is not None and PdfPipelineOptions is not None:
-                self._converter = DocumentConverter(
-                    format_options={
-                        InputFormat.PDF: pipeline_options
-                    }
-                )
-                logger.info("✅ Converter initialized with PDF format options")
+                # Check available attributes before using them
+                converter_config = {}
+                
+                # Try to use PDF format options if InputFormat.PDF exists
+                if hasattr(InputFormat, 'PDF'):
+                    converter_config[InputFormat.PDF] = pipeline_options
+                    logger.info("✅ Converter initialized with PDF format options")
+                elif 'pdf' in [attr.lower() for attr in dir(InputFormat)]:
+                    # Try to find PDF format enum
+                    pdf_format = None
+                    for attr in dir(InputFormat):
+                        if attr.lower() == 'pdf':
+                            pdf_format = getattr(InputFormat, attr)
+                            break
+                    if pdf_format is not None:
+                        converter_config[pdf_format] = pipeline_options
+                        logger.info("✅ Converter initialized with PDF format options (found PDF enum)")
+                    else:
+                        logger.warning("⚠️ PDF format not found in InputFormat, using default converter")
+                else:
+                    logger.warning("⚠️ InputFormat.PDF not available, using default converter")
+                
+                if converter_config:
+                    self._converter = DocumentConverter(format_options=converter_config)
+                    logger.info("✅ Converter initialized with format options")
+                else:
+                    self._converter = DocumentConverter()
+                    logger.info("✅ Converter initialized without format options")
             else:
-                # Initialize without format options
                 self._converter = DocumentConverter()
-                logger.info("✅ Converter initialized with default options (no InputFormat or PdfPipelineOptions)")
+                logger.info("✅ Converter initialized without format options")
+            
+            logger.info(f"✅ Enhanced docling processor initialized successfully")
+            logger.info(f"🔧 [PROCESSOR] Converter type: {type(self._converter)}")
+            logger.info(f"🔧 [PROCESSOR] Available methods: {[m for m in dir(self._converter) if not m.startswith('_')]}")
             
             self._initialized = True
-            logger.info("✅ Enhanced docling processor initialized successfully")
-            logger.info(f"🔧 [PROCESSOR] Converter type: {type(self._converter)}")
-            logger.info(f"🔧 [PROCESSOR] Available methods: {[method for method in dir(self._converter) if not method.startswith('_')]}")
             return True
             
         except Exception as e:
