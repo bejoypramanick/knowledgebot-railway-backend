@@ -111,8 +111,8 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
     """
     Convert a document to markdown using a presigned URL.
     
-    This endpoint downloads the document from the provided presigned URL
-    and processes it using docling, eliminating the need for file uploads.
+    This endpoint passes the presigned URL directly to docling's convert() method,
+    eliminating the need for file downloads and temporary files.
     
     Args:
         request_data: Contains presigned_url, filename, and mime_type
@@ -120,8 +120,6 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
     Returns:
         DoclingProcessResponse with markdown content and metadata
     """
-    temp_file_path = None
-    
     try:
         # Validate input
         if not request_data.presigned_url:
@@ -142,61 +140,16 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         )
         logger.info(f"🔗 Full presigned URL: {request_data.presigned_url}")
         
-        # Download file from presigned URL
-        import httpx
-        import tempfile
-        
-        timeout_config = httpx.Timeout(
-            connect=30.0,
-            read=300.0,  # 5 minutes for download
-            write=30.0,
-            pool=30.0
-        )
-        
-        async with httpx.AsyncClient(timeout=timeout_config) as client:
-            logger.info(f"🌐 [DOCLING_SERVICE] Starting download from presigned URL...")
-            response = await client.get(request_data.presigned_url)
-            
-            logger.info(f"📡 [DOCLING_SERVICE] Download response: HTTP {response.status_code}")
-            
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Failed to download file from presigned URL: HTTP {response.status_code}"
-                )
-            
-            content = response.content
-            file_size = len(content)
-            
-            logger.info(f"📥 [DOCLING_SERVICE] Downloaded {file_size} bytes ({file_size / 1024:.1f}KB)")
-            
-            # Validate file for processing
-            is_valid, error_msg = validate_file_for_processing(request_data.filename, file_size)
-            if not is_valid:
-                raise HTTPException(status_code=400, detail=error_msg)
-            
-            # Create temporary file
-            fd, temp_file_path = tempfile.mkstemp(suffix=os.path.splitext(request_data.filename)[1])
-            try:
-                with os.fdopen(fd, 'wb') as tmp:
-                    tmp.write(content)
-                
-                logger.info(f"📥 Downloaded {file_size / 1024:.1f}KB from presigned URL")
-                logger.info(f"📁 [DOCLING_SERVICE] Created temp file: {temp_file_path}")
-            except Exception as e:
-                # Clean up file descriptor if write fails
-                os.close(fd)
-                raise HTTPException(status_code=500, detail=f"Failed to write downloaded content: {e}")
-        
         # Get processor
         processor = await get_processor()
-        logger.info(f"🔧 [DOCLING_SERVICE] Got processor: {type(processor)}")
+        logger.info(f"� [DOCLING_SERVICE] Got processor: {type(processor)}")
         
-        # Process document
-        logger.info(f"📄 [DOCLING_SERVICE] Starting docling processing...")
-        markdown_content, metadata = await processor.process_document(
-            file_path=temp_file_path,
+        # Process document directly from presigned URL (no temp file needed)
+        logger.info(f"� [DOCLING_SERVICE] Starting docling processing from presigned URL...")
+        markdown_content, metadata = await processor.process_document_from_url(
+            presigned_url=request_data.presigned_url,
             original_filename=request_data.filename,
+            mime_type=request_data.mime_type,
             timeout_seconds=settings.docling_processing_timeout_seconds
         )
         

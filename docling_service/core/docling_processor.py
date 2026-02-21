@@ -269,6 +269,8 @@ class DoclingProcessor:
                 # Check file extension to determine processing approach
                 file_ext = Path(source).suffix.lower()
                 logger.info(f"📄 File extension detected: {file_ext}")
+            else:
+                logger.info(f"🌐 Using convert_single() for URL: {source[:100]}...")
 
             # Suppress progress bar output by redirecting stdout/stderr
             import sys
@@ -283,7 +285,7 @@ class DoclingProcessor:
                 sys.stdout = io.StringIO()
                 sys.stderr = io.StringIO()
 
-                # Use convert_single() for all formats
+                # Use convert_single() for all formats (both files and URLs)
                 if not is_url:
                     logger.info(f"📄 Using convert_single() for file: {source}")
                 conversion_result = self._converter.convert_single(source)
