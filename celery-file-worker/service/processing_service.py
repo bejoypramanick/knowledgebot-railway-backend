@@ -341,7 +341,7 @@ async def process_file_content(
         logger.info(f"� [S3] Generating presigned URL for S3 object: {s3_key}")
         from shared.s3_file_storage import s3_file_storage
 
-        success, result = await s3_file_storage.generate_presigned_url(s3_key, expiration=3600)
+        success, result = s3_file_storage.generate_presigned_url(s3_key, expiration=3600)
         if not success:
             logger.error(f"❌ [S3] Failed to generate presigned URL: {result}")
             return {
@@ -452,7 +452,7 @@ async def process_file_content(
 
             try:
                 markdown_content, docling_metadata = await process_with_docling(
-                    file_path=tmp_path,  # Not used when presigned_url is provided
+                    file_path="",  # Empty string when using presigned URL
                     original_filename=original_filename,
                     mime_type=detected_mime_type,
                     presigned_url=presigned_url  # Use presigned URL instead of file upload
