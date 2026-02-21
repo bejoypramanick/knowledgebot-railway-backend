@@ -15,9 +15,9 @@ psutil>=6.1.0
 tenacity>=8.2.2
 
 # Document Processing
-# Pin to 1.5.0+ to ensure PARTIAL_SUCCESS enum exists (breaking change in earlier 1.x versions)
-docling>=1.5.0,<2.0.0
-docling-core>=1.5.0,<2.0.0
+# Updated to latest version for enhanced features (InputFormat, PdfPipelineOptions, TableFormerMode)
+docling>=2.0.0,<3.0.0
+docling-core>=2.0.0,<3.0.0
 
 # Image OCR Extraction
 easyocr>=1.6.0

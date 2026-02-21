@@ -49,35 +49,52 @@ try:
     except Exception as e:
         logger.warning(f"⚠️ [BASE_MODELS] Could not list base_models: {e}")
     
-    # Try to import InputFormat, but don't fail if it's not available
+    # Try to import InputFormat for docling 2.0+
     try:
         from docling.datamodel.base_models import InputFormat
         logger.info("✅ [IMPORT] InputFormat imported successfully")
     except ImportError as e:
         InputFormat = None
         logger.warning(f"⚠️ [IMPORT] InputFormat not available: {e}")
-        # Try alternative import paths
+        # Try to use DocInputType as alternative for older versions
         try:
-            from docling.datamodel.base_models import InputFormat as InputFormatAlt
-            InputFormat = InputFormatAlt
-            logger.info("✅ [IMPORT] InputFormat imported via alternative path")
+            from docling.datamodel.base_models import DocInputType
+            InputFormat = DocInputType  # Use DocInputType as fallback
+            logger.info("✅ [IMPORT] Using DocInputType as InputFormat fallback")
         except ImportError:
-            logger.warning("⚠️ [IMPORT] InputFormat not available in any path")
+            logger.warning("⚠️ [IMPORT] DocInputType not available either")
     
-    # Try to import pipeline options
+    # Try to import pipeline options for docling 2.0+
     try:
         from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
         logger.info("✅ [IMPORT] PdfPipelineOptions and TableFormerMode imported successfully")
     except ImportError as e:
-        PdfPipelineOptions = None
-        TableFormerMode = None
-        logger.warning(f"⚠️ [IMPORT] Pipeline options not available: {e}")
+        # Try to use available classes for older versions
+        try:
+            from docling.datamodel.base_models import PipelineOptions, TableStructureOptions
+            PdfPipelineOptions = PipelineOptions
+            logger.info("✅ [IMPORT] Using PipelineOptions as PdfPipelineOptions fallback")
+            
+            # Try to get TableFormerMode or create a fallback
+            TableFormerMode = None
+            logger.warning("⚠️ [IMPORT] TableFormerMode not available, using fallback")
+        except ImportError as e2:
+            PdfPipelineOptions = None
+            TableFormerMode = None
+            logger.warning(f"⚠️ [IMPORT] Pipeline options not available: {e2}")
     
     # Try to import settings and OCR model
     try:
         from docling.datamodel.settings import settings
-        from docling.models.ocr_mac_model import OcrMacModel
-        logger.info("✅ [IMPORT] Settings and OcrMacModel imported successfully")
+        try:
+            from docling.models.ocr_mac_model import OcrMacModel
+        except ImportError:
+            # Try alternative OCR model import for newer versions
+            try:
+                from docling.models.ocr_model import OcrMacModel
+            except ImportError:
+                OcrMacModel = None
+        logger.info("✅ [IMPORT] Settings and OCR model imported successfully")
     except ImportError as e:
         settings = None
         OcrMacModel = None
