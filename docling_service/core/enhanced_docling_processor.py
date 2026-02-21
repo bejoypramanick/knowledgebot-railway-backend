@@ -26,10 +26,31 @@ except Exception as e:
 # Import docling libraries
 try:
     from docling.document_converter import DocumentConverter
-    from docling.datamodel.base_models import ConversionStatus, InputFormat
-    from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
-    from docling.datamodel.settings import settings
-    from docling.models.ocr_mac_model import OcrMacModel
+    from docling.datamodel.base_models import ConversionStatus
+    
+    # Try to import InputFormat, but don't fail if it's not available
+    try:
+        from docling.datamodel.base_models import InputFormat
+    except ImportError:
+        InputFormat = None
+        logger.warning("⚠️ InputFormat not available, using default format options")
+    
+    # Try to import pipeline options
+    try:
+        from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
+    except ImportError:
+        PdfPipelineOptions = None
+        TableFormerMode = None
+        logger.warning("⚠️ Pipeline options not available, using basic processing")
+    
+    # Try to import settings and OCR model
+    try:
+        from docling.datamodel.settings import settings
+        from docling.models.ocr_mac_model import OcrMacModel
+    except ImportError:
+        settings = None
+        OcrMacModel = None
+        logger.warning("⚠️ OCR settings not available")
     
     # Build list of acceptable conversion statuses
     _acceptable_statuses = [ConversionStatus.SUCCESS]
@@ -41,6 +62,7 @@ try:
     
     logger.info("✅ Docling libraries imported successfully")
     logger.info(f"✅ Acceptable conversion statuses: {_ACCEPTABLE_CONVERSION_STATUSES}")
+    logger.info(f"📦 Available modules: DocumentConverter={DocumentConverter is not None}, PdfPipelineOptions={PdfPipelineOptions is not None}, InputFormat={InputFormat is not None}")
     
 except ImportError as e:
     logger.error(f"❌ Failed to import docling libraries: {e}")
@@ -50,6 +72,8 @@ except ImportError as e:
     PdfPipelineOptions = None
     TableFormerMode = None
     InputFormat = None
+    settings = None
+    OcrMacModel = None
 
 
 class EnhancedDoclingProcessor:
@@ -86,32 +110,38 @@ class EnhancedDoclingProcessor:
             logger.info(f"   - TableFormer Mode: {self.tableformer_mode}")
             
             # Check if required imports are available
-            if DocumentConverter is None or PdfPipelineOptions is None:
-                logger.error("❌ Required docling libraries not available")
+            if DocumentConverter is None:
+                logger.error("❌ DocumentConverter not available")
                 return False
             
-            # Configure advanced pipeline options
-            pipeline_options = PdfPipelineOptions()
-            
-            # Enable layout analysis for better document understanding
-            if self.enable_layout_analysis:
-                pipeline_options.do_layout_analysis = True
-                logger.info("✅ Layout analysis enabled")
-            
-            # Enable table structure recognition
-            if self.enable_table_structure:
-                pipeline_options.do_table_structure = True
-                pipeline_options.table_structure_options.do_cell_matching = self.enable_cell_matching
+            # Configure advanced pipeline options if available
+            pipeline_options = None
+            if PdfPipelineOptions is not None:
+                pipeline_options = PdfPipelineOptions()
                 
-                # Set tableformer mode only if it's a valid enum
-                if hasattr(pipeline_options.table_structure_options, 'mode') and TableFormerMode is not None:
-                    pipeline_options.table_structure_options.mode = self.tableformer_mode
-                    logger.info(f"✅ Table structure enabled (cell_matching={self.enable_cell_matching}, mode={self.tableformer_mode})")
-                else:
-                    logger.info(f"✅ Table structure enabled (cell_matching={self.enable_cell_matching}, mode=DEFAULT)")
-            
-            # Enable OCR for scanned documents
-            pipeline_options.do_ocr = True
+                # Enable layout analysis for better document understanding
+                if self.enable_layout_analysis:
+                    pipeline_options.do_layout_analysis = True
+                    logger.info("✅ Layout analysis enabled")
+                
+                # Enable table structure recognition
+                if self.enable_table_structure:
+                    pipeline_options.do_table_structure = True
+                    pipeline_options.table_structure_options.do_cell_matching = self.enable_cell_matching
+                    
+                    # Set tableformer mode only if it's a valid enum
+                    if hasattr(pipeline_options.table_structure_options, 'mode') and TableFormerMode is not None:
+                        pipeline_options.table_structure_options.mode = self.tableformer_mode
+                        logger.info(f"✅ Table structure enabled (cell_matching={self.enable_cell_matching}, mode={self.tableformer_mode})")
+                    else:
+                        logger.info(f"✅ Table structure enabled (cell_matching={self.enable_cell_matching}, mode=DEFAULT)")
+                
+                # Enable OCR for scanned documents
+                pipeline_options.do_ocr = True
+                
+                logger.info("✅ Advanced pipeline options configured")
+            else:
+                logger.warning("⚠️ PdfPipelineOptions not available, using default processing")
             
             # Configure OCR settings
             if hasattr(settings, 'ocr') and OcrMacModel is not None:
@@ -119,11 +149,17 @@ class EnhancedDoclingProcessor:
                 logger.info("✅ OCR auto-model selection enabled")
             
             # Initialize converter with advanced options
-            self._converter = DocumentConverter(
-                format_options={
-                    InputFormat.PDF: pipeline_options
-                } if InputFormat is not None else {}
-            )
+            if InputFormat is not None and PdfPipelineOptions is not None:
+                self._converter = DocumentConverter(
+                    format_options={
+                        InputFormat.PDF: pipeline_options
+                    }
+                )
+                logger.info("✅ Converter initialized with PDF format options")
+            else:
+                # Initialize without format options
+                self._converter = DocumentConverter()
+                logger.info("✅ Converter initialized with default options (no InputFormat or PdfPipelineOptions)")
             
             self._initialized = True
             logger.info("✅ Enhanced docling processor initialized successfully")
