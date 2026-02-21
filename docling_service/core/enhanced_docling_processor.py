@@ -179,25 +179,54 @@ class EnhancedDoclingProcessor:
             if PdfPipelineOptions is not None:
                 pipeline_options = PdfPipelineOptions()
                 
+                # Check available attributes and configure accordingly
+                available_attrs = [attr for attr in dir(pipeline_options) if not attr.startswith('_')]
+                logger.info(f"🔧 [PIPELINE] Available PdfPipelineOptions attributes: {available_attrs}")
+                
                 # Enable layout analysis for better document understanding
                 if self.enable_layout_analysis:
-                    pipeline_options.do_layout_analysis = True
-                    logger.info("✅ Layout analysis enabled")
+                    if hasattr(pipeline_options, 'do_layout'):
+                        pipeline_options.do_layout = True
+                        logger.info("✅ Layout analysis enabled (do_layout)")
+                    elif hasattr(pipeline_options, 'layout_analysis'):
+                        pipeline_options.layout_analysis = True
+                        logger.info("✅ Layout analysis enabled (layout_analysis)")
+                    else:
+                        logger.warning("⚠️ Layout analysis attribute not found in PdfPipelineOptions")
                 
                 # Enable table structure recognition
                 if self.enable_table_structure:
-                    pipeline_options.do_table_structure = True
-                    pipeline_options.table_structure_options.do_cell_matching = self.enable_cell_matching
-                    
-                    # Set tableformer mode only if it's a valid enum
-                    if hasattr(pipeline_options.table_structure_options, 'mode') and TableFormerMode is not None:
-                        pipeline_options.table_structure_options.mode = self.tableformer_mode
-                        logger.info(f"✅ Table structure enabled (cell_matching={self.enable_cell_matching}, mode={self.tableformer_mode})")
+                    if hasattr(pipeline_options, 'do_table_structure'):
+                        pipeline_options.do_table_structure = True
+                        logger.info("✅ Table structure enabled (do_table_structure)")
+                    elif hasattr(pipeline_options, 'table_structure'):
+                        pipeline_options.table_structure = True
+                        logger.info("✅ Table structure enabled (table_structure)")
                     else:
-                        logger.info(f"✅ Table structure enabled (cell_matching={self.enable_cell_matching}, mode=DEFAULT)")
+                        logger.warning("⚠️ Table structure attribute not found in PdfPipelineOptions")
+                    
+                    # Configure table structure options if available
+                    if hasattr(pipeline_options, 'table_structure_options'):
+                        if hasattr(pipeline_options.table_structure_options, 'do_cell_matching'):
+                            pipeline_options.table_structure_options.do_cell_matching = self.enable_cell_matching
+                            logger.info(f"✅ Cell matching enabled: {self.enable_cell_matching}")
+                        
+                        # Set tableformer mode only if it's a valid enum and attribute exists
+                        if (hasattr(pipeline_options.table_structure_options, 'mode') and 
+                            TableFormerMode is not None and 
+                            hasattr(TableFormerMode, 'ACCURATE')):
+                            pipeline_options.table_structure_options.mode = self.tableformer_mode
+                            logger.info(f"✅ TableFormer mode set: {self.tableformer_mode}")
+                        else:
+                            logger.warning("⚠️ TableFormer mode not available, using default")
                 
                 # Enable OCR for scanned documents
-                pipeline_options.do_ocr = True
+                if hasattr(pipeline_options, 'do_ocr'):
+                    pipeline_options.do_ocr = True
+                    logger.info("✅ OCR enabled (do_ocr)")
+                elif hasattr(pipeline_options, 'ocr_enabled'):
+                    pipeline_options.ocr_enabled = True
+                    logger.info("✅ OCR enabled (ocr_enabled)")
                 
                 logger.info("✅ Advanced pipeline options configured")
             else:
