@@ -121,8 +121,11 @@ class EnhancedDoclingProcessor:
             # Initialize converter with advanced options using new docling structure
             if InputFormat is not None and PdfPipelineOptions is not None:
                 # Check available attributes before using them
-                available_attrs = [attr for attr in dir(pipeline_options) if not attr.startswith('_')]
-                logger.info(f"🔧 [PIPELINE] Available PdfPipelineOptions attributes: {available_attrs}")
+                if pipeline_options is not None:
+                    available_attrs = [attr for attr in dir(pipeline_options) if not attr.startswith('_')]
+                    logger.info(f"🔧 [PIPELINE] Available PdfPipelineOptions attributes: {available_attrs}")
+                else:
+                    logger.warning("⚠️ [PIPELINE] PdfPipelineOptions is None, skipping attribute check")
                 
                 # Initialize converter using format-specific options
                 converter_config = {}
