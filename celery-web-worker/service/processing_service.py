@@ -672,7 +672,13 @@ class ProcessingService:
             filename = os.path.basename(urlparse(file_url).path)
             mime_type = mime_types.get(file_ext, 'application/octet-stream')
 
-            markdown_content, _ = await process_with_docling(temp_path, filename, mime_type, timeout_seconds=30)
+            markdown_content, _ = await process_with_docling(
+                file_path=temp_path, 
+                filename=filename, 
+                mime_type=mime_type, 
+                timeout_seconds=30,
+                presigned_url=None  # Web worker uses local files
+            )
 
             if markdown_content:
                 logger.info(f"✅ [DOCLING] Extracted {len(markdown_content)} chars")

@@ -52,17 +52,20 @@ async def process_with_docling(
     file_path: str,
     original_filename: str,
     mime_type: str,
-    timeout_seconds: Optional[int] = None
+    timeout_seconds: Optional[int] = None,
+    presigned_url: Optional[str] = None
 ) -> Tuple[Optional[str], dict]:
     """
     Call docling service to convert document to markdown.
     Retries connection failures up to 3 times with exponential backoff.
+    Can process either local file upload or presigned URL.
 
     Args:
-        file_path: Path to the file to process
+        file_path: Path to the file to process (optional if presigned_url provided)
         original_filename: Original filename
         mime_type: MIME type of the file
         timeout_seconds: Request timeout in seconds
+        presigned_url: Presigned S3 URL for direct download by docling service
 
     Returns:
         Tuple of (markdown_content, metadata) or (None, error_dict) on failure
@@ -77,61 +80,82 @@ async def process_with_docling(
     
     for attempt in range(max_retries):
         try:
-            # Prepare multipart form data
-            with open(file_path, 'rb') as f:
-                files = {'file': (original_filename, f, mime_type)}
-
-                # Use proper timeout configuration to handle long-running operations
-                # Connect timeout: 30s, Read timeout: processing timeout + 60s buffer
-                timeout_config = Timeout(
-                    connect=30.0,
-                    read=timeout_seconds + 60,
-                    write=30.0,
-                    pool=30.0
-                )
-                
-                logger.info(f"🔧 [DOCLING] HTTP timeout config - Connect: 30s, Read: {timeout_seconds + 60}s, Write: 30s, Pool: 30s")
-                
-                async with httpx.AsyncClient(timeout=timeout_config) as client:
-                    if attempt > 0:
-                        logger.info(
-                            f"🔄 [DOCLING] Retry attempt {attempt + 1}/{max_retries} for {original_filename}"
-                        )
-                    
+            # Configure timeout for this attempt
+            timeout_config = httpx.Timeout(
+                connect=30.0,
+                read=timeout_seconds + 60,  # Add buffer for large files
+                write=30.0,
+                pool=30.0
+            )
+            
+            logger.info(f"🔧 [DOCLING] HTTP timeout config - Connect: 30s, Read: {timeout_seconds + 60}s, Write: 30s, Pool: 30s")
+            
+            async with httpx.AsyncClient(timeout=timeout_config) as client:
+                if attempt > 0:
                     logger.info(
-                        f"📄 [DOCLING] Calling docling service: {settings.docling_service_url} "
+                        f"🔄 [DOCLING] Retry attempt {attempt + 1}/{max_retries} for {original_filename}"
+                    )
+                
+                # Choose request method based on whether we have a presigned URL
+                if presigned_url:
+                    logger.info(
+                        f"📄 [DOCLING] Calling docling service with presigned URL: {settings.docling_service_url} "
                         f"for {original_filename}"
                     )
-
+                    
+                    # Send presigned URL in JSON payload
+                    request_data = {
+                        "presigned_url": presigned_url,
+                        "filename": original_filename,
+                        "mime_type": mime_type
+                    }
+                    
                     response = await client.post(
-                        f"{settings.docling_service_url}/api/v1/docling/process",
-                        files=files,
+                        f"{settings.docling_service_url}/api/v1/docling/process_url",
+                        json=request_data,
                         timeout=timeout_seconds
                     )
+                else:
+                    logger.info(
+                        f"📄 [DOCLING] Calling docling service with file upload: {settings.docling_service_url} "
+                        f"for {original_filename}"
+                    )
+                    
+                    # Legacy file upload mode
+                    with open(file_path, 'rb') as f:
+                        files = {
+                            'file': (original_filename, f, mime_type)
+                        }
+                        
+                        response = await client.post(
+                            f"{settings.docling_service_url}/api/v1/docling/process",
+                            files=files,
+                            timeout=timeout_seconds
+                        )
 
-                    logger.info(f"📄 [DOCLING] Response status: {response.status_code}")
+                logger.info(f"📄 [DOCLING] Response status: {response.status_code}")
 
-                    if response.status_code == 200:
-                        result = response.json()
+                if response.status_code == 200:
+                    result = response.json()
 
-                        if result.get("success"):
-                            markdown_content = result.get("content")
-                            metadata = result.get("metadata", {})
+                    if result.get("success"):
+                        markdown_content = result.get("content")
+                        metadata = result.get("metadata", {})
 
-                            logger.info(
-                                f"✅ [DOCLING] Successfully converted {original_filename}: "
-                                f"{len(markdown_content)} chars, "
-                                f"{metadata.get('images_with_ocr', 0)} images OCR'd"
-                            )
+                        logger.info(
+                            f"✅ [DOCLING] Successfully converted {original_filename}: "
+                            f"{len(markdown_content)} chars, "
+                            f"{metadata.get('images_with_ocr', 0)} images OCR'd"
+                        )
 
-                            return markdown_content, metadata
-                        else:
-                            error = result.get("error", "Unknown error")
-                            logger.warning(
-                                f"⚠️ [DOCLING] Conversion failed for {original_filename}: {error}"
-                            )
-                            return None, {"error": error}
+                        return markdown_content, metadata
                     else:
+                        error = result.get("error", "Unknown error")
+                        logger.warning(
+                            f"⚠️ [DOCLING] Conversion failed for {original_filename}: {error}"
+                        )
+                        return None, {"error": error}
+                else:
                         # Handle non-200 responses with better error details
                         response_text = response.text.strip() if response.text else ""
                         if response_text:

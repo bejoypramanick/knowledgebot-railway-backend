@@ -337,27 +337,23 @@ async def process_file_content(
         
         logger.info(f"📋 [FILE_DETAILS] Retrieved: file_id={file_id}, filename={original_filename}, s3_key={s3_key}")
 
-        # STEP 2: S3 DOWNLOAD PHASE
-        logger.info(f"📥 [S3] Downloading file from S3: {s3_key}")
+        # STEP 2: GENERATE PRESIGNED URL (instead of downloading)
+        logger.info(f"� [S3] Generating presigned URL for S3 object: {s3_key}")
         from shared.s3_file_storage import s3_file_storage
 
-        success, result = await s3_file_storage.download_file(s3_key)
+        success, result = await s3_file_storage.generate_presigned_url(s3_key, expiration=3600)
         if not success:
-            logger.error(f"❌ [S3] Download failed: {result}")
+            logger.error(f"❌ [S3] Failed to generate presigned URL: {result}")
             return {
                 "success": False,
-                "error": f"S3 download failed: {result}"
+                "error": f"Failed to generate presigned URL: {result}"
             }
 
-        file_bytes = result
-        logger.info(f"✅ [S3] Downloaded {len(file_bytes)} bytes from S3")
+        presigned_url = result
+        logger.info(f"✅ [S3] Generated presigned URL for {s3_key}")
 
-        # Create temp file from downloaded bytes
-        import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{original_filename}") as tmp:
-            tmp.write(file_bytes)
-            tmp_path = tmp.name
-        logger.info(f"✅ Created temp file: {tmp_path}")
+        # No need to create temp files - docling service will download directly
+        tmp_path = None  # Not used with presigned URL approach
 
         # STEP 3: VALIDATION PHASE
         logger.info(f"🔍 [VALIDATION] Starting file validation for {original_filename}")
@@ -456,9 +452,10 @@ async def process_file_content(
 
             try:
                 markdown_content, docling_metadata = await process_with_docling(
-                    tmp_path,
-                    original_filename,
-                    detected_mime_type
+                    file_path=tmp_path,  # Not used when presigned_url is provided
+                    original_filename=original_filename,
+                    mime_type=detected_mime_type,
+                    presigned_url=presigned_url  # Use presigned URL instead of file upload
                 )
 
                 if markdown_content:

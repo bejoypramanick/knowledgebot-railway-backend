@@ -174,6 +174,42 @@ class S3FileStorage:
             logger.error(f"❌ Unexpected error deleting file: {e}")
             return False
 
+    def generate_presigned_url(self, s3_key: str, expiration: int = 3600) -> Tuple[bool, str]:
+        """
+        Generate a presigned URL for S3 object access
+        
+        Args:
+            s3_key: S3 object key
+            expiration: URL expiration time in seconds (default: 1 hour)
+            
+        Returns:
+            Tuple of (success, url) or (False, error_message)
+        """
+        if not self.is_available():
+            logger.warning("⚠️ Railway storage not available, cannot generate presigned URL")
+            return False, "Storage not available"
+        
+        try:
+            logger.info(f"🔗 Generating presigned URL for S3 object: {s3_key}")
+            
+            presigned_url = self._s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': self.bucket_name, 'Key': s3_key},
+                ExpiresIn=expiration
+            )
+            
+            logger.info(f"✅ Generated presigned URL for {s3_key} (expires in {expiration}s)")
+            return True, presigned_url
+            
+        except ClientError as e:
+            error_msg = f"Failed to generate presigned URL: {e}"
+            logger.error(f"❌ {error_msg}")
+            return False, error_msg
+        except Exception as e:
+            error_msg = f"Unexpected error generating presigned URL: {e}"
+            logger.error(f"❌ {error_msg}")
+            return False, error_msg
+
     async def delete_files_batch(self, s3_keys: list) -> Tuple[int, int]:
         """
         Delete multiple files from Railway storage in batch
