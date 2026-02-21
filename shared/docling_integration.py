@@ -2,9 +2,7 @@
 import asyncio
 import logging
 import os
-import random
 import tempfile
-import time
 from typing import Optional, Tuple
 
 import httpx
@@ -24,12 +22,6 @@ SKIP_DOCLING_TYPES = {
 }
 
 MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024
-
-# Circuit breaker state to prevent hammering overloaded service
-_circuit_breaker_failures = 0
-_circuit_breaker_last_failure = None
-_circuit_breaker_threshold = 10  # Failures before circuit opens
-_circuit_breaker_timeout = 300  # 5 minutes before retrying
 
 
 def _get_settings():
@@ -64,8 +56,7 @@ async def process_with_docling(
 ) -> Tuple[Optional[str], dict]:
     """
     Call docling service to convert document to markdown.
-    Retries connection failures up to 5 times with exponential backoff.
-    Includes circuit breaker to prevent hammering overloaded service.
+    Retries connection failures up to 3 times with exponential backoff.
 
     Args:
         file_path: Path to the file to process
@@ -76,25 +67,13 @@ async def process_with_docling(
     Returns:
         Tuple of (markdown_content, metadata) or (None, error_dict) on failure
     """
-    global _circuit_breaker_failures, _circuit_breaker_last_failure
-    
     settings = _get_settings()
 
     if timeout_seconds is None:
         timeout_seconds = settings.docling_timeout_seconds
 
-    # Check circuit breaker state
-    current_time = time.time()
-    if (_circuit_breaker_failures >= _circuit_breaker_threshold and 
-        _circuit_breaker_last_failure and 
-        current_time - _circuit_breaker_last_failure < _circuit_breaker_timeout):
-        logger.warning(f"🚫 [DOCLING_CIRCUIT_BREAKER] Service overloaded, skipping {original_filename}")
-        logger.warning(f"   Failures: {_circuit_breaker_failures}, Timeout: {_circuit_breaker_timeout}s remaining")
-        return None, {"error": "Docling service temporarily unavailable (circuit breaker open)"}
-
-    max_retries = 5
-    # Exponential backoff with jitter: [5, 15, 30, 60, 120] seconds
-    base_delays = [5, 15, 30, 60, 120]
+    max_retries = 3
+    retry_delays = [5, 15, 30]  # seconds between retries
     
     for attempt in range(max_retries):
         try:
@@ -138,13 +117,6 @@ async def process_with_docling(
                         if result.get("success"):
                             markdown_content = result.get("content")
                             metadata = result.get("metadata", {})
-
-                            # Reset circuit breaker on success
-                            global _circuit_breaker_failures, _circuit_breaker_last_failure
-                            if _circuit_breaker_failures > 0:
-                                logger.info(f"✅ [DOCLING_CIRCUIT_BREAKER] Service recovered, resetting failure count from {_circuit_breaker_failures}")
-                                _circuit_breaker_failures = 0
-                                _circuit_breaker_last_failure = None
 
                             logger.info(
                                 f"✅ [DOCLING] Successfully converted {original_filename}: "
@@ -202,28 +174,19 @@ async def process_with_docling(
             return None, {"error": "Docling processing timeout"}
 
         except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
-            # Connection errors - retry with exponential backoff and jitter
+            # Connection errors - retry with backoff
             if attempt < max_retries - 1:
-                # Add jitter (±25% random variation) to prevent thundering herd
-                base_delay = base_delays[attempt]
-                jitter = random.uniform(0.75, 1.25)
-                delay = base_delay * jitter
-                
+                delay = retry_delays[attempt]
                 logger.warning(
                     f"⚠️ [DOCLING] Connection failed for {original_filename} (attempt {attempt + 1}/{max_retries}): {e}"
                 )
-                logger.info(f"⏳ [DOCLING] Retrying in {delay:.1f}s... (jitter applied to prevent service overload)")
+                logger.info(f"⏳ [DOCLING] Retrying in {delay}s... (docling service may be busy)")
                 await asyncio.sleep(delay)
                 continue
             else:
-                # Update circuit breaker on failure
-                _circuit_breaker_failures += 1
-                _circuit_breaker_last_failure = current_time
-                
                 logger.warning(
                     f"⚠️ [DOCLING] All connection attempts failed for {original_filename}: {e}"
                 )
-                logger.warning(f"🚫 [DOCLING_CIRCUIT_BREAKER] Failure count: {_circuit_breaker_failures}/{_circuit_breaker_threshold}")
                 return None, {"error": f"Connection failed after {max_retries} attempts: {str(e)}"}
 
         except Exception as e:
