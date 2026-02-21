@@ -101,7 +101,7 @@ class SimpleDoclingProcessor:
                 
                 # Direct conversion from presigned URL
                 conversion_result = self._converter.convert_single(presigned_url)
-                logger.info(f" Conversion result:{conversion_result}")
+                
             finally:
                 # Restore original stdout/stderr
                 sys.stdout = original_stdout
