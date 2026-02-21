@@ -90,6 +90,21 @@ try:
             TableFormerMode = None
             logger.warning(f"⚠️ [IMPORT] Pipeline options not available: {e2}")
     
+    # Try to import PdfFormatOption for newer docling versions
+    try:
+        from docling.datamodel.base_models import PdfFormatOption
+        logger.info("✅ [IMPORT] PdfFormatOption imported successfully")
+    except ImportError as e:
+        PdfFormatOption = None
+        logger.warning(f"⚠️ [IMPORT] PdfFormatOption not available: {e}")
+        # Try alternative import paths
+        try:
+            from docling.datamodel.base_models import FormatOption
+            PdfFormatOption = FormatOption
+            logger.info("✅ [IMPORT] Using FormatOption as PdfFormatOption fallback")
+        except ImportError:
+            logger.warning("⚠️ [IMPORT] FormatOption not available either")
+    
     # Try to import settings and configure EasyOCR only
     try:
         from docling.datamodel.settings import settings
@@ -174,12 +189,9 @@ class EnhancedDoclingProcessor:
                 logger.error("❌ DocumentConverter not available")
                 return False
             
-            # Configure advanced pipeline options if available
-            pipeline_options = None
-            if PdfPipelineOptions is not None:
-                pipeline_options = PdfPipelineOptions()
-                
-                # Check available attributes and configure accordingly
+            # Initialize converter with advanced options using new docling structure
+            if InputFormat is not None and PdfPipelineOptions is not None:
+                # Check available attributes before using them
                 available_attrs = [attr for attr in dir(pipeline_options) if not attr.startswith('_')]
                 logger.info(f"🔧 [PIPELINE] Available PdfPipelineOptions attributes: {available_attrs}")
                 
@@ -228,49 +240,50 @@ class EnhancedDoclingProcessor:
                     pipeline_options.ocr_enabled = True
                     logger.info("✅ OCR enabled (ocr_enabled)")
                 
-                logger.info("✅ Advanced pipeline options configured")
-            else:
-                logger.warning("⚠️ PdfPipelineOptions not available, using default processing")
-            
-            # Configure OCR settings for EasyOCR
-            if hasattr(settings, 'ocr') and settings is not None:
-                # Configure EasyOCR settings
-                settings.ocr.enabled = True
-                settings.ocr.easyocr_enabled = True
-                logger.info("✅ EasyOCR enabled in settings")
-            else:
-                logger.info("✅ Using default EasyOCR configuration")
-            
-            # Initialize converter with advanced options
-            if InputFormat is not None and PdfPipelineOptions is not None:
-                # Check available attributes before using them
-                converter_config = {}
-                
-                # Try to use PDF format options if InputFormat.PDF exists
-                if hasattr(InputFormat, 'PDF'):
-                    converter_config[InputFormat.PDF] = pipeline_options
-                    logger.info("✅ Converter initialized with PDF format options")
-                elif 'pdf' in [attr.lower() for attr in dir(InputFormat)]:
-                    # Try to find PDF format enum
-                    pdf_format = None
-                    for attr in dir(InputFormat):
-                        if attr.lower() == 'pdf':
-                            pdf_format = getattr(InputFormat, attr)
-                            break
-                    if pdf_format is not None:
-                        converter_config[pdf_format] = pipeline_options
-                        logger.info("✅ Converter initialized with PDF format options (found PDF enum)")
+                # Initialize converter using new docling structure
+                if PdfFormatOption is not None:
+                    # Use PdfFormatOption wrapper for newer versions
+                    try:
+                        # Try to find PDF format in InputFormat
+                        pdf_format = None
+                        if hasattr(InputFormat, 'PDF'):
+                            pdf_format = InputFormat.PDF
+                        else:
+                            # Case-insensitive search for PDF format
+                            for attr in dir(InputFormat):
+                                if attr.lower() == 'pdf':
+                                    pdf_format = getattr(InputFormat, attr)
+                                    break
+                        
+                        if pdf_format is not None:
+                            # Create PdfFormatOption with pipeline options
+                            pdf_format_option = PdfFormatOption(
+                                pipeline_options=pipeline_options
+                                # backend="pypdfium2"  # Optional: force specific backend
+                            )
+                            converter_config = {
+                                pdf_format: pdf_format_option
+                            }
+                            self._converter = DocumentConverter(format_options=converter_config)
+                            logger.info("✅ Converter initialized with PdfFormatOption wrapper")
+                        else:
+                            logger.warning("⚠️ PDF format not found, using default converter")
+                            self._converter = DocumentConverter()
+                    except Exception as e:
+                        logger.error(f"❌ Failed to create PdfFormatOption: {e}")
+                        self._converter = DocumentConverter()
+                else:
+                    # Fallback to old method for older versions
+                    converter_config = {}
+                    if hasattr(InputFormat, 'PDF'):
+                        converter_config[InputFormat.PDF] = pipeline_options
+                        self._converter = DocumentConverter(format_options=converter_config)
+                        logger.info("✅ Converter initialized with legacy format options")
                     else:
-                        logger.warning("⚠️ PDF format not found in InputFormat, using default converter")
-                else:
-                    logger.warning("⚠️ InputFormat.PDF not available, using default converter")
+                        self._converter = DocumentConverter()
+                        logger.info("✅ Converter initialized without format options")
                 
-                if converter_config:
-                    self._converter = DocumentConverter(format_options=converter_config)
-                    logger.info("✅ Converter initialized with format options")
-                else:
-                    self._converter = DocumentConverter()
-                    logger.info("✅ Converter initialized without format options")
+                logger.info("✅ Advanced pipeline options configured")
             else:
                 self._converter = DocumentConverter()
                 logger.info("✅ Converter initialized without format options")
