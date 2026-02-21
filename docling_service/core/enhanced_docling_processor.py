@@ -35,23 +35,23 @@ try:
     except Exception as e:
         logger.warning(f"⚠️ [VERSION] Could not get docling version: {e}")
     
-    from docling.document_converter import DocumentConverter
-    logger.info("✅ [IMPORT] DocumentConverter imported successfully")
+    # ✅ NEW/CORRECT (v2.x) - Import FormatOption classes from document_converter
+    from docling.document_converter import (
+        DocumentConverter, 
+        PdfFormatOption, 
+        WordFormatOption, 
+        HtmlFormatOption, 
+        ExcelFormatOption
+    )
+    logger.info("✅ [IMPORT] DocumentConverter and FormatOptions imported successfully")
     
-    from docling.datamodel.base_models import ConversionStatus
-    logger.info("✅ [IMPORT] ConversionStatus imported successfully")
+    # ✅ CORRECT - InputFormat and ConversionStatus stay in base_models
+    from docling.datamodel.base_models import ConversionStatus, InputFormat
+    logger.info("✅ [IMPORT] ConversionStatus and InputFormat imported successfully")
     
-    
-    # Try to import format-specific options for newer docling versions
-    try:
-        from docling.datamodel.base_models import PdfFormatOption, WordFormatOption, HtmlFormatOption, ExcelFormatOption
-        logger.info("✅ [IMPORT] Format-specific options imported successfully")
-    except ImportError as e:
-        PdfFormatOption = None
-        WordFormatOption = None
-        HtmlFormatOption = None
-        ExcelFormatOption = None
-        logger.warning(f"⚠️ [IMPORT] Format-specific options not available: {e}")
+    # ✅ CORRECT - PdfPipelineOptions stays in pipeline_options
+    from docling.datamodel.pipeline_options import PdfPipelineOptions
+    logger.info("✅ [IMPORT] PdfPipelineOptions imported successfully")
            
     # Build list of acceptable conversion statuses
     _acceptable_statuses = [ConversionStatus.SUCCESS]
@@ -74,8 +74,13 @@ except ImportError as e:
     ConversionStatus = None
     DocumentConverter = None
     PdfPipelineOptions = None
-    TableFormerMode = None
     InputFormat = None
+    # v2.x format options
+    PdfFormatOption = None
+    WordFormatOption = None
+    HtmlFormatOption = None
+    ExcelFormatOption = None
+    TableFormerMode = None
     settings = None
     OcrMacModel = None
 
@@ -118,61 +123,44 @@ class EnhancedDoclingProcessor:
                 logger.error("❌ DocumentConverter not available")
                 return False
             
-            # Initialize converter with advanced options using new docling structure
-            pipeline_options = None
+            # Initialize converter with advanced options using new docling v2.x structure
             if InputFormat is not None and PdfPipelineOptions is not None:
-                pipeline_options = PdfPipelineOptions()
-                logger.info("✅ PdfPipelineOptions initialized successfully")
-            elif InputFormat is not None:
-                logger.warning("⚠️ PdfPipelineOptions not available, using basic pipeline")
-            
-            if InputFormat is not None and PdfPipelineOptions is not None:
-                # Check available attributes before using them
-                if pipeline_options is not None:
-                    available_attrs = [attr for attr in dir(pipeline_options) if not attr.startswith('_')]
-                    logger.info(f"🔧 [PIPELINE] Available PdfPipelineOptions attributes: {available_attrs}")
-                else:
-                    logger.warning("⚠️ [PIPELINE] PdfPipelineOptions is None, skipping attribute check")
+                # Setup the specific PDF intelligence for high-quality RAG extraction
+                pdf_pipeline_options = PdfPipelineOptions()
+                pdf_pipeline_options.do_table_structure = True
+                pdf_pipeline_options.do_layout_analysis = True
+                logger.info("✅ PdfPipelineOptions configured with table structure and layout analysis")
                 
-                # Initialize converter using format-specific options
+                # Check available attributes before using them
+                available_attrs = [attr for attr in dir(pdf_pipeline_options) if not attr.startswith('_')]
+                logger.info(f"🔧 [PIPELINE] Available PdfPipelineOptions attributes: {available_attrs}")
+                
+                # Map them to the converter using v2.x pattern
                 converter_config = {}
                 
                 # PDF format with enhanced options to prevent "text soup"
                 if hasattr(InputFormat, 'PDF') and PdfFormatOption is not None:
-                    pdf_format_option = PdfFormatOption(
-                        pipeline_options=pipeline_options
-                        # backend="pypdfium2"  # Optional: force specific backend
-                    )
+                    pdf_format_option = PdfFormatOption(pipeline_options=pdf_pipeline_options)
                     converter_config[InputFormat.PDF] = pdf_format_option
                     logger.info("✅ [PDF] Using PdfFormatOption with enhanced structure analysis")
                 
                 # DOCX format with section handling for human reading order
                 if hasattr(InputFormat, 'DOCX') and WordFormatOption is not None:
-                    word_format_option = WordFormatOption(
-                        pipeline_options=pipeline_options,
-                        properties={"handle_sections": True}
-                    )
+                    word_format_option = WordFormatOption()
                     converter_config[InputFormat.DOCX] = word_format_option
-                    logger.info("✅ [DOCX] Using WordFormatOption with section handling")
+                    logger.info("✅ [DOCX] Using WordFormatOption")
                 
                 # HTML format with tag filtering to prevent menu indexing
                 if hasattr(InputFormat, 'HTML') and HtmlFormatOption is not None:
-                    html_format_option = HtmlFormatOption(
-                        pipeline_options=pipeline_options,
-                        # backend="custom"  # Optional: custom backend
-                        # tags_filter=["nav", "footer", "script"]  # Strip unwanted tags
-                    )
+                    html_format_option = HtmlFormatOption()
                     converter_config[InputFormat.HTML] = html_format_option
-                    logger.info("✅ [HTML] Using HtmlFormatOption with tag filtering")
+                    logger.info("✅ [HTML] Using HtmlFormatOption")
                 
                 # CSV/XLSX format with sheet names for RAG context
                 if hasattr(InputFormat, 'XLSX') and ExcelFormatOption is not None:
-                    excel_format_option = ExcelFormatOption(
-                        pipeline_options=pipeline_options,
-                        include_sheet_names=True
-                    )
+                    excel_format_option = ExcelFormatOption()
                     converter_config[InputFormat.XLSX] = excel_format_option
-                    logger.info("✅ [XLSX] Using ExcelFormatOption with sheet names")
+                    logger.info("✅ [XLSX] Using ExcelFormatOption")
                 
                 if converter_config:
                     self._converter = DocumentConverter(format_options=converter_config)
