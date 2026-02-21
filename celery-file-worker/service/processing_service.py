@@ -431,6 +431,13 @@ async def process_file_content(
                     logger.info(f"📊 [DOCLING_METADATA] Processing time: {docling_processing_time_ms}ms, "
                               f"Images: {docling_images_extracted}, OCR: {docling_images_with_ocr}")
                     
+                    # Log the full markdown content from Docling service
+                    logger.info(f"📝 [DOCLING_CONTENT] Full markdown content from Docling service:")
+                    logger.info(f"--- START MARKDOWN CONTENT ---")
+                    logger.info(f"{markdown_content}")
+                    logger.info(f"--- END MARKDOWN CONTENT ---")
+                    logger.info(f"📊 [DOCLING_STATS] Content length: {len(markdown_content)} characters, {len(markdown_content.split())} words")
+                    
                     markdown_tmp_path = create_markdown_temp_file(markdown_content)
                     # Switch to markdown artifact
                     original_tmp_path = tmp_path
@@ -551,6 +558,16 @@ async def process_file_content(
                     final_state = "ACTIVE"
                     gemini_processed_at = datetime.utcnow()
 
+                    # Log the complete Gemini FileStore response
+                    logger.info(f"📦 [GEMINI_RESPONSE] Full FileStore upload response:")
+                    logger.info(f"--- START GEMINI RESPONSE ---")
+                    logger.info(f"Operation: {operation}")
+                    logger.info(f"Operation Response: {operation.response}")
+                    logger.info(f"Document Name: {document_name}")
+                    logger.info(f"Final State: {final_state}")
+                    logger.info(f"Processed At: {gemini_processed_at}")
+                    logger.info(f"--- END GEMINI RESPONSE ---")
+                    
                     # Create a placeholder file object with the document name
                     class FileSearchDocument:
                         def __init__(self, name):
@@ -566,9 +583,14 @@ async def process_file_content(
                     }
 
                     logger.info(f"✅ [GEMINI] Upload complete to FileSearch store. Document: {document_name}")
-                    logger.info(f"� [METADATA] Stored FileSearch info: store={file_search_store_name}, document={document_name}")
+                    logger.info(f"📝 [METADATA] Stored FileSearch info: store={file_search_store_name}, document={document_name}")
                 else:
                     logger.error(f"❌ [GEMINI] Upload failed - no document_name in response: {operation}")
+                    logger.error(f"📦 [GEMINI_RESPONSE] Failed operation details:")
+                    logger.error(f"Operation: {operation}")
+                    logger.error(f"Has response: {hasattr(operation, 'response')}")
+                    if hasattr(operation, 'response'):
+                        logger.error(f"Response: {operation.response}")
                     raise Exception("FileSearch upload failed - no document returned")
 
             except Exception as e:
