@@ -112,17 +112,19 @@ class SimpleDoclingProcessor:
             
             # Check if conversion was successful
             if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
-                # Extract markdown content - use the document property from ConversionResult
+                # Extract markdown content - use document property from ConversionResult
                 try:
                     # Access the document from conversion result
                     docling_document = conversion_result.document
                     logger.info(f"🔧 [PROCESSOR] Got document object: {type(docling_document)}")
                     
-                    # Try to export markdown from the document
+                    # Try to export markdown from document
                     markdown_content = docling_document.export_to_markdown()
                     logger.info(f"✅ [PROCESSOR] Document export worked, got {len(markdown_content) if markdown_content else 0} chars")
                 except AttributeError as e:
                     logger.error(f"❌ [PROCESSOR] Document export failed: {e}")
+                    logger.error(f"❌ [PROCESSOR] Available attributes: {[attr for attr in dir(conversion_result) if not attr.startswith('_')]}")
+                    logger.error(f"❌ [PROCESSOR] Conversion result dir: {dir(conversion_result)}")
                     logger.error(f"❌ [PROCESSOR] Presigned URL conversion unsuccessful for: {presigned_url}")
                     return None, {"error": f"Document export error: {e}", "filename": original_filename}
                 
