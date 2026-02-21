@@ -438,16 +438,15 @@ async def process_file_content(
                     logger.info(f"--- END CONTENT ---")
                     logger.info(f"📊 [DOCLING_STATS] Content length: {len(markdown_content)} characters, {len(markdown_content.split())} words")
                     
-                    # Use JSON content if available, otherwise fallback to markdown
+                    # Check content format and handle accordingly
                     content_for_upload = markdown_content
                     if docling_metadata and docling_metadata.get('content_format') == 'json':
-                        # Extract JSON content from docling metadata if available
-                        json_content = docling_metadata.get('json_content')
-                        if json_content:
-                            content_for_upload = json_content
-                            logger.info(f"📋 [JSON_UPLOAD] Using JSON content for Gemini FileStore: {len(json_content)} chars")
-                        else:
-                            logger.info(f"⚠️ [JSON_UPLOAD] JSON format requested but not available, using markdown")
+                        # The markdown_content variable actually contains JSON content
+                        content_for_upload = markdown_content
+                        logger.info(f"📋 [JSON_UPLOAD] Using JSON content for Gemini FileStore: {len(content_for_upload)} chars")
+                        logger.info(f"📋 [JSON_UPLOAD] JSON preview: {content_for_upload[:200]}...")
+                    else:
+                        logger.info(f"📝 [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content_for_upload)} chars")
                     
                     # Create temporary file with appropriate content
                     if docling_metadata and docling_metadata.get('content_format') == 'json':

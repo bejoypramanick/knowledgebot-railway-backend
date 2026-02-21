@@ -117,13 +117,25 @@ async def process_with_docling(
                     result = response.json()
 
                     if result.get("success"):
-                        markdown_content = result.get("content")
+                        content = result.get("content")
                         metadata = result.get("metadata", {})
+                        
+                        # Log the content format and metadata
+                        content_format = metadata.get("content_format", "unknown")
+                        logger.info(f"📄 [DOCLING] Content format: {content_format}")
+                        logger.info(f"📊 [DOCLING] Metadata keys: {list(metadata.keys())}")
+                        
+                        if content_format == "json":
+                            logger.info(f"📋 [DOCLING] JSON content length: {len(content)} chars")
+                            logger.info(f"📋 [DOCLING] JSON preview: {content[:200]}...")
+                        else:
+                            logger.info(f"📝 [DOCLING] Markdown content length: {len(content)} chars")
+                            logger.info(f"📝 [DOCLING] Markdown preview: {content[:200]}...")
                         
                         logger.info(
                             f"✅ [DOCLING] Successfully processed {original_filename} via presigned URL"
                         )
-                        return markdown_content, metadata
+                        return content, metadata
                     else:
                         error_msg = result.get("error", "Unknown error")
                         logger.error(
