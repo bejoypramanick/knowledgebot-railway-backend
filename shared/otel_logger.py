@@ -3,6 +3,7 @@ Unified OpenTelemetry Logging Utilities
 Provides structured logging with OTel span context integration for all services
 """
 import logging
+import inspect
 from typing import Dict, Any, Optional
 from contextvars import ContextVar
 from opentelemetry import trace
@@ -16,8 +17,30 @@ def set_task_id(task_id: str) -> None:
     task_id_ctx_var.set(task_id)
 
 def get_task_id() -> Optional[str]:
-    """Get the current task ID from context"""
+    """Get current task ID from context"""
     return task_id_ctx_var.get()
+
+def get_calling_file_info() -> Dict[str, str]:
+    """Get complete file info of calling code (2 levels up the stack)"""
+    try:
+        # Go up 2 levels in the stack to get the actual calling code
+        # Level 0: this function
+        # Level 1: _log_with_context method
+        # Level 2: actual calling code (info/error/warning/etc.)
+        frame = inspect.stack()[2]
+        return {
+            'file_path': frame.filename,
+            'line_number': str(frame.lineno),
+            'method_name': frame.function,
+            'full_info': f"{frame.filename}:{frame.lineno} in {frame.function}()"
+        }
+    except (IndexError, AttributeError):
+        return {
+            'file_path': 'unknown_file',
+            'line_number': 'unknown',
+            'method_name': 'unknown',
+            'full_info': 'unknown_file:unknown in unknown()'
+        }
 
 class OpenTelemetryLogger:
     """Enhanced logger with OpenTelemetry integration for Railway"""
@@ -37,18 +60,30 @@ class OpenTelemetryLogger:
         
     def _log_with_context(self, level: int, message: str, extra: Dict[str, Any] = None):
         """Log message with OpenTelemetry context using standard logging"""
+        # Get calling file info automatically
+        file_info = get_calling_file_info()
+        
         # Add task ID to message
         formatted_message = self._format_message(message)
         
-        # Add task ID to extra fields
+        # Add file info to message for debugging
+        file_prefix = f"[{file_info['full_info']}]"
+        full_message = f"{file_prefix} {formatted_message}"
+        
+        # Add task ID and file info to extra fields
         extra = extra or {}
         task_id = get_task_id()
         if task_id:
             extra['task_id'] = task_id
+        extra.update({
+            'file_path': file_info['file_path'],
+            'line_number': file_info['line_number'],
+            'method_name': file_info['method_name']
+        })
         
         # Standard logger automatically includes otelTraceID and otelSpanID 
         # from shared/telemetry.py LoggingInstrumentor
-        self.logger.log(level, formatted_message, extra=extra)
+        self.logger.log(level, full_message, extra=extra)
         
         # Add span attributes if span exists
         span = trace.get_current_span()
@@ -60,6 +95,9 @@ class OpenTelemetryLogger:
                     "log.message": message,
                     "log.logger": self.logger.name,
                     "service.name": self.service_name,
+                    "file.path": file_info['file_path'],
+                    "file.line": file_info['line_number'],
+                    "file.method": file_info['method_name'],
                     **({"task_id": task_id} if task_id else {})
                 }
             )
