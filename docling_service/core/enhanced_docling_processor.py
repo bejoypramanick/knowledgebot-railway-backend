@@ -25,32 +25,63 @@ except Exception as e:
 
 # Import docling libraries
 try:
+    logger.info("🔍 [IMPORT] Attempting to import docling libraries...")
+    
+    # Check docling version and available modules
+    try:
+        import docling
+        logger.info(f"📦 [VERSION] Docling version: {docling.__version__}")
+        logger.info(f"📦 [MODULES] Available docling modules: {[name for name in dir(docling) if not name.startswith('_')]}")
+    except Exception as e:
+        logger.warning(f"⚠️ [VERSION] Could not get docling version: {e}")
+    
     from docling.document_converter import DocumentConverter
+    logger.info("✅ [IMPORT] DocumentConverter imported successfully")
+    
     from docling.datamodel.base_models import ConversionStatus
+    logger.info("✅ [IMPORT] ConversionStatus imported successfully")
+    
+    # Check what's available in base_models
+    try:
+        import docling.datamodel.base_models as base_models
+        available_classes = [name for name in dir(base_models) if not name.startswith('_')]
+        logger.info(f"📦 [BASE_MODELS] Available classes: {available_classes}")
+    except Exception as e:
+        logger.warning(f"⚠️ [BASE_MODELS] Could not list base_models: {e}")
     
     # Try to import InputFormat, but don't fail if it's not available
     try:
         from docling.datamodel.base_models import InputFormat
-    except ImportError:
+        logger.info("✅ [IMPORT] InputFormat imported successfully")
+    except ImportError as e:
         InputFormat = None
-        logger.warning("⚠️ InputFormat not available, using default format options")
+        logger.warning(f"⚠️ [IMPORT] InputFormat not available: {e}")
+        # Try alternative import paths
+        try:
+            from docling.datamodel.base_models import InputFormat as InputFormatAlt
+            InputFormat = InputFormatAlt
+            logger.info("✅ [IMPORT] InputFormat imported via alternative path")
+        except ImportError:
+            logger.warning("⚠️ [IMPORT] InputFormat not available in any path")
     
     # Try to import pipeline options
     try:
         from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
-    except ImportError:
+        logger.info("✅ [IMPORT] PdfPipelineOptions and TableFormerMode imported successfully")
+    except ImportError as e:
         PdfPipelineOptions = None
         TableFormerMode = None
-        logger.warning("⚠️ Pipeline options not available, using basic processing")
+        logger.warning(f"⚠️ [IMPORT] Pipeline options not available: {e}")
     
     # Try to import settings and OCR model
     try:
         from docling.datamodel.settings import settings
         from docling.models.ocr_mac_model import OcrMacModel
-    except ImportError:
+        logger.info("✅ [IMPORT] Settings and OcrMacModel imported successfully")
+    except ImportError as e:
         settings = None
         OcrMacModel = None
-        logger.warning("⚠️ OCR settings not available")
+        logger.warning(f"⚠️ [IMPORT] OCR settings not available: {e}")
     
     # Build list of acceptable conversion statuses
     _acceptable_statuses = [ConversionStatus.SUCCESS]
@@ -60,12 +91,15 @@ try:
         _acceptable_statuses.append(ConversionStatus.SUCCESS_WITH_ERRORS)
     _ACCEPTABLE_CONVERSION_STATUSES = tuple(_acceptable_statuses)
     
-    logger.info("✅ Docling libraries imported successfully")
-    logger.info(f"✅ Acceptable conversion statuses: {_ACCEPTABLE_CONVERSION_STATUSES}")
-    logger.info(f"📦 Available modules: DocumentConverter={DocumentConverter is not None}, PdfPipelineOptions={PdfPipelineOptions is not None}, InputFormat={InputFormat is not None}")
+    logger.info("✅ [IMPORT] Docling libraries imported successfully")
+    logger.info(f"✅ [IMPORT] Acceptable conversion statuses: {_ACCEPTABLE_CONVERSION_STATUSES}")
+    logger.info(f"📦 [IMPORT] Available modules: DocumentConverter={DocumentConverter is not None}, PdfPipelineOptions={PdfPipelineOptions is not None}, InputFormat={InputFormat is not None}")
     
 except ImportError as e:
-    logger.error(f"❌ Failed to import docling libraries: {e}")
+    logger.error(f"❌ [IMPORT] Failed to import docling libraries: {e}")
+    logger.error(f"❌ [IMPORT] This might be due to missing dependencies or version conflicts")
+    logger.error(f"❌ [IMPORT] Try running: pip install --upgrade docling docling-core")
+    logger.error(f"❌ [IMPORT] Or check if docling is properly installed in the container")
     _ACCEPTABLE_CONVERSION_STATUSES = ()
     ConversionStatus = None
     DocumentConverter = None
