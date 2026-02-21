@@ -416,10 +416,7 @@ async def process_file_content(
             try:
                 logger.info(f"🔍 [DEBUG] About to call process_with_docling with presigned_url: {presigned_url}")
                 markdown_content, docling_metadata = await process_with_docling(
-                    file_path="",  # Empty string when using presigned URL
-                    original_filename=original_filename,
-                    mime_type=detected_mime_type,
-                    presigned_url=presigned_url  # Use presigned URL instead of file upload
+                    presigned_url=presigned_url  # Use presigned URL only
                 )
                 logger.info(f"🔍 [DEBUG] process_with_docling returned: markdown_content={bool(markdown_content)}, metadata_keys={list(docling_metadata.keys()) if docling_metadata else 'None'}")
 
