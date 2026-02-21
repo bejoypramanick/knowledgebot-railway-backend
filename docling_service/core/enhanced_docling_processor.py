@@ -41,28 +41,35 @@ try:
     from docling.datamodel.base_models import ConversionStatus
     logger.info("✅ [IMPORT] ConversionStatus imported successfully")
     
-    # Check what's available in base_models
+    # Check what's available in base_models for InputFormat detection
     try:
         import docling.datamodel.base_models as base_models
         available_classes = [name for name in dir(base_models) if not name.startswith('_')]
         logger.info(f"📦 [BASE_MODELS] Available classes: {available_classes}")
-    except Exception as e:
-        logger.warning(f"⚠️ [BASE_MODELS] Could not list base_models: {e}")
-    
-    # Try to import InputFormat for latest docling version
-    try:
-        from docling.datamodel.base_models import InputFormat
-        logger.info("✅ [IMPORT] InputFormat imported successfully")
-    except ImportError as e:
+        
+        # Look for InputFormat or similar classes
         InputFormat = None
-        logger.warning(f"⚠️ [IMPORT] InputFormat not available: {e}")
-        # Try to use DocInputType as fallback for older versions
-        try:
-            from docling.datamodel.base_models import DocInputType
-            InputFormat = DocInputType  # Use DocInputType as fallback
-            logger.info("✅ [IMPORT] Using DocInputType as InputFormat fallback")
-        except ImportError:
-            logger.warning("⚠️ [IMPORT] DocInputType not available either")
+        for class_name in available_classes:
+            if 'InputFormat' in class_name:
+                InputFormat = getattr(base_models, class_name)
+                logger.info(f"✅ [INPUT_FORMAT] Found and using InputFormat class: {class_name}")
+                break
+        
+        if InputFormat is None:
+            logger.warning("⚠️ [INPUT_FORMAT] InputFormat class not found in base_models")
+            # Try to find any format-related class
+            for class_name in available_classes:
+                if 'Format' in class_name and 'Input' in class_name:
+                    InputFormat = getattr(base_models, class_name)
+                    logger.info(f"✅ [INPUT_FORMAT] Using alternative format class: {class_name}")
+                    break
+                    
+        if InputFormat is None:
+            logger.error("❌ [INPUT_FORMAT] No format class found in base_models")
+            
+    except Exception as e:
+        logger.error(f"❌ [INPUT_FORMAT] Failed to inspect base_models: {e}")
+        InputFormat = None
     
     # Try to import pipeline options for latest docling version
     try:
@@ -136,7 +143,7 @@ try:
     
     logger.info("✅ [IMPORT] Docling libraries imported successfully")
     logger.info(f"✅ [IMPORT] Acceptable conversion statuses: {_ACCEPTABLE_CONVERSION_STATUSES}")
-    logger.info(f"📦 [IMPORT] Available modules: DocumentConverter={DocumentConverter is not None}, PdfPipelineOptions={PdfPipelineOptions is not None}, InputFormat={InputFormat is not None}")
+    logger.info(f"📦 [IMPORT] Available modules: DocumentConverter={DocumentConverter is not None}, PdfPipelineOptions={PdfPipelineOptions is not None}")
     
 except ImportError as e:
     logger.error(f"❌ [IMPORT] Failed to import docling libraries: {e}")
