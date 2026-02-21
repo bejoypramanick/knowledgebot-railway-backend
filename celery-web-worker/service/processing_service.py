@@ -531,62 +531,6 @@ class ProcessingService:
             return False
         if self._normalize_url(url) in visited_urls:
             return False
-        return True
-
-    # ==================== CONTENT LAYER ====================
-
-    async def _preparePageAsJSON(self, html: str, page_url: str) -> str:
-        """Convert HTML to JSON using trafilatura + cleanup"""
-        try:
-            from shared.html_processor import extract_content_from_html
-            
-            # Extract structured content as JSON
-            json_content, metadata = extract_content_from_html(html_content=html, output_format="json", remove_ads=True)
-            
-            if json_content:
-                logger.info(f"📋 [JSON_PAGE] Generated JSON content for {page_url}: {len(json_content)} chars")
-                return json.dumps(json_content, indent=2, ensure_ascii=False)
-            else:
-                logger.warning(f"⚠️ [JSON_PAGE] JSON extraction failed for {page_url}")
-                # Fallback to basic text extraction
-                return await self._cleanTextManually(html)
-                
-        except Exception as e:
-            logger.error(f"❌ [JSON_PAGE] HTML to JSON conversion failed: {e}")
-            raise
-
-    async def _preparePageAsMarkdown(self, html: str, page_url: str) -> str:
-        """Convert HTML to Markdown and extract embedded files"""
-
-    async def _extractTextFromHTML(self, html_content: str) -> str:
-        """Convert HTML to JSON using trafilatura + cleanup"""
-        try:
-            import trafilatura
-            import json
-            
-            # Extract structured content using trafilatura
-            extracted = trafilatura.extract(
-                html_content, 
-                include_comments=False,
-                include_tables=True,  # Extract tables
-                include_format=True,  # Include structured data
-                with_metadata=True,  # Include metadata
-                output_format='json',  # Output JSON format
-                remove_ads=True
-            )
-            
-            # Convert to JSON for Gemini FileStore (better for search)
-            if extracted and hasattr(extracted, 'as_dict'):
-                # Get structured data as dictionary
-                content_dict = extracted.as_dict()
-                
-                # Create enhanced JSON structure for Gemini FileStore
-                json_content = {
-                    "content": {
-                        "text": extracted.text or "",
-                        "title": extracted.title or "",
-                        "author": extracted.author or "",
-                        "date": extracted.date or "",
                         "description": extracted.description or "",
                         "url": extracted.url or ""
                     },
