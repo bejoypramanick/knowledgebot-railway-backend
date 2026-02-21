@@ -21,13 +21,14 @@ def get_task_id() -> Optional[str]:
     return task_id_ctx_var.get()
 
 def get_calling_file_info() -> Dict[str, str]:
-    """Get complete file info of calling code (2 levels up the stack)"""
+    """Get complete file info of calling code (3 levels up the stack)"""
     try:
-        # Go up 2 levels in the stack to get the actual calling code
+        # Go up 3 levels in the stack to get the actual calling code
         # Level 0: this function
-        # Level 1: _log_with_context method
-        # Level 2: actual calling code (info/error/warning/etc.)
-        frame = inspect.stack()[2]
+        # Level 1: _log_with_context method  
+        # Level 2: info/error/warning/etc. method
+        # Level 3: actual calling code (where logger.info() is called)
+        frame = inspect.stack()[3]
         return {
             'file_path': frame.filename,
             'line_number': str(frame.lineno),

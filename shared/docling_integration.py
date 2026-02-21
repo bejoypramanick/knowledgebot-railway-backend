@@ -49,23 +49,20 @@ def _get_settings():
 
 
 async def process_with_docling(
-    file_path: str,
+    presigned_url: str,
     original_filename: str,
     mime_type: str,
-    timeout_seconds: Optional[int] = None,
-    presigned_url: Optional[str] = None
+    timeout_seconds: Optional[int] = None
 ) -> Tuple[Optional[str], dict]:
     """
-    Call docling service to convert document to markdown.
+    Call docling service to convert document to markdown using presigned URL.
     Retries connection failures up to 3 times with exponential backoff.
-    Can process either local file upload or presigned URL.
 
     Args:
-        file_path: Path to the file to process (optional if presigned_url provided)
+        presigned_url: Presigned S3 URL for direct download by docling service
         original_filename: Original filename
         mime_type: MIME type of the file
         timeout_seconds: Request timeout in seconds
-        presigned_url: Presigned S3 URL for direct download by docling service
 
     Returns:
         Tuple of (markdown_content, metadata) or (None, error_dict) on failure
@@ -96,46 +93,23 @@ async def process_with_docling(
                         f"🔄 [DOCLING] Retry attempt {attempt + 1}/{max_retries} for {original_filename}"
                     )
                 
-                # Choose request method based on whether we have a presigned URL
-                logger.info(f"🔍 [DOCLING] presigned_url type: {type(presigned_url)}")
-                logger.info(f"🔍 [DOCLING] presigned_url value: {presigned_url}")
-                logger.info(f"🔍 [DOCLING] presigned_url is None: {presigned_url is None}")
-                logger.info(f"🔍 [DOCLING] presigned_url is empty string: {presigned_url == ''}")
-                if presigned_url:
-                    logger.info(
-                        f"📄 [DOCLING] Calling docling service with presigned URL: {settings.docling_service_url} "
-                        f"for {original_filename}"
-                    )
-                    
-                    # Send presigned URL in JSON payload
-                    request_data = {
-                        "presigned_url": presigned_url,
-                        "filename": original_filename,
-                        "mime_type": mime_type
-                    }
-                    
-                    response = await client.post(
-                        f"{settings.docling_service_url}/api/v1/docling/process_url",
-                        json=request_data,
-                        timeout=timeout_seconds
-                    )
-                else:
-                    logger.info(
-                        f"📄 [DOCLING] Calling docling service with file upload: {settings.docling_service_url} "
-                        f"for {original_filename}"
-                    )
-                    
-                    # Legacy file upload mode
-                    with open(file_path, 'rb') as f:
-                        files = {
-                            'file': (original_filename, f, mime_type)
-                        }
-                        
-                        response = await client.post(
-                            f"{settings.docling_service_url}/api/v1/docling/process",
-                            files=files,
-                            timeout=timeout_seconds
-                        )
+                logger.info(
+                    f"📄 [DOCLING] Calling docling service with presigned URL: {settings.docling_service_url} "
+                    f"for {original_filename}"
+                )
+                
+                # Send presigned URL in JSON payload
+                request_data = {
+                    "presigned_url": presigned_url,
+                    "filename": original_filename,
+                    "mime_type": mime_type
+                }
+                
+                response = await client.post(
+                    f"{settings.docling_service_url}/api/v1/docling/process_url",
+                    json=request_data,
+                    timeout=timeout_seconds
+                )
 
                 logger.info(f"📄 [DOCLING] Response status: {response.status_code}")
 
@@ -145,40 +119,27 @@ async def process_with_docling(
                     if result.get("success"):
                         markdown_content = result.get("content")
                         metadata = result.get("metadata", {})
-
+                        
                         logger.info(
-                            f"✅ [DOCLING] Successfully converted {original_filename}: "
-                            f"{len(markdown_content)} chars, "
-                            f"{metadata.get('images_with_ocr', 0)} images OCR'd"
+                            f"✅ [DOCLING] Successfully processed {original_filename} via presigned URL"
                         )
-
                         return markdown_content, metadata
                     else:
-                        error = result.get("error", "Unknown error")
-                        logger.warning(
-                            f"⚠️ [DOCLING] Conversion failed for {original_filename}: {error}"
+                        error_msg = result.get("error", "Unknown error")
+                        logger.error(
+                            f"❌ [DOCLING] Processing failed for {original_filename}: {error_msg}"
                         )
-                        return None, {"error": error}
+                        return None, {"error": error_msg, "filename": original_filename}
                 else:
-                        # Handle non-200 responses with better error details
-                        response_text = response.text.strip() if response.text else ""
-                        if response_text:
-                            error_msg = f"HTTP {response.status_code}: {response_text}"
-                        else:
-                            error_msg = f"HTTP {response.status_code}: Empty response from docling service"
-                        
-                        logger.warning(f"⚠️ [DOCLING] Request failed for {original_filename}: {error_msg}")
-                        logger.debug(f"🔍 [DOCLING] Response headers: {dict(response.headers)}")
-                        logger.debug(f"🔍 [DOCLING] Response status code: {response.status_code}")
-                        return None, {"error": error_msg}
+                    logger.error(
+                        f"❌ [DOCLING] HTTP error {response.status_code} for {original_filename}"
+                    )
+                    return None, {
+                        "error": f"HTTP {response.status_code}",
+                        "filename": original_filename
+                    }
 
-        except httpx.TimeoutException as e:
-            # Handle different types of timeout exceptions
-            error_type = type(e).__name__
-            error_msg = str(e)
-            
-            logger.error(f"⏱️ [DOCLING_TIMEOUT] {error_type} for {original_filename}: {error_msg}")
-            logger.error(f"⏱️ [DOCLING_TIMEOUT] Request details - timeout_seconds: {timeout_seconds}, attempt: {attempt + 1}/{max_retries}")
+        except httpx.TimeoutException:
             
             # Determine which timeout caused the issue
             if "connect" in error_msg.lower():
