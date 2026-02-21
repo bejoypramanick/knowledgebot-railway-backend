@@ -40,8 +40,8 @@ try:
         DocumentConverter, 
         PdfFormatOption, 
         WordFormatOption, 
-        HtmlFormatOption, 
-        ExcelFormatOption
+        HTMLFormatOption,  # Note: HTML is all caps
+        ExcelFormatOption  # Used for both .xlsx and .csv
     )
     logger.info("✅ [IMPORT] DocumentConverter and FormatOptions imported successfully")
     
@@ -49,9 +49,9 @@ try:
     from docling.datamodel.base_models import ConversionStatus, InputFormat
     logger.info("✅ [IMPORT] ConversionStatus and InputFormat imported successfully")
     
-    # ✅ CORRECT - PdfPipelineOptions stays in pipeline_options
-    from docling.datamodel.pipeline_options import PdfPipelineOptions
-    logger.info("✅ [IMPORT] PdfPipelineOptions imported successfully")
+    # ✅ CORRECT - PdfPipelineOptions and TableFormerMode stay in their modules
+    from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
+    logger.info("✅ [IMPORT] PdfPipelineOptions and TableFormerMode imported successfully")
            
     # Build list of acceptable conversion statuses
     _acceptable_statuses = [ConversionStatus.SUCCESS]
@@ -78,7 +78,7 @@ except ImportError as e:
     # v2.x format options
     PdfFormatOption = None
     WordFormatOption = None
-    HtmlFormatOption = None
+    HTMLFormatOption = None  # Note: HTML is all caps
     ExcelFormatOption = None
     TableFormerMode = None
     settings = None
@@ -125,46 +125,44 @@ class EnhancedDoclingProcessor:
             
             # Initialize converter with advanced options using new docling v2.x structure
             if InputFormat is not None and PdfPipelineOptions is not None:
-                # Setup the specific PDF intelligence for high-quality RAG extraction
-                pdf_pipeline_options = PdfPipelineOptions()
-                pdf_pipeline_options.do_table_structure = True
-                pdf_pipeline_options.do_layout_analysis = True
-                logger.info("✅ PdfPipelineOptions configured with table structure and layout analysis")
+                # 1. Pipeline Options (The 'Intelligence')
+                pdf_opts = PdfPipelineOptions()
+                pdf_opts.do_table_structure = True
+                if hasattr(pdf_opts, 'table_structure_options') and TableFormerMode is not None:
+                    pdf_opts.table_structure_options.mode = TableFormerMode.ACCURATE
+                logger.info("✅ PdfPipelineOptions configured with table structure and accurate mode")
                 
-                # Check available attributes before using them
-                available_attrs = [attr for attr in dir(pdf_pipeline_options) if not attr.startswith('_')]
-                logger.info(f"🔧 [PIPELINE] Available PdfPipelineOptions attributes: {available_attrs}")
+                # 2. Format Options (The 'Routing')
+                # In v2.x, these classes live in docling.document_converter
+                format_options = {}
                 
-                # Map them to the converter using v2.x pattern
-                converter_config = {}
-                
-                # PDF format with enhanced options to prevent "text soup"
+                # PDF format with enhanced options
                 if hasattr(InputFormat, 'PDF') and PdfFormatOption is not None:
-                    pdf_format_option = PdfFormatOption(pipeline_options=pdf_pipeline_options)
-                    converter_config[InputFormat.PDF] = pdf_format_option
+                    format_options[InputFormat.PDF] = PdfFormatOption(pipeline_options=pdf_opts)
                     logger.info("✅ [PDF] Using PdfFormatOption with enhanced structure analysis")
                 
-                # DOCX format with section handling for human reading order
+                # DOCX format
                 if hasattr(InputFormat, 'DOCX') and WordFormatOption is not None:
-                    word_format_option = WordFormatOption()
-                    converter_config[InputFormat.DOCX] = word_format_option
+                    format_options[InputFormat.DOCX] = WordFormatOption()
                     logger.info("✅ [DOCX] Using WordFormatOption")
                 
-                # HTML format with tag filtering to prevent menu indexing
-                if hasattr(InputFormat, 'HTML') and HtmlFormatOption is not None:
-                    html_format_option = HtmlFormatOption()
-                    converter_config[InputFormat.HTML] = html_format_option
-                    logger.info("✅ [HTML] Using HtmlFormatOption")
+                # HTML format (note: HTMLFormatOption with all caps)
+                if hasattr(InputFormat, 'HTML') and HTMLFormatOption is not None:
+                    format_options[InputFormat.HTML] = HTMLFormatOption()
+                    logger.info("✅ [HTML] Using HTMLFormatOption")
                 
-                # CSV/XLSX format with sheet names for RAG context
+                # XLSX and CSV formats (both use ExcelFormatOption)
                 if hasattr(InputFormat, 'XLSX') and ExcelFormatOption is not None:
-                    excel_format_option = ExcelFormatOption()
-                    converter_config[InputFormat.XLSX] = excel_format_option
+                    format_options[InputFormat.XLSX] = ExcelFormatOption()
                     logger.info("✅ [XLSX] Using ExcelFormatOption")
                 
-                if converter_config:
-                    self._converter = DocumentConverter(format_options=converter_config)
-                    logger.info(f"✅ Converter initialized with {len(converter_config)} format-specific options")
+                if hasattr(InputFormat, 'CSV') and ExcelFormatOption is not None:
+                    format_options[InputFormat.CSV] = ExcelFormatOption()
+                    logger.info("✅ [CSV] Using ExcelFormatOption")
+                
+                if format_options:
+                    self._converter = DocumentConverter(format_options=format_options)
+                    logger.info(f"✅ Converter initialized with {len(format_options)} format-specific options")
                 else:
                     # Fallback to basic converter
                     self._converter = DocumentConverter()
