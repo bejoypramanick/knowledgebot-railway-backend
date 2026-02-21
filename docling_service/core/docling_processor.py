@@ -128,11 +128,9 @@ class SimpleDoclingProcessor:
                         markdown_content = conversion_result.document.export_to_markdown()
                         logger.info(f"✅ [PROCESSOR] Older API worked, got {len(markdown_content) if markdown_content else 0} chars")
                     except AttributeError as e2:
-                        logger.warning(f"⚠️ [PROCESSOR] Older API failed: {e2}")
-                        # Fallback: try to get content directly
-                        logger.info(f"🔧 [PROCESSOR] Trying fallback: str(conversion_result)")
-                        markdown_content = str(conversion_result)
-                        logger.info(f"✅ [PROCESSOR] Fallback worked, got {len(markdown_content) if markdown_content else 0} chars")
+                        logger.error(f"❌ [PROCESSOR] Both APIs failed - newer: {e}, older: {e2}")
+                        logger.error(f"❌ [PROCESSOR] Presigned URL conversion unsuccessful for: {presigned_url}")
+                        return None, {"error": f"API compatibility error: {e2}", "filename": original_filename}
                 
                 # Build simple metadata
                 metadata = {
