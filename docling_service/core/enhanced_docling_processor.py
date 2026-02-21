@@ -334,76 +334,24 @@ class EnhancedDoclingProcessor:
                 sys.stdout = io.StringIO()
                 sys.stderr = io.StringIO()
                 
-                # Log available methods for debugging
-                available_methods = [method for method in dir(self._converter) if not method.startswith('_')]
-                logger.info(f"🔧 [CONVERTER] Available DocumentConverter methods: {available_methods}")
-                
+                # Convert document using convert method
                 logger.info(f"🔄 [CONVERT] Starting conversion for: {presigned_url}")
-            
-                # Try different conversion methods based on docling version
-                conversion_result = None
                 
-                # Method 1: Try convert_single (older versions)
-                if hasattr(self._converter, 'convert_single'):
-                    logger.info("✅ [CONVERT] Using convert_single method")
-                    conversion_result = self._converter.convert_single(presigned_url)
-                
-                # Method 2: Try convert (newer versions)
-                elif hasattr(self._converter, 'convert'):
+                # Use the convert method (standard in newer docling versions)
+                if hasattr(self._converter, 'convert'):
                     logger.info("✅ [CONVERT] Using convert method")
                     conversion_result = self._converter.convert(presigned_url)
-                
-                # Method 3: Try convert_local (for local file conversion)
-                elif hasattr(self._converter, 'convert_local'):
-                    logger.info("✅ [CONVERT] Using convert_local method")
-                    # For URLs, we might need to download first
-                    import httpx
-                    try:
-                        response = httpx.get(presigned_url, timeout=30)
-                        if response.status_code == 200:
-                            # Create temporary file
-                            import tempfile
-                            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                                tmp_file.write(response.content)
-                                tmp_file.flush()
-                                conversion_result = self._converter.convert_local(tmp_file.name)
-                                logger.info(f"✅ [CONVERT] Downloaded and converted locally: {tmp_file.name}")
-                        else:
-                            raise Exception(f"Failed to download file: {response.status_code}")
-                    except Exception as e:
-                        logger.error(f"❌ [CONVERT] Local conversion failed: {e}")
-                        raise
-                
-                # Method 4: Try any method with 'convert' in name
                 else:
-                    available_methods = [m for m in dir(self._converter) if 'convert' in m.lower() and not m.startswith('_')]
-                    logger.info(f"🔧 [CONVERT] Available conversion methods: {available_methods}")
+                    # Show available methods for debugging
+                    available_methods = [m for m in dir(self._converter) if not m.startswith('_')]
+                    logger.error(f"❌ [CONVERT] 'convert' method not found. Available methods: {available_methods}")
+                    raise AttributeError("DocumentConverter missing 'convert' method")
                     
-                    if available_methods:
-                        # Try the first available method
-                        method_name = available_methods[0]
-                        logger.info(f"🔧 [CONVERT] Attempting method: {method_name}")
-                        try:
-                            conversion_result = getattr(self._converter, method_name)(presigned_url)
-                            logger.info(f"✅ [CONVERT] Successfully used method: {method_name}")
-                        except Exception as e:
-                            logger.error(f"❌ [CONVERT] Method {method_name} failed: {e}")
-                            # Try other methods
-                            for other_method in available_methods[1:]:
-                                try:
-                                    logger.info(f"🔧 [CONVERT] Trying alternative method: {other_method}")
-                                    conversion_result = getattr(self._converter, other_method)(presigned_url)
-                                    logger.info(f"✅ [CONVERT] Successfully used alternative method: {other_method}")
-                                    break
-                                except Exception as e2:
-                                    logger.error(f"❌ [CONVERT] Alternative method {other_method} failed: {e2}")
-                                    continue
-                    else:
-                        raise AttributeError("No conversion method found in DocumentConverter")
-                
-                if conversion_result is None:
-                    raise Exception("All conversion methods failed")
-                    
+            except Exception as e:
+                logger.error(f"❌ [CONVERT] Conversion failed: {e}")
+                import traceback
+                logger.error(f"   Traceback: {traceback.format_exc()}")
+                raise
             finally:
                 # Restore original stdout/stderr
                 sys.stdout = original_stdout
