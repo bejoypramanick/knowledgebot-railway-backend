@@ -265,72 +265,35 @@ class EnhancedDoclingProcessor:
             
             # Check if conversion was successful
             if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
-                # Extract content in JSON format for Gemini FileStore
-                json_content = None
-                docling_dict = None
-                layout_info = {}
-                table_info = {}
-                
+                # Extract markdown content for Gemini FileStore (simple and reliable)
                 try:
-                    # Export to dict for structured JSON content (primary output)
-                    if self.enable_export_to_dict:
-                        docling_dict = conversion_result.document.export_to_dict()
-                        logger.info(f"✅ [ENHANCED] Export to dict successful")
-                        
-                        # Extract TEXT content for RAG (not raw JSON dump)
-                        if 'content' in docling_dict and 'text' in docling_dict['content']:
-                            json_content = docling_dict['content']['text']
-                            logger.info(f"✅ [RAG] Extracted text content for RAG: {len(json_content)} chars")
-                        else:
-                            logger.warning("⚠️ [RAG] No text content found in docling_dict, using fallback")
-                            json_content = json.dumps(docling_dict, indent=2, ensure_ascii=False)
-                            logger.info(f"⚠️ [RAG] Using full JSON dump as fallback: {len(json_content)} chars")
-                        
-                        # Extract layout information (minimal for RAG)
-                        if self.enable_layout_analysis and docling_dict:
-                            layout_info = {
-                                'element_count': len(docling_dict.get('layout', {}).get('elements', [])),
-                                'has_tables': bool(docling_dict.get('layout', {}).get('tables', []))
-                            }
-                            logger.info(f"📐 [LAYOUT] Found {layout_info['element_count']} elements")
-                        
-                        # Extract table information (minimal for RAG)
-                        if self.enable_table_structure and docling_dict:
-                            table_info = {
-                                'table_count': len(docling_dict.get('structure', {}).get('tables', [])),
-                                'has_headers': bool(docling_dict.get('structure', {}).get('tables', []))
-                            }
-                            logger.info(f"📊 [TABLES] Found {table_info['table_count']} tables")
+                    markdown_content = conversion_result.render_as_markdown()
+                    logger.info(f"✅ [ENHANCED] Markdown content generated: {len(markdown_content)} chars")
+                    logger.info(f"📝 [MARKDOWN] Content preview: {markdown_content[:200]}...")
                     
-                    # Return JSON content as primary output
-                    if json_content:
-                        logger.info(f"✅ [RAG] Using text content for Gemini FileStore: {len(json_content)} chars")
-                    else:
-                        logger.warning("⚠️ [RAG] No content extracted, using empty JSON")
-                        json_content = "{}"
+                    # Log complete markdown content before sending to Gemini FileStore
+                    logger.info(f"� [COMPLETE_MARKDOWN] Full markdown content before Gemini FileStore upload:")
+                    logger.info(f"=== START COMPLETE MARKDOWN ===")
+                    logger.info(f"{markdown_content}")
+                    logger.info(f"=== END COMPLETE MARKDOWN ===")
+                    logger.info(f"📊 [MARKDOWN_STATS] Total characters: {len(markdown_content)}")
+                    logger.info(f"📊 [MARKDOWN_STATS] Total lines: {len(markdown_content.splitlines())}")
+                    logger.info(f"📊 [MARKDOWN_STATS] Total words: {len(markdown_content.split())}")
                     
-                    # Return JSON content as primary output
-                    if json_content:
-                        # JSON is the primary content, markdown is secondary
-                        markdown_content = conversion_result.render_as_markdown()
-                        logger.info(f"✅ [ENHANCED] JSON content generated: {len(json_content)} chars, markdown fallback: {len(markdown_content)} chars")
-                    else:
-                        # If JSON export fails, return empty dict and use markdown
-                        json_content = {}
-                        markdown_content = conversion_result.render_as_markdown()
+                except Exception as e:
                         logger.info(f"⚠️ [ENHANCED] JSON export failed, using markdown as primary: {len(markdown_content)} chars")
                         
                 except AttributeError as e:
                     logger.error(f"❌ [ENHANCED] Content extraction failed: {e}")
                     return None, {"error": f"Content extraction error: {e}", "filename": original_filename}
                 
-                # Build enhanced metadata
+                # Build enhanced metadata for markdown content
                 metadata = {
                     "filename": original_filename,
                     "processing_time_ms": processing_time_ms,
                     "model": self.model_name,
                     "conversion_status": str(conversion_result.status),
-                    "content_format": "json" if (json_content and isinstance(json_content, dict)) else "markdown",
+                    "content_format": "markdown",
                     "enhanced_features": {
                         "layout_analysis": self.enable_layout_analysis,
                         "table_structure": self.enable_table_structure,
@@ -339,22 +302,21 @@ class EnhancedDoclingProcessor:
                         "tableformer_mode": str(self.tableformer_mode)
                     },
                     "content_stats": {
-                        "json_length": len(json_content) if json_content else 0,
                         "markdown_length": len(markdown_content) if markdown_content else 0,
-                        "word_count": len(markdown_content.split()) if markdown_content else 0,
-                        "line_count": len(markdown_content.split('\n')) if markdown_content else 0
+                        "json_length": 0
                     }
                 }
                 
                 # Add layout information if available
-                if layout_info:
-                    metadata["layout_analysis"] = layout_info
+                layout_info = self._extract_layout_info(conversion_result.docling_dict)
+                metadata["layout_analysis"] = layout_info
                 
                 # Add table information if available
-                if table_info:
-                    metadata["table_analysis"] = table_info
+                table_info = self._extract_table_info(conversion_result.docling_dict)
+                metadata["table_analysis"] = table_info
                 
-                # Add structured data if available
+                # Return markdown content as primary output
+                return markdown_content, metadata
                 if docling_dict:
                     metadata["structured_data_available"] = True
                     # Store a summary of the structured data (not the full dict to avoid metadata bloat)
