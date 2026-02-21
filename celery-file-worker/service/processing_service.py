@@ -392,17 +392,13 @@ async def process_file_content(
 
         # Calculate hash and detect MIME type
         sha256_hash = calculate_sha256(tmp_path)
-        detected_mime_type = detect_mime_type_from_extension(original_filename, "", tmp_path)
+        detected_mime_type = detect_mime_type_from_extension(original_filename)
         
         # Store original file info before any conversion
         original_file_extension = original_filename.rsplit('.', 1)[-1] if '.' in original_filename else ''
         original_mime_type = detected_mime_type
         
         logger.info(f"🔍 [ROUTING] Detected MIME: {detected_mime_type} for {original_filename}")
-
-        # STEP 4: FORMAT CONVERSION PHASE (duplicate check removed - now handled in API gateway)
-        markdown_tmp_path = None
-        processed_successfully = False
 
         # STEP 4: FORMAT CONVERSION PHASE - Use Docling for all supported formats
         markdown_tmp_path = None
