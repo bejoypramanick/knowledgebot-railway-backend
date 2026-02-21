@@ -83,22 +83,24 @@ try:
             TableFormerMode = None
             logger.warning(f"⚠️ [IMPORT] Pipeline options not available: {e2}")
     
-    # Try to import settings and OCR model
+    # Try to import settings and configure EasyOCR only
     try:
         from docling.datamodel.settings import settings
+        logger.info("✅ [IMPORT] Settings imported successfully")
+        
+        # Configure EasyOCR for OCR processing
         try:
-            from docling.models.ocr_mac_model import OcrMacModel
-        except ImportError:
-            # Try alternative OCR model import for newer versions
-            try:
-                from docling.models.ocr_model import OcrMacModel
-            except ImportError:
-                OcrMacModel = None
-        logger.info("✅ [IMPORT] Settings and OCR model imported successfully")
+            import easyocr
+            logger.info("✅ [IMPORT] EasyOCR imported successfully")
+            # EasyOCR will be used for OCR processing
+        except ImportError as e:
+            logger.warning(f"⚠️ [IMPORT] EasyOCR not available: {e}")
+            logger.warning("⚠️ [IMPORT] OCR processing will be limited")
+            
     except ImportError as e:
         settings = None
-        OcrMacModel = None
-        logger.warning(f"⚠️ [IMPORT] OCR settings not available: {e}")
+        logger.warning(f"⚠️ [IMPORT] Settings not available: {e}")
+        logger.warning("⚠️ [IMPORT] Using default OCR settings")
     
     # Build list of acceptable conversion statuses
     _acceptable_statuses = [ConversionStatus.SUCCESS]
@@ -194,10 +196,14 @@ class EnhancedDoclingProcessor:
             else:
                 logger.warning("⚠️ PdfPipelineOptions not available, using default processing")
             
-            # Configure OCR settings
-            if hasattr(settings, 'ocr') and OcrMacModel is not None:
-                settings.ocr.mac_model = OcrMacModel.MODEL_AUTO
-                logger.info("✅ OCR auto-model selection enabled")
+            # Configure OCR settings for EasyOCR
+            if hasattr(settings, 'ocr') and settings is not None:
+                # Configure EasyOCR settings
+                settings.ocr.enabled = True
+                settings.ocr.easyocr_enabled = True
+                logger.info("✅ EasyOCR enabled in settings")
+            else:
+                logger.info("✅ Using default EasyOCR configuration")
             
             # Initialize converter with advanced options
             if InputFormat is not None and PdfPipelineOptions is not None:
