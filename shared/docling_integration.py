@@ -6,6 +6,7 @@ import tempfile
 from typing import Optional, Tuple
 
 import httpx
+from httpx import Timeout
 
 logger = logging.getLogger("docling_integration")
 
@@ -77,7 +78,16 @@ async def process_with_docling(
             with open(file_path, 'rb') as f:
                 files = {'file': (original_filename, f, mime_type)}
 
-                async with httpx.AsyncClient(timeout=timeout_seconds + 30) as client:
+                # Use proper timeout configuration to handle long-running operations
+                # Connect timeout: 30s, Read timeout: processing timeout + 60s buffer
+                timeout_config = Timeout(
+                    connect=30.0,
+                    read=timeout_seconds + 60,
+                    write=30.0,
+                    pool=30.0
+                )
+                
+                async with httpx.AsyncClient(timeout=timeout_config) as client:
                     if attempt > 0:
                         logger.info(
                             f"🔄 [DOCLING] Retry attempt {attempt + 1}/{max_retries} for {original_filename}"
