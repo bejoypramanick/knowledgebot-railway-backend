@@ -440,16 +440,16 @@ async def process_file_content(
                     
                     # Check content format and handle accordingly
                     content_for_upload = markdown_content
-                    logger.info(f"� [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content_for_upload)} chars")
-                        
-                        # Log complete markdown content before sending to Gemini FileStore
-                        logger.info(f"📝 [COMPLETE_MARKDOWN] Full markdown content before Gemini FileStore upload:")
-                        logger.info(f"=== START COMPLETE MARKDOWN ===")
-                        logger.info(f"{content_for_upload}")
-                        logger.info(f"=== END COMPLETE MARKDOWN ===")
-                        logger.info(f"📊 [MARKDOWN_STATS] Total characters: {len(content_for_upload)}")
-                        logger.info(f"📊 [MARKDOWN_STATS] Total lines: {len(content_for_upload.splitlines())}")
-                        logger.info(f"📊 [MARKDOWN_STATS] Total words: {len(content_for_upload.split())}")
+                    logger.info(f"📋 [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content_for_upload)} chars")
+                    
+                    # Log complete markdown content before sending to Gemini FileStore
+                    logger.info(f"📝 [COMPLETE_MARKDOWN] Full markdown content before Gemini FileStore upload:")
+                    logger.info(f"=== START COMPLETE MARKDOWN ===")
+                    logger.info(f"{content_for_upload}")
+                    logger.info(f"=== END COMPLETE MARKDOWN ===")
+                    logger.info(f"📊 [MARKDOWN_STATS] Total characters: {len(content_for_upload)}")
+                    logger.info(f"📊 [MARKDOWN_STATS] Total lines: {len(content_for_upload.splitlines())}")
+                    logger.info(f"📊 [MARKDOWN_STATS] Total words: {len(content_for_upload.split())}")
                     
                     # Create temporary file with appropriate content
                     if docling_metadata and docling_metadata.get('content_format') == 'json':
