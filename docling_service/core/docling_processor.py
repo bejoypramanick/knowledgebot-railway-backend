@@ -114,13 +114,12 @@ class SimpleDoclingProcessor:
             if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
                 # Extract markdown content - use render_as_markdown method from ConversionResult
                 try:
-                    # Try render_as_markdown method directly on ConversionResult
+                    # Use direct render method for current docling version
                     markdown_content = conversion_result.render_as_markdown()
                     logger.info(f"✅ [PROCESSOR] render_as_markdown worked, got {len(markdown_content) if markdown_content else 0} chars")
+                    logger.info(f"🔧 [PROCESSOR] Markdown preview: {markdown_content[:200] if markdown_content else 'None'}...")
                 except AttributeError as e:
                     logger.error(f"❌ [PROCESSOR] render_as_markdown failed: {e}")
-                    logger.error(f"❌ [PROCESSOR] Available attributes: {[attr for attr in dir(conversion_result) if not attr.startswith('_')]}")
-                    logger.error(f"❌ [PROCESSOR] Conversion result dir: {dir(conversion_result)}")
                     logger.error(f"❌ [PROCESSOR] Presigned URL conversion unsuccessful for: {presigned_url}")
                     return None, {"error": f"render_as_markdown error: {e}", "filename": original_filename}
                 
