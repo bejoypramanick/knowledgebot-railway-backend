@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # Docling Processing Configuration
     docling_model_name: str = "granite-docling-258m"  # Larger model for better quality, despite slower performance
     docling_max_file_size_mb: int = 10  # Reduced from 50MB to prevent OOM crashes
-    docling_processing_timeout_seconds: int = 270
+    docling_processing_timeout_seconds: int = 1800
 
     # Processing Configuration
     docling_max_workers: int = 2

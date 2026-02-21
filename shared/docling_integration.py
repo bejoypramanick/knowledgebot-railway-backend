@@ -38,7 +38,7 @@ def _get_settings():
             # Create minimal settings from environment
             class MinimalSettings:
                 docling_enabled = os.getenv("DOCLING_ENABLED", "true").lower() == "true"
-                docling_timeout_seconds = int(os.getenv("DOCLING_TIMEOUT_SECONDS", "300"))
+                docling_timeout_seconds = int(os.getenv("DOCLING_TIMEOUT_SECONDS", "1800"))
                 docling_service_url = os.getenv("DOCLING_SERVICE_URL", "http://localhost:8004")
                 docling_fallback_to_raw = os.getenv("DOCLING_FALLBACK_TO_RAW", "true").lower() == "true"
             return MinimalSettings()
@@ -77,7 +77,7 @@ async def process_with_docling(
             with open(file_path, 'rb') as f:
                 files = {'file': (original_filename, f, mime_type)}
 
-                async with httpx.AsyncClient(timeout=timeout_seconds + 10) as client:
+                async with httpx.AsyncClient(timeout=timeout_seconds + 30) as client:
                     if attempt > 0:
                         logger.info(
                             f"🔄 [DOCLING] Retry attempt {attempt + 1}/{max_retries} for {original_filename}"
