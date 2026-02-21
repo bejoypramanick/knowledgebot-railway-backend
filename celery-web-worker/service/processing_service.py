@@ -225,12 +225,12 @@ class ProcessingService:
             try:
                 start_time = time.time()
 
-                # Convert
-                markdown = await self._preparePageAsMarkdown(page_data.page_html, page_data.page_url)
+                # Convert to JSON for Gemini FileStore (better for search)
+                json_content = await self._preparePageAsJSON(page_data.page_html, page_data.page_url)
                 page_data = PageData(
                     page_url=page_data.page_url,
                     page_html=page_data.page_html,
-                    markdown=markdown,
+                    json_content=json_content,
                     title=page_data.title,
                     description=page_data.description,
                     session_id=page_data.session_id
@@ -241,6 +241,9 @@ class ProcessingService:
                 if not upload_result:
                     logger.warning(f"   ⚠️ Upload failed, skipping this page")
                     return None
+                
+                # Store current page data for MIME type detection
+                self._current_page_data = page_data
 
                 logger.info(f"   ✅ Uploaded to Gemini: {upload_result.document_name}")
 
@@ -532,26 +535,93 @@ class ProcessingService:
 
     # ==================== CONTENT LAYER ====================
 
+    async def _preparePageAsJSON(self, html: str, page_url: str) -> str:
+        """Convert HTML to JSON using trafilatura + cleanup"""
+        try:
+            from shared.html_processor import extract_content_from_html
+            
+            # Extract structured content as JSON
+            json_content, metadata = extract_content_from_html(html_content=html, output_format="json")
+            
+            if json_content:
+                logger.info(f"📋 [JSON_PAGE] Generated JSON content for {page_url}: {len(json_content)} chars")
+                return json_content
+            else:
+                logger.warning(f"⚠️ [JSON_PAGE] JSON extraction failed for {page_url}")
+                # Fallback to basic text extraction
+                return await self._cleanTextManually(html)
+                
+        except Exception as e:
+            logger.error(f"❌ [JSON_PAGE] HTML to JSON conversion failed: {e}")
+            raise
+
     async def _preparePageAsMarkdown(self, html: str, page_url: str) -> str:
         """Convert HTML to Markdown and extract embedded files"""
-        markdown = await self._extractTextFromHTML(html)
-        markdown = await self._extractDocumentsFromPage(html, page_url, markdown)
-        return markdown
 
     async def _extractTextFromHTML(self, html_content: str) -> str:
-        """Convert HTML to Markdown using trafilatura + cleanup"""
+        """Convert HTML to JSON using trafilatura + cleanup"""
         try:
             import trafilatura
-            from markdownify import markdownify as md
-
-            extracted = trafilatura.extract(html_content, include_comments=False)
-            markdown = md(extracted, heading_style="atx") if extracted else await self._cleanTextManually(html_content)
-
-            markdown = await self._normalizeMarkdownText(markdown)
-            logger.info(f"✅ [CONTENT] {len(markdown)} characters")
-            return markdown
+            import json
+            
+            # Extract structured content using trafilatura
+            extracted = trafilatura.extract(
+                html_content, 
+                include_comments=False,
+                include_tables=True,  # Extract tables
+                include_format=True,  # Include structured data
+                with_metadata=True,  # Include metadata
+                output_format='json'  # Output JSON format
+            )
+            
+            # Convert to JSON for Gemini FileStore (better for search)
+            if extracted and hasattr(extracted, 'as_dict'):
+                # Get structured data as dictionary
+                content_dict = extracted.as_dict()
+                
+                # Create enhanced JSON structure for Gemini FileStore
+                json_content = {
+                    "content": {
+                        "text": extracted.text or "",
+                        "title": extracted.title or "",
+                        "author": extracted.author or "",
+                        "date": extracted.date or "",
+                        "description": extracted.description or "",
+                        "url": extracted.url or ""
+                    },
+                    "structure": {
+                        "images": [{"src": img.get("src", ""), "alt": img.get("alt", "")} for img in (extracted.images or [])],
+                        "links": [{"url": link.get("href", ""), "text": link.get("text", "")} for link in (extracted.links or [])],
+                        "tables": extracted.tables or [],
+                        "metadata": {
+                            "word_count": len(extracted.text.split()) if extracted.text else 0,
+                            "char_count": len(extracted.text) if extracted.text else 0,
+                            "has_images": bool(extracted.images),
+                            "has_tables": bool(extracted.tables),
+                            "has_links": bool(extracted.links)
+                        }
+                    },
+                    "extraction_metadata": {
+                        "processor": "trafilatura",
+                        "extraction_time": time.time(),
+                        "source_format": "html",
+                        "output_format": "json"
+                    }
+                }
+                
+                # Convert to JSON string
+                json_str = json.dumps(json_content, indent=2, ensure_ascii=False)
+                logger.info(f"📋 [TRAFILE] Extracted JSON content: {len(json_str)} chars")
+                logger.info(f"📊 [TRAFILE] Found {len(extracted.tables or [])} tables, {len(extracted.images or [])} images")
+                
+                return json_str
+            else:
+                # Fallback to manual processing if JSON extraction fails
+                logger.warning(f"⚠️ [TRAFILE] JSON extraction failed, using markdown fallback")
+                return await self._cleanTextManually(html_content)
+                
         except Exception as e:
-            logger.error(f"❌ HTML to Markdown conversion failed: {e}")
+            logger.error(f"❌ [TRAFILE] HTML to JSON conversion failed: {e}")
             raise
 
     async def _cleanTextManually(self, html_content: str) -> str:
@@ -745,50 +815,67 @@ class ProcessingService:
     ) -> Optional[UploadResult]:
         """Upload single page to Gemini FileSearch"""
         from core.ai import get_genai_client
-
+        import json
+        
         # Use async client for consistency with polling method
         genai_client = get_genai_client().aio
         if not genai_client:
             raise Exception("Gemini client not configured")
-
-        fd, temp_file = tempfile.mkstemp(suffix='.md')
-
+        
+        # Determine content format and MIME type
+        content = page_data.markdown
+        mime_type = 'text/markdown'
+        temp_suffix = '.md'
+        
+        if hasattr(page_data, 'json_content') and page_data.json_content:
+            content = page_data.json_content
+            mime_type = 'application/json'
+            temp_suffix = '.json'
+            logger.info(f"📋 [JSON_UPLOAD] Using JSON content for Gemini FileStore: {len(content)} chars")
+        
+        # Create temporary file with appropriate suffix
+        fd, temp_file = tempfile.mkstemp(suffix=temp_suffix)
         try:
-            os.write(fd, page_data.markdown.encode('utf-8'))
+            os.write(fd, content.encode('utf-8'))
             os.close(fd)
-
-            metrics = calculate_metrics(page_data.markdown)
+            
+            metrics = calculate_metrics(content)
             doc_name = f"page_{job_context.website_id}_{int(time.time())}"
-
             logger.info(f"   📤 Uploading: {doc_name} ({metrics.get('file_size_bytes', 0):,} bytes)")
-
+            
             operation = await genai_client.file_search_stores.upload_to_file_search_store(
                 file=temp_file,
                 file_search_store_name=job_context.store_name,
                 config=await self._buildGeminiUploadConfig(doc_name, job_context.website_id, page_data.page_url)
             )
-
+            
             if not operation:
                 logger.error(f"   ❌ Failed to create upload operation")
                 return None
-
+            
             return await self._waitForGeminiUploadCompletion(operation, job_context)
         finally:
             try:
-                os.close(fd)
+                os.unlink(temp_file)
             except:
                 pass
             await self._deleteTemporaryFile(temp_file)
 
     async def _buildGeminiUploadConfig(self, doc_name: str, website_id: int, page_url: str) -> Dict:
-        """Build Gemini upload configuration"""
+        """Build Gemini upload configuration with dynamic MIME type"""
+        # Determine MIME type based on content format
+        mime_type = 'text/markdown'
+        if hasattr(self, '_current_page_data') and hasattr(self._current_page_data, 'json_content'):
+            mime_type = 'application/json'
+        
         return {
             'display_name': doc_name,
-            'mime_type': 'text/markdown',
+            'mime_type': mime_type,
             'custom_metadata': [
                 {'key': 'source_type', 'string_value': 'website'},
                 {'key': 'website_id', 'string_value': str(website_id)},
-                {'key': 'page_url', 'string_value': page_url}
+                {'key': 'page_url', 'string_value': page_url},
+                {'key': 'content_format', 'string_value': 'json' if mime_type == 'application/json' else 'markdown'}
             ]
         }
 
