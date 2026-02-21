@@ -1,5 +1,6 @@
 """Enhanced Docling processor with advanced features for better document processing."""
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -64,9 +65,9 @@ class EnhancedDoclingProcessor:
         # Advanced processing options
         self.enable_layout_analysis = True
         self.enable_table_structure = True
-        self.enable_cell_matching = False  # Use text cells from structure prediction
+        self.enable_cell_matching = True  
         self.enable_export_to_dict = True
-        self.tableformer_mode = TableFormerMode.ACCURATE  # Use accurate mode for better quality
+        self.tableformer_mode = TableFormerMode.ACCURATE 
         
     async def initialize(self) -> bool:
         """Initialize the enhanced docling processor with advanced features."""
@@ -171,21 +172,19 @@ class EnhancedDoclingProcessor:
             
             # Check if conversion was successful
             if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
-                # Extract enhanced content
-                markdown_content = None
+                # Extract content in JSON format for Gemini FileStore
+                json_content = None
                 docling_dict = None
                 layout_info = {}
                 table_info = {}
                 
                 try:
-                    # Get markdown content
-                    markdown_content = conversion_result.render_as_markdown()
-                    logger.info(f"✅ [ENHANCED] render_as_markdown worked, got {len(markdown_content) if markdown_content else 0} chars")
-                    
-                    # Export to dict for structured data
+                    # Export to dict for structured JSON content (primary output)
                     if self.enable_export_to_dict:
                         docling_dict = conversion_result.document.export_to_dict()
                         logger.info(f"✅ [ENHANCED] Export to dict successful")
+                        json_content = json.dumps(docling_dict, indent=2, ensure_ascii=False)
+                        logger.info(f"✅ [ENHANCED] JSON content generated: {len(json_content)} chars")
                         
                         # Extract layout information
                         if self.enable_layout_analysis and docling_dict:
@@ -197,6 +196,15 @@ class EnhancedDoclingProcessor:
                             table_info = self._extract_table_info(docling_dict)
                             logger.info(f"📊 [TABLES] Found {len(table_info.get('tables', []))} tables")
                     
+                    # Fallback to markdown if JSON export fails
+                    if not json_content:
+                        markdown_content = conversion_result.render_as_markdown()
+                        logger.info(f"⚠️ [ENHANCED] JSON export failed, using markdown fallback: {len(markdown_content)} chars")
+                    else:
+                        # Keep markdown as secondary content for compatibility
+                        markdown_content = conversion_result.render_as_markdown()
+                        logger.info(f"✅ [ENHANCED] Both JSON and markdown generated")
+                        
                 except AttributeError as e:
                     logger.error(f"❌ [ENHANCED] Content extraction failed: {e}")
                     return None, {"error": f"Content extraction error: {e}", "filename": original_filename}
@@ -207,6 +215,7 @@ class EnhancedDoclingProcessor:
                     "processing_time_ms": processing_time_ms,
                     "model": self.model_name,
                     "conversion_status": str(conversion_result.status),
+                    "content_format": "json" if json_content else "markdown",
                     "enhanced_features": {
                         "layout_analysis": self.enable_layout_analysis,
                         "table_structure": self.enable_table_structure,
@@ -215,6 +224,7 @@ class EnhancedDoclingProcessor:
                         "tableformer_mode": str(self.tableformer_mode)
                     },
                     "content_stats": {
+                        "json_length": len(json_content) if json_content else 0,
                         "markdown_length": len(markdown_content) if markdown_content else 0,
                         "word_count": len(markdown_content.split()) if markdown_content else 0,
                         "line_count": len(markdown_content.split('\n')) if markdown_content else 0
@@ -241,9 +251,11 @@ class EnhancedDoclingProcessor:
                     }
                 
                 logger.info(f"✅ Enhanced processing completed for: {original_filename}")
-                logger.info(f"📊 [STATS] Content: {metadata['content_stats']['markdown_length']} chars, {metadata['content_stats']['word_count']} words")
+                logger.info(f"📊 [STATS] JSON: {metadata['content_stats']['json_length']} chars, Markdown: {metadata['content_stats']['markdown_length']} chars")
                 
-                return markdown_content, metadata
+                # Return JSON content as primary, markdown as fallback
+                primary_content = json_content if json_content else markdown_content
+                return primary_content, metadata
             else:
                 error_msg = f"Enhanced conversion failed with status: {conversion_result.status}"
                 logger.warning(f"⚠️ Enhanced processing failed for {original_filename}: {error_msg}")

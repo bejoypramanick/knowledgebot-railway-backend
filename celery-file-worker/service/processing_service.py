@@ -17,7 +17,8 @@ from core.config import settings
 from shared.docling_integration import (
     process_with_docling,
     should_use_docling_for_file,
-    create_markdown_temp_file
+    create_markdown_temp_file,
+    create_json_temp_file
 )
 from shared.file_search import get_file_search_store_by_display_name
 from shared.html_processor import extract_content_from_html
@@ -430,19 +431,43 @@ async def process_file_content(
                     logger.info(f"📊 [DOCLING_METADATA] Processing time: {docling_processing_time_ms}ms, "
                               f"Images: {docling_images_extracted}, OCR: {docling_images_with_ocr}")
                     
-                    # Log the full markdown content from Docling service
-                    logger.info(f"📝 [DOCLING_CONTENT] Full markdown content from Docling service:")
-                    logger.info(f"--- START MARKDOWN CONTENT ---")
+                    # Log the full content from Docling service
+                    logger.info(f"📝 [DOCLING_CONTENT] Full content from Docling service:")
+                    logger.info(f"--- START CONTENT ---")
                     logger.info(f"{markdown_content}")
-                    logger.info(f"--- END MARKDOWN CONTENT ---")
+                    logger.info(f"--- END CONTENT ---")
                     logger.info(f"📊 [DOCLING_STATS] Content length: {len(markdown_content)} characters, {len(markdown_content.split())} words")
                     
-                    markdown_tmp_path = create_markdown_temp_file(markdown_content)
-                    # Switch to markdown artifact
+                    # Use JSON content if available, otherwise fallback to markdown
+                    content_for_upload = markdown_content
+                    if docling_metadata and docling_metadata.get('content_format') == 'json':
+                        # Extract JSON content from docling metadata if available
+                        json_content = docling_metadata.get('json_content')
+                        if json_content:
+                            content_for_upload = json_content
+                            logger.info(f"📋 [JSON_UPLOAD] Using JSON content for Gemini FileStore: {len(json_content)} chars")
+                        else:
+                            logger.info(f"⚠️ [JSON_UPLOAD] JSON format requested but not available, using markdown")
+                    
+                    # Create temporary file with appropriate content
+                    if docling_metadata and docling_metadata.get('content_format') == 'json':
+                        tmp_path = create_json_temp_file(content_for_upload)
+                    else:
+                        tmp_path = create_markdown_temp_file(content_for_upload)
+                    
+                    # Switch to processed artifact
                     original_tmp_path = tmp_path
-                    tmp_path = markdown_tmp_path
-                    original_filename = original_filename.rsplit('.', 1)[0] + '.md'
-                    detected_mime_type = 'text/markdown'
+                    
+                    # Update filename and MIME type based on content format
+                    if docling_metadata and docling_metadata.get('content_format') == 'json':
+                        original_filename = original_filename.rsplit('.', 1)[0] + '.json'
+                        detected_mime_type = 'application/json'
+                        logger.info(f"📋 [JSON_FORMAT] Using JSON format for Gemini FileStore")
+                    else:
+                        original_filename = original_filename.rsplit('.', 1)[0] + '.md'
+                        detected_mime_type = 'text/markdown'
+                        logger.info(f"📝 [MARKDOWN_FORMAT] Using markdown format for Gemini FileStore")
+                    
                     processed_successfully = True
                     logger.info(f"✅ [DOCLING] Converted {original_filename} to markdown")
                 else:

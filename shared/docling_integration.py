@@ -242,7 +242,7 @@ def create_markdown_temp_file(markdown_content: str) -> str:
     Create a temporary markdown file from content.
 
     Args:
-        markdown_content: The markdown content
+       markdown_content: The markdown content
 
     Returns:
         Path to the temporary markdown file
@@ -253,7 +253,22 @@ def create_markdown_temp_file(markdown_content: str) -> str:
             f.write(markdown_content)
         return temp_path
     except Exception as e:
-        logger.error(f"❌ Failed to create markdown temp file: {e}")
+        logger.error(f" Failed to create markdown temp file: {e}")
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise
+
+
+def create_json_temp_file(json_content: str) -> str:
+    """Create a temporary file with JSON content for Gemini FileStore."""
+    fd, temp_path = tempfile.mkstemp(suffix='.json')
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            f.write(json_content)
+        logger.info(f" [JSON_TEMP] Created JSON temp file: {temp_path}")
+        return temp_path
+    except Exception as e:
+        logger.error(f" Failed to create JSON temp file: {e}")
         if os.path.exists(temp_path):
             os.unlink(temp_path)
         raise
