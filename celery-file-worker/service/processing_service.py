@@ -469,7 +469,7 @@ async def process_file_content(
                         except json.JSONDecodeError as e:
                             logger.error(f"❌ [JSON_INVALID] Invalid JSON format: {e}")
                     else:
-                        logger.info(f"�📝 [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content_for_upload)} chars")
+                        logger.info(f"� [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content_for_upload)} chars")
                         
                         # Log complete markdown content before sending to Gemini FileStore
                         logger.info(f"📝 [COMPLETE_MARKDOWN] Full markdown content before Gemini FileStore upload:")
@@ -576,10 +576,15 @@ async def process_file_content(
                     ]
                 }
                 
-                # Explicitly set MIME type for markdown files (inside config, like web worker)
-                if detected_mime_type == 'text/markdown' or tmp_path.endswith('.md'):
+                # Set appropriate MIME type based on content format
+                if docling_metadata and docling_metadata.get('content_format') == 'json':
+                    upload_config['mime_type'] = 'application/json'
+                    logger.info(f"📋 [MIME] Setting mime_type='application/json' for JSON content from {original_filename}")
+                elif detected_mime_type == 'text/markdown' or tmp_path.endswith('.md'):
                     upload_config['mime_type'] = 'text/markdown'
-                    logger.info(f"📝 [MIME] Explicitly setting mime_type='text/markdown' for {original_filename}")
+                    logger.info(f"📝 [MIME] Setting mime_type='text/markdown' for {original_filename}")
+                else:
+                    logger.info(f"📄 [MIME] Using default MIME type for {original_filename}")
                 
                 operation = genai_client.file_search_stores.upload_to_file_search_store(
                     file=tmp_path,
