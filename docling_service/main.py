@@ -24,7 +24,7 @@ from docling_service.core.utils import (
     setup_global_exception_logging,
     log_endpoint_request
 )
-from docling_service.core.docling_processor import get_processor
+from docling_service.core.enhanced_docling_processor import enhanced_processor
 from docling_service.routers import router
 from shared.middleware import CorrelationIDMiddleware
 
@@ -46,9 +46,11 @@ async def lifespan(app: FastAPI):
 
         # Initialize Docling processor
         logger.info("⏳ Initializing Docling processor and OCR reader...")
-        processor = await get_processor()
-
-        if processor._initialized:
+        
+        # Initialize enhanced processor
+        init_success = await enhanced_processor.initialize()
+        
+        if init_success:
             logger.info("✅ Docling processor initialized successfully")
             logger.info(f"   Model: {settings.docling_model_name}")
             logger.info(f"   Max file size: {settings.docling_max_file_size_mb}MB")
