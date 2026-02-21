@@ -131,11 +131,16 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         if not request_data.mime_type:
             raise HTTPException(status_code=400, detail="mime_type is required")
         
+        logger.info(f"🔍 [DOCLING_SERVICE] Received presigned URL request:")
+        logger.info(f"  - Filename: {request_data.filename}")
+        logger.info(f"  - MIME Type: {request_data.mime_type}")
+        logger.info(f"  - Presigned URL: {request_data.presigned_url[:100]}...")
+        
         logger.info(
             f"📄 Processing via URL: {request_data.filename} "
             f"(type: {request_data.mime_type}, timeout={settings.docling_processing_timeout_seconds}s)"
         )
-        logger.info(f"🔗 Presigned URL: {request_data.presigned_url[:100]}...")
+        logger.info(f"🔗 Full presigned URL: {request_data.presigned_url}")
         
         # Download file from presigned URL
         import httpx
@@ -149,7 +154,10 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         )
         
         async with httpx.AsyncClient(timeout=timeout_config) as client:
+            logger.info(f"🌐 [DOCLING_SERVICE] Starting download from presigned URL...")
             response = await client.get(request_data.presigned_url)
+            
+            logger.info(f"📡 [DOCLING_SERVICE] Download response: HTTP {response.status_code}")
             
             if response.status_code != 200:
                 raise HTTPException(
@@ -159,6 +167,8 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
             
             content = response.content
             file_size = len(content)
+            
+            logger.info(f"📥 [DOCLING_SERVICE] Downloaded {file_size} bytes ({file_size / 1024:.1f}KB)")
             
             # Validate file for processing
             is_valid, error_msg = validate_file_for_processing(request_data.filename, file_size)
@@ -172,6 +182,7 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
                     tmp.write(content)
                 
                 logger.info(f"📥 Downloaded {file_size / 1024:.1f}KB from presigned URL")
+                logger.info(f"📁 [DOCLING_SERVICE] Created temp file: {temp_file_path}")
             except Exception as e:
                 # Clean up file descriptor if write fails
                 os.close(fd)
@@ -179,13 +190,17 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         
         # Get processor
         processor = await get_processor()
+        logger.info(f"🔧 [DOCLING_SERVICE] Got processor: {type(processor)}")
         
         # Process document
+        logger.info(f"📄 [DOCLING_SERVICE] Starting docling processing...")
         markdown_content, metadata = await processor.process_document(
             file_path=temp_file_path,
             original_filename=request_data.filename,
             timeout_seconds=settings.docling_processing_timeout_seconds
         )
+        
+        logger.info(f"📊 [DOCLING_SERVICE] Processing result: markdown_content={bool(markdown_content)}, metadata_keys={list(metadata.keys()) if metadata else 'None'}")
         
         # Handle processing errors
         if not markdown_content:
