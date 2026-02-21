@@ -111,8 +111,17 @@ class SimpleDoclingProcessor:
             
             # Check if conversion was successful
             if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
-                # Extract markdown content
-                markdown_content = conversion_result.document.export_to_markdown()
+                # Extract markdown content - try different methods based on docling version
+                try:
+                    # Try the newer API first
+                    markdown_content = conversion_result.export_to_markdown()
+                except AttributeError:
+                    try:
+                        # Try the older API with document attribute
+                        markdown_content = conversion_result.document.export_to_markdown()
+                    except AttributeError:
+                        # Fallback: try to get content directly
+                        markdown_content = str(conversion_result)
                 
                 # Build simple metadata
                 metadata = {
