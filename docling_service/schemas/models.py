@@ -3,6 +3,22 @@ from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 
 
+class DoclingProcessURLRequest(BaseModel):
+    """Request model for processing document via presigned URL."""
+    presigned_url: str = Field(description="Presigned S3 URL for document download")
+    filename: str = Field(description="Original filename")
+    mime_type: str = Field(description="MIME type of the document")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "presigned_url": "https://s3.amazonaws.com/bucket/file?signature=...",
+                "filename": "document.pdf",
+                "mime_type": "application/pdf"
+            }
+        }
+
+
 class DoclingProcessResponse(BaseModel):
     """Response model for document processing."""
     success: bool = Field(description="Whether processing was successful")

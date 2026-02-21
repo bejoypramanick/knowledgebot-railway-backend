@@ -138,15 +138,36 @@ class DoclingProcessor:
         self,
         file_path: str,
         original_filename: str,
-        timeout_seconds: int = 270
+        timeout_seconds: int = 1800
+    ) -> Tuple[Optional[str], Dict[str, Any]]:
+        """Process a document file and return markdown content with OCR."""
+        return await self._process_document_internal(file_path, original_filename, timeout_seconds)
+
+    async def process_document_from_url(
+        self,
+        presigned_url: str,
+        original_filename: str,
+        mime_type: str,
+        timeout_seconds: int = 1800
+    ) -> Tuple[Optional[str], Dict[str, Any]]:
+        """Process a document from a presigned URL and return markdown content with OCR."""
+        return await self._process_document_internal(presigned_url, original_filename, timeout_seconds, is_url=True)
+
+    async def _process_document_internal(
+        self,
+        source: str,
+        original_filename: str,
+        timeout_seconds: int,
+        is_url: bool = False
     ) -> Tuple[Optional[str], Dict[str, Any]]:
         """
         Convert a document to markdown.
 
         Args:
-            file_path: Path to the document file
+            source: Path to the document file or presigned URL
             original_filename: Original filename for context
             timeout_seconds: Processing timeout in seconds
+            is_url: Whether source is a presigned URL
 
         Returns:
             Tuple of (markdown_content, metadata) or (None, {error: message}) on failure
@@ -226,77 +247,78 @@ class DoclingProcessor:
                 "filename": original_filename
             }
 
-    def _convert_document(self, file_path: str) -> Any:
-            """
-            Blocking document conversion using docling convert_single() API.
-            Called in thread pool executor.
-            """
-            if not self._converter:
-                raise RuntimeError("Docling converter not initialized")
+    def _convert_document(self, source: str, is_url: bool = False) -> Any:
+        """
+        Blocking document conversion using docling convert_single() API.
+        Called in thread pool executor.
+        
+        Args:
+            source: Path to the document file or presigned URL
+            is_url: Whether source is a presigned URL
+        """
+        if not self._converter:
+            raise RuntimeError("Docling converter not initialized")
 
-            try:
-                logger.info(f"🔍 Starting conversion for: {file_path}")
+        try:
+            source_type = "URL" if is_url else "file"
+            logger.info(f"🔍 Starting conversion for {source_type}: {source[:100] if is_url else source}")
 
+            # For now, we'll let the router handle URL downloads
+            # This method will primarily handle local files
+            if not is_url:
                 # Check file extension to determine processing approach
-                file_ext = Path(file_path).suffix.lower()
+                file_ext = Path(source).suffix.lower()
                 logger.info(f"📄 File extension detected: {file_ext}")
 
-                # Suppress progress bar output by redirecting stdout/stderr
-                import sys
-                import io
+            # Suppress progress bar output by redirecting stdout/stderr
+            import sys
+            import io
 
-                # Save original stdout/stderr
-                original_stdout = sys.stdout
-                original_stderr = sys.stderr
+            # Save original stdout/stderr
+            original_stdout = sys.stdout
+            original_stderr = sys.stderr
 
-                try:
-                    # Redirect to null to suppress progress bars
-                    sys.stdout = io.StringIO()
-                    sys.stderr = io.StringIO()
+            try:
+                # Redirect to null to suppress progress bars
+                sys.stdout = io.StringIO()
+                sys.stderr = io.StringIO()
 
-                    # For HTML files, we need to handle them differently
-                    # HTML files should be processed directly by docling, not through convert_single
-                    # Use convert_single() for all formats
-                    logger.info(f"📄 Using convert_single() for file: {file_path}")
-                    conversion_result = self._converter.convert_single(file_path)
+                # Use convert_single() for all formats
+                if not is_url:
+                    logger.info(f"📄 Using convert_single() for file: {source}")
+                conversion_result = self._converter.convert_single(source)
 
-                finally:
-                    # Restore original stdout/stderr
-                    sys.stdout = original_stdout
-                    sys.stderr = original_stderr
+            finally:
+                # Restore original stdout/stderr
+                sys.stdout = original_stdout
+                sys.stderr = original_stderr
 
-                logger.info(f"🔍 Conversion completed, status: {conversion_result.status}")
+            logger.info(f"🔍 Conversion completed, status: {conversion_result.status}")
 
-                # Check if conversion was successful
-                if conversion_result.status not in _ACCEPTABLE_CONVERSION_STATUSES:
-                    # Build error message with details from conversion result
-                    error_msg = f"Conversion failed with status: {conversion_result.status}"
-                    error_details = []
+            # Check if conversion was successful
+            if conversion_result.status not in _ACCEPTABLE_CONVERSION_STATUSES:
+                # Build error message with details from conversion result
+                error_msg = f"Conversion failed with status: {conversion_result.status}"
+                error_details = []
 
-                    # Try to extract error details
-                    if hasattr(conversion_result, 'errors') and conversion_result.errors:
-                        try:
-                            error_details = [str(e) if not hasattr(e, 'error_message') else e.error_message for e in conversion_result.errors]
-                        except Exception as extract_error:
-                            logger.warning(f"Failed to extract error details: {extract_error}")
-                            error_details = [str(conversion_result.status)]
+                # Try to extract error details
+                if hasattr(conversion_result, 'errors') and conversion_result.errors:
+                    try:
+                        error_details = [str(e) if not hasattr(e, 'error_message') else e.error_message for e in conversion_result.errors]
+                    except Exception as extract_error:
+                        logger.warning(f"Failed to extract error details: {extract_error}")
+                        error_details = [str(conversion_result.status)]
 
-                    logger.error(f"🔍 {error_msg}")
-                    raise RuntimeError(f"{error_msg}. Details: {error_details}")
+                error_msg += f" - Details: {', '.join(error_details)}"
+                raise RuntimeError(error_msg)
 
-                return conversion_result
+            return conversion_result
 
-            except Exception as e:
-                logger.error(f"🔍 Error in _convert_document: {type(e).__name__}: {e}")
-                import traceback
-                logger.error(f"🔍 Traceback: {traceback.format_exc()}")
-                raise
+        except Exception as e:
+            logger.error(f"❌ Document conversion failed: {e}")
+            raise
 
-    async def _extract_and_ocr_images(
-        self,
-        converted_doc: Any,
-        filename: str
-    ) -> Dict[str, Any]:
+    async def _extract_images_with_ocr(self, markdown_content: str, filename: str) -> Dict[str, Any]:
         """
         Extract images from document and perform OCR on them.
 

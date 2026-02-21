@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Request
 
 from docling_service.core.docling_processor import get_processor
 from docling_service.core.config import settings
-from docling_service.schemas.models import DoclingProcessResponse
+from docling_service.schemas.models import DoclingProcessResponse, DoclingProcessURLRequest
 from docling_service.utils.validation import validate_file_for_processing
 from docling_service.utils.constants import MAX_FILE_SIZE_BYTES
 
@@ -92,6 +92,126 @@ async def process_document(request: Request, file: UploadFile = File(...)) -> Do
             detail=f"Unexpected processing error: {str(e)}"
         )
 
+    finally:
+        # Cleanup temporary file
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.unlink(temp_file_path)
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to cleanup temp file {temp_file_path}: {e}")
+        
+        # Force garbage collection to free memory
+        import gc
+        gc.collect()
+        logger.debug("🧹 Garbage collection completed")
+
+
+@router.post("/process_url")
+async def process_document_from_url(request: Request, request_data: DoclingProcessURLRequest) -> DoclingProcessResponse:
+    """
+    Convert a document to markdown using a presigned URL.
+    
+    This endpoint downloads the document from the provided presigned URL
+    and processes it using docling, eliminating the need for file uploads.
+    
+    Args:
+        request_data: Contains presigned_url, filename, and mime_type
+    
+    Returns:
+        DoclingProcessResponse with markdown content and metadata
+    """
+    temp_file_path = None
+    
+    try:
+        # Validate input
+        if not request_data.presigned_url:
+            raise HTTPException(status_code=400, detail="presigned_url is required")
+        if not request_data.filename:
+            raise HTTPException(status_code=400, detail="filename is required")
+        if not request_data.mime_type:
+            raise HTTPException(status_code=400, detail="mime_type is required")
+        
+        logger.info(
+            f"📄 Processing via URL: {request_data.filename} "
+            f"(type: {request_data.mime_type}, timeout={settings.docling_processing_timeout_seconds}s)"
+        )
+        logger.info(f"🔗 Presigned URL: {request_data.presigned_url[:100]}...")
+        
+        # Download file from presigned URL
+        import httpx
+        import tempfile
+        
+        timeout_config = httpx.Timeout(
+            connect=30.0,
+            read=300.0,  # 5 minutes for download
+            write=30.0,
+            pool=30.0
+        )
+        
+        async with httpx.AsyncClient(timeout=timeout_config) as client:
+            response = await client.get(request_data.presigned_url)
+            
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Failed to download file from presigned URL: HTTP {response.status_code}"
+                )
+            
+            content = response.content
+            file_size = len(content)
+            
+            # Validate file for processing
+            is_valid, error_msg = validate_file_for_processing(request_data.filename, file_size)
+            if not is_valid:
+                raise HTTPException(status_code=400, detail=error_msg)
+            
+            # Create temporary file
+            fd, temp_file_path = tempfile.mkstemp(suffix=os.path.splitext(request_data.filename)[1])
+            with os.fdopen(fd, 'wb') as tmp:
+                tmp.write(content)
+            
+            logger.info(f"📥 Downloaded {file_size / 1024:.1f}KB from presigned URL")
+        
+        # Get processor
+        processor = await get_processor()
+        
+        # Process document
+        markdown_content, metadata = await processor.process_document(
+            file_path=temp_file_path,
+            original_filename=request_data.filename,
+            timeout_seconds=settings.docling_processing_timeout_seconds
+        )
+        
+        # Handle processing errors
+        if not markdown_content:
+            error_msg = metadata.get("error", "Unknown error")
+            logger.warning(f"⚠️ Processing failed for {request_data.filename}: {error_msg}")
+            raise HTTPException(
+                status_code=422,
+                detail=f"Conversion failed: {error_msg}"
+            )
+        
+        logger.info(f"✅ Successfully processed: {request_data.filename}")
+        
+        return DoclingProcessResponse(
+            success=True,
+            content=markdown_content,
+            metadata=metadata,
+            error=None
+        )
+    
+    except HTTPException as http_exc:
+        logger.error(f"❌ HTTP Exception processing {request_data.filename}: {http_exc.status_code} - {http_exc.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"❌ Unexpected error processing {request_data.filename}: {e}")
+        import traceback
+        logger.error(f"🔍 Full traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected processing error: {str(e)}"
+        )
+    
     finally:
         # Cleanup temporary file
         if temp_file_path and os.path.exists(temp_file_path):
