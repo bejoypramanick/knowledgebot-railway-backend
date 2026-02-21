@@ -445,8 +445,40 @@ async def process_file_content(
                         content_for_upload = markdown_content
                         logger.info(f"📋 [JSON_UPLOAD] Using JSON content for Gemini FileStore: {len(content_for_upload)} chars")
                         logger.info(f"📋 [JSON_UPLOAD] JSON preview: {content_for_upload[:200]}...")
+                        
+                        # Log complete JSON content before sending to Gemini FileStore
+                        logger.info(f"📋 [COMPLETE_JSON] Full JSON content before Gemini FileStore upload:")
+                        logger.info(f"=== START COMPLETE JSON ===")
+                        logger.info(f"{content_for_upload}")
+                        logger.info(f"=== END COMPLETE JSON ===")
+                        logger.info(f"📊 [JSON_STATS] Total characters: {len(content_for_upload)}")
+                        logger.info(f"📊 [JSON_STATS] Total lines: {len(content_for_upload.splitlines())}")
+                        
+                        # Validate JSON format
+                        try:
+                            import json
+                            parsed_json = json.loads(content_for_upload)
+                            logger.info(f"✅ [JSON_VALID] Valid JSON format confirmed")
+                            logger.info(f"� [JSON_STRUCTURE] Top-level keys: {list(parsed_json.keys())}")
+                            if 'content' in parsed_json:
+                                logger.info(f"📊 [JSON_STRUCTURE] Content keys: {list(parsed_json['content'].keys())}")
+                            if 'structure' in parsed_json:
+                                logger.info(f"📊 [JSON_STRUCTURE] Structure keys: {list(parsed_json['structure'].keys())}")
+                            if 'enhanced_features' in parsed_json:
+                                logger.info(f"📊 [JSON_STRUCTURE] Enhanced features: {parsed_json['enhanced_features']}")
+                        except json.JSONDecodeError as e:
+                            logger.error(f"❌ [JSON_INVALID] Invalid JSON format: {e}")
                     else:
-                        logger.info(f"📝 [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content_for_upload)} chars")
+                        logger.info(f"�📝 [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content_for_upload)} chars")
+                        
+                        # Log complete markdown content before sending to Gemini FileStore
+                        logger.info(f"📝 [COMPLETE_MARKDOWN] Full markdown content before Gemini FileStore upload:")
+                        logger.info(f"=== START COMPLETE MARKDOWN ===")
+                        logger.info(f"{content_for_upload}")
+                        logger.info(f"=== END COMPLETE MARKDOWN ===")
+                        logger.info(f"📊 [MARKDOWN_STATS] Total characters: {len(content_for_upload)}")
+                        logger.info(f"📊 [MARKDOWN_STATS] Total lines: {len(content_for_upload.splitlines())}")
+                        logger.info(f"📊 [MARKDOWN_STATS] Total words: {len(content_for_upload.split())}")
                     
                     # Create temporary file with appropriate content
                     if docling_metadata and docling_metadata.get('content_format') == 'json':
