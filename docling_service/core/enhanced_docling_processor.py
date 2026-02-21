@@ -347,22 +347,24 @@ class EnhancedDoclingProcessor:
             for page_idx, page in enumerate(pages):
                 # Extract text blocks
                 texts = page.get('texts', [])
-                for text in texts:
-                    layout_info["elements"].append({
-                        "type": "text",
-                        "page": page_idx,
-                        "content_length": len(text.get('text', '')),
-                        "bbox": text.get('bbox', [])
-                    })
+                if isinstance(texts, list):
+                    for text in texts:
+                        layout_info["elements"].append({
+                            "type": "text",
+                            "page": page_idx,
+                            "content_length": len(text.get('text', '')) if isinstance(text, dict) else len(str(text)),
+                            "bbox": text.get('bbox', []) if isinstance(text, dict) else []
+                        })
                 
                 # Extract images/pictures
                 pictures = page.get('pictures', [])
-                for picture in pictures:
-                    layout_info["elements"].append({
-                        "type": "image",
-                        "page": page_idx,
-                        "bbox": picture.get('bbox', [])
-                    })
+                if isinstance(pictures, list):
+                    for picture in pictures:
+                        layout_info["elements"].append({
+                            "type": "image",
+                            "page": page_idx,
+                            "bbox": picture.get('bbox', []) if isinstance(picture, dict) else []
+                        })
             
             layout_info["total_elements"] = len(layout_info["elements"])
             
@@ -383,18 +385,20 @@ class EnhancedDoclingProcessor:
             pages = docling_dict.get('pages', [])
             for page_idx, page in enumerate(pages):
                 tables = page.get('tables', [])
-                for table_idx, table in enumerate(tables):
-                    cells = table.get('cells', [])
-                    table_data = {
-                        "page": page_idx,
-                        "table_index": table_idx,
-                        "rows": len(set(cell.get('row', []) for cell in cells)),
-                        "cols": len(set(cell.get('col', []) for cell in cells)),
-                        "cells_count": len(cells),
-                        "bbox": table.get('bbox', [])
-                    }
-                    table_info["tables"].append(table_data)
-                    table_info["total_cells"] += len(cells)
+                if isinstance(tables, list):
+                    for table_idx, table in enumerate(tables):
+                        cells = table.get('cells', [])
+                        if isinstance(cells, list):
+                            table_data = {
+                                "page": page_idx,
+                                "table_index": table_idx,
+                                "rows": len(set(cell.get('row', []) for cell in cells)),
+                                "cols": len(set(cell.get('col', []) for cell in cells)),
+                                "cells_count": len(cells),
+                                "bbox": table.get('bbox', []) if isinstance(table, dict) else []
+                            }
+                            table_info["tables"].append(table_data)
+                            table_info["total_cells"] += len(cells)
             
             table_info["total_tables"] = len(table_info["tables"])
             
