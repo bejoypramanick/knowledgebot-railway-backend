@@ -365,91 +365,22 @@ async def check_redis_queue() -> Dict[str, Any]:
         }
 
 
-async def queue_website_for_deletion(website_id: int) -> Dict[str, Any]:
+async def delete_website(website_id: int) -> Dict[str, Any]:
     """
-    Delete a website: immediately if idle, or queue for deletion if currently processing.
-
-    For processing websites: Sets Redis cancellation flag and marks as queued_for_deletion.
-    The worker will detect the flag, stop processing, and delete.
-
-    For idle websites: Deletes directly via delete_website_logic.
+    Delete website atomically with complete cleanup
     """
-    logger.info("=" * 80)
-    logger.info(f"🗑️  [DELETE_WEBSITE_REQUEST] Website deletion requested for ID: {website_id}")
-    logger.info("=" * 80)
-
-    try:
-        # Get website details first
-        website_record = await get_website_by_id(website_id)
-        if not website_record:
-            logger.error(f"❌ Website not found: {website_id}")
-            return {
-                "success": False,
-                "error": "Website not found"
-            }
-
-        logger.info(f"✅ Website found: {website_record['original_url']}")
-        logger.info(f"   Current status: {website_record['processing_status']}")
-        celery_task_id = website_record.get('celery_task_id')
-        logger.info(f"   Celery Task ID: {celery_task_id}")
-
-        # Check if website is currently processing
-        if website_record['processing_status'] in ('pending', 'processing'):
-            logger.info(f"🔄 [PROCESSING] Website is {website_record['processing_status']}, marking for deletion...")
-
-            # Update website status to queued for deletion
-            await update_website_status(website_id, 'queued_for_deletion')
-            logger.info(f"   Status updated to: queued_for_deletion")
-
-            # Set Redis cancellation flag to signal worker to stop and delete
-            if celery_task_id:
-                import redis as redis_lib
-                import os
-
-                try:
-                    web_redis_url = os.getenv('WEB_REDIS_URL', 'redis://localhost:6379/1')
-                    redis_conn = redis_lib.from_url(web_redis_url, decode_responses=True, socket_connect_timeout=2)
-
-                    # Set flag to tell worker this task should be deleted
-                    redis_conn.setex(f"task_cancelled:{celery_task_id}", 300, "1")
-                    redis_conn.close()
-
-                    logger.info(f"   ✅ Set cancellation flag in Redis for task {celery_task_id}")
-                except Exception as flag_err:
-                    logger.warning(f"   ⚠️  Could not set Redis cancellation flag: {flag_err}")
-
-            logger.info("=" * 80)
-            logger.info(f"✅ [DELETE_QUEUED] Website marked for deletion")
-            logger.info("=" * 80)
-            logger.info(f"   The worker will delete this website when it detects the flag")
-
-            return {
-                "success": True,
-                "message": "Website deletion queued successfully (worker will delete when current operation completes)",
-                "task_id": celery_task_id,
-                "website_id": str(website_id),
-                "status": "queued_for_deletion"
-            }
-        else:
-            # Website is not processing, delete directly
-            logger.info(f"⚡ [IDLE] Website is idle ({website_record['processing_status']}), deleting directly...")
-
-            from knowledgebase_ingestion.service.file_service import FileService
-            file_service = FileService()
-            result = await file_service.delete_website_logic(str(website_id))
-
-            return result
-
-    except Exception as e:
-        logger.error("=" * 80)
-        logger.error(f"❌ [DELETE_ERROR] Error during website deletion: {e}")
-        logger.error("=" * 80)
-        logger.error(f"   Website ID: {website_id}")
-
-        return {
-            "success": False,
-            "error": str(e)
-        }
+    from .atomic_deletion_service import atomic_deletion_service
+    
+    logger.info(f"🗑️ [DELETE_WEBSITE] Starting atomic website deletion for ID: {website_id}")
+    
+    result = await atomic_deletion_service.delete_website_atomically(website_id)
+    
+    if result["success"]:
+        logger.info(f"✅ [DELETE_WEBSITE] Website {website_id} deleted successfully")
+    else:
+        logger.error(f"❌ [DELETE_WEBSITE] Failed to delete website {website_id}: {result.get('error')}")
+    
+    return result
 
 
 async def get_website_details_for_worker(task_id: str) -> Optional[Dict[str, Any]]:

@@ -6,7 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
 
-from docling_service.core.docling_processor import get_processor
+from docling_service.core.enhanced_docling_processor import enhanced_processor
 from docling_service.core.config import settings
 from docling_service.schemas.models import DoclingProcessResponse, DoclingProcessURLRequest
 from docling_service.utils.validation import validate_file_for_processing
@@ -50,14 +50,20 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         )
         logger.info(f"🔗 Full presigned URL: {request_data.presigned_url}")
         
-        # Get processor
-        processor = await get_processor()
-        logger.info(f"🔧 [ROUTER] Got processor: {type(processor)}")
+        # Get enhanced processor
+        if not enhanced_processor._initialized:
+            logger.info("🔧 [ROUTER] Initializing enhanced processor...")
+            init_success = await enhanced_processor.initialize()
+            if not init_success:
+                raise HTTPException(status_code=503, detail="Enhanced docling processor initialization failed")
+        
+        processor = enhanced_processor
+        logger.info(f"🔧 [ROUTER] Using enhanced processor: {type(processor)}")
         logger.info(f"🔧 [ROUTER] Processor initialized: {processor._initialized}")
         logger.info(f"🔧 [ROUTER] Processor model: {processor.model_name}")
         
-        # Process document directly from presigned URL (no temp file needed)
-        logger.info(f"📄 [ROUTER] Starting docling processing from presigned URL...")
+        # Process document with enhanced features
+        logger.info(f"📄 [ROUTER] Starting enhanced docling processing from presigned URL...")
         markdown_content, metadata = await processor.process_document_from_url(
             presigned_url=request_data.presigned_url,
             original_filename=request_data.filename,
@@ -109,25 +115,33 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
 
 @router.get("/health")
 async def health_check(request: Request) -> dict:
-    """Health check endpoint."""
+    """Health check endpoint for enhanced docling service."""
     try:
-        processor = await get_processor()
-        health = await processor.health_check()
+        # Initialize enhanced processor if needed
+        if not enhanced_processor._initialized:
+            logger.info("🔧 [HEALTH] Initializing enhanced processor for health check...")
+            await enhanced_processor.initialize()
         
         return {
-            "status": "healthy" if health["initialized"] else "degraded",
-            "docling_initialized": health["initialized"],
-            "ocr_initialized": health["converter_available"],
-            "service": "docling-service",
-            "model": processor.model_name if processor else None
+            "status": "healthy" if enhanced_processor._initialized else "degraded",
+            "docling_initialized": enhanced_processor._initialized,
+            "enhanced_features": {
+                "layout_analysis": enhanced_processor.enable_layout_analysis,
+                "table_structure": enhanced_processor.enable_table_structure,
+                "cell_matching": enhanced_processor.enable_cell_matching,
+                "export_to_dict": enhanced_processor.enable_export_to_dict,
+                "tableformer_mode": str(enhanced_processor.tableformer_mode)
+            },
+            "service": "enhanced-docling-service",
+            "model": enhanced_processor.model_name
         }
     except Exception as e:
-        logger.error(f"❌ [ROUTER] Health check failed: {e}")
+        logger.error(f"❌ [HEALTH] Health check failed: {e}")
         return {
             "status": "unhealthy",
             "docling_initialized": False,
-            "ocr_initialized": False,
-            "service": "docling-service",
+            "enhanced_features": {},
+            "service": "enhanced-docling-service",
             "model": None,
             "error": str(e)
         }

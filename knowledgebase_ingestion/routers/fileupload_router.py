@@ -10,7 +10,7 @@ from knowledgebase_ingestion.utils.auth import extract_user_from_request
 from knowledgebase_ingestion.utils.logging import get_otel_logger
 from knowledgebase_ingestion.service.fileupload_service import (
     get_fileupload_dao, get_pending_files, get_file_by_id,
-    cancel_files, update_file_status, queue_file_for_deletion,
+    cancel_files, update_file_status, delete_file,
     validate_file_upload, delete_all_knowledge
 )
 from knowledgebase_ingestion.service.file_service import get_file_service
@@ -300,8 +300,8 @@ async def delete_file(file_id: str, request: Request = None):
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
         
-        # Queue file for deletion (handles both processing and direct deletion)
-        result = await queue_file_for_deletion(int(file_id))
+        # Delete file atomically with complete cleanup
+        result = await delete_file(int(file_id))
         
         if result.get('success'):
             logger.info(f"✅ File deletion processed: {file_id}")

@@ -147,109 +147,22 @@ async def queue_file_for_processing(file_id: int, celery_task_id: str) -> bool:
         return False
 
 
-async def queue_file_for_deletion(file_id: int) -> Dict[str, Any]:
+async def delete_file(file_id: int) -> Dict[str, Any]:
     """
-    Queue file for deletion if currently processing.
+    Delete file atomically with complete cleanup
     """
-    logger.info("=" * 80)
-    logger.info(f"🗑️  [DELETE_START] File deletion process started for file ID: {file_id}")
-    logger.info("=" * 80)
-
-    try:
-        # Get file details first
-        logger.info(f"🔍 [LOOKUP] Fetching file record from database...")
-        file_record = await get_file_by_id(file_id)
-
-        if not file_record:
-            logger.error(f"❌ [LOOKUP_FAILED] File ID {file_id} not found in database")
-            return {
-                "success": False,
-                "error": "File not found"
-            }
-
-        logger.info(f"✅ [LOOKUP_SUCCESS] File found in database")
-        logger.info(f"   ID: {file_record['id']}")
-        logger.info(f"   Filename: {file_record['original_filename']}")
-        logger.info(f"   Status: {file_record['processing_status']}")
-
-        # Check if file is currently processing
-        current_status = file_record['processing_status']
-        logger.info(f"🔄 [STATUS_CHECK] Current file status: {current_status}")
-
-        if current_status in ('pending', 'processing'):
-            logger.info(f"📋 [QUEUE_DELETE] File is {current_status}, marking for deletion...")
-
-            # Get existing task ID or generate new one
-            celery_task_id = file_record.get('celery_task_id') or str(__import__('uuid').uuid4())
-            logger.info(f"   Celery Task ID: {celery_task_id}")
-
-            # Update file status to queued for deletion
-            logger.info(f"💾 [STATUS_UPDATE] Updating file status to 'queued_for_deletion'...")
-            status_updated = await update_file_status(file_id, 'queued_for_deletion')
-            logger.info(f"   Status Update Result: {status_updated}")
-
-            # Set Redis cancellation flag to signal worker to stop and delete
-            if celery_task_id:
-                import redis as redis_lib
-                import os
-
-                try:
-                    file_redis_url = os.getenv('FILE_REDIS_URL', 'redis://localhost:6379/0')
-                    redis_conn = redis_lib.from_url(file_redis_url, decode_responses=True, socket_connect_timeout=2)
-
-                    # Set flag to tell worker this task should be deleted
-                    redis_conn.setex(f"task_cancelled:{celery_task_id}", 300, "1")
-                    redis_conn.close()
-
-                    logger.info(f"   ✅ Set cancellation flag in Redis for task {celery_task_id}")
-                except Exception as flag_err:
-                    logger.warning(f"   ⚠️  Could not set Redis cancellation flag: {flag_err}")
-
-            logger.info("=" * 80)
-            logger.info(f"✅ [DELETE_QUEUED] File marked for deletion")
-            logger.info("=" * 80)
-            logger.info(f"   File ID: {file_id}")
-            logger.info(f"   Task ID: {celery_task_id}")
-            logger.info(f"   Status: queued_for_deletion")
-            logger.info(f"   The worker will delete this file when it detects the cancellation flag")
-
-            return {
-                "success": True,
-                "message": "File deletion queued successfully (worker will delete when current operation completes)",
-                "task_id": celery_task_id,
-                "file_id": str(file_id),
-                "status": "queued_for_deletion"
-            }
-        else:
-            # File is not processing, delete directly
-            logger.info(f"⚡ [DIRECT_DELETE] File is {current_status}, deleting directly...")
-            logger.info(f"   Loading FileService...")
-
-            from knowledgebase_ingestion.service.file_service import FileService
-            file_service = FileService()
-
-            logger.info(f"   Calling delete_file_logic() for file ID {file_id}...")
-            result = await file_service.delete_file_logic(str(file_id))
-
-            logger.info("=" * 80)
-            logger.info(f"🗑️  [DIRECT_DELETE_COMPLETE] Direct deletion completed")
-            logger.info("=" * 80)
-            logger.info(f"   Success: {result.get('success')}")
-            logger.info(f"   Message: {result.get('message')}")
-
-            return result
-
-    except Exception as e:
-        logger.error("=" * 80)
-        logger.error(f"❌ [DELETE_ERROR] Error queuing file for deletion: {e}")
-        logger.error("=" * 80)
-        logger.error(f"   File ID: {file_id}")
-        logger.error(f"   Error Type: {type(e).__name__}")
-
-        return {
-            "success": False,
-            "error": str(e)
-        }
+    from .atomic_deletion_service import atomic_deletion_service
+    
+    logger.info(f"�️ [DELETE_FILE] Starting atomic file deletion for ID: {file_id}")
+    
+    result = await atomic_deletion_service.delete_file_atomically(file_id)
+    
+    if result["success"]:
+        logger.info(f"✅ [DELETE_FILE] File {file_id} deleted successfully")
+    else:
+        logger.error(f"❌ [DELETE_FILE] Failed to delete file {file_id}: {result.get('error')}")
+    
+    return result
 
 
 async def validate_file_upload(file: UploadFile, file_size: int, replace_existing: bool = False) -> Dict[str, Any]:
