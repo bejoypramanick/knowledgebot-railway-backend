@@ -167,10 +167,15 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
             
             # Create temporary file
             fd, temp_file_path = tempfile.mkstemp(suffix=os.path.splitext(request_data.filename)[1])
-            with os.fdopen(fd, 'wb') as tmp:
-                tmp.write(content)
-            
-            logger.info(f"📥 Downloaded {file_size / 1024:.1f}KB from presigned URL")
+            try:
+                with os.fdopen(fd, 'wb') as tmp:
+                    tmp.write(content)
+                
+                logger.info(f"📥 Downloaded {file_size / 1024:.1f}KB from presigned URL")
+            except Exception as e:
+                # Clean up file descriptor if write fails
+                os.close(fd)
+                raise HTTPException(status_code=500, detail=f"Failed to write downloaded content: {e}")
         
         # Get processor
         processor = await get_processor()
