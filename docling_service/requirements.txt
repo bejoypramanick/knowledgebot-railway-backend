@@ -15,9 +15,9 @@ psutil>=6.1.0
 tenacity>=8.2.2
 
 # Document Processing
-# Updated to latest version for enhanced features (InputFormat, PdfPipelineOptions, TableFormerMode)
-docling>=2.0.0,<3.0.0
-docling-core>=2.0.0,<3.0.0
+# Use latest version for enhanced features (InputFormat, PdfPipelineOptions, TableFormerMode)
+docling>=2.5.0
+docling-core>=2.5.0
 
 # Image OCR Extraction
 easyocr>=1.6.0

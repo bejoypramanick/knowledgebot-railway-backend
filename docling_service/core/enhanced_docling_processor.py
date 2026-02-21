@@ -49,14 +49,14 @@ try:
     except Exception as e:
         logger.warning(f"⚠️ [BASE_MODELS] Could not list base_models: {e}")
     
-    # Try to import InputFormat for docling 2.0+
+    # Try to import InputFormat for latest docling version
     try:
         from docling.datamodel.base_models import InputFormat
         logger.info("✅ [IMPORT] InputFormat imported successfully")
     except ImportError as e:
         InputFormat = None
         logger.warning(f"⚠️ [IMPORT] InputFormat not available: {e}")
-        # Try to use DocInputType as alternative for older versions
+        # Try to use DocInputType as fallback for older versions
         try:
             from docling.datamodel.base_models import DocInputType
             InputFormat = DocInputType  # Use DocInputType as fallback
@@ -64,7 +64,7 @@ try:
         except ImportError:
             logger.warning("⚠️ [IMPORT] DocInputType not available either")
     
-    # Try to import pipeline options for docling 2.0+
+    # Try to import pipeline options for latest docling version
     try:
         from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
         logger.info("✅ [IMPORT] PdfPipelineOptions and TableFormerMode imported successfully")
@@ -73,11 +73,18 @@ try:
         try:
             from docling.datamodel.base_models import PipelineOptions, TableStructureOptions
             PdfPipelineOptions = PipelineOptions
-            logger.info("✅ [IMPORT] Using PipelineOptions as PdfPipelineOptions fallback")
+            logger.info("✅ [IMPORT] Using PipelineOptions from base_models")
             
-            # Try to get TableFormerMode or create a fallback
+            # Try to get TableStructureOptions for table configuration
+            try:
+                from docling.datamodel.base_models import TableStructureOptions
+                logger.info("✅ [IMPORT] TableStructureOptions available")
+            except ImportError:
+                logger.warning("⚠️ [IMPORT] TableStructureOptions not available")
+            
+            # TableFormerMode not available in this version
             TableFormerMode = None
-            logger.warning("⚠️ [IMPORT] TableFormerMode not available, using fallback")
+            logger.warning("⚠️ [IMPORT] TableFormerMode not available in this version")
         except ImportError as e2:
             PdfPipelineOptions = None
             TableFormerMode = None
