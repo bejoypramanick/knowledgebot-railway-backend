@@ -67,7 +67,12 @@ class EnhancedDoclingProcessor:
         self.enable_table_structure = True
         self.enable_cell_matching = True  
         self.enable_export_to_dict = True
-        self.tableformer_mode = TableFormerMode.ACCURATE 
+        
+        # Set tableformer mode only if TableFormerMode is available
+        if TableFormerMode is not None:
+            self.tableformer_mode = TableFormerMode.ACCURATE 
+        else:
+            self.tableformer_mode = "ACCURATE"  # Fallback string 
         
     async def initialize(self) -> bool:
         """Initialize the enhanced docling processor with advanced features."""
@@ -79,6 +84,11 @@ class EnhancedDoclingProcessor:
             logger.info(f"   - Cell Matching: {self.enable_cell_matching}")
             logger.info(f"   - Export to Dict: {self.enable_export_to_dict}")
             logger.info(f"   - TableFormer Mode: {self.tableformer_mode}")
+            
+            # Check if required imports are available
+            if DocumentConverter is None or PdfPipelineOptions is None:
+                logger.error("❌ Required docling libraries not available")
+                return False
             
             # Configure advanced pipeline options
             pipeline_options = PdfPipelineOptions()
@@ -92,14 +102,19 @@ class EnhancedDoclingProcessor:
             if self.enable_table_structure:
                 pipeline_options.do_table_structure = True
                 pipeline_options.table_structure_options.do_cell_matching = self.enable_cell_matching
-                pipeline_options.table_structure_options.mode = self.tableformer_mode
-                logger.info(f"✅ Table structure enabled (cell_matching={self.enable_cell_matching}, mode={self.tableformer_mode})")
+                
+                # Set tableformer mode only if it's a valid enum
+                if hasattr(pipeline_options.table_structure_options, 'mode') and TableFormerMode is not None:
+                    pipeline_options.table_structure_options.mode = self.tableformer_mode
+                    logger.info(f"✅ Table structure enabled (cell_matching={self.enable_cell_matching}, mode={self.tableformer_mode})")
+                else:
+                    logger.info(f"✅ Table structure enabled (cell_matching={self.enable_cell_matching}, mode=DEFAULT)")
             
             # Enable OCR for scanned documents
             pipeline_options.do_ocr = True
             
             # Configure OCR settings
-            if hasattr(settings, 'ocr'):
+            if hasattr(settings, 'ocr') and OcrMacModel is not None:
                 settings.ocr.mac_model = OcrMacModel.MODEL_AUTO
                 logger.info("✅ OCR auto-model selection enabled")
             
@@ -107,7 +122,7 @@ class EnhancedDoclingProcessor:
             self._converter = DocumentConverter(
                 format_options={
                     InputFormat.PDF: pipeline_options
-                }
+                } if InputFormat is not None else {}
             )
             
             self._initialized = True
