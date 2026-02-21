@@ -7,7 +7,6 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 
 from docling_service.core.enhanced_docling_processor import enhanced_processor
-from docling_service.core.docling_processor import SimpleDoclingProcessor
 from docling_service.core.config import settings
 from docling_service.schemas.models import DoclingProcessResponse, DoclingProcessURLRequest
 from docling_service.utils.validation import validate_file_for_processing
@@ -66,18 +65,7 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
             else:
                 logger.warning("⚠️ [ROUTER] Enhanced processor initialization failed, trying simple processor")
         
-        # Fallback to simple processor
-        if processor is None:
-            logger.info("🔧 [ROUTER] Initializing simple processor fallback...")
-            simple_processor = SimpleDoclingProcessor()
-            init_success = await simple_processor.initialize()
-            if init_success:
-                processor = simple_processor
-                processor_type = "simple"
-                logger.info("✅ [ROUTER] Using simple processor fallback")
-            else:
-                logger.error("❌ [ROUTER] Both enhanced and simple processors failed")
-                raise HTTPException(status_code=503, detail="All docling processors failed to initialize")
+        
         
         logger.info(f"🔧 [ROUTER] Using {processor_type} processor: {type(processor)}")
         logger.info(f"🔧 [ROUTER] Processor initialized: {processor._initialized}")
