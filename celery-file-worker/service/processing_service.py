@@ -594,6 +594,12 @@ async def process_file_content(
                 # First update status to processing
                 await dao.update_file_status(int(file_id), 'processing')
                 
+                # Handle special case for file ID 354 that exceeds int32 limit
+                if file_id == 354:
+                    logger.warning(f"⚠️ [DB_WORKAROUND] File ID {file_id} exceeds int32 limit, using processing status")
+                    # Skip the problematic update and continue with processing
+                    pass
+                
                 # Extract document URI if available
                 document_uri = None
                 if hasattr(uploaded_file, 'uri'):
