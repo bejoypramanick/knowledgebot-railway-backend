@@ -486,6 +486,23 @@ async def process_file_content(
                     else:
                         tmp_path = create_markdown_temp_file(content_for_upload)
                     
+                    # Log the content of the temporary file before upload
+                    logger.info(f"📁 [TEMP_FILE] Temporary file created: {tmp_path}")
+                    logger.info(f"📁 [TEMP_FILE] File size: {os.path.getsize(tmp_path)} bytes")
+                    logger.info(f"📁 [TEMP_FILE] Content preview before FileStore upload:")
+                    logger.info(f"=== START TEMP FILE CONTENT ===")
+                    
+                    try:
+                        with open(tmp_path, 'r', encoding='utf-8') as f:
+                            temp_content = f.read()
+                            logger.info(f"{temp_content}")
+                            logger.info(f"=== END TEMP FILE CONTENT ===")
+                            logger.info(f"📊 [TEMP_FILE] Total characters: {len(temp_content)}")
+                            logger.info(f"📊 [TEMP_FILE] Total lines: {len(temp_content.splitlines())}")
+                    except Exception as e:
+                        logger.error(f"❌ [TEMP_FILE] Could not read temp file content: {e}")
+                        logger.info(f"=== END TEMP FILE CONTENT (READ FAILED) ===")
+                    
                     # Switch to processed artifact
                     original_tmp_path = tmp_path
                     
