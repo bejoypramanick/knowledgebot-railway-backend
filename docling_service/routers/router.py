@@ -89,7 +89,7 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         return DoclingProcessResponse(
             success=False,
             content=None,
-            metadata=None,
+            metadata={"error": f"HTTP Exception: {http_exc.status_code} - {http_exc.detail}"},
             error=f"HTTP Exception: {http_exc.status_code} - {http_exc.detail}"
         )
         
@@ -100,7 +100,7 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         return DoclingProcessResponse(
             success=False,
             content=None,
-            metadata=None,
+            metadata={"error": f"Unexpected error: {str(e)}"},
             error=f"Unexpected error: {str(e)}"
         )
 
