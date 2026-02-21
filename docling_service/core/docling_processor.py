@@ -109,28 +109,22 @@ class SimpleDoclingProcessor:
             
             logger.info(f"🔍 Conversion completed, status: {conversion_result.status}")
             logger.info(f"🔧 [PROCESSOR] Conversion result type: {type(conversion_result)}")
-            logger.info(f"🔧 [PROCESSOR] Conversion result attributes: {[attr for attr in dir(conversion_result) if not attr.startswith('_')]}")
-            logger.info(f"🔧 [PROCESSOR] Conversion result dir: {dir(conversion_result)}")
             
             # Check if conversion was successful
             if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
-                # Extract markdown content - try different methods based on docling version
+                # Extract markdown content - use the document property from ConversionResult
                 try:
-                    # Try the newer API first
-                    logger.info(f"🔧 [PROCESSOR] Trying newer API: conversion_result.export_to_markdown()")
-                    markdown_content = conversion_result.export_to_markdown()
-                    logger.info(f"✅ [PROCESSOR] Newer API worked, got {len(markdown_content) if markdown_content else 0} chars")
+                    # Access the document from conversion result
+                    docling_document = conversion_result.document
+                    logger.info(f"🔧 [PROCESSOR] Got document object: {type(docling_document)}")
+                    
+                    # Try to export markdown from the document
+                    markdown_content = docling_document.export_to_markdown()
+                    logger.info(f"✅ [PROCESSOR] Document export worked, got {len(markdown_content) if markdown_content else 0} chars")
                 except AttributeError as e:
-                    logger.warning(f"⚠️ [PROCESSOR] Newer API failed: {e}")
-                    try:
-                        # Try the older API with document attribute
-                        logger.info(f"🔧 [PROCESSOR] Trying older API: conversion_result.document.export_to_markdown()")
-                        markdown_content = conversion_result.document.export_to_markdown()
-                        logger.info(f"✅ [PROCESSOR] Older API worked, got {len(markdown_content) if markdown_content else 0} chars")
-                    except AttributeError as e2:
-                        logger.error(f"❌ [PROCESSOR] Both APIs failed - newer: {e}, older: {e2}")
-                        logger.error(f"❌ [PROCESSOR] Presigned URL conversion unsuccessful for: {presigned_url}")
-                        return None, {"error": f"API compatibility error: {e2}", "filename": original_filename}
+                    logger.error(f"❌ [PROCESSOR] Document export failed: {e}")
+                    logger.error(f"❌ [PROCESSOR] Presigned URL conversion unsuccessful for: {presigned_url}")
+                    return None, {"error": f"Document export error: {e}", "filename": original_filename}
                 
                 # Build simple metadata
                 metadata = {
