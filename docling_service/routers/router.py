@@ -50,11 +50,11 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         )
         logger.info(f"🔗 Full presigned URL: {request_data.presigned_url}")
         
-        # Get enhanced processor with fallback to simple processor
+        # Initialize enhanced processor
         processor = None
         processor_type = "unknown"
         
-        # Try enhanced processor first
+        # Initialize enhanced processor
         if not enhanced_processor._initialized:
             logger.info("🔧 [ROUTER] Initializing enhanced processor...")
             init_success = await enhanced_processor.initialize()
@@ -63,13 +63,12 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
                 processor_type = "enhanced"
                 logger.info("✅ [ROUTER] Using enhanced processor")
             else:
-                logger.warning("⚠️ [ROUTER] Enhanced processor initialization failed, trying simple processor")
-        
-        
-        
-        logger.info(f"🔧 [ROUTER] Using {processor_type} processor: {type(processor)}")
-        logger.info(f"🔧 [ROUTER] Processor initialized: {processor._initialized}")
-        logger.info(f"🔧 [ROUTER] Processor model: {processor.model_name}")
+                logger.error("❌ [ROUTER] Enhanced processor initialization failed")
+                raise HTTPException(status_code=503, detail="Enhanced processor failed to initialize")
+        else:
+            processor = enhanced_processor
+            processor_type = "enhanced"
+            logger.info("✅ [ROUTER] Using already initialized enhanced processor")
         
         # Process document with appropriate processor
         logger.info(f"📄 [ROUTER] Starting {processor_type} docling processing from presigned URL...")
@@ -132,10 +131,6 @@ async def health_check(request: Request) -> dict:
                 "initialized": False,
                 "features": {},
                 "error": None
-            },
-            "simple": {
-                "initialized": False,
-                "error": None
             }
         }
         
@@ -161,21 +156,12 @@ async def health_check(request: Request) -> dict:
                 "tableformer_mode": str(enhanced_processor.tableformer_mode)
             }
         
-        # Check simple processor as fallback
-        try:
-            simple_processor = SimpleDoclingProcessor()
-            init_success = await simple_processor.initialize()
-            processor_status["simple"]["initialized"] = init_success
-        except Exception as e:
-            processor_status["simple"]["error"] = str(e)
+        
         
         # Determine overall status
         if processor_status["enhanced"]["initialized"]:
             status = "healthy"
             active_processor = "enhanced"
-        elif processor_status["simple"]["initialized"]:
-            status = "degraded"
-            active_processor = "simple"
         else:
             status = "unhealthy"
             active_processor = "none"
@@ -193,8 +179,7 @@ async def health_check(request: Request) -> dict:
             "status": "unhealthy",
             "active_processor": "none",
             "processors": {
-                "enhanced": {"initialized": False, "error": str(e)},
-                "simple": {"initialized": False, "error": str(e)}
+                "enhanced": {"initialized": False, "error": str(e)}
             },
             "service": "docling-service",
             "model": None,
