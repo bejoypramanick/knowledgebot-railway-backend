@@ -318,12 +318,7 @@ class EnhancedDoclingProcessor:
                 
                 # Return markdown content as primary output
                 return markdown_content, metadata
-                if json_content and isinstance(json_content, dict):
-                    # Return JSON dict as primary content
-                    return json_content, metadata
-                else:
-                    # Return markdown as fallback when JSON fails
-                    return markdown_content, metadata
+                
             else:
                 error_msg = f"Enhanced conversion failed with status: {conversion_result.status}"
                 logger.warning(f"⚠️ Enhanced processing failed for {original_filename}: {error_msg}")
