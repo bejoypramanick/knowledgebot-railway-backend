@@ -69,7 +69,7 @@ def process_file_upload_task(
         from service.processing_service import process_file_content
         logger.info("✅ [PROCESSING] process_file_content loaded successfully")
 
-        logger.info("⚙️  [PROCESSING] Calling process_file_content() with file_id...")
+        logger.info(f"⚙️  [PROCESSING] Calling process_file_content() with file_id {file_id}")
         
         # Get or create event loop for this worker process
         try:

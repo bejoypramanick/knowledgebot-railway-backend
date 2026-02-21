@@ -80,10 +80,13 @@ async def process_document(request: Request, file: UploadFile = File(...)) -> Do
             error=None
         )
 
-    except HTTPException:
+    except HTTPException as http_exc:
+        logger.error(f"❌ HTTP Exception processing {file.filename}: {http_exc.status_code} - {http_exc.detail}")
         raise
     except Exception as e:
         logger.error(f"❌ Unexpected error processing {file.filename}: {e}")
+        import traceback
+        logger.error(f"🔍 Full traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
             detail=f"Unexpected processing error: {str(e)}"

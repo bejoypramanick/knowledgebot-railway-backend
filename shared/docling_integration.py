@@ -117,8 +117,16 @@ async def process_with_docling(
                             )
                             return None, {"error": error}
                     else:
-                        error_msg = f"HTTP {response.status_code}: {response.text}"
+                        # Handle non-200 responses with better error details
+                        response_text = response.text.strip() if response.text else ""
+                        if response_text:
+                            error_msg = f"HTTP {response.status_code}: {response_text}"
+                        else:
+                            error_msg = f"HTTP {response.status_code}: Empty response from docling service"
+                        
                         logger.warning(f"⚠️ [DOCLING] Request failed for {original_filename}: {error_msg}")
+                        logger.debug(f"🔍 [DOCLING] Response headers: {dict(response.headers)}")
+                        logger.debug(f"🔍 [DOCLING] Response status code: {response.status_code}")
                         return None, {"error": error_msg}
 
         except asyncio.TimeoutError:
