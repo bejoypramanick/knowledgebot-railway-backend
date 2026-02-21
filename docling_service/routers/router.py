@@ -1,10 +1,10 @@
-"""Docling Service API Router."""
+"""Docling Service API Router - Presigned URL Only."""
 import logging
 import os
 import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from docling_service.core.docling_processor import get_processor
 from docling_service.core.config import settings
@@ -14,96 +14,6 @@ from docling_service.utils.constants import MAX_FILE_SIZE_BYTES
 
 logger = logging.getLogger("docling_service")
 router = APIRouter()
-
-
-@router.post("/process")
-async def process_document(request: Request, file: UploadFile = File(...)) -> DoclingProcessResponse:
-    """
-    Convert a document to markdown with image OCR extraction.
-
-    Supports: PDF, DOCX, PPTX, XLSX, HTML, etc.
-    Returns markdown content with embedded image OCR text.
-    """
-    temp_file_path = None
-
-    try:
-        # Validate filename
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="Filename is required")
-
-        # Read file content
-        content = await file.read()
-        file_size = len(content)
-
-        # Validate file for processing
-        is_valid, error_msg = validate_file_for_processing(file.filename, file_size)
-        if not is_valid:
-            raise HTTPException(status_code=400, detail=error_msg)
-
-        # Create temporary file
-        import tempfile
-        fd, temp_file_path = tempfile.mkstemp(suffix=os.path.splitext(file.filename)[1])
-        with os.fdopen(fd, 'wb') as tmp:
-            tmp.write(content)
-
-        logger.info(
-            f"📄 Processing: {file.filename} "
-            f"({file_size / 1024:.1f}KB, timeout={settings.docling_processing_timeout_seconds}s)"
-        )
-
-        # Get processor
-        processor = await get_processor()
-
-        # Process document
-        markdown_content, metadata = await processor.process_document(
-            file_path=temp_file_path,
-            original_filename=file.filename,
-            timeout_seconds=settings.docling_processing_timeout_seconds
-        )
-
-        # Handle processing errors
-        if not markdown_content:
-            error_msg = metadata.get("error", "Unknown error")
-            logger.warning(f"⚠️ Processing failed for {file.filename}: {error_msg}")
-            # Raise exception instead of returning 200 with success=False
-            raise HTTPException(
-                status_code=422,
-                detail=f"Conversion failed: {error_msg}"
-            )
-
-        logger.info(f"✅ Successfully processed: {file.filename}")
-
-        return DoclingProcessResponse(
-            success=True,
-            content=markdown_content,
-            metadata=metadata,
-            error=None
-        )
-
-    except HTTPException as http_exc:
-        logger.error(f"❌ HTTP Exception processing {file.filename}: {http_exc.status_code} - {http_exc.detail}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Unexpected error processing {file.filename}: {e}")
-        import traceback
-        logger.error(f"🔍 Full traceback: {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unexpected processing error: {str(e)}"
-        )
-
-    finally:
-        # Cleanup temporary file
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.unlink(temp_file_path)
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to cleanup temp file {temp_file_path}: {e}")
-        
-        # Force garbage collection to free memory
-        import gc
-        gc.collect()
-        logger.debug("🧹 Garbage collection completed")
 
 
 @router.post("/process_url")
@@ -145,7 +55,6 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         logger.info(f"🔧 [ROUTER] Got processor: {type(processor)}")
         logger.info(f"🔧 [ROUTER] Processor initialized: {processor._initialized}")
         logger.info(f"🔧 [ROUTER] Processor model: {processor.model_name}")
-        logger.info(f"🔧 [ROUTER] Converter type: {type(processor._converter)}")
         
         # Process document directly from presigned URL (no temp file needed)
         logger.info(f"📄 [ROUTER] Starting docling processing from presigned URL...")
@@ -163,13 +72,13 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         # Handle processing errors
         if not markdown_content:
             error_msg = metadata.get("error", "Unknown error")
-            logger.warning(f"⚠️ Processing failed for {request_data.filename}: {error_msg}")
+            logger.warning(f"⚠️ [ROUTER] Processing failed for {request_data.filename}: {error_msg}")
             raise HTTPException(
                 status_code=422,
                 detail=f"Conversion failed: {error_msg}"
             )
         
-        logger.info(f"✅ Successfully processed: {request_data.filename}")
+        logger.info(f"✅ [ROUTER] Successfully processed: {request_data.filename}")
         
         return DoclingProcessResponse(
             success=True,
@@ -177,31 +86,26 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
             metadata=metadata,
             error=None
         )
-    
-    except HTTPException as http_exc:
-        logger.error(f"❌ HTTP Exception processing {request_data.filename}: {http_exc.status_code} - {http_exc.detail}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ Unexpected error processing {request_data.filename}: {e}")
-        import traceback
-        logger.error(f"🔍 Full traceback: {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unexpected processing error: {str(e)}"
-        )
-    
-    finally:
-        # Cleanup temporary file
-        if temp_file_path and os.path.exists(temp_file_path):
-            try:
-                os.unlink(temp_file_path)
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to cleanup temp file {temp_file_path}: {e}")
         
-        # Force garbage collection to free memory
-        import gc
-        gc.collect()
-        logger.debug("🧹 Garbage collection completed")
+    except HTTPException as http_exc:
+        logger.error(f"❌ [ROUTER] HTTP Exception processing {request_data.filename}: {http_exc.status_code} - {http_exc.detail}")
+        return DoclingProcessResponse(
+            success=False,
+            content=None,
+            metadata=None,
+            error=f"HTTP Exception: {http_exc.status_code} - {http_exc.detail}"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ [ROUTER] Unexpected error processing {request_data.filename}: {e}")
+        import traceback
+        logger.error(f"🔍 [ROUTER] Full traceback: {traceback.format_exc()}")
+        return DoclingProcessResponse(
+            success=False,
+            content=None,
+            metadata=None,
+            error=f"Unexpected error: {str(e)}"
+        )
 
 
 @router.get("/health")
@@ -210,20 +114,21 @@ async def health_check(request: Request) -> dict:
     try:
         processor = await get_processor()
         health = await processor.health_check()
-
+        
         return {
             "status": "healthy" if health["initialized"] else "degraded",
             "docling_initialized": health["initialized"],
             "ocr_initialized": health["converter_available"],
             "service": "docling-service",
-            "model": settings.docling_model_name
+            "model": processor.model_name if processor else None
         }
     except Exception as e:
-        logger.error(f"❌ Health check failed: {e}")
+        logger.error(f"❌ [ROUTER] Health check failed: {e}")
         return {
             "status": "unhealthy",
             "docling_initialized": False,
             "ocr_initialized": False,
             "service": "docling-service",
+            "model": None,
             "error": str(e)
         }
