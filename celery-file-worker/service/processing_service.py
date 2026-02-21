@@ -394,8 +394,8 @@ async def process_file_content(
                 "error": f"Size validation failed: {size_error}"
             }
 
-        # Calculate hash
-        sha256_hash = calculate_sha256(tmp_path)
+        # Calculate hash (only if we have a local file)
+        sha256_hash = calculate_sha256(tmp_path) if tmp_path else None
         
         # Store original file info before any conversion
         original_file_extension = original_filename.rsplit('.', 1)[-1] if '.' in original_filename else ''
