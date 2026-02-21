@@ -288,7 +288,10 @@ class DoclingProcessor:
                 # Use convert_single() for all formats (both files and URLs)
                 if not is_url:
                     logger.info(f"📄 Using convert_single() for file: {source}")
-                conversion_result = self._converter.convert_single(source)
+                    conversion_result = self._converter.convert_single(source)
+                else:
+                    logger.info(f"🌐 Using convert_single() for URL: {source[:100]}...")
+                    conversion_result = self._converter.convert_single(source)
 
             finally:
                 # Restore original stdout/stderr
