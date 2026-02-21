@@ -294,29 +294,30 @@ class EnhancedDoclingProcessor:
                 }
                 
                 # Add layout information if available
-                layout_info = self._extract_layout_info(conversion_result.docling_dict)
+                doc_dict = conversion_result.document.export_to_dict()
+                layout_info = self._extract_layout_info(doc_dict)
                 metadata["layout_analysis"] = layout_info
                 
                 # Add table information if available
-                table_info = self._extract_table_info(conversion_result.docling_dict)
+                table_info = self._extract_table_info(doc_dict)
                 metadata["table_analysis"] = table_info
                 
-                # Return markdown content as primary output
-                return markdown_content, metadata
-                if docling_dict:
+                # Add structured data summary if available
+                if doc_dict:
                     metadata["structured_data_available"] = True
-                    # Store a summary of the structured data (not the full dict to avoid metadata bloat)
+                    # Store a summary of structured data (not full dict to avoid metadata bloat)
                     metadata["structured_summary"] = {
-                        "total_pages": len(docling_dict.get('pages', [])),
-                        "has_text_blocks": any('texts' in page for page in docling_dict.get('pages', [])),
-                        "has_tables": any('tables' in page for page in docling_dict.get('pages', [])),
-                        "has_images": any('pictures' in page for page in docling_dict.get('pages', []))
+                        "total_pages": len(doc_dict.get('pages', [])),
+                        "has_text_blocks": any('texts' in page for page in doc_dict.get('pages', [])),
+                        "has_tables": any('tables' in page for page in doc_dict.get('pages', [])),
+                        "has_images": any('pictures' in page for page in doc_dict.get('pages', []))
                     }
                 
                 logger.info(f"✅ Enhanced processing completed for: {original_filename}")
                 logger.info(f"📊 [STATS] JSON: {metadata['content_stats']['json_length']} chars, Markdown: {metadata['content_stats']['markdown_length']} chars")
                 
-                # Return JSON content as primary output, markdown as fallback
+                # Return markdown content as primary output
+                return markdown_content, metadata
                 if json_content and isinstance(json_content, dict):
                     # Return JSON dict as primary content
                     return json_content, metadata
