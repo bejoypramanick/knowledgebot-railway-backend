@@ -41,61 +41,6 @@ try:
     from docling.datamodel.base_models import ConversionStatus
     logger.info("✅ [IMPORT] ConversionStatus imported successfully")
     
-    # Check what's available in base_models for InputFormat detection
-    try:
-        import docling.datamodel.base_models as base_models
-        available_classes = [name for name in dir(base_models) if not name.startswith('_')]
-        logger.info(f"📦 [BASE_MODELS] Available classes: {available_classes}")
-        
-        # Look for InputFormat or similar classes
-        InputFormat = None
-        for class_name in available_classes:
-            if 'InputFormat' in class_name:
-                InputFormat = getattr(base_models, class_name)
-                logger.info(f"✅ [INPUT_FORMAT] Found and using InputFormat class: {class_name}")
-                break
-        
-        if InputFormat is None:
-            logger.warning("⚠️ [INPUT_FORMAT] InputFormat class not found in base_models")
-            # Try to find any format-related class
-            for class_name in available_classes:
-                if 'Format' in class_name and 'Input' in class_name:
-                    InputFormat = getattr(base_models, class_name)
-                    logger.info(f"✅ [INPUT_FORMAT] Using alternative format class: {class_name}")
-                    break
-                    
-        if InputFormat is None:
-            logger.error("❌ [INPUT_FORMAT] No format class found in base_models")
-            
-    except Exception as e:
-        logger.error(f"❌ [INPUT_FORMAT] Failed to inspect base_models: {e}")
-        InputFormat = None
-    
-    # Try to import pipeline options for latest docling version
-    try:
-        from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
-        logger.info("✅ [IMPORT] PdfPipelineOptions and TableFormerMode imported successfully")
-    except ImportError as e:
-        # Try to use available classes for older versions
-        try:
-            from docling.datamodel.base_models import PipelineOptions, TableStructureOptions
-            PdfPipelineOptions = PipelineOptions
-            logger.info("✅ [IMPORT] Using PipelineOptions from base_models")
-            
-            # Try to get TableStructureOptions for table configuration
-            try:
-                from docling.datamodel.base_models import TableStructureOptions
-                logger.info("✅ [IMPORT] TableStructureOptions available")
-            except ImportError:
-                logger.warning("⚠️ [IMPORT] TableStructureOptions not available")
-            
-            # TableFormerMode not available in this version
-            TableFormerMode = None
-            logger.warning("⚠️ [IMPORT] TableFormerMode not available in this version")
-        except ImportError as e2:
-            PdfPipelineOptions = None
-            TableFormerMode = None
-            logger.warning(f"⚠️ [IMPORT] Pipeline options not available: {e2}")
     
     # Try to import format-specific options for newer docling versions
     try:
@@ -107,32 +52,7 @@ try:
         HtmlFormatOption = None
         ExcelFormatOption = None
         logger.warning(f"⚠️ [IMPORT] Format-specific options not available: {e}")
-        # Try alternative imports
-        try:
-            from docling.datamodel.base_models import FormatOption
-            logger.info("✅ [IMPORT] Using generic FormatOption as fallback")
-        except ImportError:
-            logger.warning("⚠️ [IMPORT] No format options available")
-    
-    # Try to import settings and configure EasyOCR only
-    try:
-        from docling.datamodel.settings import settings
-        logger.info("✅ [IMPORT] Settings imported successfully")
-        
-        # Configure EasyOCR for OCR processing
-        try:
-            import easyocr
-            logger.info("✅ [IMPORT] EasyOCR imported successfully")
-            # EasyOCR will be used for OCR processing
-        except ImportError as e:
-            logger.warning(f"⚠️ [IMPORT] EasyOCR not available: {e}")
-            logger.warning("⚠️ [IMPORT] OCR processing will be limited")
-            
-    except ImportError as e:
-        settings = None
-        logger.warning(f"⚠️ [IMPORT] Settings not available: {e}")
-        logger.warning("⚠️ [IMPORT] Using default OCR settings")
-    
+           
     # Build list of acceptable conversion statuses
     _acceptable_statuses = [ConversionStatus.SUCCESS]
     if hasattr(ConversionStatus, 'PARTIAL_SUCCESS'):
