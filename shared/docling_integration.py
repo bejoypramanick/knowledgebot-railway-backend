@@ -87,6 +87,8 @@ async def process_with_docling(
                     pool=30.0
                 )
                 
+                logger.info(f"🔧 [DOCLING] HTTP timeout config - Connect: 30s, Read: {timeout_seconds + 60}s, Write: 30s, Pool: 30s")
+                
                 async with httpx.AsyncClient(timeout=timeout_config) as client:
                     if attempt > 0:
                         logger.info(
@@ -138,6 +140,28 @@ async def process_with_docling(
                         logger.debug(f"🔍 [DOCLING] Response headers: {dict(response.headers)}")
                         logger.debug(f"🔍 [DOCLING] Response status code: {response.status_code}")
                         return None, {"error": error_msg}
+
+        except httpx.TimeoutException as e:
+            # Handle different types of timeout exceptions
+            error_type = type(e).__name__
+            error_msg = str(e)
+            
+            logger.error(f"⏱️ [DOCLING_TIMEOUT] {error_type} for {original_filename}: {error_msg}")
+            logger.error(f"⏱️ [DOCLING_TIMEOUT] Request details - timeout_seconds: {timeout_seconds}, attempt: {attempt + 1}/{max_retries}")
+            
+            # Determine which timeout caused the issue
+            if "connect" in error_msg.lower():
+                logger.error(f"⏱️ [DOCLING_TIMEOUT] CONNECT TIMEOUT - Could not connect to docling service")
+            elif "read" in error_msg.lower():
+                logger.error(f"⏱️ [DOCLING_TIMEOUT] READ TIMEOUT - Server took too long to respond")
+            elif "write" in error_msg.lower():
+                logger.error(f"⏱️ [DOCLING_TIMEOUT] WRITE TIMEOUT - Upload took too long")
+            elif "pool" in error_msg.lower():
+                logger.error(f"⏱️ [DOCLING_TIMEOUT] POOL TIMEOUT - Connection pool issue")
+            else:
+                logger.error(f"⏱️ [DOCLING_TIMEOUT] UNKNOWN TIMEOUT - {error_msg}")
+            
+            return None, {"error": f"HTTP timeout ({error_type}): {error_msg}"}
 
         except asyncio.TimeoutError:
             logger.warning(
