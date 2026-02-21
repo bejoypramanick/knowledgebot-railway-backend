@@ -226,7 +226,7 @@ class ProcessingService:
                 start_time = time.time()
 
                 # Convert to JSON for Gemini FileStore (better for search)
-                json_content = await self._preparePageAsJSON(page_data.page_html, page_data.page_url)
+                json_content = await self._preparePageAsJSON(page_data.page_html, page_data.page_url, remove_ads=True)
                 page_data = PageData(
                     page_url=page_data.page_url,
                     page_html=page_data.page_html,
@@ -541,11 +541,11 @@ class ProcessingService:
             from shared.html_processor import extract_content_from_html
             
             # Extract structured content as JSON
-            json_content, metadata = extract_content_from_html(html_content=html, output_format="json")
+            json_content, metadata = extract_content_from_html(html_content=html, output_format="json", remove_ads=True)
             
             if json_content:
                 logger.info(f"📋 [JSON_PAGE] Generated JSON content for {page_url}: {len(json_content)} chars")
-                return json_content
+                return json.dumps(json_content, indent=2, ensure_ascii=False)
             else:
                 logger.warning(f"⚠️ [JSON_PAGE] JSON extraction failed for {page_url}")
                 # Fallback to basic text extraction
@@ -571,7 +571,8 @@ class ProcessingService:
                 include_tables=True,  # Extract tables
                 include_format=True,  # Include structured data
                 with_metadata=True,  # Include metadata
-                output_format='json'  # Output JSON format
+                output_format='json',  # Output JSON format
+                remove_ads=True
             )
             
             # Convert to JSON for Gemini FileStore (better for search)
