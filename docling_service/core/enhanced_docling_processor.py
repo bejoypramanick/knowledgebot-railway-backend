@@ -299,8 +299,26 @@ class EnhancedDoclingProcessor:
                 sys.stdout = io.StringIO()
                 sys.stderr = io.StringIO()
                 
-                # Enhanced conversion from presigned URL
-                conversion_result = self._converter.convert_single(presigned_url)
+                # Log available methods for debugging
+                available_methods = [method for method in dir(self._converter) if not method.startswith('_')]
+                logger.info(f"🔧 [CONVERTER] Available DocumentConverter methods: {available_methods}")
+                
+                # Convert document using available method
+                if hasattr(self._converter, 'convert_single'):
+                    conversion_result = self._converter.convert_single(presigned_url)
+                    logger.info("✅ [CONVERTER] Using convert_single method")
+                elif hasattr(self._converter, 'convert'):
+                    conversion_result = self._converter.convert(presigned_url)
+                    logger.info("✅ [CONVERTER] Using convert method")
+                else:
+                    # Try to find the correct conversion method
+                    conversion_methods = [m for m in available_methods if 'convert' in m.lower()]
+                    if conversion_methods:
+                        method_name = conversion_methods[0]
+                        logger.info(f"🔧 [CONVERTER] Using available method: {method_name}")
+                        conversion_result = getattr(self._converter, method_name)(presigned_url)
+                    else:
+                        raise AttributeError("No conversion method found in DocumentConverter")
                 
             finally:
                 # Restore original stdout/stderr
