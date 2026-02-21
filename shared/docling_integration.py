@@ -276,7 +276,7 @@ async def should_use_docling_for_file(
     return True
 
 
-async def create_markdown_temp_file(markdown_content: str) -> str:
+def create_markdown_temp_file(markdown_content: str) -> str:
     """
     Create a temporary markdown file from content.
 

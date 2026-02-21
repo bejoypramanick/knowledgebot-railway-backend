@@ -413,7 +413,7 @@ async def process_file_content(
                 markdown_content, html_metadata = extract_content_from_html(tmp_path)
                 
                 if markdown_content:
-                    markdown_tmp_path = await create_markdown_temp_file(markdown_content)
+                    markdown_tmp_path = create_markdown_temp_file(markdown_content)
                     # Switch to markdown artifact
                     original_tmp_path = tmp_path
                     tmp_path = markdown_tmp_path
@@ -473,7 +473,7 @@ async def process_file_content(
                     logger.info(f"📊 [DOCLING_METADATA] Processing time: {docling_processing_time_ms}ms, "
                               f"Images: {docling_images_extracted}, OCR: {docling_images_with_ocr}")
                     
-                    markdown_tmp_path = await create_markdown_temp_file(markdown_content)
+                    markdown_tmp_path = create_markdown_temp_file(markdown_content)
                     # Switch to markdown artifact
                     original_tmp_path = tmp_path
                     tmp_path = markdown_tmp_path
