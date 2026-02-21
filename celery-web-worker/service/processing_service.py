@@ -225,12 +225,12 @@ class ProcessingService:
             try:
                 start_time = time.time()
 
-                # Convert to JSON for Gemini FileStore (better for search)
-                json_content = await self._preparePageAsJSON(page_data.page_html, page_data.page_url, remove_ads=True)
+                # Convert to markdown for Gemini FileStore
+                markdown_content = await self._preparePageAsMarkdown(page_data.page_html, page_data.page_url, remove_ads=True)
                 page_data = PageData(
                     page_url=page_data.page_url,
                     page_html=page_data.page_html,
-                    json_content=json_content,
+                    markdown=markdown_content,
                     title=page_data.title,
                     description=page_data.description,
                     session_id=page_data.session_id
@@ -531,42 +531,34 @@ class ProcessingService:
             return False
         if self._normalize_url(url) in visited_urls:
             return False
-                        "description": extracted.description or "",
-                        "url": extracted.url or ""
-                    },
-                    "structure": {
-                        "images": [{"src": img.get("src", ""), "alt": img.get("alt", "")} for img in (extracted.images or [])],
-                        "links": [{"url": link.get("href", ""), "text": link.get("text", "")} for link in (extracted.links or [])],
-                        "tables": extracted.tables or [],
-                        "metadata": {
-                            "word_count": len(extracted.text.split()) if extracted.text else 0,
-                            "char_count": len(extracted.text) if extracted.text else 0,
-                            "has_images": bool(extracted.images),
-                            "has_tables": bool(extracted.tables),
-                            "has_links": bool(extracted.links)
-                        }
-                    },
-                    "extraction_metadata": {
-                        "processor": "trafilatura",
-                        "extraction_time": time.time(),
-                        "source_format": "html",
-                        "output_format": "json"
-                    }
-                }
-                
-                # Convert to JSON string
-                json_str = json.dumps(json_content, indent=2, ensure_ascii=False)
-                logger.info(f"📋 [TRAFILE] Extracted JSON content: {len(json_str)} chars")
-                logger.info(f"📊 [TRAFILE] Found {len(extracted.tables or [])} tables, {len(extracted.images or [])} images")
-                
-                return json_str
+        return True
+
+    async def _preparePageAsMarkdown(self, html_content: str, page_url: str, remove_ads: bool = True) -> str:
+        """Convert HTML content to structured markdown using trafilatura"""
+        try:
+            import trafilatura
+            from trafilatura import extract
+            
+            # Extract content using trafilatura
+            extracted = extract(
+                html_content,
+                include_images=True,
+                include_tables=True,
+                include_links=True,
+                output_format='markdown',
+                with_metadata=True
+            )
+            
+            if extracted:
+                logger.info(f"📋 [TRAFILE] Extracted markdown content: {len(extracted)} chars")
+                return extracted
             else:
-                # Fallback to manual processing if JSON extraction fails
-                logger.warning(f"⚠️ [TRAFILE] JSON extraction failed, using markdown fallback")
+                # Fallback to manual processing if markdown extraction fails
+                logger.warning(f"⚠️ [TRAFILE] Markdown extraction failed, using manual fallback")
                 return await self._cleanTextManually(html_content)
                 
         except Exception as e:
-            logger.error(f"❌ [TRAFILE] HTML to JSON conversion failed: {e}")
+            logger.error(f"❌ [TRAFILE] HTML to markdown conversion failed: {e}")
             raise
 
     async def _cleanTextManually(self, html_content: str) -> str:
@@ -767,16 +759,11 @@ class ProcessingService:
         if not genai_client:
             raise Exception("Gemini client not configured")
         
-        # Determine content format and MIME type
+        # Use markdown content for Gemini FileStore
         content = page_data.markdown
         mime_type = 'text/markdown'
         temp_suffix = '.md'
-        
-        if hasattr(page_data, 'json_content') and page_data.json_content:
-            content = page_data.json_content
-            mime_type = 'application/json'
-            temp_suffix = '.json'
-            logger.info(f"📋 [JSON_UPLOAD] Using JSON content for Gemini FileStore: {len(content)} chars")
+        logger.info(f"📋 [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content)} chars")
         
         # Create temporary file with appropriate suffix
         fd, temp_file = tempfile.mkstemp(suffix=temp_suffix)
@@ -807,20 +794,15 @@ class ProcessingService:
             await self._deleteTemporaryFile(temp_file)
 
     async def _buildGeminiUploadConfig(self, doc_name: str, website_id: int, page_url: str) -> Dict:
-        """Build Gemini upload configuration with dynamic MIME type"""
-        # Determine MIME type based on content format
-        mime_type = 'text/markdown'
-        if hasattr(self, '_current_page_data') and hasattr(self._current_page_data, 'json_content'):
-            mime_type = 'application/json'
-        
+        """Build Gemini upload configuration for markdown content"""
         return {
             'display_name': doc_name,
-            'mime_type': mime_type,
+            'mime_type': 'text/markdown',
             'custom_metadata': [
                 {'key': 'source_type', 'string_value': 'website'},
                 {'key': 'website_id', 'string_value': str(website_id)},
                 {'key': 'page_url', 'string_value': page_url},
-                {'key': 'content_format', 'string_value': 'json' if mime_type == 'application/json' else 'markdown'}
+                {'key': 'content_format', 'string_value': 'markdown'}
             ]
         }
 
