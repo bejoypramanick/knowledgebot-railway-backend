@@ -87,6 +87,9 @@ class SimpleDoclingProcessor:
         try:
             logger.info(f"🔍 Starting conversion for URL: {presigned_url[:100]}...")
             
+            # Measure processing time
+            conversion_start_time = time.time()
+            
             # Suppress progress bar output by redirecting stdout/stderr
             import sys
             import io
@@ -107,8 +110,12 @@ class SimpleDoclingProcessor:
                 sys.stdout = original_stdout
                 sys.stderr = original_stderr
             
+            # Calculate actual processing time in milliseconds
+            processing_time_ms = int((time.time() - conversion_start_time) * 1000)
+            
             logger.info(f"🔍 Conversion completed, status: {conversion_result.status}")
             logger.info(f"🔧 [PROCESSOR] Conversion result type: {type(conversion_result)}")
+            logger.info(f"⏱️ [PROCESSOR] Processing time: {processing_time_ms}ms")
             
             # Check if conversion was successful
             if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
@@ -126,7 +133,7 @@ class SimpleDoclingProcessor:
                 # Build simple metadata
                 metadata = {
                     "filename": original_filename,
-                    "processing_time_ms": int(time.time() * 1000),  # Placeholder
+                    "processing_time_ms": processing_time_ms,
                     "model": self.model_name,
                     "conversion_status": str(conversion_result.status)
                 }
