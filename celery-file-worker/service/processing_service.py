@@ -351,6 +351,9 @@ async def process_file_content(
 
         presigned_url = result
         logger.info(f"✅ [S3] Generated presigned URL for {s3_key}")
+        logger.info(f"🔍 [DEBUG] presigned_url type: {type(presigned_url)}")
+        logger.info(f"🔍 [DEBUG] presigned_url length: {len(presigned_url) if presigned_url else 'None'}")
+        logger.info(f"🔍 [DEBUG] presigned_url starts with http: {presigned_url.startswith('http') if presigned_url else 'None'}")
 
         # No need to create temp files - docling service will download directly
         tmp_path = None  # Not used with presigned URL approach
