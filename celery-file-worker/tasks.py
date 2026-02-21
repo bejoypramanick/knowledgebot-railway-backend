@@ -31,7 +31,6 @@ def process_file_upload_task(
     - Query database for file details
     - Download file from S3
     - File validation (extension, MIME type, size)
-    - Duplicate detection (by SHA256 hash)
     - Format conversion (HTML→Markdown, PDF→Markdown)
     - Gemini FileSearch upload
     - Database metadata recording
