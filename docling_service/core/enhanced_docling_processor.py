@@ -253,7 +253,7 @@ class EnhancedDoclingProcessor:
             if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
                 # Extract markdown content for Gemini FileStore (simple and reliable)
                 try:
-                    markdown_content = conversion_result.render_as_markdown()
+                    markdown_content = conversion_result.document.export_to_markdown()
                     logger.info(f"✅ [ENHANCED] Markdown content generated: {len(markdown_content)} chars")
                     logger.info(f"📝 [MARKDOWN] Content preview: {markdown_content[:200]}...")
                     
