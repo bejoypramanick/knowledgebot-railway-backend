@@ -361,6 +361,10 @@ async def process_file_content(
         # STEP 3: VALIDATION PHASE
         logger.info(f"🔍 [VALIDATION] Starting file validation for {original_filename}")
 
+        # Detect MIME type first (needed for validation)
+        detected_mime_type = detect_mime_type_from_extension(original_filename)
+        logger.info(f"🔍 [VALIDATION] Detected MIME type: {detected_mime_type} for {original_filename}")
+
         # Validate file extension
         ext_valid, ext_error = validate_file_extension(original_filename)
         if not ext_valid:
@@ -390,9 +394,8 @@ async def process_file_content(
                 "error": f"Size validation failed: {size_error}"
             }
 
-        # Calculate hash and detect MIME type
+        # Calculate hash
         sha256_hash = calculate_sha256(tmp_path)
-        detected_mime_type = detect_mime_type_from_extension(original_filename)
         
         # Store original file info before any conversion
         original_file_extension = original_filename.rsplit('.', 1)[-1] if '.' in original_filename else ''
