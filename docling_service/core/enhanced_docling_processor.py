@@ -90,20 +90,22 @@ try:
             TableFormerMode = None
             logger.warning(f"⚠️ [IMPORT] Pipeline options not available: {e2}")
     
-    # Try to import PdfFormatOption for newer docling versions
+    # Try to import format-specific options for newer docling versions
     try:
-        from docling.datamodel.base_models import PdfFormatOption
-        logger.info("✅ [IMPORT] PdfFormatOption imported successfully")
+        from docling.datamodel.base_models import PdfFormatOption, WordFormatOption, HtmlFormatOption, ExcelFormatOption
+        logger.info("✅ [IMPORT] Format-specific options imported successfully")
     except ImportError as e:
         PdfFormatOption = None
-        logger.warning(f"⚠️ [IMPORT] PdfFormatOption not available: {e}")
-        # Try alternative import paths
+        WordFormatOption = None
+        HtmlFormatOption = None
+        ExcelFormatOption = None
+        logger.warning(f"⚠️ [IMPORT] Format-specific options not available: {e}")
+        # Try alternative imports
         try:
             from docling.datamodel.base_models import FormatOption
-            PdfFormatOption = FormatOption
-            logger.info("✅ [IMPORT] Using FormatOption as PdfFormatOption fallback")
+            logger.info("✅ [IMPORT] Using generic FormatOption as fallback")
         except ImportError:
-            logger.warning("⚠️ [IMPORT] FormatOption not available either")
+            logger.warning("⚠️ [IMPORT] No format options available")
     
     # Try to import settings and configure EasyOCR only
     try:
@@ -240,48 +242,53 @@ class EnhancedDoclingProcessor:
                     pipeline_options.ocr_enabled = True
                     logger.info("✅ OCR enabled (ocr_enabled)")
                 
-                # Initialize converter using new docling structure
-                if PdfFormatOption is not None:
-                    # Use PdfFormatOption wrapper for newer versions
-                    try:
-                        # Try to find PDF format in InputFormat
-                        pdf_format = None
-                        if hasattr(InputFormat, 'PDF'):
-                            pdf_format = InputFormat.PDF
-                        else:
-                            # Case-insensitive search for PDF format
-                            for attr in dir(InputFormat):
-                                if attr.lower() == 'pdf':
-                                    pdf_format = getattr(InputFormat, attr)
-                                    break
-                        
-                        if pdf_format is not None:
-                            # Create PdfFormatOption with pipeline options
-                            pdf_format_option = PdfFormatOption(
-                                pipeline_options=pipeline_options
-                                # backend="pypdfium2"  # Optional: force specific backend
-                            )
-                            converter_config = {
-                                pdf_format: pdf_format_option
-                            }
-                            self._converter = DocumentConverter(format_options=converter_config)
-                            logger.info("✅ Converter initialized with PdfFormatOption wrapper")
-                        else:
-                            logger.warning("⚠️ PDF format not found, using default converter")
-                            self._converter = DocumentConverter()
-                    except Exception as e:
-                        logger.error(f"❌ Failed to create PdfFormatOption: {e}")
-                        self._converter = DocumentConverter()
+                # Initialize converter using format-specific options
+                converter_config = {}
+                
+                # PDF format with enhanced options to prevent "text soup"
+                if hasattr(InputFormat, 'PDF') and PdfFormatOption is not None:
+                    pdf_format_option = PdfFormatOption(
+                        pipeline_options=pipeline_options
+                        # backend="pypdfium2"  # Optional: force specific backend
+                    )
+                    converter_config[InputFormat.PDF] = pdf_format_option
+                    logger.info("✅ [PDF] Using PdfFormatOption with enhanced structure analysis")
+                
+                # DOCX format with section handling for human reading order
+                if hasattr(InputFormat, 'DOCX') and WordFormatOption is not None:
+                    word_format_option = WordFormatOption(
+                        pipeline_options=pipeline_options,
+                        properties={"handle_sections": True}
+                    )
+                    converter_config[InputFormat.DOCX] = word_format_option
+                    logger.info("✅ [DOCX] Using WordFormatOption with section handling")
+                
+                # HTML format with tag filtering to prevent menu indexing
+                if hasattr(InputFormat, 'HTML') and HtmlFormatOption is not None:
+                    html_format_option = HtmlFormatOption(
+                        pipeline_options=pipeline_options
+                        # backend="custom"  # Optional: custom backend
+                        # tags_filter=["nav", "footer", "script"]  # Strip unwanted tags
+                    )
+                    converter_config[InputFormat.HTML] = html_format_option
+                    logger.info("✅ [HTML] Using HtmlFormatOption with tag filtering")
+                
+                # CSV/XLSX format with sheet names for RAG context
+                if hasattr(InputFormat, 'XLSX') and ExcelFormatOption is not None:
+                    excel_format_option = ExcelFormatOption(
+                        pipeline_options=pipeline_options,
+                        include_sheet_names=True
+                    )
+                    converter_config[InputFormat.XLSX] = excel_format_option
+                    logger.info("✅ [XLSX] Using ExcelFormatOption with sheet names")
+                
+                if converter_config:
+                    self._converter = DocumentConverter(format_options=converter_config)
+                    logger.info(f"✅ Converter initialized with {len(converter_config)} format-specific options")
                 else:
-                    # Fallback to old method for older versions
-                    converter_config = {}
-                    if hasattr(InputFormat, 'PDF'):
-                        converter_config[InputFormat.PDF] = pipeline_options
-                        self._converter = DocumentConverter(format_options=converter_config)
-                        logger.info("✅ Converter initialized with legacy format options")
-                    else:
-                        self._converter = DocumentConverter()
-                        logger.info("✅ Converter initialized without format options")
+                    # Fallback to basic converter
+                    self._converter = DocumentConverter()
+                    logger.info("✅ Converter initialized without format options")
                 
                 logger.info("✅ Advanced pipeline options configured")
             else:
