@@ -142,10 +142,13 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         
         # Get processor
         processor = await get_processor()
-        logger.info(f"� [DOCLING_SERVICE] Got processor: {type(processor)}")
+        logger.info(f"🔧 [ROUTER] Got processor: {type(processor)}")
+        logger.info(f"🔧 [ROUTER] Processor initialized: {processor._initialized}")
+        logger.info(f"🔧 [ROUTER] Processor model: {processor.model_name}")
+        logger.info(f"🔧 [ROUTER] Converter type: {type(processor._converter)}")
         
         # Process document directly from presigned URL (no temp file needed)
-        logger.info(f"� [DOCLING_SERVICE] Starting docling processing from presigned URL...")
+        logger.info(f"📄 [ROUTER] Starting docling processing from presigned URL...")
         markdown_content, metadata = await processor.process_document_from_url(
             presigned_url=request_data.presigned_url,
             original_filename=request_data.filename,
@@ -153,7 +156,9 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
             timeout_seconds=settings.docling_processing_timeout_seconds
         )
         
-        logger.info(f"📊 [DOCLING_SERVICE] Processing result: markdown_content={bool(markdown_content)}, metadata_keys={list(metadata.keys()) if metadata else 'None'}")
+        logger.info(f"📊 [ROUTER] Processing result: markdown_content={bool(markdown_content)}, metadata_keys={list(metadata.keys()) if metadata else 'None'}")
+        logger.info(f"🔧 [ROUTER] Processing time: {metadata.get('processing_time_ms', 'N/A')}ms")
+        logger.info(f"🔧 [ROUTER] Conversion status: {metadata.get('conversion_status', 'N/A')}")
         
         # Handle processing errors
         if not markdown_content:

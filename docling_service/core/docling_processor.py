@@ -65,6 +65,8 @@ class SimpleDoclingProcessor:
             
             self._initialized = True
             logger.info("✅ Docling processor initialized successfully")
+            logger.info(f"🔧 [PROCESSOR] Converter type: {type(self._converter)}")
+            logger.info(f"🔧 [PROCESSOR] Available methods: {[method for method in dir(self._converter) if not method.startswith('_')]}")
             return True
             
         except Exception as e:
