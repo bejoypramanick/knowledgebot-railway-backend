@@ -124,51 +124,6 @@ class EnhancedDoclingProcessor:
                 available_attrs = [attr for attr in dir(pipeline_options) if not attr.startswith('_')]
                 logger.info(f"🔧 [PIPELINE] Available PdfPipelineOptions attributes: {available_attrs}")
                 
-                # Enable layout analysis for better document understanding
-                if self.enable_layout_analysis:
-                    if hasattr(pipeline_options, 'do_layout'):
-                        pipeline_options.do_layout = True
-                        logger.info("✅ Layout analysis enabled (do_layout)")
-                    elif hasattr(pipeline_options, 'layout_analysis'):
-                        pipeline_options.layout_analysis = True
-                        logger.info("✅ Layout analysis enabled (layout_analysis)")
-                    else:
-                        logger.warning("⚠️ Layout analysis attribute not found in PdfPipelineOptions")
-                
-                # Enable table structure recognition
-                if self.enable_table_structure:
-                    if hasattr(pipeline_options, 'do_table_structure'):
-                        pipeline_options.do_table_structure = True
-                        logger.info("✅ Table structure enabled (do_table_structure)")
-                    elif hasattr(pipeline_options, 'table_structure'):
-                        pipeline_options.table_structure = True
-                        logger.info("✅ Table structure enabled (table_structure)")
-                    else:
-                        logger.warning("⚠️ Table structure attribute not found in PdfPipelineOptions")
-                    
-                    # Configure table structure options if available
-                    if hasattr(pipeline_options, 'table_structure_options'):
-                        if hasattr(pipeline_options.table_structure_options, 'do_cell_matching'):
-                            pipeline_options.table_structure_options.do_cell_matching = self.enable_cell_matching
-                            logger.info(f"✅ Cell matching enabled: {self.enable_cell_matching}")
-                        
-                        # Set tableformer mode only if it's a valid enum and attribute exists
-                        if (hasattr(pipeline_options.table_structure_options, 'mode') and 
-                            TableFormerMode is not None and 
-                            hasattr(TableFormerMode, 'ACCURATE')):
-                            pipeline_options.table_structure_options.mode = self.tableformer_mode
-                            logger.info(f"✅ TableFormer mode set: {self.tableformer_mode}")
-                        else:
-                            logger.warning("⚠️ TableFormer mode not available, using default")
-                
-                # Enable OCR for scanned documents
-                if hasattr(pipeline_options, 'do_ocr'):
-                    pipeline_options.do_ocr = True
-                    logger.info("✅ OCR enabled (do_ocr)")
-                elif hasattr(pipeline_options, 'ocr_enabled'):
-                    pipeline_options.ocr_enabled = True
-                    logger.info("✅ OCR enabled (ocr_enabled)")
-                
                 # Initialize converter using format-specific options
                 converter_config = {}
                 
@@ -193,7 +148,7 @@ class EnhancedDoclingProcessor:
                 # HTML format with tag filtering to prevent menu indexing
                 if hasattr(InputFormat, 'HTML') and HtmlFormatOption is not None:
                     html_format_option = HtmlFormatOption(
-                        pipeline_options=pipeline_options
+                        pipeline_options=pipeline_options,
                         # backend="custom"  # Optional: custom backend
                         # tags_filter=["nav", "footer", "script"]  # Strip unwanted tags
                     )
