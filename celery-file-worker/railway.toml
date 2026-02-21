@@ -20,6 +20,9 @@ restartPolicyMaxRetries = 10
 # - GEMINI_API_KEY=...
 # - DOCLING_SERVICE_URL=http://docling.railway.internal:8080
 # - GEMINI_FILE_SEARCH_STORE_NAME=knowledgebotsearchstore-xxxxx
+# - DOCLING_ENABLED=true (optional, default: true)
+# - DOCLING_TIMEOUT_SECONDS=1800 (optional, default: 1800 - 30 minutes)
+# - DOCLING_FALLBACK_TO_RAW=true (optional, default: true)
 #
 # This worker processes:
 # - File uploads (process_file_upload_task)
