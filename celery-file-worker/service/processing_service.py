@@ -367,18 +367,17 @@ async def process_file_content(
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             return {
-                "success": False,
                 "error": f"Extension validation failed: {ext_error}"
             }
 
         # Validate MIME type
-        mime_valid, mime_error = validate_mime_type("", original_filename)
+        mime_valid, mime_error = validate_mime_type(detected_mime_type, original_filename)
         if not mime_valid:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
             return {
                 "success": False,
-                "error": f"MIME validation failed: {mime_error}"
+                "error": f"Invalid MIME type: {mime_error}"
             }
 
         # Validate file size
