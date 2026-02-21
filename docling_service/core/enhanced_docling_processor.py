@@ -311,14 +311,16 @@ class EnhancedDoclingProcessor:
                             table_info = self._extract_table_info(docling_dict)
                             logger.info(f"📊 [TABLES] Found {len(table_info.get('tables', []))} tables")
                     
-                    # Fallback to markdown if JSON export fails
-                    if not json_content:
+                    # Return JSON content as primary output
+                    if json_content:
+                        # JSON is the primary content, markdown is secondary
                         markdown_content = conversion_result.render_as_markdown()
-                        logger.info(f"⚠️ [ENHANCED] JSON export failed, using markdown fallback: {len(markdown_content)} chars")
+                        logger.info(f"✅ [ENHANCED] JSON content generated: {len(json_content)} chars, markdown fallback: {len(markdown_content)} chars")
                     else:
-                        # Keep markdown as secondary content for compatibility
+                        # If JSON export fails, return empty dict and use markdown
+                        json_content = {}
                         markdown_content = conversion_result.render_as_markdown()
-                        logger.info(f"✅ [ENHANCED] Both JSON and markdown generated")
+                        logger.info(f"⚠️ [ENHANCED] JSON export failed, using markdown as primary: {len(markdown_content)} chars")
                         
                 except AttributeError as e:
                     logger.error(f"❌ [ENHANCED] Content extraction failed: {e}")
@@ -330,7 +332,7 @@ class EnhancedDoclingProcessor:
                     "processing_time_ms": processing_time_ms,
                     "model": self.model_name,
                     "conversion_status": str(conversion_result.status),
-                    "content_format": "json" if json_content else "markdown",
+                    "content_format": "json" if (json_content and isinstance(json_content, dict)) else "markdown",
                     "enhanced_features": {
                         "layout_analysis": self.enable_layout_analysis,
                         "table_structure": self.enable_table_structure,
@@ -368,9 +370,13 @@ class EnhancedDoclingProcessor:
                 logger.info(f"✅ Enhanced processing completed for: {original_filename}")
                 logger.info(f"📊 [STATS] JSON: {metadata['content_stats']['json_length']} chars, Markdown: {metadata['content_stats']['markdown_length']} chars")
                 
-                # Return JSON content as primary, markdown as fallback
-                primary_content = json_content if json_content else markdown_content
-                return primary_content, metadata
+                # Return JSON content as primary output, markdown as fallback
+                if json_content and isinstance(json_content, dict):
+                    # Return JSON dict as primary content
+                    return json_content, metadata
+                else:
+                    # Return markdown as fallback when JSON fails
+                    return markdown_content, metadata
             else:
                 error_msg = f"Enhanced conversion failed with status: {conversion_result.status}"
                 logger.warning(f"⚠️ Enhanced processing failed for {original_filename}: {error_msg}")
