@@ -59,7 +59,9 @@ async def process_document_from_url(request: Request, request_data: DoclingProce
         # Process document directly from presigned URL (no temp file needed)
         logger.info(f"📄 [ROUTER] Starting docling processing from presigned URL...")
         markdown_content, metadata = await processor.process_document_from_url(
-            presigned_url=request_data.presigned_url
+            presigned_url=request_data.presigned_url,
+            original_filename=request_data.filename,
+            mime_type=request_data.mime_type
         )
         
         logger.info(f"📊 [ROUTER] Processing result: markdown_content={bool(markdown_content)}, metadata_keys={list(metadata.keys()) if metadata else 'None'}")
