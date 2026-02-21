@@ -405,54 +405,14 @@ async def process_file_content(
         markdown_tmp_path = None
         processed_successfully = False
 
-        # 1. Route HTML files to HTML-specific pipeline
-        if detected_mime_type == 'text/html' or original_filename.lower().endswith(('.html', '.htm')):
-            logger.info(f"🌐 [ROUTING] Routing {original_filename} to HTML-specific pipeline")
-            try:
-                from shared.html_processor import extract_content_from_html
-                markdown_content, html_metadata = extract_content_from_html(tmp_path)
-                
-                if markdown_content:
-                    markdown_tmp_path = create_markdown_temp_file(markdown_content)
-                    # Switch to markdown artifact
-                    original_tmp_path = tmp_path
-                    tmp_path = markdown_tmp_path
-                    original_filename = original_filename.rsplit('.', 1)[0] + '.md'
-                    detected_mime_type = 'text/markdown'
-                    processed_successfully = True
-                    logger.info(f"✅ [HTML] Extracted {len(markdown_content)} characters from HTML")
-                else:
-                    error_msg = html_metadata.get("error", "HTML extraction failed")
-                    logger.error(f"❌ [HTML] Extraction failed for {original_filename}: {error_msg}")
-                    # HARD FAILURE: Do not return 200, stop processing
-                    if tmp_path and os.path.exists(tmp_path):
-                        os.unlink(tmp_path)
-                    return {
-                        "success": False,
-                        "error": f"HTML extraction failed: {error_msg}"
-                    }
-            except Exception as e:
-                logger.error(f"❌ [HTML] Unexpected error processing HTML: {e}")
-                if tmp_path and os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-                return {
-                    "success": False,
-                    "error": f"HTML processing error: {str(e)}"
-                }
+        # STEP 4: FORMAT CONVERSION PHASE - Use Docling for all supported formats
+        markdown_tmp_path = None
+        processed_successfully = False
 
-        # 2. Route PDFs and other Docling-supported files
-        elif await should_use_docling_for_file(original_filename, detected_mime_type, file_size):
-            logger.info(f"📄 [ROUTING] Routing {original_filename} to Docling (PDF/DOCX) pipeline")
-            # Strict check: Never send HTML to Docling
-            if detected_mime_type == 'text/html' or original_filename.lower().endswith(('.html', '.htm')):
-                logger.error(f"🚫 [ROUTING] Refusing to send HTML to Docling for {original_filename}")
-                if tmp_path and os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
-                return {
-                    "success": False,
-                    "error": "HTML files must use HTML pipeline, not Docling"
-                }
-
+        # Route all supported files to Docling (including HTML)
+        if await should_use_docling_for_file(original_filename, detected_mime_type, file_size):
+            logger.info(f"📄 [ROUTING] Routing {original_filename} to Docling pipeline")
+            
             try:
                 logger.info(f"🔍 [DEBUG] About to call process_with_docling with presigned_url: {presigned_url}")
                 markdown_content, docling_metadata = await process_with_docling(
@@ -484,24 +444,24 @@ async def process_file_content(
                 else:
                     error_msg = docling_metadata.get("error", "Docling processing failed")
                     logger.error(f"❌ [DOCLING] Processing failed for {original_filename}: {error_msg}")
-                    
                     # HARD FAILURE (no fallback to raw if it's a PDF/DOCX that failed)
                     if tmp_path and os.path.exists(tmp_path):
                         os.unlink(tmp_path)
                     return {
                         "success": False,
-                        "error": f"Document conversion failed: {error_msg}"
+                        "error": f"Docling processing failed: {error_msg}"
                     }
             except Exception as e:
-                logger.error(f"❌ [DOCLING] Unexpected error in Docling pipeline: {e}")
+                logger.error(f"❌ [DOCLING] Unexpected error: {e}")
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
                 return {
                     "success": False,
                     "error": f"Docling processing error: {str(e)}"
                 }
+
+        # Unsupported format
         else:
-            # For types that skip docling (txt, md, etc.) OR if DOCLING_ENABLED=false
             # Mark as processed successfully and send file raw to Gemini API
             from core.config import settings
             if not settings.docling_enabled:
