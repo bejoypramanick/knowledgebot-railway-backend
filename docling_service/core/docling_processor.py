@@ -108,20 +108,31 @@ class SimpleDoclingProcessor:
                 sys.stderr = original_stderr
             
             logger.info(f"🔍 Conversion completed, status: {conversion_result.status}")
+            logger.info(f"🔧 [PROCESSOR] Conversion result type: {type(conversion_result)}")
+            logger.info(f"🔧 [PROCESSOR] Conversion result attributes: {[attr for attr in dir(conversion_result) if not attr.startswith('_')]}")
+            logger.info(f"🔧 [PROCESSOR] Conversion result dir: {dir(conversion_result)}")
             
             # Check if conversion was successful
             if conversion_result.status in _ACCEPTABLE_CONVERSION_STATUSES:
                 # Extract markdown content - try different methods based on docling version
                 try:
                     # Try the newer API first
+                    logger.info(f"🔧 [PROCESSOR] Trying newer API: conversion_result.export_to_markdown()")
                     markdown_content = conversion_result.export_to_markdown()
-                except AttributeError:
+                    logger.info(f"✅ [PROCESSOR] Newer API worked, got {len(markdown_content) if markdown_content else 0} chars")
+                except AttributeError as e:
+                    logger.warning(f"⚠️ [PROCESSOR] Newer API failed: {e}")
                     try:
                         # Try the older API with document attribute
+                        logger.info(f"🔧 [PROCESSOR] Trying older API: conversion_result.document.export_to_markdown()")
                         markdown_content = conversion_result.document.export_to_markdown()
-                    except AttributeError:
+                        logger.info(f"✅ [PROCESSOR] Older API worked, got {len(markdown_content) if markdown_content else 0} chars")
+                    except AttributeError as e2:
+                        logger.warning(f"⚠️ [PROCESSOR] Older API failed: {e2}")
                         # Fallback: try to get content directly
+                        logger.info(f"🔧 [PROCESSOR] Trying fallback: str(conversion_result)")
                         markdown_content = str(conversion_result)
+                        logger.info(f"✅ [PROCESSOR] Fallback worked, got {len(markdown_content) if markdown_content else 0} chars")
                 
                 # Build simple metadata
                 metadata = {
