@@ -39,18 +39,38 @@ def _redact_redis_url(redis_url: str) -> str:
 class DoclingRQClient:
     """Client for interacting with docling-serve via Redis Queue."""
 
-    def __init__(self, redis_url: str, queue_name: str = "docling"):
+    def __init__(
+        self,
+        redis_url: str,
+        queue_name: str = "docling",
+        job_timeout_minutes: int = 60,
+        polling_timeout_seconds: int = 3600,
+        poll_initial_delay: int = 2,
+        poll_max_interval: int = 60
+    ):
         """
-        Initialize the RQ client.
+        Initialize the RQ client with configurable timeouts.
 
         Args:
             redis_url: Redis connection URL (e.g., redis://host:6379/0)
             queue_name: Redis queue name (must match docling-serve worker's queue)
+            job_timeout_minutes: RQ job timeout in minutes (default 60 minutes = 1 hour)
+            polling_timeout_seconds: Max time to poll for results in seconds (default 3600 = 1 hour)
+            poll_initial_delay: Initial polling interval in seconds (default 2)
+            poll_max_interval: Maximum polling interval in seconds (default 60)
         """
         self.redis_conn = Redis.from_url(redis_url)
         self.queue = Queue(queue_name, connection=self.redis_conn)
+        self.job_timeout_minutes = job_timeout_minutes
+        self.polling_timeout_seconds = polling_timeout_seconds
+        self.poll_initial_delay = poll_initial_delay
+        self.poll_max_interval = poll_max_interval
+
         logger.info(f"🔌 [RQ_CLIENT] Initialized with Redis URL: {_redact_redis_url(redis_url)}")
         logger.info(f"🔌 [RQ_CLIENT] Using queue: {queue_name}")
+        logger.info(f"⏱️  [RQ_CLIENT] Job timeout: {job_timeout_minutes} minutes")
+        logger.info(f"⏱️  [RQ_CLIENT] Polling timeout: {polling_timeout_seconds} seconds ({polling_timeout_seconds/60:.1f} minutes)")
+        logger.info(f"⏱️  [RQ_CLIENT] Poll intervals: {poll_initial_delay}s initial, {poll_max_interval}s max")
 
     async def enqueue_document(
         self,
@@ -97,12 +117,16 @@ class DoclingRQClient:
             # Enqueue to docling_jobkit's RQ worker function
             # Note: conversion_manager, orchestrator_config, and scratch_dir
             # are automatically injected by CustomRQWorker.perform_job() into job.kwargs
+
+            # Format job timeout: convert minutes to string like "60m" or "90m"
+            job_timeout_str = f"{self.job_timeout_minutes}m"
+
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
                 task_data,
                 scratch_dir=scratch_dir,
-                job_timeout='30m',
-                result_ttl=14400  # 4 hours
+                job_timeout=job_timeout_str,  # Configurable job timeout (default 60 minutes)
+                result_ttl=14400  # 4 hours - results stored in Redis for 4 hours
             )
 
             logger.info(f"✅ [RQ_ENQUEUE] Job enqueued: {job.id} for {filename}")
@@ -119,30 +143,38 @@ class DoclingRQClient:
     async def poll_job_result(
         self,
         job_id: str,
-        timeout: int = 1800,
-        poll_interval_initial: int = 2,
-        poll_interval_max: int = 30
+        timeout: int = None,
+        poll_interval_initial: int = None,
+        poll_interval_max: int = None
     ) -> Tuple[str, dict]:
         """
         Poll for job completion with exponential backoff.
 
         Args:
             job_id: RQ job ID to poll
-            timeout: Maximum time to wait in seconds (default 30 minutes)
-            poll_interval_initial: Initial poll interval in seconds
-            poll_interval_max: Maximum poll interval in seconds
+            timeout: Maximum time to wait in seconds (uses instance timeout if None)
+            poll_interval_initial: Initial poll interval in seconds (uses instance value if None)
+            poll_interval_max: Maximum poll interval in seconds (uses instance value if None)
 
         Returns:
-            Tuple of (markdown_content, metadata)
+            Tuple of (json_content, metadata)
 
         Raises:
             TimeoutError: If job doesn't complete within timeout
             Exception: If job fails
         """
+        # Use instance config if parameters not provided
+        if timeout is None:
+            timeout = self.polling_timeout_seconds
+        if poll_interval_initial is None:
+            poll_interval_initial = self.poll_initial_delay
+        if poll_interval_max is None:
+            poll_interval_max = self.poll_max_interval
+
         start_time = time.time()
         interval = poll_interval_initial
 
-        logger.info(f"⏳ [RQ_POLL] Starting poll for job: {job_id} (timeout: {timeout}s)")
+        logger.info(f"⏳ [RQ_POLL] Starting poll for job: {job_id} (timeout: {timeout}s = {timeout/60:.1f} minutes)")
 
         while True:
             elapsed = time.time() - start_time
@@ -194,7 +226,7 @@ class DoclingRQClient:
         presigned_url: str,
         filename: str,
         mime_type: str,
-        timeout_seconds: int = 1800
+        timeout_seconds: int = None
     ) -> Tuple[str, dict]:
         """
         High-level method: enqueue job, poll for result, return content.
@@ -203,22 +235,26 @@ class DoclingRQClient:
             presigned_url: Presigned S3 URL
             filename: Original filename
             mime_type: MIME type
-            timeout_seconds: Timeout for polling
+            timeout_seconds: Timeout for polling (uses instance timeout if None)
 
         Returns:
-            Tuple of (markdown_content, metadata)
+            Tuple of (json_content, metadata)
         """
         try:
+            # Use instance timeout if not provided
+            if timeout_seconds is None:
+                timeout_seconds = self.polling_timeout_seconds
+
             # Enqueue the job
             job_id = await self.enqueue_document(presigned_url, filename, mime_type)
 
-            # Poll for result
-            markdown, metadata = await self.poll_job_result(
+            # Poll for result with configured timeout
+            json_content, metadata = await self.poll_job_result(
                 job_id,
                 timeout=timeout_seconds
             )
 
-            return markdown, metadata
+            return json_content, metadata
 
         except Exception as e:
             logger.error(f"❌ [RQ_PROCESS] Error processing {filename}: {e}")

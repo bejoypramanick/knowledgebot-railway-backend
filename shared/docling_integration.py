@@ -97,12 +97,27 @@ async def process_with_docling(
         )
 
         # Initialize RQ client with docling-specific Redis URL (DB 2) and queue name
+        # Pass all timeout configurations from settings
         docling_redis_url = settings.get_docling_redis_url
         docling_queue_name = settings.docling_rq_queue_name
-        client = DoclingRQClient(docling_redis_url, queue_name=docling_queue_name)
+        client = DoclingRQClient(
+            redis_url=docling_redis_url,
+            queue_name=docling_queue_name,
+            job_timeout_minutes=settings.docling_rq_job_timeout_minutes,
+            polling_timeout_seconds=settings.docling_timeout_seconds,
+            poll_initial_delay=settings.docling_poll_initial_delay,
+            poll_max_interval=settings.docling_poll_max_interval
+        )
+
+        logger.info(
+            f"⏱️  [DOCLING_CONFIG] Timeout settings: "
+            f"Job={settings.docling_rq_job_timeout_minutes}min, "
+            f"Polling={settings.docling_timeout_seconds}s, "
+            f"Poll intervals={settings.docling_poll_initial_delay}s-{settings.docling_poll_max_interval}s"
+        )
 
         # Enqueue job and poll for result
-        markdown_content, metadata = await client.process_document_async(
+        json_content, metadata = await client.process_document_async(
             presigned_url,
             original_filename,
             mime_type,
@@ -110,21 +125,17 @@ async def process_with_docling(
         )
 
         # Log the content format and metadata
-        content_format = metadata.get("content_format", "markdown")
+        content_format = metadata.get("content_format", "json")
         logger.info(f"📄 [DOCLING_RQ] Content format: {content_format}")
         logger.info(f"📊 [DOCLING_RQ] Metadata keys: {list(metadata.keys())}")
 
-        if content_format == "json":
-            logger.info(f"📋 [DOCLING_RQ] JSON content length: {len(markdown_content)} chars")
-            logger.info(f"📋 [DOCLING_RQ] JSON preview: {markdown_content[:200]}...")
-        else:
-            logger.info(f"📝 [DOCLING_RQ] Markdown content length: {len(markdown_content)} chars")
-            logger.info(f"📝 [DOCLING_RQ] Markdown preview: {markdown_content[:200]}...")
+        logger.info(f"📋 [DOCLING_RQ] JSON content length: {len(json_content)} chars")
+        logger.info(f"📋 [DOCLING_RQ] JSON preview: {json_content[:200]}...")
 
         logger.info(
             f"✅ [DOCLING_RQ] Successfully processed {original_filename} via Redis Queue"
         )
-        return markdown_content, metadata
+        return json_content, metadata
 
     except TimeoutError as e:
         logger.error(f"⏱️ [DOCLING_RQ] Timeout: {e}")
