@@ -4,7 +4,6 @@ Handles business logic for file processing operations
 """
 import asyncio
 import os
-import json
 from typing import Dict, List, Any, Optional
 from dao.file_dao import FileDAO
 from shared.otel_logger import get_otel_logger
@@ -112,67 +111,15 @@ class FileService:
 
     async def check_duplicate_file(self, original_filename: str, exclude_file_id: int = None) -> Optional[Dict[str, Any]]:
         """Check if file with same name exists in database (only active files)."""
-        try:
-            from shared.db import get_db_connection
-
-            async with get_db_connection() as conn:
-                # First, log ALL files with this name to debug
-                all_files = await conn.fetch(
-                    "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 ORDER BY id DESC",
-                    original_filename
-                )
-                logger.info(f"🔍 [DUPLICATE_CHECK_ALL] Found {len(all_files)} total files with name '{original_filename}':")
-                for f in all_files:
-                    logger.info(f"   - ID={f['id']}, status={f['processing_status']}")
-                
-                # Only check active files (exclude failed, deleted, cancelled)
-                # Also exclude the current file being processed
-                if exclude_file_id:
-                    record = await conn.fetchrow(
-                        "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 AND id != $2 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
-                        original_filename, exclude_file_id
-                    )
-                    logger.info(f"🔍 [DUPLICATE_CHECK] Excluding current file ID={exclude_file_id} from check")
-                else:
-                    record = await conn.fetchrow(
-                        "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
-                        original_filename
-                    )
-                
-                if record:
-                    logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE duplicate: ID={record['id']}, filename={record['original_filename']}, status={record['processing_status']}")
-                else:
-                    logger.info(f"🔍 [DUPLICATE_CHECK] No active duplicate found for: {original_filename}")
-                return record
-        except Exception as e:
-            logger.error(f"❌ Error checking duplicate: {e}")
-            return None
+        from dao.fileupload_dao import FileUploadDAO
+        dao = FileUploadDAO()
+        return await dao.check_duplicate_file(original_filename, exclude_file_id)
 
     async def get_admin_user_role_id(self, user_email: str = None) -> Optional[str]:
         """Get admin user role ID from database."""
-        try:
-            from shared.db import get_db_connection
-
-            async with get_db_connection() as conn:
-                # Get admin role first
-                admin_role = await conn.fetchval(
-                    "SELECT id FROM roles WHERE role_name = 'admin' LIMIT 1"
-                )
-
-                if not admin_role:
-                    logger.warning("⚠️ Admin role not found in database")
-                    return None
-
-                # Get user role mapping for this email
-                user_role = await conn.fetchval(
-                    "SELECT user_role_id FROM user_role_mapping WHERE email = $1 AND role_id = $2 LIMIT 1",
-                    user_email or 'admin', admin_role
-                )
-
-                return user_role
-        except Exception as e:
-            logger.warning(f"⚠️ Error getting admin user role: {e}")
-            return None
+        from dao.fileupload_dao import FileUploadDAO
+        dao = FileUploadDAO()
+        return await dao.get_admin_user_role_id(user_email)
 
     async def delete_existing_file_record(self, file_id: str) -> bool:
         """Delete a file record from the database."""
@@ -200,41 +147,21 @@ class FileService:
         char_count: int = 0,
         user_role_id: int = None
     ) -> Optional[int]:
-        """
-        Record file metadata to database.
-        Returns: file_id or None on failure
-        """
-        try:
-            from shared.db import get_db_connection
-
-            # Use provided user_role_id or look it up from database
-            if not user_role_id:
-                user_role_id = await self.get_admin_user_role_id(user_email)
-
-            async with get_db_connection() as conn:
-                file_id = await conn.fetchval(
-                    """INSERT INTO file_uploads
-                       (user_role_id, original_filename, display_name, file_extension,
-                        mime_type, file_size, sha256_hash, gemini_file_name, processing_status,
-                        gemini_processed_at, metadata, char_count, created_at)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
-                       RETURNING id""",
-                    user_role_id,
-                    original_filename,
-                    file_display_name,
-                    file_ext,
-                    mime_type,
-                    file_size,
-                    sha256_hash,
-                    uploaded_file.name,
-                    final_state,
-                    gemini_processed_at,
-                    json.dumps(file_search_metadata) if file_search_metadata else None,
-                    char_count
-                )
-
-                logger.info(f"✅ Recorded metadata for {original_filename}, DB ID: {file_id}")
-                return file_id
-        except Exception as e:
-            logger.error(f"❌ Error recording metadata: {e}")
-            raise
+        """Record file metadata to database. Returns: file_id or None on failure"""
+        from dao.fileupload_dao import FileUploadDAO
+        dao = FileUploadDAO()
+        return await dao.record_metadata(
+            user_email=user_email,
+            original_filename=original_filename,
+            file_display_name=file_display_name,
+            file_ext=file_ext,
+            gemini_file_name=uploaded_file.name,
+            file_size=file_size,
+            sha256_hash=sha256_hash,
+            final_state=final_state,
+            gemini_processed_at=gemini_processed_at,
+            mime_type=mime_type,
+            file_search_metadata=file_search_metadata,
+            char_count=char_count,
+            user_role_id=user_role_id
+        )

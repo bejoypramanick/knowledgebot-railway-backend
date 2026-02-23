@@ -296,32 +296,24 @@ async def process_file_content(
 
         # STEP 1: Query database with file_id to get file details
         logger.info(f"🔍 [DB_QUERY] Getting file details for file_id: {file_id}")
-        
-        from shared.db import get_db_connection
-        
-        async with get_db_connection() as conn:
-            file_record = await conn.fetchrow("""
-                SELECT id, user_role_id, original_filename, display_name, 
-                       s3_key, file_size, mime_type, processing_status
-                FROM file_uploads 
-                WHERE id = $1
-            """, file_id)
-        
+
+        from dao.fileupload_dao import FileUploadDAO
+        dao = FileUploadDAO()
+        file_record = await dao.get_file_by_id(file_id)
+
         if not file_record:
-            logger.error(f"❌ [DB_QUERY] No file found for file_id: {file_id}")
             return {
                 "success": False,
                 "error": f"No file found for file_id: {file_id}"
             }
-        
+
         # Extract file details from database record
         original_filename = file_record['original_filename']
         file_display_name = file_record['display_name']
         s3_key = file_record['s3_key']
         file_size = file_record['file_size']
         user_role_id = file_record['user_role_id']
-        
-        logger.info(f"✅ [DB_QUERY] File found: {original_filename}")
+
         logger.info(f"   Display name: {file_display_name}")
         logger.info(f"   S3 key: {s3_key}")
         logger.info(f"   Size: {file_size} bytes")
