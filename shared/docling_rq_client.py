@@ -59,38 +59,30 @@ class DoclingRQClient:
         mime_type: str
     ) -> str:
         try:
-            # Define scratch_dir – match what your workers use!
-            # Best: Use the same value as DOCLING_SERVE_SCRATCH_PATH env var on workers
-            scratch_dir = "/data/scratchpad"  # or "/tmp/docling" or whatever is mounted/writable in worker container
+            scratch_dir = "/data/scratchpad"   # confirm this matches worker mount
             task_id = str(uuid.uuid4())
+
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
-                task_data={
-                    "task_type": "convert",           # Required – tells it what to do
-                    "presigned_url": presigned_url,
-                    "filename": filename,
-                    "mime_type": mime_type,
-                    "task_id": task_id,
-                    "options": {
-                        "do_ocr": False,           # Enable/Disable OCR
-                        "do_table_structure": False # Enable/Disable Table extraction
-                 }   
-                    # Add other fields if needed from task_data examples:
-                    # "task_id": some_uuid (optional, RQ generates one),
-                    # "options": {} for extra conversion flags
+                presigned_url=presigned_url,
+                filename=filename,
+                mime_type=mime_type,
+                task_type="convert",
+                task_id=task_id,
+                options={
+                    "do_ocr": False,
+                    "do_table_structure": False,
                 },
-                scratch_dir=scratch_dir,              # ← This fixes the TypeError
+                scratch_dir=scratch_dir,
                 job_timeout='30m',
                 result_ttl=14400
             )
 
-            logger.info(f"✅ [RQ_ENQUEUE] Job enqueued: {job.id} for {filename} (scratch_dir={scratch_dir})")
-            # ... rest unchanged
-
             return job.id
 
-        except Exception as e:
-            logger.error(f"❌ [RQ_ENQUEUE] Failed: {e}")
+        except Exception as exc:
+            # log properly in production
+            print(f"Enqueue failed: {exc}")
             raise
 
     async def poll_job_result(
