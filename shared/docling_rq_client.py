@@ -138,9 +138,9 @@ class DoclingRQClient:
             task_id = str(uuid.uuid4())
 
             # Build task data according to docling-serve RQ Task schema
-            # Structure:
-            # - Top level: to_formats, return_as_file, target (orchestrator level)
-            # - options: nested object with pipeline_options and export_options
+            # The RQ worker expects:
+            # - Top level: to_formats, return_as_file, target
+            # - options.pipeline_options: Docling conversion settings (NOT export_options)
             task_data = {
                 "task_id": task_id,
                 "task_type": "convert",
@@ -153,15 +153,12 @@ class DoclingRQClient:
                 # Top-level orchestrator parameters
                 "to_formats": ["json"],      # Request JSON format
                 "return_as_file": False,     # Return raw result, not file
-                # Nested options: orchestrator passes these to Docling Engine
+                # Pipeline options for Docling Engine
                 "options": {
                     "pipeline_options": {
                         "do_ocr": False,                    # TODO: Enable after models are cached
                         "do_table_structure": True,
                         "include_images": False             # CRITICAL: Prevents ZIP bundling
-                    },
-                    "export_options": {
-                        "format": "json"                    # Export as JSON
                     }
                 }
             }
