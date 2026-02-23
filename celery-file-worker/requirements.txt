@@ -26,6 +26,8 @@ redis>=5.0.1
 rq>=1.15.0
 gevent>=24.2.1
 nest-asyncio>=1.5.8
+# MessagePack for docling-serve result deserialization
+msgpack>=1.0.5
 # Google Generative AI (NEW SDK)
 google-genai>=1.60.0
 # OpenTelemetry

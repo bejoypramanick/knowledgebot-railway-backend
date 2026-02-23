@@ -313,16 +313,29 @@ class DoclingRQClient:
                                             logger.info(f"✅ [RQ_DESERIALIZE] Successfully deserialized as Pickle")
                                             logger.debug(f"📊 [RQ_DESERIALIZE] Type: {type(deserialized_data)}")
                                         except Exception as pickle_err:
-                                            logger.debug(f"⚠️ [RQ_DESERIALIZE] Pickle failed: {pickle_err}")
+                                            logger.info(f"⚠️ [RQ_DESERIALIZE] Pickle failed: {type(pickle_err).__name__}: {str(pickle_err)[:100]}")
 
                                             # Try MessagePack deserialization
                                             try:
-                                                import msgpack
-                                                deserialized_data = msgpack.unpackb(redis_value, raw=False)
+                                                try:
+                                                    import msgpack
+                                                except ImportError:
+                                                    logger.warning(f"⚠️ [RQ_DESERIALIZE] msgpack not installed - install with: pip install msgpack>=1.0.5")
+                                                    raise
+
+                                                logger.debug(f"🔍 [RQ_DESERIALIZE] Trying MessagePack (first 4 bytes: {redis_value[:4].hex()})")
+                                                # Try different msgpack configurations
+                                                try:
+                                                    deserialized_data = msgpack.unpackb(redis_value, raw=False, strict_map_key=False)
+                                                except TypeError:
+                                                    # Older msgpack versions don't have strict_map_key
+                                                    deserialized_data = msgpack.unpackb(redis_value, raw=False)
+
                                                 logger.info(f"✅ [RQ_DESERIALIZE] Successfully deserialized as MessagePack")
-                                                logger.debug(f"📊 [RQ_DESERIALIZE] Type: {type(deserialized_data)}")
+                                                logger.debug(f"📊 [RQ_DESERIALIZE] Type: {type(deserialized_data)}, Keys: {list(deserialized_data.keys()) if isinstance(deserialized_data, dict) else 'N/A'}")
                                             except Exception as msgpack_err:
-                                                logger.debug(f"⚠️ [RQ_DESERIALIZE] MessagePack failed: {msgpack_err}")
+                                                logger.info(f"⚠️ [RQ_DESERIALIZE] MessagePack also failed: {type(msgpack_err).__name__}: {str(msgpack_err)[:100]}")
+                                                logger.debug(f"📊 [RQ_DESERIALIZE] First 20 bytes (hex): {redis_value[:20].hex()}")
 
                                         # If deserialization succeeded, check if it's a ZipArchiveResult
                                         if deserialized_data:
