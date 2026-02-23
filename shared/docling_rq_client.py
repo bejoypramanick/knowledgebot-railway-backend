@@ -153,9 +153,8 @@ class DoclingRQClient:
                 "convert_options": {
                     "do_ocr": False,  # TODO: Enable after models are cached
                     "do_table_structure": True
-                    # Docling Document object is returned as JSON by docling-serve
-                    # (Markdown files written to disk are just intermediate outputs)
-                }
+                },
+                "export_to_json": True  # Export Document as JSON (not Markdown)
             }
 
             # Add Railway Storage target if configured - docling-serve will upload result directly to Railway Storage

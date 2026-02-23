@@ -153,6 +153,44 @@ async def process_with_docling(
             timeout_seconds=timeout_seconds
         )
 
+        # Handle ZIP archives from docling-serve
+        # Docling-serve returns results as ZipArchiveResult containing JSON or Markdown files
+        if json_content and isinstance(json_content, bytes):
+            # Check if it's a ZIP file (magic bytes: PK)
+            if json_content[:2] == b'PK':
+                logger.info(f"📦 [ZIP_EXTRACT] Docling result is a ZIP archive, extracting...")
+                try:
+                    import zipfile
+                    import io
+
+                    # Extract ZIP
+                    with zipfile.ZipFile(io.BytesIO(json_content)) as zip_file:
+                        logger.info(f"📋 [ZIP_CONTENTS] Files in archive: {zip_file.namelist()}")
+
+                        # Look for JSON files first, then Markdown
+                        json_file = None
+                        md_file = None
+
+                        for filename in zip_file.namelist():
+                            if filename.endswith('.json'):
+                                json_file = filename
+                                break
+                            elif filename.endswith('.md'):
+                                md_file = filename
+
+                        if json_file:
+                            logger.info(f"✅ [ZIP_EXTRACT] Found JSON file: {json_file}")
+                            json_content = zip_file.read(json_file).decode('utf-8')
+                        elif md_file:
+                            logger.info(f"✅ [ZIP_EXTRACT] Found Markdown file (will use as-is): {md_file}")
+                            json_content = zip_file.read(md_file).decode('utf-8')
+                        else:
+                            logger.error(f"❌ [ZIP_EXTRACT] No JSON or Markdown files found in archive")
+                            return None, {"error": "No JSON or Markdown files in docling result ZIP"}
+                except Exception as e:
+                    logger.error(f"❌ [ZIP_EXTRACT] Failed to extract ZIP: {e}")
+                    return None, {"error": f"Failed to extract docling result ZIP: {str(e)}"}
+
         # Check if json_content is an S3 key path (not actual JSON)
         # S3 key paths start with "docling-results/" and don't start with '{' or '['
         if json_content and isinstance(json_content, str):
