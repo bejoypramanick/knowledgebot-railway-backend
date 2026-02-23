@@ -280,3 +280,14 @@ class FileUploadDAO:
         except Exception as e:
             logger.error(f"❌ Error recording metadata: {e}")
             raise
+
+    async def get_file_metadata_for_deletion(self, file_id: int) -> Optional[Dict[str, Any]]:
+        """Get file metadata for deletion operations (from file_uploads table)."""
+        query = "SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = $1"
+        try:
+            async with get_db_connection() as conn:
+                record = await conn.fetchrow(query, file_id)
+                return dict(record) if record else None
+        except Exception as e:
+            logger.error(f"❌ Error getting file metadata for deletion: {e}")
+            return None

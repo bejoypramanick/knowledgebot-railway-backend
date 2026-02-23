@@ -253,31 +253,27 @@ async def process_file_content(
 
     async def get_file_details_by_task_id(celery_task_id: str) -> Optional[Dict[str, Any]]:
         """Query database to get file details using celery_task_id"""
+        from dao.fileupload_dao import FileUploadDAO
+
         try:
-            from shared.db import get_db_connection
-            
+            dao = FileUploadDAO()
             # Add retry logic for database connection issues
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    async with get_db_connection() as conn:
-                        record = await conn.fetchrow(
-                            "SELECT id, original_filename, display_name, s3_key, file_size "
-                            "FROM file_uploads WHERE celery_task_id = $1",
-                            celery_task_id
-                        )
-                        if record:
-                            logger.info(f"✅ [DB_QUERY_SUCCESS] Found file record for task_id: {celery_task_id}")
-                            logger.info(f"   File ID: {record['id']}, S3 Key: {record['s3_key']}")
-                            return {
-                                "file_id": str(record["id"]),
-                                "original_filename": record["original_filename"],
-                                "file_display_name": record["display_name"],
-                                "s3_key": record["s3_key"],
-                                "file_size": record["file_size"]
-                            }
-                        logger.warning(f"⚠️ [DB_QUERY_EMPTY] No file record found for task_id: {celery_task_id}")
-                        return None
+                    record = await dao.get_file_by_task_id(celery_task_id)
+                    if record:
+                        logger.info(f"✅ [DB_QUERY_SUCCESS] Found file record for task_id: {celery_task_id}")
+                        logger.info(f"   File ID: {record['id']}, S3 Key: {record['s3_key']}")
+                        return {
+                            "file_id": str(record["id"]),
+                            "original_filename": record["original_filename"],
+                            "file_display_name": record["display_name"],
+                            "s3_key": record["s3_key"],
+                            "file_size": record["file_size"]
+                        }
+                    logger.warning(f"⚠️ [DB_QUERY_EMPTY] No file record found for task_id: {celery_task_id}")
+                    return None
                 except Exception as conn_err:
                     if attempt < max_retries - 1:
                         logger.warning(f"⚠️ [DB_RETRY] Connection error (attempt {attempt + 1}/{max_retries}): {conn_err}")
@@ -806,31 +802,18 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
             except ValueError:
                 numeric_id = file_id
 
-            async with get_db_connection() as conn:
-                # Try file_uploads table first
-                record = await conn.fetchrow(
-                    "SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = $1",
-                    numeric_id
-                )
-                if record:
-                    gemini_file_name = record['gemini_file_name']
-                    original_filename = record.get('original_filename', 'Unknown')
-                    table_name = 'file_uploads'
-                    file_search_metadata = record.get('metadata')
-                else:
-                    # Try scraped_websites table
-                    record = await conn.fetchrow(
-                        "SELECT gemini_file_name, original_url, metadata FROM scraped_websites WHERE id = $1",
-                        numeric_id
-                    )
-                    if record:
-                        gemini_file_name = record['gemini_file_name']
-                        original_filename = record.get('original_url', 'Unknown')
-                        table_name = 'scraped_websites'
-                        file_search_metadata = record.get('metadata')
-                    else:
-                        logger.error(f"❌ [DELETE] File not found in database: {file_id}")
-                        return {"success": False, "error": "File not found"}
+            from dao.fileupload_dao import FileUploadDAO
+            dao = FileUploadDAO()
+            record = await dao.get_file_metadata_for_deletion(numeric_id)
+
+            if record:
+                gemini_file_name = record['gemini_file_name']
+                original_filename = record.get('original_filename', 'Unknown')
+                table_name = 'file_uploads'
+                file_search_metadata = record.get('metadata')
+            else:
+                logger.error(f"❌ [DELETE] File not found in database: {file_id}")
+                return {"success": False, "error": "File not found"}
         except Exception as e:
             logger.error(f"❌ [DELETE] Error looking up file record: {e}")
             return {"success": False, "error": str(e)}
