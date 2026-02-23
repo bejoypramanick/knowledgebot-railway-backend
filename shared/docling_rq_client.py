@@ -71,8 +71,8 @@ class DoclingRQClient:
                     "filename": filename,
                     "mime_type": mime_type,
                     "task_id": task_id,
-                    "options": {
-                    "do_ocr": True,           # Enable/Disable OCR
+                    "conversion_options": {
+                    "do_ocr": False,           # Enable/Disable OCR
                     "do_table_structure": True # Enable/Disable Table extraction
                 }   
                     # Add other fields if needed from task_data examples:
