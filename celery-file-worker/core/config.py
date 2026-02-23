@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     docling_redis_url: str  # DOCLING_REDIS_URL from Railway (required - DB 2)
     docling_enabled: bool = True  # Set to False to disable docling and use raw uploads
     docling_timeout_seconds: int = 1800  # Processing timeout (30 minutes - handles queue wait time)
-    docling_rq_queue_name: str = "docling"  # Redis queue name for docling jobs
+    docling_rq_queue_name: str = "convert"  # Redis queue name for docling jobs (must match docling-serve worker)
     docling_poll_initial_delay: int = 2  # Initial polling interval in seconds
     docling_poll_max_interval: int = 30  # Maximum polling interval in seconds
     docling_fallback_to_raw: bool = True  # Fallback to raw upload if docling fails/times out

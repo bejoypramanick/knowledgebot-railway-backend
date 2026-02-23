@@ -39,16 +39,18 @@ def _redact_redis_url(redis_url: str) -> str:
 class DoclingRQClient:
     """Client for interacting with docling-serve via Redis Queue."""
 
-    def __init__(self, redis_url: str):
+    def __init__(self, redis_url: str, queue_name: str = "docling"):
         """
         Initialize the RQ client.
 
         Args:
             redis_url: Redis connection URL (e.g., redis://host:6379/0)
+            queue_name: Redis queue name (must match docling-serve worker's queue)
         """
         self.redis_conn = Redis.from_url(redis_url)
-        self.queue = Queue('docling', connection=self.redis_conn)
+        self.queue = Queue(queue_name, connection=self.redis_conn)
         logger.info(f"🔌 [RQ_CLIENT] Initialized with Redis URL: {_redact_redis_url(redis_url)}")
+        logger.info(f"🔌 [RQ_CLIENT] Using queue: {queue_name}")
 
     async def enqueue_document(
         self,

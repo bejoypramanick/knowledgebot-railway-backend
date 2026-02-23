@@ -95,9 +95,10 @@ async def process_with_docling(
             f"📄 [DOCLING_RQ] Enqueuing job for {original_filename} via Redis Queue (DB 2)"
         )
 
-        # Initialize RQ client with docling-specific Redis URL (DB 2)
+        # Initialize RQ client with docling-specific Redis URL (DB 2) and queue name
         docling_redis_url = settings.get_docling_redis_url
-        client = DoclingRQClient(docling_redis_url)
+        docling_queue_name = settings.docling_rq_queue_name
+        client = DoclingRQClient(docling_redis_url, queue_name=docling_queue_name)
 
         # Enqueue job and poll for result
         markdown_content, metadata = await client.process_document_async(
