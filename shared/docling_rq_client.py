@@ -138,6 +138,9 @@ class DoclingRQClient:
             task_id = str(uuid.uuid4())
 
             # Build task data according to docling_jobkit Task schema
+            # Note: Docling-serve processes documents and returns results in the format specified by target
+            # - If target is S3: Returns S3 key path (stored in Redis with TTL)
+            # - If no target: Returns Document as JSON (stored in Redis)
             task_data = {
                 "task_id": task_id,
                 "task_type": "convert",  # Lowercase enum value
@@ -149,9 +152,9 @@ class DoclingRQClient:
                 ],
                 "convert_options": {
                     "do_ocr": False,  # TODO: Enable after models are cached
-                    "do_table_structure": True,
-                    "output_format": "json"  # Request JSON output instead of markdown
-                    # Other options have defaults and are optional
+                    "do_table_structure": True
+                    # Docling Document object is returned as JSON by docling-serve
+                    # (Markdown files written to disk are just intermediate outputs)
                 }
             }
 
