@@ -46,10 +46,13 @@ class DoclingRQClient:
         job_timeout_minutes: int = 60,
         polling_timeout_seconds: int = 3600,
         poll_initial_delay: int = 2,
-        poll_max_interval: int = 60
+        poll_max_interval: int = 60,
+        s3_bucket_name: str = None,
+        s3_region: str = "us-east-1",
+        s3_docling_prefix: str = "docling-results"
     ):
         """
-        Initialize the RQ client with configurable timeouts.
+        Initialize the RQ client with configurable timeouts and S3 output.
 
         Args:
             redis_url: Redis connection URL (e.g., redis://host:6379/0)
@@ -58,6 +61,9 @@ class DoclingRQClient:
             polling_timeout_seconds: Max time to poll for results in seconds (default 3600 = 1 hour)
             poll_initial_delay: Initial polling interval in seconds (default 2)
             poll_max_interval: Maximum polling interval in seconds (default 60)
+            s3_bucket_name: S3 bucket for docling output (required - docling-serve will upload here)
+            s3_region: AWS region for S3 (default us-east-1)
+            s3_docling_prefix: S3 key prefix for docling outputs (default docling-results)
         """
         self.redis_conn = Redis.from_url(redis_url)
         self.queue = Queue(queue_name, connection=self.redis_conn)
@@ -66,11 +72,21 @@ class DoclingRQClient:
         self.poll_initial_delay = poll_initial_delay
         self.poll_max_interval = poll_max_interval
 
+        # S3 configuration for docling output
+        self.s3_bucket_name = s3_bucket_name
+        self.s3_region = s3_region
+        self.s3_docling_prefix = s3_docling_prefix
+
         logger.info(f"🔌 [RQ_CLIENT] Initialized with Redis URL: {_redact_redis_url(redis_url)}")
         logger.info(f"🔌 [RQ_CLIENT] Using queue: {queue_name}")
         logger.info(f"⏱️  [RQ_CLIENT] Job timeout: {job_timeout_minutes} minutes")
         logger.info(f"⏱️  [RQ_CLIENT] Polling timeout: {polling_timeout_seconds} seconds ({polling_timeout_seconds/60:.1f} minutes)")
         logger.info(f"⏱️  [RQ_CLIENT] Poll intervals: {poll_initial_delay}s initial, {poll_max_interval}s max")
+
+        if s3_bucket_name:
+            logger.info(f"💾 [S3_TARGET] Docling will upload results to: s3://{s3_bucket_name}/{s3_docling_prefix}/ (region: {s3_region})")
+        else:
+            logger.warning(f"⚠️  [S3_TARGET] No S3 bucket configured - docling results will be stored in Redis")
 
     async def enqueue_document(
         self,
@@ -113,6 +129,18 @@ class DoclingRQClient:
                     # Other options have defaults and are optional
                 }
             }
+
+            # Add S3 target if configured - docling-serve will upload result directly to S3
+            if self.s3_bucket_name:
+                task_data["target"] = {
+                    "kind": "s3",
+                    "bucket": self.s3_bucket_name,
+                    "key_prefix": f"{self.s3_docling_prefix}/{task_id}/",
+                    "region": self.s3_region
+                }
+                logger.info(f"📍 [S3_TARGET] Task {task_id} will output to: s3://{self.s3_bucket_name}/{self.s3_docling_prefix}/{task_id}/")
+            else:
+                logger.info(f"📍 [REDIS_TARGET] Task {task_id} will output to Redis")
 
             # Enqueue to docling_jobkit's RQ worker function
             # Note: conversion_manager, orchestrator_config, and scratch_dir

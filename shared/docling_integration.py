@@ -97,16 +97,25 @@ async def process_with_docling(
         )
 
         # Initialize RQ client with docling-specific Redis URL (DB 2) and queue name
-        # Pass all timeout configurations from settings
+        # Pass timeout configurations and S3 output settings from config
         docling_redis_url = settings.get_docling_redis_url
         docling_queue_name = settings.docling_rq_queue_name
+
+        # Get S3 configuration (optional)
+        s3_bucket = getattr(settings, 's3_bucket_name', None)
+        s3_region = getattr(settings, 's3_region', 'us-east-1')
+        s3_prefix = getattr(settings, 's3_docling_prefix', 'docling-results')
+
         client = DoclingRQClient(
             redis_url=docling_redis_url,
             queue_name=docling_queue_name,
             job_timeout_minutes=settings.docling_rq_job_timeout_minutes,
             polling_timeout_seconds=settings.docling_timeout_seconds,
             poll_initial_delay=settings.docling_poll_initial_delay,
-            poll_max_interval=settings.docling_poll_max_interval
+            poll_max_interval=settings.docling_poll_max_interval,
+            s3_bucket_name=s3_bucket,
+            s3_region=s3_region,
+            s3_docling_prefix=s3_prefix
         )
 
         logger.info(
@@ -115,6 +124,11 @@ async def process_with_docling(
             f"Polling={settings.docling_timeout_seconds}s, "
             f"Poll intervals={settings.docling_poll_initial_delay}s-{settings.docling_poll_max_interval}s"
         )
+
+        if s3_bucket:
+            logger.info(f"💾 [S3_CONFIG] Docling-serve will upload results to S3: s3://{s3_bucket}/{s3_prefix}/")
+        else:
+            logger.info(f"💾 [REDIS_CONFIG] Docling results will be stored in Redis")
 
         # Enqueue job and poll for result
         json_content, metadata = await client.process_document_async(
