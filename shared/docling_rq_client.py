@@ -62,7 +62,7 @@ class DoclingRQClient:
             # Define scratch_dir – match what your workers use!
             # Best: Use the same value as DOCLING_SERVE_SCRATCH_PATH env var on workers
             scratch_dir = "/data/scratchpad"  # or "/tmp/docling" or whatever is mounted/writable in worker container
-
+            task_id = str(uuid.uuid4())
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
                 task_data={
@@ -70,6 +70,7 @@ class DoclingRQClient:
                     "presigned_url": presigned_url,
                     "filename": filename,
                     "mime_type": mime_type,
+                    "task_id": task_id
                     # Add other fields if needed from task_data examples:
                     # "task_id": some_uuid (optional, RQ generates one),
                     # "options": {} for extra conversion flags
