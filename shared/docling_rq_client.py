@@ -93,6 +93,8 @@ class DoclingRQClient:
             }
 
             # Enqueue to docling_jobkit's RQ worker function
+            # Note: conversion_manager, orchestrator_config, and scratch_dir
+            # are automatically injected by CustomRQWorker.perform_job() into job.kwargs
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
                 task_data,
