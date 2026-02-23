@@ -283,27 +283,54 @@ class DoclingRQClient:
                                 # Value could be either: S3 key path OR actual JSON content
                                 redis_value = self.redis_conn.get(result)
                                 if redis_value:
-                                    redis_value_str = redis_value.decode('utf-8') if isinstance(redis_value, bytes) else redis_value
-                                    logger.info(f"✅ [RQ_REDIS_FETCH] Successfully fetched from Redis key: {result}")
-                                    logger.info(f"📋 [RQ_REDIS_VALUE] Value type check - starts with 'docling-results': {redis_value_str.startswith('docling-results')}")
-
-                                    # Check if value is an S3 key path (e.g., "docling-results/task_id/result.json")
-                                    # or actual JSON content (starts with '{' or '[')
-                                    if redis_value_str.startswith('docling-results/') or (not redis_value_str.startswith('{') and not redis_value_str.startswith('[')):
-                                        # This is an S3 key path stored in Redis
-                                        logger.info(f"📦 [S3_KEY_FROM_REDIS] S3 key found in Redis: {redis_value_str}")
-                                        markdown = redis_value_str  # Return the S3 key for caller to fetch
+                                    # Handle binary data - try multiple decodings
+                                    redis_value_str = None
+                                    if isinstance(redis_value, bytes):
+                                        # Try UTF-8 first
+                                        try:
+                                            redis_value_str = redis_value.decode('utf-8')
+                                            logger.info(f"✅ [RQ_REDIS_FETCH] Decoded as UTF-8")
+                                        except UnicodeDecodeError:
+                                            # Try latin-1 (can decode any byte sequence)
+                                            try:
+                                                redis_value_str = redis_value.decode('latin-1')
+                                                logger.info(f"✅ [RQ_REDIS_FETCH] Decoded as latin-1")
+                                            except Exception as e2:
+                                                logger.error(f"❌ [RQ_REDIS_FETCH] Failed all decodings: {e2}")
+                                                logger.debug(f"📊 [RQ_REDIS_FETCH] First 20 bytes: {redis_value[:20]}")
+                                                markdown = ""
+                                                metadata = {}
+                                                raise
                                     else:
-                                        # This is actual JSON content
-                                        logger.info(f"📄 [JSON_FROM_REDIS] Actual JSON content found in Redis")
-                                        markdown = redis_value_str
-                                    metadata = {}
+                                        redis_value_str = str(redis_value)
+
+                                    if redis_value_str:
+                                        logger.info(f"✅ [RQ_REDIS_FETCH] Successfully fetched from Redis key: {result}")
+                                        logger.info(f"📋 [RQ_REDIS_VALUE] Length: {len(redis_value_str)} chars, First 50: {redis_value_str[:50]}")
+
+                                        # Check if value is an S3 key path (e.g., "docling-results/task_id/result.json")
+                                        # or actual JSON content (starts with '{' or '[')
+                                        if redis_value_str.startswith('docling-results/'):
+                                            # This is an S3 key path stored in Redis
+                                            logger.info(f"📦 [S3_KEY_FROM_REDIS] S3 key found in Redis: {redis_value_str}")
+                                            markdown = redis_value_str  # Return the S3 key for caller to fetch
+                                        elif redis_value_str.startswith('{') or redis_value_str.startswith('['):
+                                            # This is actual JSON content
+                                            logger.info(f"📄 [JSON_FROM_REDIS] Actual JSON content found in Redis")
+                                            markdown = redis_value_str
+                                        else:
+                                            # Unknown format - log details for debugging
+                                            logger.warning(f"⚠️ [RQ_REDIS_FETCH] Unknown value format: {redis_value_str[:100]}")
+                                            markdown = redis_value_str
+                                        metadata = {}
                                 else:
                                     logger.error(f"❌ [RQ_REDIS_FETCH] Redis key {result} not found or expired")
                                     markdown = ""
                                     metadata = {}
                             except Exception as e:
                                 logger.error(f"❌ [RQ_REDIS_FETCH] Failed to fetch from Redis key {result}: {e}")
+                                import traceback
+                                logger.error(f"📊 [RQ_REDIS_FETCH] Traceback: {traceback.format_exc()}")
                                 markdown = ""
                                 metadata = {}
                         else:
