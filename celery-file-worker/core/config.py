@@ -58,11 +58,14 @@ class Settings(BaseSettings):
             )
         return self.docling_redis_url
 
-    # S3 Configuration for docling result storage
-    # Docling-serve will upload results directly to S3 using these settings
-    s3_bucket_name: str  # S3_BUCKET_NAME from Railway (required - docling output bucket)
-    s3_region: str = "us-east-1"  # AWS region (default us-east-1)
-    s3_docling_prefix: str = "docling-results"  # S3 key prefix for docling outputs
+    # Railway Storage Configuration (S3-compatible) for docling result storage
+    # Docling-serve will upload results directly to Railway Storage using these settings
+    railway_bucket_name: Optional[str] = None  # RAILWAY_BUCKET_NAME (bucket for docling outputs)
+    railway_region: Optional[str] = None  # RAILWAY_REGION (region for storage)
+    railway_storage_url: Optional[str] = None  # RAILWAY_STORAGE_URL (S3-compatible endpoint)
+    railway_storage_access_key: Optional[str] = None  # RAILWAY_STORAGE_ACCESS_KEY (for auth)
+    railway_storage_secret_key: Optional[str] = None  # RAILWAY_STORAGE_SECRET_KEY (for auth)
+    s3_docling_prefix: str = "docling-results"  # S3 key prefix for docling outputs (optional)
 
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None

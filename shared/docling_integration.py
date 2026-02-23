@@ -97,13 +97,16 @@ async def process_with_docling(
         )
 
         # Initialize RQ client with docling-specific Redis URL (DB 2) and queue name
-        # Pass timeout configurations and S3 output settings from config
+        # Pass timeout configurations and Railway Storage output settings from config
         docling_redis_url = settings.get_docling_redis_url
         docling_queue_name = settings.docling_rq_queue_name
 
-        # Get S3 configuration (optional)
-        s3_bucket = getattr(settings, 's3_bucket_name', None)
-        s3_region = getattr(settings, 's3_region', 'us-east-1')
+        # Get Railway Storage configuration (optional)
+        railway_bucket = getattr(settings, 'railway_bucket_name', None)
+        railway_region = getattr(settings, 'railway_region', None)
+        railway_storage_url = getattr(settings, 'railway_storage_url', None)
+        railway_access_key = getattr(settings, 'railway_storage_access_key', None)
+        railway_secret_key = getattr(settings, 'railway_storage_secret_key', None)
         s3_prefix = getattr(settings, 's3_docling_prefix', 'docling-results')
 
         client = DoclingRQClient(
@@ -113,8 +116,11 @@ async def process_with_docling(
             polling_timeout_seconds=settings.docling_timeout_seconds,
             poll_initial_delay=settings.docling_poll_initial_delay,
             poll_max_interval=settings.docling_poll_max_interval,
-            s3_bucket_name=s3_bucket,
-            s3_region=s3_region,
+            railway_bucket_name=railway_bucket,
+            railway_region=railway_region,
+            railway_storage_url=railway_storage_url,
+            railway_storage_access_key=railway_access_key,
+            railway_storage_secret_key=railway_secret_key,
             s3_docling_prefix=s3_prefix
         )
 
@@ -125,8 +131,8 @@ async def process_with_docling(
             f"Poll intervals={settings.docling_poll_initial_delay}s-{settings.docling_poll_max_interval}s"
         )
 
-        if s3_bucket:
-            logger.info(f"💾 [S3_CONFIG] Docling-serve will upload results to S3: s3://{s3_bucket}/{s3_prefix}/")
+        if railway_bucket and railway_storage_url:
+            logger.info(f"💾 [RAILWAY_STORAGE_CONFIG] Docling-serve will upload results to Railway Storage: {railway_bucket}/{s3_prefix}/")
         else:
             logger.info(f"💾 [REDIS_CONFIG] Docling results will be stored in Redis")
 
