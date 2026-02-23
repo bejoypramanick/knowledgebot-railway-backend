@@ -8,36 +8,10 @@ import json
 import redis
 from typing import Dict, Any, Optional, List
 from datetime import datetime
-from urllib.parse import urlparse, urlunparse
+from redactable import redact
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("redis_message_queue", "messaging")
-
-
-def _redact_redis_url(redis_url: str) -> str:
-    """Redact sensitive info (password) from Redis URL for logging."""
-    if not redis_url:
-        return redis_url
-    try:
-        parsed = urlparse(redis_url)
-        # Redact password if present
-        if parsed.password:
-            netloc = f"{parsed.username}:***@{parsed.hostname}"
-            if parsed.port:
-                netloc += f":{parsed.port}"
-            redacted = urlunparse((
-                parsed.scheme,
-                netloc,
-                parsed.path,
-                parsed.params,
-                parsed.query,
-                parsed.fragment
-            ))
-            return redacted
-        return redis_url
-    except Exception:
-        # If parsing fails, return original
-        return redis_url
 
 
 class RedisMessageQueue:
@@ -72,7 +46,7 @@ class RedisMessageQueue:
         try:
             self._file_connection = redis.from_url(self.file_redis_url)
             self._file_connection.ping()
-            logger.info(f"✅ File Redis connection initialized: {_redact_redis_url(self.file_redis_url)}")
+            logger.info(f"✅ File Redis connection initialized: {redact(self.file_redis_url)}")
         except Exception as e:
             logger.error(f"❌ Failed to initialize file Redis connection: {e}")
             self._file_connection = None
@@ -80,7 +54,7 @@ class RedisMessageQueue:
         try:
             self._web_connection = redis.from_url(self.web_redis_url)
             self._web_connection.ping()
-            logger.info(f"✅ Web Redis connection initialized: {_redact_redis_url(self.web_redis_url)}")
+            logger.info(f"✅ Web Redis connection initialized: {redact(self.web_redis_url)}")
         except Exception as e:
             logger.error(f"❌ Failed to initialize web Redis connection: {e}")
             self._web_connection = None

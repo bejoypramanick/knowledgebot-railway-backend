@@ -2,38 +2,14 @@
 import asyncio
 import time
 from typing import Tuple
-from urllib.parse import urlparse, urlunparse
 
 from redis import Redis
 from rq import Queue
 from rq.job import Job
+from redactable import redact
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("docling_rq_client", "docling")
-
-
-def _redact_redis_url(redis_url: str) -> str:
-    """Redact sensitive info (password) from Redis URL for logging."""
-    try:
-        parsed = urlparse(redis_url)
-        # Redact password if present
-        if parsed.password:
-            netloc = f"{parsed.username}:***@{parsed.hostname}"
-            if parsed.port:
-                netloc += f":{parsed.port}"
-            redacted = urlunparse((
-                parsed.scheme,
-                netloc,
-                parsed.path,
-                parsed.params,
-                parsed.query,
-                parsed.fragment
-            ))
-            return redacted
-        return redis_url
-    except Exception:
-        # If parsing fails, return original (shouldn't happen)
-        return redis_url
 
 
 class DoclingRQClient:
@@ -48,7 +24,7 @@ class DoclingRQClient:
         """
         self.redis_conn = Redis.from_url(redis_url)
         self.queue = Queue('docling', connection=self.redis_conn)
-        logger.info(f"🔌 [RQ_CLIENT] Initialized with Redis URL: {_redact_redis_url(redis_url)}")
+        logger.info(f"🔌 [RQ_CLIENT] Initialized with Redis URL: {redact(redis_url)}")
 
     async def enqueue_document(
         self,
