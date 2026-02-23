@@ -137,26 +137,28 @@ class DoclingRQClient:
             scratch_dir = "/data/scratchpad"
             task_id = str(uuid.uuid4())
 
-            # Build task data according to docling_jobkit Task schema
-            # Note: Docling-serve processes documents and returns results in the format specified by target
-            # - If target is S3: Returns S3 key path (stored in Redis with TTL)
-            # - If no target: Returns Document as JSON (stored in Redis)
+            # Build task data according to docling_jobkit RQ Task schema
+            # Note: In docling-serve v1.x+, parameters are split between top-level and options
+            # - Top level: to_formats, return_as_file, target
+            # - options: conversion parameters (do_ocr, do_table_structure, include_images)
             task_data = {
                 "task_id": task_id,
                 "task_type": "convert",  # Lowercase enum value
                 "sources": [
                     {
+                        "kind": "http",  # Explicit source type
                         "url": presigned_url,
-                        "headers": {}  # HttpSource expects url and optional headers
+                        "headers": {}  # Optional headers
                     }
                 ],
-                "convert_options": {
-                    "do_ocr": False,  # TODO: Enable after models are cached
-                    "do_table_structure": True
-                },
+                # Top-level export parameters
+                "to_formats": ["json"],      # Only export JSON (prevents ZIP wrapping)
+                "return_as_file": False,     # Return raw JSON, not wrapped in ZIP
+                # Conversion options
                 "options": {
-                    "to_formats": ["json"],  # Only export JSON (prevents ZIP wrapping)
-                    "return_as_file": False  # Return raw JSON, not wrapped in ZIP
+                    "do_ocr": False,           # TODO: Enable after models are cached
+                    "do_table_structure": True,
+                    "include_images": False    # CRITICAL: Prevent ZIP bundling even with single format
                 }
             }
 
