@@ -168,14 +168,12 @@ class DoclingRQClient:
             if has_all_s3_creds:
                 task_data["target"] = {
                     "kind": "s3",
-                    "s3": {
-                        "bucket": self.railway_bucket_name,
-                        "key_prefix": f"{self.s3_docling_prefix}/{task_id}/",
-                        "region": self.railway_region,
-                        "endpoint": self.railway_storage_url,  # NOTE: "endpoint" not "endpoint_url"
-                        "access_key": self.railway_storage_access_key,  # NOTE: "access_key" not "access_key_id"
-                        "secret_key": self.railway_storage_secret_key  # NOTE: "secret_key" not "secret_access_key"
-                    }
+                    "bucket": self.railway_bucket_name,
+                    "key_prefix": f"{self.s3_docling_prefix}/{task_id}/",
+                    "region": self.railway_region,
+                    "endpoint": self.railway_storage_url,
+                    "access_key": self.railway_storage_access_key,
+                    "secret_key": self.railway_storage_secret_key
                 }
                 logger.info(f"📍 [RAILWAY_STORAGE_TARGET] Task {task_id} will output to: {self.railway_bucket_name}/{self.s3_docling_prefix}/{task_id}/")
             else:
