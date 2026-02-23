@@ -412,71 +412,114 @@ async def process_file_content(
                 if markdown_content:
                     # Capture Docling metadata
                     processed_by_docling = True
+
+                    # Extract all docling metadata fields
                     docling_processing_time_ms = docling_metadata.get('processing_time_ms', 0)
                     docling_images_extracted = docling_metadata.get('images_extracted', 0)
                     docling_images_with_ocr = docling_metadata.get('images_with_ocr', 0)
-                    
-                    logger.info(f"📊 [DOCLING_METADATA] Processing time: {docling_processing_time_ms}ms, "
-                              f"Images: {docling_images_extracted}, OCR: {docling_images_with_ocr}")
-                    
-                    # Log the full content from Docling service
-                    logger.info(f"📝 [DOCLING_CONTENT] Full content from Docling service:")
-                    logger.info(f"--- START CONTENT ---")
+                    content_format = docling_metadata.get('content_format', 'markdown')
+
+                    # Calculate content statistics
+                    content_length = len(markdown_content)
+                    content_lines = len(markdown_content.splitlines())
+                    content_words = len(markdown_content.split())
+
+                    # Log comprehensive Docling response summary
+                    logger.info(
+                        f"✅ [DOCLING_COMPLETE_RESPONSE] Docling service response received - "
+                        f"Format: {content_format}, "
+                        f"Content: {content_length} chars / {content_lines} lines / {content_words} words, "
+                        f"Processing: {docling_processing_time_ms}ms, "
+                        f"Images: {docling_images_extracted} extracted / {docling_images_with_ocr} with OCR"
+                    )
+
+                    # Log full response from Docling service with all metadata
+                    logger.info(f"📋 [DOCLING_FULL_RESPONSE] Complete Docling service response:")
+                    logger.info(f"    Content Format: {content_format}")
+                    logger.info(f"    Content Length: {content_length} characters")
+                    logger.info(f"    Content Lines: {content_lines}")
+                    logger.info(f"    Content Words: {content_words}")
+                    logger.info(f"    Processing Time: {docling_processing_time_ms} ms")
+                    logger.info(f"    Images Extracted: {docling_images_extracted}")
+                    logger.info(f"    Images with OCR: {docling_images_with_ocr}")
+                    logger.info(f"    Additional Metadata Keys: {list(docling_metadata.keys())}")
+
+                    # Log full content from Docling service (complete markdown/json before any processing)
+                    logger.info(f"📝 [DOCLING_CONTENT_FULL] Full content from Docling service (before Gemini upload):")
+                    logger.info(f"═══════════════════════════════════ START DOCLING CONTENT ═══════════════════════════════════")
                     logger.info(f"{markdown_content}")
-                    logger.info(f"--- END CONTENT ---")
-                    logger.info(f"📊 [DOCLING_STATS] Content length: {len(markdown_content)} characters, {len(markdown_content.split())} words")
-                    
+                    logger.info(f"═══════════════════════════════════ END DOCLING CONTENT ═══════════════════════════════════")
+
                     # Check content format and handle accordingly
                     content_for_upload = markdown_content
-                    logger.info(f"📋 [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content_for_upload)} chars")
+
+                    # Log the content being sent to Gemini FileStore
+                    logger.info(f"📤 [DOCLING_TO_GEMINI] Sending Docling response to Gemini FileStore:")
+                    logger.info(f"    Content Format: {content_format}")
+                    logger.info(f"    Total Size: {len(content_for_upload)} characters")
+                    logger.info(f"    File will be created as: {original_filename.rsplit('.', 1)[0]}.{'json' if content_format == 'json' else 'md'}")
                     
-                    # Log complete markdown content before sending to Gemini FileStore
-                    logger.info(f"📝 [COMPLETE_MARKDOWN] Full markdown content before Gemini FileStore upload:")
-                    logger.info(f"=== START COMPLETE MARKDOWN ===")
-                    logger.info(f"{content_for_upload}")
-                    logger.info(f"=== END COMPLETE MARKDOWN ===")
-                    logger.info(f"📊 [MARKDOWN_STATS] Total characters: {len(content_for_upload)}")
-                    logger.info(f"📊 [MARKDOWN_STATS] Total lines: {len(content_for_upload.splitlines())}")
-                    logger.info(f"📊 [MARKDOWN_STATS] Total words: {len(content_for_upload.split())}")
-                    
-                    # Create temporary file with appropriate content
-                    if docling_metadata and docling_metadata.get('content_format') == 'json':
+                    # Create temporary file with appropriate content from Docling response
+                    is_json_format = docling_metadata and docling_metadata.get('content_format') == 'json'
+                    if is_json_format:
                         tmp_path = create_json_temp_file(content_for_upload)
                     else:
                         tmp_path = create_markdown_temp_file(content_for_upload)
-                    
-                    # Log the content of the temporary file before upload
-                    logger.info(f"📁 [TEMP_FILE] Temporary file created: {tmp_path}")
-                    logger.info(f"📁 [TEMP_FILE] File size: {os.path.getsize(tmp_path)} bytes")
-                    logger.info(f"📁 [TEMP_FILE] Content preview before FileStore upload:")
-                    logger.info(f"=== START TEMP FILE CONTENT ===")
-                    
+
+                    # Log temporary file creation and verify content
+                    temp_file_size = os.path.getsize(tmp_path)
+                    logger.info(f"📁 [TEMP_FILE_CREATED] Temporary file created from Docling response:")
+                    logger.info(f"    File Path: {tmp_path}")
+                    logger.info(f"    File Size: {temp_file_size} bytes")
+                    logger.info(f"    Format: {'JSON' if is_json_format else 'Markdown'}")
+
+                    # Verify and log the actual content in the temporary file
                     try:
                         with open(tmp_path, 'r', encoding='utf-8') as f:
                             temp_content = f.read()
-                            logger.info(f"{temp_content}")
-                            logger.info(f"=== END TEMP FILE CONTENT ===")
-                            logger.info(f"📊 [TEMP_FILE] Total characters: {len(temp_content)}")
-                            logger.info(f"📊 [TEMP_FILE] Total lines: {len(temp_content.splitlines())}")
+                            temp_lines = len(temp_content.splitlines())
+                            temp_words = len(temp_content.split())
+
+                            logger.info(f"📝 [TEMP_FILE_CONTENT_VERIFIED] Content written to temporary file:")
+                            logger.info(f"    Characters: {len(temp_content)}")
+                            logger.info(f"    Lines: {temp_lines}")
+                            logger.info(f"    Words: {temp_words}")
+
+                            if len(temp_content) < 10000:
+                                # For smaller files, log the complete content
+                                logger.info(f"📋 [TEMP_FILE_FULL_CONTENT] Complete file content (< 10KB):")
+                                logger.info(f"┌─────────────────────────────────────────────────────────────────┐")
+                                logger.info(f"{temp_content}")
+                                logger.info(f"└─────────────────────────────────────────────────────────────────┘")
+                            else:
+                                # For larger files, log preview
+                                preview_length = 2000
+                                logger.info(f"📋 [TEMP_FILE_PREVIEW] File content preview (first 2000 chars of {len(temp_content)}):")
+                                logger.info(f"┌─────────────────────────────────────────────────────────────────┐")
+                                logger.info(f"{temp_content[:preview_length]}...")
+                                logger.info(f"└─────────────────────────────────────────────────────────────────┘")
                     except Exception as e:
-                        logger.error(f"❌ [TEMP_FILE] Could not read temp file content: {e}")
-                        logger.info(f"=== END TEMP FILE CONTENT (READ FAILED) ===")
+                        logger.error(f"❌ [TEMP_FILE_ERROR] Could not verify temporary file content: {e}")
                     
                     # Switch to processed artifact
                     original_tmp_path = tmp_path
-                    
-                    # Update filename and MIME type based on content format
-                    if docling_metadata and docling_metadata.get('content_format') == 'json':
+
+                    # Update filename and MIME type based on Docling response content format
+                    is_json_response = docling_metadata and docling_metadata.get('content_format') == 'json'
+                    if is_json_response:
                         original_filename = original_filename.rsplit('.', 1)[0] + '.json'
                         detected_mime_type = 'application/json'
-                        logger.info(f"📋 [JSON_FORMAT] Using JSON format for Gemini FileStore")
+                        logger.info(f"📋 [CONTENT_FORMAT_CONVERSION] Docling responded with JSON format - "
+                                  f"File will be uploaded to Gemini FileStore as: {original_filename} (MIME: {detected_mime_type})")
                     else:
                         original_filename = original_filename.rsplit('.', 1)[0] + '.md'
                         detected_mime_type = 'text/markdown'
-                        logger.info(f"📝 [MARKDOWN_FORMAT] Using markdown format for Gemini FileStore")
-                    
+                        logger.info(f"📝 [CONTENT_FORMAT_CONVERSION] Docling responded with Markdown format - "
+                                  f"File will be uploaded to Gemini FileStore as: {original_filename} (MIME: {detected_mime_type})")
+
                     processed_successfully = True
-                    logger.info(f"✅ [DOCLING] Converted {original_filename} to markdown")
+                    logger.info(f"✅ [DOCLING_PROCESSING_COMPLETE] Successfully processed and converted: {original_filename} "
+                              f"(Original: {original_filename.rsplit('.', 1)[0]}.*)")
                 else:
                     error_msg = docling_metadata.get("error", "Docling processing failed")
                     logger.error(f"❌ [DOCLING] Processing failed for {original_filename}: {error_msg}")
@@ -594,15 +637,17 @@ async def process_file_content(
                     final_state = "ACTIVE"
                     gemini_processed_at = datetime.utcnow()
 
-                    # Log the complete Gemini FileStore response
-                    logger.info(f"📦 [GEMINI_RESPONSE] Full FileStore upload response:")
-                    logger.info(f"--- START GEMINI RESPONSE ---")
+                    # Log complete Gemini FileStore response after successful upload
+                    logger.info(f"📦 [GEMINI_UPLOAD_RESPONSE] Complete FileStore upload response received:")
+                    logger.info(f"    Document Name: {document_name}")
+                    logger.info(f"    Final State: {final_state}")
+                    logger.info(f"    Processed At: {gemini_processed_at.isoformat()}")
+                    logger.info(f"    Operation Type: {type(operation).__name__}")
+                    logger.info(f"    Response Details: {operation.response}")
+                    logger.info(f"📋 [GEMINI_UPLOAD_FULL_RESPONSE] Full operation response:")
+                    logger.info(f"┌─────────────────────────────────────────────────────────────────┐")
                     logger.info(f"Operation: {operation}")
-                    logger.info(f"Operation Response: {operation.response}")
-                    logger.info(f"Document Name: {document_name}")
-                    logger.info(f"Final State: {final_state}")
-                    logger.info(f"Processed At: {gemini_processed_at}")
-                    logger.info(f"--- END GEMINI RESPONSE ---")
+                    logger.info(f"└─────────────────────────────────────────────────────────────────┘")
                     
                     # Create a placeholder file object with the document name
                     class FileSearchDocument:
