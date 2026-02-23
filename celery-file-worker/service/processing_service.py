@@ -443,58 +443,10 @@ async def process_file_content(
                     logger.info(f"    Images with OCR: {docling_images_with_ocr}")
                     logger.info(f"    Additional Metadata Keys: {list(docling_metadata.keys())}")
 
-                    # Log extracted tables from Docling JSON - all rows, columns, and data
+                    # Log the raw JSON content - top-level keys + first 5000 chars
                     logger.info(f"📝 [DOCLING_CONTENT] JSON content length: {len(json_content)} chars")
-                    try:
-                        import json as json_lib
-                        parsed = json_lib.loads(json_content) if isinstance(json_content, str) and json_content.strip().startswith(('{', '[')) else None
-                        if parsed and isinstance(parsed, dict):
-                            logger.info(f"📊 [DOCLING_STRUCTURE] Top-level keys: {list(parsed.keys())}")
-
-                            tables_found = 0
-
-                            # Docling v2 JSON format: "tables" key contains table objects
-                            # Each table has "data" with grid structure
-                            if 'tables' in parsed:
-                                for tbl_idx, table in enumerate(parsed['tables']):
-                                    tables_found += 1
-                                    logger.info(f"═══════════════════ TABLE {tables_found} ═══════════════════")
-                                    logger.info(f"  Table keys: {list(table.keys()) if isinstance(table, dict) else type(table)}")
-                                    tbl_str = json_lib.dumps(table, indent=2, ensure_ascii=False)
-                                    # Log complete table - split into chunks if very large
-                                    for chunk_start in range(0, len(tbl_str), 10000):
-                                        logger.info(tbl_str[chunk_start:chunk_start + 10000])
-                                    logger.info(f"═══════════════════ END TABLE {tables_found} ═══════════════════")
-
-                            # Also check main-text / body / content for inline tables
-                            for key in ['main-text', 'body', 'content', 'page_content', 'furniture']:
-                                items = parsed.get(key, [])
-                                if not isinstance(items, list):
-                                    continue
-                                for item in items:
-                                    if not isinstance(item, dict):
-                                        continue
-                                    label = str(item.get('label', item.get('type', item.get('category', '')))).lower()
-                                    if 'table' in label:
-                                        tables_found += 1
-                                        logger.info(f"═══════════════════ TABLE {tables_found} (from '{key}') ═══════════════════")
-                                        tbl_str = json_lib.dumps(item, indent=2, ensure_ascii=False)
-                                        for chunk_start in range(0, len(tbl_str), 10000):
-                                            logger.info(tbl_str[chunk_start:chunk_start + 10000])
-                                        logger.info(f"═══════════════════ END TABLE {tables_found} ═══════════════════")
-
-                            if tables_found == 0:
-                                logger.info(f"📊 [DOCLING_TABLES] No tables found in known keys. Logging first 3000 chars:")
-                                logger.info(f"{json_content[:3000]}")
-                            else:
-                                logger.info(f"📊 [DOCLING_TABLES] Total tables extracted: {tables_found}")
-                        else:
-                            # Not valid JSON - log preview
-                            logger.warning(f"⚠️ [DOCLING_CONTENT] Content is not valid JSON")
-                            logger.info(f"Preview (first 500 chars): {repr(json_content[:500])}")
-                    except Exception as parse_err:
-                        logger.warning(f"⚠️ [DOCLING_PARSE] Could not parse JSON for table extraction: {parse_err}")
-                        logger.info(f"Preview (first 500 chars): {repr(json_content[:500])}")
+                    logger.info(f"📝 [DOCLING_CONTENT] First 5000 chars of raw JSON:")
+                    logger.info(f"{json_content[:5000]}")
 
                     # Use JSON content from Docling service
                     content_for_upload = json_content
