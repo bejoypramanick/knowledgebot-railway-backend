@@ -154,7 +154,7 @@ class DoclingRQClient:
                 "to_formats": ["json"],      # Request JSON format
                 "return_as_file": False,     # Return raw result, not file
                 # Pipeline options for Docling Engine
-                "options": {
+                "pipeline_options": {
                         "do_ocr": False,                    # TODO: Enable after models are cached
                         "do_table_structure": True,
                         "include_images": False             # CRITICAL: Prevents ZIP bundling
