@@ -273,12 +273,36 @@ class DoclingRQClient:
                     if isinstance(result, dict):
                         markdown = result.get('markdown', '')
                         metadata = result.get('metadata', {})
+                        logger.info(f"📝 [RQ_RESULT] Result is dict - using markdown field")
+                    elif isinstance(result, str):
+                        # Check if result is a Redis key reference (e.g., "docling:results:...")
+                        if result.startswith('docling:results:'):
+                            logger.info(f"📝 [RQ_RESULT] Result is Redis key reference: {result}")
+                            try:
+                                # Fetch the actual content from Redis using the key
+                                redis_content = self.redis_conn.get(result)
+                                if redis_content:
+                                    markdown = redis_content.decode('utf-8') if isinstance(redis_content, bytes) else redis_content
+                                    logger.info(f"✅ [RQ_REDIS_FETCH] Successfully fetched content from Redis key: {result}")
+                                else:
+                                    logger.error(f"❌ [RQ_REDIS_FETCH] Redis key {result} not found or expired")
+                                    markdown = ""
+                                metadata = {}
+                            except Exception as e:
+                                logger.error(f"❌ [RQ_REDIS_FETCH] Failed to fetch from Redis key {result}: {e}")
+                                markdown = ""
+                                metadata = {}
+                        else:
+                            # Direct JSON content as string
+                            logger.info(f"📝 [RQ_RESULT] Result is direct JSON string")
+                            markdown = result
+                            metadata = {}
                     else:
                         logger.warning(f"⚠️ [RQ_RESULT] Unexpected result type: {type(result)}")
                         markdown = str(result)
                         metadata = {}
 
-                    logger.info(f"📝 [RQ_RESULT] Markdown length: {len(markdown)} chars")
+                    logger.info(f"📝 [RQ_RESULT] Content length: {len(markdown)} chars")
                     logger.info(f"📊 [RQ_METADATA] Keys: {list(metadata.keys())}")
 
                     return markdown, metadata
