@@ -1,8 +1,9 @@
 import hashlib
 import os
-import logging
 
-logger = logging.getLogger(__name__)
+from shared.otel_logger import get_otel_logger
+
+logger = get_otel_logger("files_util", "celery-file-worker")
 
 def calculate_sha256(file_path: str) -> str:
     """Calculate SHA256 hash of a file."""
