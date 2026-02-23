@@ -1,7 +1,7 @@
 """HTML processing utilities using trafilatura."""
-import logging
 import os
 from typing import Optional, Tuple, Dict, Any
+from shared.otel_logger import get_otel_logger
 
 try:
     import trafilatura
@@ -10,7 +10,7 @@ except ImportError:
     trafilatura = None
     BeautifulSoup = None
 
-logger = logging.getLogger("shared")
+logger = get_otel_logger("html_processor", "processing")
 
 def extract_content_from_html(file_path: str = None, html_content: str = None, output_format: str = "markdown", remove_ads: bool = False) -> Tuple[Optional[str], Dict[str, Any]]:
     """

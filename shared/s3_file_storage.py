@@ -8,9 +8,9 @@ import uuid
 import boto3
 from typing import Optional, Tuple
 from botocore.exceptions import ClientError
-import logging
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger("s3_file_storage")
+logger = get_otel_logger("s3_file_storage", "storage")
 
 
 class S3FileStorage:

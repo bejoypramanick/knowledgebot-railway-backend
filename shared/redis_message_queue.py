@@ -5,12 +5,12 @@ Handles task dispatch and result reporting
 """
 import os
 import json
-import logging
 import redis
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger("redis_message_queue")
+logger = get_otel_logger("redis_message_queue", "messaging")
 
 
 class RedisMessageQueue:

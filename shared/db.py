@@ -1,7 +1,6 @@
 """Unified database utilities for PostgreSQL connections across all services."""
 import asyncio
 import os
-import logging
 import time
 from contextlib import asynccontextmanager
 from typing import Optional, Any
@@ -9,8 +8,9 @@ from typing import Optional, Any
 import asyncpg
 from tenacity import retry, stop_after_attempt, wait_exponential
 from shared.correlation_id import get_correlation_id
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger("db", "database")
 
 class DatabaseManager:
     """Robust database connection pool manager with health checks and auto-recovery."""

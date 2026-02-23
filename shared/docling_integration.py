@@ -1,12 +1,13 @@
 """Docling service integration for document processing."""
 import asyncio
-import logging
 import os
 import tempfile
 import time
 from typing import Optional, Tuple
 
-logger = logging.getLogger("docling_integration")
+from shared.otel_logger import get_otel_logger
+
+logger = get_otel_logger("docling_integration", "docling")
 
 # Supported file types for docling processing
 SUPPORTED_FILE_TYPES = {
@@ -140,8 +141,8 @@ async def should_use_docling_for_file(
 
     Checks:
     1. DOCLING_ENABLED environment variable
-    2. Docling service URL is configured
-    3. File is supported by docling
+    2. File is supported by docling
+    3. File size is within limits
 
     Args:
         filename: Original filename
@@ -155,10 +156,7 @@ async def should_use_docling_for_file(
 
     # Check if docling is enabled
     if not settings.docling_enabled:
-        return False
-
-    # Check if docling service URL is configured
-    if not settings.docling_service_url:
+        logger.info(f"🔍 [DOCLING] Docling disabled in settings, skipping for {filename}")
         return False
 
     # Get file extension
@@ -166,16 +164,20 @@ async def should_use_docling_for_file(
 
     # Check if file type should skip docling
     if ext in SKIP_DOCLING_TYPES:
+        logger.info(f"🔍 [DOCLING] File type {ext} marked to skip docling for {filename}")
         return False
 
     # Check if file type is supported
     if ext not in SUPPORTED_FILE_TYPES:
+        logger.info(f"🔍 [DOCLING] File type {ext} not supported by docling for {filename}")
         return False
 
     # Check file size
     if file_size > MAX_FILE_SIZE_BYTES:
+        logger.warning(f"⚠️ [DOCLING] File size {file_size} exceeds limit {MAX_FILE_SIZE_BYTES} for {filename}")
         return False
 
+    logger.info(f"✅ [DOCLING] File {filename} (ext: {ext}, size: {file_size}) will use docling")
     return True
 
 

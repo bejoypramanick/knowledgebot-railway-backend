@@ -1,14 +1,14 @@
 """Redis Queue client for docling-serve integration."""
 import asyncio
-import logging
 import time
 from typing import Tuple
 
 from redis import Redis
 from rq import Queue
 from rq.job import Job
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger("docling_rq_client")
+logger = get_otel_logger("docling_rq_client", "docling")
 
 
 class DoclingRQClient:

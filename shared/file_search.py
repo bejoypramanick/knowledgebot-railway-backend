@@ -3,10 +3,10 @@ Shared FileSearch store utilities for all services.
 Simple lookup of FileSearch stores by display_name.
 """
 from typing import Optional
-import logging
 from google.genai import Client
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger("file_search", "gemini")
 
 
 def get_file_search_store_by_display_name(
