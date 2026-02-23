@@ -4,10 +4,36 @@ Used to dispatch tasks to workers without importing worker code directly.
 """
 import os
 from celery import Celery
-from redactable import redact
+from urllib.parse import urlparse, urlunparse
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("celery_dispatcher", "knowledgebase-ingestion")
+
+
+def _redact_redis_url(redis_url: str) -> str:
+    """Redact sensitive info (password) from Redis URL for logging."""
+    if not redis_url:
+        return redis_url
+    try:
+        parsed = urlparse(redis_url)
+        # Redact password if present
+        if parsed.password:
+            netloc = f"{parsed.username}:***@{parsed.hostname}"
+            if parsed.port:
+                netloc += f":{parsed.port}"
+            redacted = urlunparse((
+                parsed.scheme,
+                netloc,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment
+            ))
+            return redacted
+        return redis_url
+    except Exception:
+        # If parsing fails, return original
+        return redis_url
 
 
 # File processing: Redis DB 0 (EXPLICIT - never falls back to REDIS_URL)
@@ -28,8 +54,8 @@ logger.info("=" * 80)
 logger.info(f"🔑 [ENV_VAR] FILE_REDIS_URL: {'SET' if file_redis_url else 'NOT SET'}")
 logger.info(f"🔑 [ENV_VAR] WEB_REDIS_URL: {'SET' if web_redis_url else 'NOT SET'}")
 logger.info(f"🔑 [ENV_VAR] REDIS_URL: {'SET' if os.getenv('REDIS_URL') else 'NOT SET'}")
-logger.info(f"📍 [FILE_REDIS_RESOLVED] URL: {redact(file_redis_url)}")
-logger.info(f"📍 [WEB_REDIS_RESOLVED] URL: {redact(web_redis_url)}")
+logger.info(f"📍 [FILE_REDIS_RESOLVED] URL: {_redact_redis_url(file_redis_url)}")
+logger.info(f"📍 [WEB_REDIS_RESOLVED] URL: {_redact_redis_url(web_redis_url)}")
 
 # Dispatcher app for file processing tasks (DB 0)
 logger.info("🔧 [FILE_CELERY] Creating file_celery dispatcher...")
