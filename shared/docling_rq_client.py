@@ -79,7 +79,7 @@ class DoclingRQClient:
             # Build task data according to docling_jobkit Task schema
             task_data = {
                 "task_id": task_id,
-                "task_type": "CONVERT",  # Must be uppercase enum string
+                "task_type": "convert",  # Lowercase enum value
                 "sources": [
                     {
                         "url": presigned_url,
