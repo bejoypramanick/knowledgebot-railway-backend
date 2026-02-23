@@ -79,7 +79,7 @@ class DoclingRQClient:
             # Build task data according to docling_jobkit Task schema
             task_data = {
                 "task_id": task_id,
-                "task_type": "convert",  # Must be uppercase enum string
+                "task_type": "CONVERT",  # Must be uppercase enum string
                 "sources": [
                     {
                         "url": presigned_url,
@@ -87,7 +87,7 @@ class DoclingRQClient:
                     }
                 ],
                 "convert_options": {
-                    "do_ocr": True,
+                    "do_ocr": False,  # TODO: Enable after models are cached
                     "do_table_structure": True
                     # Other options have defaults and are optional
                 }
