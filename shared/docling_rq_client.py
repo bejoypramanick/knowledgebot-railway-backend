@@ -58,38 +58,57 @@ class DoclingRQClient:
         filename: str,
         mime_type: str
     ) -> str:
+        """
+        Enqueue a document conversion job to the docling RQ queue.
+
+        Args:
+            presigned_url: Presigned S3 URL for direct download by docling worker
+            filename: Original filename
+            mime_type: MIME type of the file
+
+        Returns:
+            job_id: RQ job ID for polling results
+
+        Raises:
+            Exception: If enqueuing fails
+        """
         try:
-            scratch_dir = "/data/scratchpad"   # confirm this matches worker mount
             task_id = str(uuid.uuid4())
+
+            # Build task data according to docling_jobkit Task schema
             task_data = {
-                "task_type": "convert",           # required – tells worker what to do
-                "presigned_url": presigned_url,
-                "task_id":task_id,
-                "filename": filename,
-                "mime_type": mime_type,
-                "options": {
+                "task_id": task_id,
+                "task_type": "CONVERT",  # Must be uppercase enum string
+                "sources": [
+                    {
+                        "url": presigned_url,
+                        "headers": {}  # HttpSource expects url and optional headers
+                    }
+                ],
+                "convert_options": {
                     "do_ocr": True,
-                    "do_table_structure": True,
-                    # add more if needed, e.g.:
-                    # "do_picture_description": False,
-                    # "pipeline": "standard",
-                },
-                # optional extras the worker might use:
-                # "scratch_dir": scratch_dir,     # sometimes passed here instead
+                    "do_table_structure": True
+                    # Other options have defaults and are optional
+                }
             }
+
+            # Enqueue to docling_jobkit's RQ worker function
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
                 task_data,
-                scratch_dir=scratch_dir,
                 job_timeout='30m',
-                result_ttl=14400
+                result_ttl=14400  # 4 hours
             )
+
+            logger.info(f"✅ [RQ_ENQUEUE] Job enqueued: {job.id} for {filename}")
+            logger.info(f"   Task ID: {task_id}")
+            logger.info(f"   Presigned URL: {presigned_url[:50]}...")
+            logger.info(f"   MIME type: {mime_type}")
 
             return job.id
 
-        except Exception as exc:
-            # log properly in production
-            print(f"Enqueue failed: {exc}")
+        except Exception as e:
+            logger.error(f"❌ [RQ_ENQUEUE] Failed to enqueue job for {filename}: {e}")
             raise
 
     async def poll_job_result(
