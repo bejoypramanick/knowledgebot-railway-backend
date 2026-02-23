@@ -443,11 +443,31 @@ async def process_file_content(
                     logger.info(f"    Images with OCR: {docling_images_with_ocr}")
                     logger.info(f"    Additional Metadata Keys: {list(docling_metadata.keys())}")
 
-                    # Log full content from Docling service (complete JSON before any processing)
-                    logger.info(f"📝 [DOCLING_CONTENT_FULL] Full JSON content from Docling service (before Gemini upload):")
-                    logger.info(f"═══════════════════════════════════ START DOCLING JSON CONTENT ═══════════════════════════════════")
-                    logger.info(f"{json_content}")
-                    logger.info(f"═══════════════════════════════════ END DOCLING JSON CONTENT ═══════════════════════════════════")
+                    # Log content metadata from Docling service (not full content to avoid garbled binary logs)
+                    logger.info(f"📝 [DOCLING_CONTENT_FULL] JSON content from Docling service (before Gemini upload):")
+                    logger.info(f"═══════════════════════════════════ DOCLING JSON CONTENT ═══════════════════════════════════")
+
+                    # Log safe preview - avoid logging binary/compressed data
+                    if isinstance(json_content, str):
+                        if json_content.strip().startswith(('{', '[')):
+                            # Log first 500 chars of JSON
+                            logger.info(f"JSON Preview (first 500 chars):\n{json_content[:500]}...")
+                        else:
+                            logger.warning(f"Unexpected content format - not valid JSON/array")
+                            logger.info(f"Content type: {type(json_content)}, Length: {len(json_content)}")
+                    else:
+                        logger.warning(f"⚠️ Unexpected content type: {type(json_content).__name__}")
+
+                    logger.info(f"═══════════════════════════════════ DOCLING JSON METADATA ═══════════════════════════════════")
+                    logger.info(f"Total Content Size: {len(json_content)} characters")
+                    if isinstance(json_content, str) and json_content.strip().startswith('{'):
+                        try:
+                            import json as json_lib
+                            data = json_lib.loads(json_content)
+                            logger.info(f"Top-level keys: {list(data.keys()) if isinstance(data, dict) else 'Array'}")
+                        except:
+                            logger.debug(f"Could not parse JSON preview")
+                    logger.info(f"═══════════════════════════════════ END DOCLING CONTENT ═══════════════════════════════════")
 
                     # Use JSON content from Docling service
                     content_for_upload = json_content

@@ -157,39 +157,37 @@ async def process_with_docling(
         # Docling-serve returns results as ZipArchiveResult containing JSON or Markdown files
         # The result may be binary bytes OR a string representation of binary data (latin-1 decoded)
         is_zip = False
+        zip_bytes = None
 
         # Check for ZIP in both binary and string representations
         if json_content:
             if isinstance(json_content, bytes):
                 is_zip = json_content[:2] == b'PK'
+                zip_bytes = json_content
             elif isinstance(json_content, str):
                 # String representation of ZIP data (decoded as latin-1)
                 # Check if it starts with 'PK' character (0x50 0x4B in ASCII/latin-1)
                 is_zip = json_content.startswith('PK') or (len(json_content) > 1 and ord(json_content[0]) == 0x50 and ord(json_content[1]) == 0x4B)
-                logger.info(f"📦 [ZIP_DETECT] String content check - starts with PK chars: {is_zip}")
+                if is_zip:
+                    logger.info(f"📦 [ZIP_DETECT] String content detected as ZIP - converting to bytes")
+                    zip_bytes = json_content.encode('latin-1')
 
-        if is_zip:
+        if is_zip and zip_bytes:
             logger.info(f"📦 [ZIP_EXTRACT] Docling result is a ZIP archive, extracting...")
             try:
                 import zipfile
                 import io
 
-                # Convert string back to bytes if needed for ZIP extraction
-                if isinstance(json_content, str):
-                    logger.info(f"🔄 [ZIP_EXTRACT] Converting string to bytes using latin-1")
-                    zip_bytes = json_content.encode('latin-1')
-                else:
-                    zip_bytes = json_content
-
                 # Extract ZIP
                 with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_file:
-                    logger.info(f"📋 [ZIP_CONTENTS] Files in archive: {zip_file.namelist()}")
+                    file_list = zip_file.namelist()
+                    logger.info(f"📋 [ZIP_CONTENTS] Files in archive ({len(file_list)}): {file_list}")
 
                     # Look for JSON files first, then Markdown
                     json_file = None
                     md_file = None
 
-                    for filename in zip_file.namelist():
+                    for filename in file_list:
                         if filename.endswith('.json'):
                             json_file = filename
                             break
@@ -199,11 +197,14 @@ async def process_with_docling(
                     if json_file:
                         logger.info(f"✅ [ZIP_EXTRACT] Found JSON file: {json_file}")
                         json_content = zip_file.read(json_file).decode('utf-8')
+                        logger.info(f"✅ [ZIP_EXTRACT] Extracted JSON - length: {len(json_content)} chars")
                     elif md_file:
-                        logger.info(f"✅ [ZIP_EXTRACT] Found Markdown file (will use as-is): {md_file}")
+                        logger.info(f"✅ [ZIP_EXTRACT] Found Markdown file: {md_file}")
                         json_content = zip_file.read(md_file).decode('utf-8')
+                        logger.info(f"✅ [ZIP_EXTRACT] Extracted Markdown - length: {len(json_content)} chars")
                     else:
                         logger.error(f"❌ [ZIP_EXTRACT] No JSON or Markdown files found in archive")
+                        logger.debug(f"📊 [ZIP_EXTRACT] Archive contents: {file_list}")
                         return None, {"error": "No JSON or Markdown files in docling result ZIP"}
             except Exception as e:
                 logger.error(f"❌ [ZIP_EXTRACT] Failed to extract ZIP: {e}")
@@ -227,7 +228,24 @@ async def process_with_docling(
                         region_name=railway_region or 'us-east-1'
                     )
 
-                    # Extract bucket and key from the path
+                    # First, verify the object exists
+                    logger.info(f"🔍 [S3_VERIFY] Verifying S3 object exists: {railway_bucket}/{json_content}")
+                    try:
+                        head_response = s3_client.head_object(
+                            Bucket=railway_bucket,
+                            Key=json_content
+                        )
+                        file_size = head_response.get('ContentLength', 0)
+                        logger.info(f"✅ [S3_VERIFY] Object verified - size: {file_size} bytes")
+                    except s3_client.exceptions.NoSuchKey:
+                        logger.error(f"❌ [S3_VERIFY] S3 object NOT found: {railway_bucket}/{json_content}")
+                        return None, {"error": f"Docling result not found in S3: {json_content}"}
+                    except s3_client.exceptions.NoSuchBucket:
+                        logger.error(f"❌ [S3_VERIFY] S3 bucket NOT found: {railway_bucket}")
+                        return None, {"error": f"S3 bucket not found: {railway_bucket}"}
+
+                    # Download the object
+                    logger.info(f"📥 [S3_DOWNLOAD] Downloading JSON from S3...")
                     s3_response = s3_client.get_object(
                         Bucket=railway_bucket,
                         Key=json_content
@@ -236,6 +254,8 @@ async def process_with_docling(
                     logger.info(f"✅ [S3_DOWNLOAD] Successfully downloaded JSON from S3: {len(json_content)} chars")
                 except Exception as e:
                     logger.error(f"❌ [S3_DOWNLOAD] Failed to download from S3: {e}")
+                    import traceback
+                    logger.error(f"📊 [S3_DOWNLOAD] Traceback: {traceback.format_exc()}")
                     # Return error instead of key path
                     return None, {"error": f"Failed to download from S3: {str(e)}"}
 
@@ -245,7 +265,16 @@ async def process_with_docling(
         logger.info(f"📊 [DOCLING_RQ] Metadata keys: {list(metadata.keys())}")
 
         logger.info(f"📋 [DOCLING_RQ] JSON content length: {len(json_content)} chars")
-        logger.info(f"📋 [DOCLING_RQ] JSON preview: {json_content[:200]}...")
+
+        # Log a safe preview - only if it looks like valid text
+        if json_content and isinstance(json_content, str):
+            # Check if it's likely JSON or text
+            if json_content.strip().startswith(('{', '[')):
+                logger.info(f"📋 [DOCLING_RQ] JSON preview (first 100 chars): {json_content[:100]}...")
+            else:
+                logger.info(f"📋 [DOCLING_RQ] Content preview (first 50 chars): {repr(json_content[:50])}")
+        else:
+            logger.warning(f"⚠️ [DOCLING_RQ] Unexpected content type: {type(json_content)}")
 
         logger.info(
             f"✅ [DOCLING_RQ] Successfully processed {original_filename} via Redis Queue"

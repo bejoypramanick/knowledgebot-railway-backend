@@ -290,33 +290,92 @@ class DoclingRQClient:
                             logger.info(f"📝 [RQ_RESULT] Result is Redis key reference: {result}")
                             try:
                                 # Fetch the value from Redis using the key
-                                # Value could be either: S3 key path OR actual JSON content
+                                # Value could be: Serialized ZipArchiveResult, S3 key path, or actual JSON content
                                 redis_value = self.redis_conn.get(result)
                                 if redis_value:
-                                    # Handle binary data - try multiple decodings
+                                    logger.info(f"📦 [RQ_REDIS_FETCH] Fetched value from Redis, size: {len(redis_value)} bytes")
+                                    logger.debug(f"📊 [RQ_REDIS_FETCH] First 20 bytes: {redis_value[:20]}")
+
+                                    # First, try to detect if it's a serialized object (MessagePack or Pickle)
+                                    deserialized_data = None
                                     redis_value_str = None
+
+                                    # Try to detect serialization format
                                     if isinstance(redis_value, bytes):
-                                        # Try UTF-8 first
+                                        # Check for MessagePack format (starts with 0x82, 0x8a, 0xdc, etc. for maps/arrays)
+                                        # Or Pickle format (starts with specific opcodes like 0x80, 0x81, etc.)
+                                        first_byte = redis_value[0] if redis_value else None
+
+                                        # Try Pickle deserialization (RQ uses pickle by default)
                                         try:
-                                            redis_value_str = redis_value.decode('utf-8')
-                                            logger.info(f"✅ [RQ_REDIS_FETCH] Decoded as UTF-8")
-                                        except UnicodeDecodeError:
-                                            # Try latin-1 (can decode any byte sequence)
+                                            import pickle
+                                            deserialized_data = pickle.loads(redis_value)
+                                            logger.info(f"✅ [RQ_DESERIALIZE] Successfully deserialized as Pickle")
+                                            logger.debug(f"📊 [RQ_DESERIALIZE] Type: {type(deserialized_data)}")
+                                        except Exception as pickle_err:
+                                            logger.debug(f"⚠️ [RQ_DESERIALIZE] Pickle failed: {pickle_err}")
+
+                                            # Try MessagePack deserialization
                                             try:
-                                                redis_value_str = redis_value.decode('latin-1')
-                                                logger.info(f"✅ [RQ_REDIS_FETCH] Decoded as latin-1")
-                                            except Exception as e2:
-                                                logger.error(f"❌ [RQ_REDIS_FETCH] Failed all decodings: {e2}")
-                                                logger.debug(f"📊 [RQ_REDIS_FETCH] First 20 bytes: {redis_value[:20]}")
-                                                markdown = ""
-                                                metadata = {}
-                                                raise
-                                    else:
-                                        redis_value_str = str(redis_value)
+                                                import msgpack
+                                                deserialized_data = msgpack.unpackb(redis_value, raw=False)
+                                                logger.info(f"✅ [RQ_DESERIALIZE] Successfully deserialized as MessagePack")
+                                                logger.debug(f"📊 [RQ_DESERIALIZE] Type: {type(deserialized_data)}")
+                                            except Exception as msgpack_err:
+                                                logger.debug(f"⚠️ [RQ_DESERIALIZE] MessagePack failed: {msgpack_err}")
+
+                                        # If deserialization succeeded, check if it's a ZipArchiveResult
+                                        if deserialized_data:
+                                            if isinstance(deserialized_data, dict):
+                                                if deserialized_data.get('kind') == 'ZipArchiveResult':
+                                                    logger.info(f"📦 [ZIP_RESULT] Detected ZipArchiveResult object from Redis")
+                                                    # Extract the ZIP content and extract JSON from it
+                                                    zip_bytes = deserialized_data.get('content')
+                                                    if zip_bytes:
+                                                        try:
+                                                            import zipfile
+                                                            import io
+
+                                                            logger.info(f"🗜️ [ZIP_EXTRACT] Extracting JSON from ZipArchiveResult...")
+                                                            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_file:
+                                                                json_files = [f for f in zip_file.namelist() if f.endswith('.json')]
+                                                                if json_files:
+                                                                    json_file = json_files[0]
+                                                                    logger.info(f"✅ [ZIP_EXTRACT] Found JSON file: {json_file}")
+                                                                    with zip_file.open(json_file) as f:
+                                                                        redis_value_str = f.read().decode('utf-8')
+                                                                        logger.info(f"✅ [ZIP_EXTRACT] Extracted JSON - length: {len(redis_value_str)} chars")
+                                                                else:
+                                                                    logger.error(f"❌ [ZIP_EXTRACT] No JSON files found in ZipArchiveResult")
+                                                                    markdown = ""
+                                                                    metadata = {}
+                                                                    raise Exception("No JSON files in ZipArchiveResult")
+                                                        except Exception as zip_err:
+                                                            logger.error(f"❌ [ZIP_EXTRACT] Failed to extract from ZipArchiveResult: {zip_err}")
+                                                            import traceback
+                                                            logger.error(f"📊 [ZIP_EXTRACT] Traceback: {traceback.format_exc()}")
+                                                            markdown = ""
+                                                            metadata = {}
+                                                            raise
+
+                                        # If deserialization didn't help or didn't produce ZipArchiveResult, try text decoding
+                                        if not redis_value_str:
+                                            try:
+                                                redis_value_str = redis_value.decode('utf-8')
+                                                logger.info(f"✅ [RQ_REDIS_FETCH] Decoded as UTF-8")
+                                            except UnicodeDecodeError:
+                                                try:
+                                                    redis_value_str = redis_value.decode('latin-1')
+                                                    logger.info(f"✅ [RQ_REDIS_FETCH] Decoded as latin-1")
+                                                except Exception as e2:
+                                                    logger.error(f"❌ [RQ_REDIS_FETCH] Failed all decodings: {e2}")
+                                                    markdown = ""
+                                                    metadata = {}
+                                                    raise
 
                                     if redis_value_str:
-                                        logger.info(f"✅ [RQ_REDIS_FETCH] Successfully fetched from Redis key: {result}")
-                                        logger.info(f"📋 [RQ_REDIS_VALUE] Length: {len(redis_value_str)} chars, First 50: {redis_value_str[:50]}")
+                                        logger.info(f"✅ [RQ_REDIS_FETCH] Successfully fetched value from Redis key: {result}")
+                                        logger.info(f"📋 [RQ_REDIS_VALUE] Length: {len(redis_value_str)} chars")
 
                                         # Check if value is an S3 key path (e.g., "docling-results/task_id/result.json")
                                         # or actual JSON content (starts with '{' or '[')
@@ -330,7 +389,8 @@ class DoclingRQClient:
                                             markdown = redis_value_str
                                         else:
                                             # Unknown format - log details for debugging
-                                            logger.warning(f"⚠️ [RQ_REDIS_FETCH] Unknown value format: {redis_value_str[:100]}")
+                                            logger.warning(f"⚠️ [RQ_REDIS_FETCH] Unknown value format")
+                                            logger.debug(f"   First 100 chars: {redis_value_str[:100]}")
                                             markdown = redis_value_str
                                         metadata = {}
                                 else:
@@ -355,6 +415,57 @@ class DoclingRQClient:
 
                     logger.info(f"📝 [RQ_RESULT] Content length: {len(markdown)} chars")
                     logger.info(f"📊 [RQ_METADATA] Keys: {list(metadata.keys())}")
+
+                    # If the result is an S3 key path, verify it exists in Railway Storage
+                    # and optionally download it if requested
+                    if markdown and isinstance(markdown, str) and markdown.startswith('docling-results/'):
+                        logger.info(f"📦 [S3_VERIFY] Verifying S3 object exists: {markdown}")
+                        try:
+                            # Check if we have S3 credentials configured
+                            if self.railway_storage_url and self.railway_storage_access_key and self.railway_storage_secret_key:
+                                import boto3
+                                s3_client = boto3.client(
+                                    's3',
+                                    endpoint_url=self.railway_storage_url,
+                                    aws_access_key_id=self.railway_storage_access_key,
+                                    aws_secret_access_key=self.railway_storage_secret_key,
+                                    region_name=self.railway_region or 'us-east-1'
+                                )
+
+                                # Verify object exists
+                                try:
+                                    response = s3_client.head_object(
+                                        Bucket=self.railway_bucket_name,
+                                        Key=markdown
+                                    )
+                                    file_size = response.get('ContentLength', 0)
+                                    logger.info(f"✅ [S3_VERIFY] S3 object verified - exists at: {self.railway_bucket_name}/{markdown}")
+                                    logger.info(f"📊 [S3_VERIFY] File size: {file_size} bytes")
+
+                                    # Optionally log the object metadata
+                                    if response.get('Metadata'):
+                                        logger.debug(f"📋 [S3_VERIFY] S3 metadata: {response.get('Metadata')}")
+
+                                except s3_client.exceptions.NoSuchKey:
+                                    logger.error(f"❌ [S3_VERIFY] S3 object NOT found: {self.railway_bucket_name}/{markdown}")
+                                    logger.warning(f"⚠️ [S3_VERIFY] Redis returned S3 key but object doesn't exist in bucket")
+                                except s3_client.exceptions.NoSuchBucket:
+                                    logger.error(f"❌ [S3_VERIFY] S3 bucket NOT found: {self.railway_bucket_name}")
+                                except Exception as s3_err:
+                                    logger.error(f"❌ [S3_VERIFY] Error verifying S3 object: {s3_err}")
+                            else:
+                                missing_creds = []
+                                if not self.railway_storage_url:
+                                    missing_creds.append("RAILWAY_STORAGE_URL")
+                                if not self.railway_storage_access_key:
+                                    missing_creds.append("RAILWAY_STORAGE_ACCESS_KEY")
+                                if not self.railway_storage_secret_key:
+                                    missing_creds.append("RAILWAY_STORAGE_SECRET_KEY")
+                                logger.warning(f"⚠️ [S3_VERIFY] Cannot verify S3 - missing credentials: {', '.join(missing_creds)}")
+                        except Exception as s3_verify_err:
+                            logger.error(f"❌ [S3_VERIFY] Unexpected error during S3 verification: {s3_verify_err}")
+                            import traceback
+                            logger.error(f"📊 [S3_VERIFY] Traceback: {traceback.format_exc()}")
 
                     return markdown, metadata
 
@@ -413,4 +524,64 @@ class DoclingRQClient:
 
         except Exception as e:
             logger.error(f"❌ [RQ_PROCESS] Error processing {filename}: {e}")
+            raise
+
+    async def download_from_s3(self, s3_key: str) -> str:
+        """
+        Download JSON content from Railway Storage S3.
+
+        Args:
+            s3_key: S3 object key (e.g., "docling-results/task_id/result.json")
+
+        Returns:
+            JSON content as string
+
+        Raises:
+            Exception: If download fails or S3 credentials are not configured
+        """
+        try:
+            # Check if we have S3 credentials configured
+            if not all([self.railway_bucket_name, self.railway_storage_url,
+                       self.railway_storage_access_key, self.railway_storage_secret_key]):
+                missing = []
+                if not self.railway_bucket_name:
+                    missing.append("RAILWAY_BUCKET_NAME")
+                if not self.railway_storage_url:
+                    missing.append("RAILWAY_STORAGE_URL")
+                if not self.railway_storage_access_key:
+                    missing.append("RAILWAY_STORAGE_ACCESS_KEY")
+                if not self.railway_storage_secret_key:
+                    missing.append("RAILWAY_STORAGE_SECRET_KEY")
+                raise ValueError(f"S3 credentials not configured: {', '.join(missing)}")
+
+            import boto3
+
+            logger.info(f"📥 [S3_DOWNLOAD] Downloading from S3: {s3_key}")
+
+            s3_client = boto3.client(
+                's3',
+                endpoint_url=self.railway_storage_url,
+                aws_access_key_id=self.railway_storage_access_key,
+                aws_secret_access_key=self.railway_storage_secret_key,
+                region_name=self.railway_region or 'us-east-1'
+            )
+
+            # Download the object
+            response = s3_client.get_object(
+                Bucket=self.railway_bucket_name,
+                Key=s3_key
+            )
+
+            content = response['Body'].read().decode('utf-8')
+            file_size = response.get('ContentLength', len(content))
+
+            logger.info(f"✅ [S3_DOWNLOAD] Successfully downloaded: {s3_key}")
+            logger.info(f"📊 [S3_DOWNLOAD] File size: {file_size} bytes, Content length: {len(content)} chars")
+
+            return content
+
+        except Exception as e:
+            logger.error(f"❌ [S3_DOWNLOAD] Failed to download {s3_key}: {e}")
+            import traceback
+            logger.error(f"📊 [S3_DOWNLOAD] Traceback: {traceback.format_exc()}")
             raise
