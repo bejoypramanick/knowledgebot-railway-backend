@@ -68,8 +68,8 @@ class DoclingRQClient:
                 "filename": filename,
                 "mime_type": mime_type,
                 "options": {
-                    "do_ocr": False,
-                    "do_table_structure": False,
+                    "do_ocr": True,
+                    "do_table_structure": True,
                     # add more if needed, e.g.:
                     # "do_picture_description": False,
                     # "pipeline": "standard",
@@ -80,10 +80,6 @@ class DoclingRQClient:
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
                 task_data,
-                options={
-                    "do_ocr": True,
-                    "do_table_structure": True,
-                },
                 scratch_dir=scratch_dir,
                 job_timeout='30m',
                 result_ttl=14400
