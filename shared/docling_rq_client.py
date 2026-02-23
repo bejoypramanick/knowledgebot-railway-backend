@@ -137,28 +137,32 @@ class DoclingRQClient:
             scratch_dir = "/data/scratchpad"
             task_id = str(uuid.uuid4())
 
-            # Build task data according to docling_jobkit RQ Task schema
-            # Note: In docling-serve v1.x+, parameters are split between top-level and convert_options
-            # - Top level: to_formats, return_as_file, target, convert_options
-            # - convert_options: conversion parameters (do_ocr, do_table_structure, include_images)
+            # Build task data according to docling-serve RQ Task schema
+            # Structure:
+            # - Top level: to_formats, return_as_file, target (orchestrator level)
+            # - options: nested object with pipeline_options and export_options
             task_data = {
                 "task_id": task_id,
-                "task_type": "convert",  # Lowercase enum value
+                "task_type": "convert",
                 "sources": [
                     {
-                        "kind": "http",  # Explicit source type
-                        "url": presigned_url,
-                        "headers": {}  # Optional headers
+                        "kind": "http",
+                        "url": presigned_url
                     }
                 ],
-                # Top-level export parameters
-                "to_formats": ["json"],      # Only export JSON (prevents ZIP wrapping)
-                "return_as_file": False,     # Return raw JSON, not wrapped in ZIP
-                # Conversion options (MUST be named convert_options, not options)
-                "convert_options": {
-                    "do_ocr": False,           # TODO: Enable after models are cached
-                    "do_table_structure": True,
-                    "include_images": False    # CRITICAL: Prevent ZIP bundling even with single format
+                # Top-level orchestrator parameters
+                "to_formats": ["json"],      # Request JSON format
+                "return_as_file": False,     # Return raw result, not file
+                # Nested options: orchestrator passes these to Docling Engine
+                "options": {
+                    "pipeline_options": {
+                        "do_ocr": False,                    # TODO: Enable after models are cached
+                        "do_table_structure": True,
+                        "include_images": False             # CRITICAL: Prevents ZIP bundling
+                    },
+                    "export_options": {
+                        "format": "json"                    # Export as JSON
+                    }
                 }
             }
 
