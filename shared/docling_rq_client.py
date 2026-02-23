@@ -73,10 +73,10 @@ class DoclingRQClient:
             Exception: If enqueuing fails
         """
         try:
-            # Enqueue job with docling_jobkit's RQ worker function
-            # conversion_task is the actual RQ worker function in docling_jobkit
+            # Enqueue job with docling-serve RQ worker function
+            # Use the correct function path based on docling-serve implementation
             job = self.queue.enqueue(
-                'docling_jobkit.orchestrators.rq.worker.conversion_task',
+                'docling_serve.conversion_task',
                 args=(presigned_url, filename, mime_type),
                 job_timeout='30m',
                 result_ttl=14400  # 4 hours
