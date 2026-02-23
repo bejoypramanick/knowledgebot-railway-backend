@@ -443,10 +443,28 @@ async def process_file_content(
                     logger.info(f"    Images with OCR: {docling_images_with_ocr}")
                     logger.info(f"    Additional Metadata Keys: {list(docling_metadata.keys())}")
 
-                    # Log the raw JSON content - top-level keys + first 5000 chars
+                    # Log tables extracted by Docling from the PDF
                     logger.info(f"📝 [DOCLING_CONTENT] JSON content length: {len(json_content)} chars")
-                    logger.info(f"📝 [DOCLING_CONTENT] First 5000 chars of raw JSON:")
-                    logger.info(f"{json_content[:5000]}")
+                    try:
+                        import json as json_lib
+                        parsed = json_lib.loads(json_content) if isinstance(json_content, str) and json_content.strip().startswith(('{', '[')) else None
+                        if parsed and isinstance(parsed, dict):
+                            logger.info(f"📊 [DOCLING_STRUCTURE] Top-level keys: {list(parsed.keys())}")
+                            # Docling stores extracted tables under the "tables" key in its JSON output
+                            raw_tables = parsed.get('tables', None)
+                            if raw_tables is not None:
+                                logger.info(f"📊 [DOCLING_TABLES] Found 'tables' key with {len(raw_tables)} table(s)")
+                                tables_json = json_lib.dumps(raw_tables, indent=2, ensure_ascii=False)
+                                # Log in chunks to avoid log truncation
+                                for chunk_start in range(0, len(tables_json), 10000):
+                                    logger.info(tables_json[chunk_start:chunk_start + 10000])
+                            else:
+                                logger.info(f"📊 [DOCLING_TABLES] No 'tables' key found. First 3000 chars:")
+                                logger.info(f"{json_content[:3000]}")
+                        else:
+                            logger.warning(f"⚠️ [DOCLING_CONTENT] Not valid JSON. First 500 chars: {repr(json_content[:500])}")
+                    except Exception as parse_err:
+                        logger.warning(f"⚠️ [DOCLING_PARSE] Failed to parse: {parse_err}. First 500 chars: {repr(json_content[:500])}")
 
                     # Use JSON content from Docling service
                     content_for_upload = json_content
