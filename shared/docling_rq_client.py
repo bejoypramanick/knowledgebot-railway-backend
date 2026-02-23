@@ -73,12 +73,10 @@ class DoclingRQClient:
             Exception: If enqueuing fails
         """
         try:
-            # Import the convert_document function from docling_serve
-            from docling_serve import convert_document
-            
-            # Enqueue job with callable function (not string path)
+            # Enqueue job with docling-serve RQ worker function
+            # Use the correct function path based on docling-serve implementation
             job = self.queue.enqueue(
-                convert_document,
+                "docling_serve.convert_document",
                 args=(presigned_url, filename, mime_type),
                 job_timeout='30m',
                 result_ttl=14400  # 4 hours
