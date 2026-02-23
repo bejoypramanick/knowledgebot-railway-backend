@@ -140,16 +140,18 @@ class DoclingRQClient:
             }
 
             # Add Railway Storage target if configured - docling-serve will upload result directly to Railway Storage
+            # Must match docling_jobkit.datamodel.DoclingJobkitS3Target schema
             if self.railway_bucket_name and self.railway_storage_url:
                 task_data["target"] = {
                     "kind": "s3",
-                    "bucket": self.railway_bucket_name,
-                    "key_prefix": f"{self.s3_docling_prefix}/{task_id}/",
-                    "region": self.railway_region,
-                    # Railway Storage specific settings
-                    "endpoint_url": self.railway_storage_url,
-                    "access_key_id": self.railway_storage_access_key,
-                    "secret_access_key": self.railway_storage_secret_key
+                    "s3": {
+                        "bucket": self.railway_bucket_name,
+                        "key_prefix": f"{self.s3_docling_prefix}/{task_id}/",
+                        "region": self.railway_region,
+                        "endpoint": self.railway_storage_url,  # NOTE: "endpoint" not "endpoint_url"
+                        "access_key": self.railway_storage_access_key,  # NOTE: "access_key" not "access_key_id"
+                        "secret_key": self.railway_storage_secret_key  # NOTE: "secret_key" not "secret_access_key"
+                    }
                 }
                 logger.info(f"📍 [RAILWAY_STORAGE_TARGET] Task {task_id} will output to: {self.railway_bucket_name}/{self.s3_docling_prefix}/{task_id}/")
             else:
