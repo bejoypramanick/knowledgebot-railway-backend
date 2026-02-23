@@ -88,7 +88,8 @@ class DoclingRQClient:
                 ],
                 "convert_options": {
                     "do_ocr": False,  # TODO: Enable after models are cached
-                    "do_table_structure": True
+                    "do_table_structure": True,
+                    "output_format": "json"  # Request JSON output instead of markdown
                     # Other options have defaults and are optional
                 }
             }

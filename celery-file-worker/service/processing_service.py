@@ -240,8 +240,8 @@ async def process_file_content(
     file_service = FileService()
     start_time = time.perf_counter()
     tmp_path = None
-    markdown_tmp_path = None
-    
+    json_tmp_path = None  # Temporary file for Docling JSON response
+
     # Initialize Docling tracking variables
     processed_by_docling = False
     docling_processing_time_ms = None
@@ -392,8 +392,8 @@ async def process_file_content(
         
         logger.info(f"🔍 [ROUTING] Detected MIME: {detected_mime_type} for {original_filename}")
 
-        # STEP 4: FORMAT CONVERSION PHASE - Use Docling for all supported formats
-        markdown_tmp_path = None
+        # STEP 4: FORMAT CONVERSION PHASE - Use Docling for all supported formats (returns JSON)
+        json_tmp_path = None
         processed_successfully = False
 
         # Route all supported files to Docling (including HTML)
@@ -402,14 +402,14 @@ async def process_file_content(
             
             try:
                 logger.info(f"🔍 [DEBUG] About to call process_with_docling with presigned_url: {presigned_url}")
-                markdown_content, docling_metadata = await process_with_docling(
+                json_content, docling_metadata = await process_with_docling(
                     presigned_url=presigned_url,  # Use presigned URL only
                     original_filename=original_filename,
                     mime_type=detected_mime_type
                 )
-                logger.info(f"🔍 [DEBUG] process_with_docling returned: markdown_content={bool(markdown_content)}, metadata_keys={list(docling_metadata.keys()) if docling_metadata else 'None'}")
+                logger.info(f"🔍 [DEBUG] process_with_docling returned: json_content={bool(json_content)}, metadata_keys={list(docling_metadata.keys()) if docling_metadata else 'None'}")
 
-                if markdown_content:
+                if json_content:
                     # Capture Docling metadata
                     processed_by_docling = True
 
@@ -417,24 +417,23 @@ async def process_file_content(
                     docling_processing_time_ms = docling_metadata.get('processing_time_ms', 0)
                     docling_images_extracted = docling_metadata.get('images_extracted', 0)
                     docling_images_with_ocr = docling_metadata.get('images_with_ocr', 0)
-                    content_format = docling_metadata.get('content_format', 'markdown')
+                    content_format = docling_metadata.get('content_format', 'json')
 
                     # Calculate content statistics
-                    content_length = len(markdown_content)
-                    content_lines = len(markdown_content.splitlines())
-                    content_words = len(markdown_content.split())
+                    content_length = len(json_content)
+                    content_lines = len(json_content.splitlines())
+                    content_words = len(json_content.split())
 
                     # Log comprehensive Docling response summary
                     logger.info(
-                        f"✅ [DOCLING_COMPLETE_RESPONSE] Docling service response received - "
-                        f"Format: {content_format}, "
+                        f"✅ [DOCLING_COMPLETE_RESPONSE] Docling service response received (JSON format) - "
                         f"Content: {content_length} chars / {content_lines} lines / {content_words} words, "
                         f"Processing: {docling_processing_time_ms}ms, "
                         f"Images: {docling_images_extracted} extracted / {docling_images_with_ocr} with OCR"
                     )
 
                     # Log full response from Docling service with all metadata
-                    logger.info(f"📋 [DOCLING_FULL_RESPONSE] Complete Docling service response:")
+                    logger.info(f"📋 [DOCLING_FULL_RESPONSE] Complete Docling service response (JSON):")
                     logger.info(f"    Content Format: {content_format}")
                     logger.info(f"    Content Length: {content_length} characters")
                     logger.info(f"    Content Lines: {content_lines}")
@@ -444,34 +443,30 @@ async def process_file_content(
                     logger.info(f"    Images with OCR: {docling_images_with_ocr}")
                     logger.info(f"    Additional Metadata Keys: {list(docling_metadata.keys())}")
 
-                    # Log full content from Docling service (complete markdown/json before any processing)
-                    logger.info(f"📝 [DOCLING_CONTENT_FULL] Full content from Docling service (before Gemini upload):")
-                    logger.info(f"═══════════════════════════════════ START DOCLING CONTENT ═══════════════════════════════════")
-                    logger.info(f"{markdown_content}")
-                    logger.info(f"═══════════════════════════════════ END DOCLING CONTENT ═══════════════════════════════════")
+                    # Log full content from Docling service (complete JSON before any processing)
+                    logger.info(f"📝 [DOCLING_CONTENT_FULL] Full JSON content from Docling service (before Gemini upload):")
+                    logger.info(f"═══════════════════════════════════ START DOCLING JSON CONTENT ═══════════════════════════════════")
+                    logger.info(f"{json_content}")
+                    logger.info(f"═══════════════════════════════════ END DOCLING JSON CONTENT ═══════════════════════════════════")
 
-                    # Check content format and handle accordingly
-                    content_for_upload = markdown_content
+                    # Use JSON content from Docling service
+                    content_for_upload = json_content
 
-                    # Log the content being sent to Gemini FileStore
-                    logger.info(f"📤 [DOCLING_TO_GEMINI] Sending Docling response to Gemini FileStore:")
-                    logger.info(f"    Content Format: {content_format}")
+                    # Log the JSON content being sent to Gemini FileStore
+                    logger.info(f"📤 [DOCLING_TO_GEMINI] Sending Docling JSON response to Gemini FileStore:")
+                    logger.info(f"    Content Format: JSON")
                     logger.info(f"    Total Size: {len(content_for_upload)} characters")
-                    logger.info(f"    File will be created as: {original_filename.rsplit('.', 1)[0]}.{'json' if content_format == 'json' else 'md'}")
-                    
-                    # Create temporary file with appropriate content from Docling response
-                    is_json_format = docling_metadata and docling_metadata.get('content_format') == 'json'
-                    if is_json_format:
-                        tmp_path = create_json_temp_file(content_for_upload)
-                    else:
-                        tmp_path = create_markdown_temp_file(content_for_upload)
+                    logger.info(f"    File will be created as: {original_filename.rsplit('.', 1)[0]}.json")
+
+                    # Create temporary JSON file from Docling response
+                    tmp_path = create_json_temp_file(content_for_upload)
 
                     # Log temporary file creation and verify content
                     temp_file_size = os.path.getsize(tmp_path)
-                    logger.info(f"📁 [TEMP_FILE_CREATED] Temporary file created from Docling response:")
+                    logger.info(f"📁 [TEMP_FILE_CREATED] Temporary JSON file created from Docling response:")
                     logger.info(f"    File Path: {tmp_path}")
                     logger.info(f"    File Size: {temp_file_size} bytes")
-                    logger.info(f"    Format: {'JSON' if is_json_format else 'Markdown'}")
+                    logger.info(f"    Format: JSON")
 
                     # Verify and log the actual content in the temporary file
                     try:
@@ -500,25 +495,21 @@ async def process_file_content(
                                 logger.info(f"└─────────────────────────────────────────────────────────────────┘")
                     except Exception as e:
                         logger.error(f"❌ [TEMP_FILE_ERROR] Could not verify temporary file content: {e}")
-                    
+
+                    # Store the JSON temporary file path for later use
+                    json_tmp_path = tmp_path
+
                     # Switch to processed artifact
                     original_tmp_path = tmp_path
 
-                    # Update filename and MIME type based on Docling response content format
-                    is_json_response = docling_metadata and docling_metadata.get('content_format') == 'json'
-                    if is_json_response:
-                        original_filename = original_filename.rsplit('.', 1)[0] + '.json'
-                        detected_mime_type = 'application/json'
-                        logger.info(f"📋 [CONTENT_FORMAT_CONVERSION] Docling responded with JSON format - "
-                                  f"File will be uploaded to Gemini FileStore as: {original_filename} (MIME: {detected_mime_type})")
-                    else:
-                        original_filename = original_filename.rsplit('.', 1)[0] + '.md'
-                        detected_mime_type = 'text/markdown'
-                        logger.info(f"📝 [CONTENT_FORMAT_CONVERSION] Docling responded with Markdown format - "
-                                  f"File will be uploaded to Gemini FileStore as: {original_filename} (MIME: {detected_mime_type})")
+                    # Update filename and MIME type - Docling always returns JSON now
+                    original_filename = original_filename.rsplit('.', 1)[0] + '.json'
+                    detected_mime_type = 'application/json'
+                    logger.info(f"📋 [CONTENT_FORMAT_JSON] Docling response is in JSON format - "
+                              f"File will be uploaded to Gemini FileStore as: {original_filename} (MIME: {detected_mime_type})")
 
                     processed_successfully = True
-                    logger.info(f"✅ [DOCLING_PROCESSING_COMPLETE] Successfully processed and converted: {original_filename} "
+                    logger.info(f"✅ [DOCLING_PROCESSING_COMPLETE] Successfully processed document to JSON format: {original_filename} "
                               f"(Original: {original_filename.rsplit('.', 1)[0]}.*)")
                 else:
                     error_msg = docling_metadata.get("error", "Docling processing failed")
@@ -680,15 +671,15 @@ async def process_file_content(
 
             # STEP 7: DATABASE UPDATE PHASE
             try:
-                # Calculate char_count from markdown content
-                if markdown_tmp_path and os.path.exists(markdown_tmp_path):
+                # Calculate char_count from JSON content
+                if json_tmp_path and os.path.exists(json_tmp_path):
                     try:
-                        with open(markdown_tmp_path, 'r', encoding='utf-8') as f:
-                            markdown_content = f.read()
-                        char_count = len(markdown_content)
-                        logger.info(f"📊 [METRICS] Calculated for {original_filename}: {char_count:,} characters")
+                        with open(json_tmp_path, 'r', encoding='utf-8') as f:
+                            json_content = f.read()
+                        char_count = len(json_content)
+                        logger.info(f"📊 [METRICS] Calculated for {original_filename}: {char_count:,} characters from JSON")
                     except Exception as me:
-                        logger.warning(f"⚠️ Could not calculate char_count from markdown: {me}")
+                        logger.warning(f"⚠️ Could not calculate char_count from JSON: {me}")
 
                 # Use the new DAO to update file record with ALL processing data
                 from dao.fileupload_dao import FileUploadDAO
@@ -735,8 +726,8 @@ async def process_file_content(
                 # STEP 8: S3 CLEANUP PHASE
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
-                if markdown_tmp_path and os.path.exists(markdown_tmp_path):
-                    os.unlink(markdown_tmp_path)
+                if json_tmp_path and os.path.exists(json_tmp_path):
+                    os.unlink(json_tmp_path)
 
                 processing_time = time.perf_counter() - start_time
                 logger.info(f"✅ [SUCCESS] File processing completed: {original_filename}")
@@ -782,8 +773,8 @@ async def process_file_content(
                 # Cleanup on failure
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
-                if markdown_tmp_path and os.path.exists(markdown_tmp_path):
-                    os.unlink(markdown_tmp_path)
+                if json_tmp_path and os.path.exists(json_tmp_path):
+                    os.unlink(json_tmp_path)
 
                 return {
                     "success": False,
@@ -816,10 +807,10 @@ async def process_file_content(
             except:
                 pass
 
-        if markdown_tmp_path and os.path.exists(markdown_tmp_path):
+        if json_tmp_path and os.path.exists(json_tmp_path):
             try:
-                os.unlink(markdown_tmp_path)
-                logger.debug(f"✅ Deleted markdown temp file: {markdown_tmp_path}")
+                os.unlink(json_tmp_path)
+                logger.debug(f"✅ Deleted markdown temp file: {json_tmp_path}")
             except:
                 pass
 

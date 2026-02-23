@@ -72,7 +72,7 @@ async def process_with_docling(
     timeout_seconds: Optional[int] = None
 ) -> Tuple[Optional[str], dict]:
     """
-    Call docling-serve via Redis Queue to convert document to markdown.
+    Call docling-serve via Redis Queue to convert document to JSON format.
 
     Args:
         presigned_url: Presigned S3 URL for direct download by docling worker
@@ -81,7 +81,8 @@ async def process_with_docling(
         timeout_seconds: Job timeout in seconds
 
     Returns:
-        Tuple of (markdown_content, metadata) or (None, error_dict) on failure
+        Tuple of (json_content, metadata) - returns JSON format from docling
+        or (None, error_dict) on failure
     """
     settings = _get_settings()
 
