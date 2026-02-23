@@ -79,7 +79,6 @@ class DoclingRQClient:
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
                 task_data,
-                task_type="convert",
                 task_id=task_id,
                 options={
                     "do_ocr": False,
