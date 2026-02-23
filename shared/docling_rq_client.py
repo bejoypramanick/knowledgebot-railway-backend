@@ -64,6 +64,7 @@ class DoclingRQClient:
             task_data = {
                 "task_type": "convert",           # required – tells worker what to do
                 "presigned_url": presigned_url,
+                "task_id":task_id,
                 "filename": filename,
                 "mime_type": mime_type,
                 "options": {
@@ -79,10 +80,9 @@ class DoclingRQClient:
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
                 task_data,
-                task_id=task_id,
                 options={
-                    "do_ocr": False,
-                    "do_table_structure": False,
+                    "do_ocr": True,
+                    "do_table_structure": True,
                 },
                 scratch_dir=scratch_dir,
                 job_timeout='30m',
