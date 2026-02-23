@@ -58,38 +58,34 @@ class DoclingRQClient:
         filename: str,
         mime_type: str
     ) -> str:
-        """
-        Enqueue a document conversion job to the docling RQ queue.
-
-        Args:
-            presigned_url: Presigned S3 URL for direct download by docling worker
-            filename: Original filename
-            mime_type: MIME type of the file
-
-        Returns:
-            job_id: RQ job ID for polling results
-
-        Raises:
-            Exception: If enqueuing fails
-        """
         try:
-            # Enqueue job with docling-serve RQ worker function
-            # Use the correct function path based on docling-serve implementation
+            # Define scratch_dir – match what your workers use!
+            # Best: Use the same value as DOCLING_SERVE_SCRATCH_PATH env var on workers
+            scratch_dir = "/data/scratchpad"  # or "/tmp/docling" or whatever is mounted/writable in worker container
+
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
-                args=(presigned_url, filename, mime_type),
+                task_data={
+                    "task_type": "convert",           # Required – tells it what to do
+                    "presigned_url": presigned_url,
+                    "filename": filename,
+                    "mime_type": mime_type,
+                    # Add other fields if needed from task_data examples:
+                    # "task_id": some_uuid (optional, RQ generates one),
+                    # "options": {} for extra conversion flags
+                },
+                scratch_dir=scratch_dir,              # ← This fixes the TypeError
                 job_timeout='30m',
-                result_ttl=14400  # 4 hours
+                result_ttl=14400
             )
 
-            logger.info(f"✅ [RQ_ENQUEUE] Job enqueued: {job.id} for {filename}")
-            logger.info(f"   Presigned URL: {presigned_url[:50]}...")
-            logger.info(f"   MIME type: {mime_type}")
+            logger.info(f"✅ [RQ_ENQUEUE] Job enqueued: {job.id} for {filename} (scratch_dir={scratch_dir})")
+            # ... rest unchanged
 
             return job.id
 
         except Exception as e:
-            logger.error(f"❌ [RQ_ENQUEUE] Failed to enqueue job for {filename}: {e}")
+            logger.error(f"❌ [RQ_ENQUEUE] Failed: {e}")
             raise
 
     async def poll_job_result(
