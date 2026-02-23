@@ -102,12 +102,21 @@ async def process_with_docling(
         docling_queue_name = settings.docling_rq_queue_name
 
         # Get Railway Storage configuration (optional)
-        railway_bucket = getattr(settings, 'railway_bucket_name', None)
-        railway_region = getattr(settings, 'railway_region', None)
-        railway_storage_url = getattr(settings, 'railway_storage_url', None)
-        railway_access_key = getattr(settings, 'railway_storage_access_key', None)
-        railway_secret_key = getattr(settings, 'railway_storage_secret_key', None)
+        # Try settings first, then fallback to direct environment variables
+        railway_bucket = getattr(settings, 'railway_bucket_name', None) or os.getenv('RAILWAY_BUCKET_NAME')
+        railway_region = getattr(settings, 'railway_region', None) or os.getenv('RAILWAY_REGION')
+        railway_storage_url = getattr(settings, 'railway_storage_url', None) or os.getenv('RAILWAY_STORAGE_URL')
+        railway_access_key = getattr(settings, 'railway_storage_access_key', None) or os.getenv('RAILWAY_STORAGE_ACCESS_KEY')
+        railway_secret_key = getattr(settings, 'railway_storage_secret_key', None) or os.getenv('RAILWAY_STORAGE_SECRET_KEY')
         s3_prefix = getattr(settings, 's3_docling_prefix', 'docling-results')
+
+        # Log Railway Storage configuration status
+        logger.info(f"🔧 [RAILWAY_STORAGE_CONFIG] Bucket: {railway_bucket}")
+        logger.info(f"🔧 [RAILWAY_STORAGE_CONFIG] Region: {railway_region}")
+        logger.info(f"🔧 [RAILWAY_STORAGE_CONFIG] Storage URL: {railway_storage_url}")
+        logger.info(f"🔧 [RAILWAY_STORAGE_CONFIG] Access Key present: {bool(railway_access_key)}")
+        logger.info(f"🔧 [RAILWAY_STORAGE_CONFIG] Secret Key present: {bool(railway_secret_key)}")
+        logger.info(f"🔧 [RAILWAY_STORAGE_CONFIG] S3 Prefix: {s3_prefix}")
 
         client = DoclingRQClient(
             redis_url=docling_redis_url,

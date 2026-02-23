@@ -92,10 +92,26 @@ class DoclingRQClient:
         logger.info(f"⏱️  [RQ_CLIENT] Polling timeout: {polling_timeout_seconds} seconds ({polling_timeout_seconds/60:.1f} minutes)")
         logger.info(f"⏱️  [RQ_CLIENT] Poll intervals: {poll_initial_delay}s initial, {poll_max_interval}s max")
 
-        if railway_bucket_name and railway_storage_url:
+        # Log Railway Storage configuration (for debugging)
+        logger.info(f"💾 [RAILWAY_STORAGE_DEBUG] Bucket: {railway_bucket_name}")
+        logger.info(f"💾 [RAILWAY_STORAGE_DEBUG] Region: {railway_region}")
+        logger.info(f"💾 [RAILWAY_STORAGE_DEBUG] URL: {railway_storage_url}")
+        logger.info(f"💾 [RAILWAY_STORAGE_DEBUG] Access Key present: {bool(railway_storage_access_key)}")
+        logger.info(f"💾 [RAILWAY_STORAGE_DEBUG] Secret Key present: {bool(railway_storage_secret_key)}")
+
+        if railway_bucket_name and railway_storage_url and railway_storage_access_key and railway_storage_secret_key:
             logger.info(f"💾 [RAILWAY_STORAGE] Docling will upload results to: Railway Storage {railway_bucket_name}/{s3_docling_prefix}/ (region: {railway_region})")
         else:
-            logger.warning(f"⚠️  [RAILWAY_STORAGE] No Railway Storage configured - docling results will be stored in Redis")
+            missing = []
+            if not railway_bucket_name:
+                missing.append("bucket")
+            if not railway_storage_url:
+                missing.append("storage_url")
+            if not railway_storage_access_key:
+                missing.append("access_key")
+            if not railway_storage_secret_key:
+                missing.append("secret_key")
+            logger.warning(f"⚠️  [RAILWAY_STORAGE] Missing credentials ({', '.join(missing)}) - docling results will be stored in Redis")
 
     async def enqueue_document(
         self,
@@ -141,7 +157,15 @@ class DoclingRQClient:
 
             # Add Railway Storage target if configured - docling-serve will upload result directly to Railway Storage
             # Must match docling_jobkit.datamodel.DoclingJobkitS3Target schema
-            if self.railway_bucket_name and self.railway_storage_url:
+            # Validate that ALL required S3 credentials are present
+            has_all_s3_creds = (
+                self.railway_bucket_name and
+                self.railway_storage_url and
+                self.railway_storage_access_key and
+                self.railway_storage_secret_key
+            )
+
+            if has_all_s3_creds:
                 task_data["target"] = {
                     "kind": "s3",
                     "s3": {
@@ -155,7 +179,22 @@ class DoclingRQClient:
                 }
                 logger.info(f"📍 [RAILWAY_STORAGE_TARGET] Task {task_id} will output to: {self.railway_bucket_name}/{self.s3_docling_prefix}/{task_id}/")
             else:
-                logger.info(f"📍 [REDIS_TARGET] Task {task_id} will output to Redis")
+                # Log which credentials are missing for debugging
+                missing_creds = []
+                if not self.railway_bucket_name:
+                    missing_creds.append("RAILWAY_BUCKET_NAME")
+                if not self.railway_storage_url:
+                    missing_creds.append("RAILWAY_STORAGE_URL")
+                if not self.railway_storage_access_key:
+                    missing_creds.append("RAILWAY_STORAGE_ACCESS_KEY")
+                if not self.railway_storage_secret_key:
+                    missing_creds.append("RAILWAY_STORAGE_SECRET_KEY")
+
+                if missing_creds:
+                    logger.warning(f"⚠️  [RAILWAY_STORAGE] Missing S3 credentials: {', '.join(missing_creds)} - Task {task_id} will output to Redis instead")
+                else:
+                    logger.info(f"📍 [REDIS_TARGET] Task {task_id} will output to Redis")
+
 
             # Enqueue to docling_jobkit's RQ worker function
             # Note: conversion_manager, orchestrator_config, and scratch_dir
