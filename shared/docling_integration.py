@@ -155,41 +155,61 @@ async def process_with_docling(
 
         # Handle ZIP archives from docling-serve
         # Docling-serve returns results as ZipArchiveResult containing JSON or Markdown files
-        if json_content and isinstance(json_content, bytes):
-            # Check if it's a ZIP file (magic bytes: PK)
-            if json_content[:2] == b'PK':
-                logger.info(f"📦 [ZIP_EXTRACT] Docling result is a ZIP archive, extracting...")
-                try:
-                    import zipfile
-                    import io
+        # The result may be binary bytes OR a string representation of binary data (latin-1 decoded)
+        is_zip = False
 
-                    # Extract ZIP
-                    with zipfile.ZipFile(io.BytesIO(json_content)) as zip_file:
-                        logger.info(f"📋 [ZIP_CONTENTS] Files in archive: {zip_file.namelist()}")
+        # Check for ZIP in both binary and string representations
+        if json_content:
+            if isinstance(json_content, bytes):
+                is_zip = json_content[:2] == b'PK'
+            elif isinstance(json_content, str):
+                # String representation of ZIP data (decoded as latin-1)
+                # Check if it starts with 'PK' character (0x50 0x4B in ASCII/latin-1)
+                is_zip = json_content.startswith('PK') or (len(json_content) > 1 and ord(json_content[0]) == 0x50 and ord(json_content[1]) == 0x4B)
+                logger.info(f"📦 [ZIP_DETECT] String content check - starts with PK chars: {is_zip}")
 
-                        # Look for JSON files first, then Markdown
-                        json_file = None
-                        md_file = None
+        if is_zip:
+            logger.info(f"📦 [ZIP_EXTRACT] Docling result is a ZIP archive, extracting...")
+            try:
+                import zipfile
+                import io
 
-                        for filename in zip_file.namelist():
-                            if filename.endswith('.json'):
-                                json_file = filename
-                                break
-                            elif filename.endswith('.md'):
-                                md_file = filename
+                # Convert string back to bytes if needed for ZIP extraction
+                if isinstance(json_content, str):
+                    logger.info(f"🔄 [ZIP_EXTRACT] Converting string to bytes using latin-1")
+                    zip_bytes = json_content.encode('latin-1')
+                else:
+                    zip_bytes = json_content
 
-                        if json_file:
-                            logger.info(f"✅ [ZIP_EXTRACT] Found JSON file: {json_file}")
-                            json_content = zip_file.read(json_file).decode('utf-8')
-                        elif md_file:
-                            logger.info(f"✅ [ZIP_EXTRACT] Found Markdown file (will use as-is): {md_file}")
-                            json_content = zip_file.read(md_file).decode('utf-8')
-                        else:
-                            logger.error(f"❌ [ZIP_EXTRACT] No JSON or Markdown files found in archive")
-                            return None, {"error": "No JSON or Markdown files in docling result ZIP"}
-                except Exception as e:
-                    logger.error(f"❌ [ZIP_EXTRACT] Failed to extract ZIP: {e}")
-                    return None, {"error": f"Failed to extract docling result ZIP: {str(e)}"}
+                # Extract ZIP
+                with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_file:
+                    logger.info(f"📋 [ZIP_CONTENTS] Files in archive: {zip_file.namelist()}")
+
+                    # Look for JSON files first, then Markdown
+                    json_file = None
+                    md_file = None
+
+                    for filename in zip_file.namelist():
+                        if filename.endswith('.json'):
+                            json_file = filename
+                            break
+                        elif filename.endswith('.md'):
+                            md_file = filename
+
+                    if json_file:
+                        logger.info(f"✅ [ZIP_EXTRACT] Found JSON file: {json_file}")
+                        json_content = zip_file.read(json_file).decode('utf-8')
+                    elif md_file:
+                        logger.info(f"✅ [ZIP_EXTRACT] Found Markdown file (will use as-is): {md_file}")
+                        json_content = zip_file.read(md_file).decode('utf-8')
+                    else:
+                        logger.error(f"❌ [ZIP_EXTRACT] No JSON or Markdown files found in archive")
+                        return None, {"error": "No JSON or Markdown files in docling result ZIP"}
+            except Exception as e:
+                logger.error(f"❌ [ZIP_EXTRACT] Failed to extract ZIP: {e}")
+                import traceback
+                logger.error(f"📊 [ZIP_EXTRACT] Traceback: {traceback.format_exc()}")
+                return None, {"error": f"Failed to extract docling result ZIP: {str(e)}"}
 
         # Check if json_content is an S3 key path (not actual JSON)
         # S3 key paths start with "docling-results/" and don't start with '{' or '['
