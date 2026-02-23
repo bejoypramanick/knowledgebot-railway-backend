@@ -152,9 +152,13 @@ class DoclingRQClient:
                 ],
                 # Top-level orchestrator parameters
                 "to_formats": ["json"],      # Request JSON format
-                "return_as_file": False     # Return raw result, not file
+                "return_as_file": False,     # Return raw result, not file
                 # Pipeline options for Docling Engine
-                
+                "convert_options": {
+                        "do_ocr": False,                    # TODO: Enable after models are cached
+                        "do_table_structure": True,
+                        "include_images": False             # CRITICAL: Prevents ZIP bundling
+                }
             }
 
             # Add Railway Storage target if configured - docling-serve will upload result directly to Railway Storage
@@ -206,11 +210,6 @@ class DoclingRQClient:
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
                 task_data,
-                options: {
-                        "do_ocr": False,                    # TODO: Enable after models are cached
-                        "do_table_structure": True,
-                        "include_images": False             # CRITICAL: Prevents ZIP bundling
-                },
                 scratch_dir=scratch_dir,
                 job_timeout=job_timeout_str,  # Configurable job timeout (default 60 minutes)
                 result_ttl=14400  # 4 hours - results stored in Redis for 4 hours
