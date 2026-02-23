@@ -29,7 +29,7 @@ def _get_settings():
         # Try to import from the caller's context (worker or knowledgebase_ingestion)
         from core.config import settings
         logger.info(f"🔧 [DOCLING] Using settings from core.config (timeout: {settings.docling_timeout_seconds}s)")
-        logger.info(f"🔧 [DOCLING] Using {settings.file_redis_url or settings.redis_url} (DB 0) → auto-construct DB 2")
+        logger.info(f"🔧 [DOCLING] Using explicit DOCLING_REDIS_URL={settings.get_docling_redis_url}")
         return settings
     except ImportError:
         try:
@@ -39,11 +39,17 @@ def _get_settings():
             return settings
         except ImportError:
             # Create minimal settings from environment
+            docling_redis_url = os.getenv("DOCLING_REDIS_URL")
+            if not docling_redis_url:
+                raise ValueError(
+                    "DOCLING_REDIS_URL environment variable is required. "
+                    "Set it to: redis://redis.railway.internal:6379/2"
+                )
+
             class MinimalSettings:
                 docling_enabled = os.getenv("DOCLING_ENABLED", "true").lower() == "true"
                 docling_timeout_seconds = int(os.getenv("DOCLING_TIMEOUT_SECONDS", "1800"))
-                redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-                docling_redis_url = os.getenv("DOCLING_REDIS_URL", None)
+                docling_redis_url = os.getenv("DOCLING_REDIS_URL")
                 docling_rq_queue_name = os.getenv("DOCLING_RQ_QUEUE_NAME", "docling")
                 docling_poll_initial_delay = int(os.getenv("DOCLING_POLL_INITIAL_DELAY", "2"))
                 docling_poll_max_interval = int(os.getenv("DOCLING_POLL_MAX_INTERVAL", "30"))
@@ -51,15 +57,11 @@ def _get_settings():
 
                 @property
                 def get_docling_redis_url(self) -> str:
-                    """Get docling Redis URL (DB 2)."""
-                    if self.docling_redis_url:
-                        return self.docling_redis_url
-                    if self.redis_url.endswith('/0'):
-                        return self.redis_url[:-1] + '2'
-                    return self.redis_url.rstrip('/') + '/2'
+                    """Get explicit docling Redis URL."""
+                    return self.docling_redis_url
 
             logger.info(f"🔧 [DOCLING] Using minimal settings from environment (timeout: {MinimalSettings.docling_timeout_seconds}s)")
-            logger.info(f"🔧 [DOCLING] Redis DB 2 (separate from Celery DB 0/1)")
+            logger.info(f"🔧 [DOCLING] Using explicit DOCLING_REDIS_URL={docling_redis_url}")
             return MinimalSettings()
 
 

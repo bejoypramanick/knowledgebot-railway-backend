@@ -26,12 +26,10 @@ class Settings(BaseSettings):
     gemini_file_search_store_name: Optional[str] = None  # FileSearch store display name - MUST be set in Railway env
 
     # Redis Configuration (used by celery_app.py to connect to Celery broker)
-    file_redis_url: Optional[str] = None  # FILE_REDIS_URL from Railway
-    # Fallback to REDIS_URL if FILE_REDIS_URL not set
-    redis_url: str = "redis://localhost:6379/0"  # DB 0: Celery file queue
+    file_redis_url: Optional[str] = None  # FILE_REDIS_URL from Railway (required)
 
     # Docling RQ Configuration (separate Redis DB to avoid collisions)
-    docling_redis_url: Optional[str] = None  # DB 2: Docling queue (auto-constructs from file_redis_url if not set)
+    docling_redis_url: str  # DOCLING_REDIS_URL from Railway (required - DB 2)
     docling_enabled: bool = True  # Set to False to disable docling and use raw uploads
     docling_timeout_seconds: int = 1800  # Processing timeout (30 minutes - handles queue wait time)
     docling_rq_queue_name: str = "docling"  # Redis queue name for docling jobs
@@ -42,26 +40,22 @@ class Settings(BaseSettings):
     @property
     def get_docling_redis_url(self) -> str:
         """
-        Get docling Redis URL, defaulting to DB 2 if not explicitly set.
+        Get docling Redis URL (must be explicitly set in environment).
 
         This keeps docling messages separate from Celery queues:
         - DB 0: FILE_REDIS_URL (file processing tasks)
         - DB 1: WEB_REDIS_URL (web processing tasks)
         - DB 2: DOCLING_REDIS_URL (docling RQ jobs and results)
+
+        Raises:
+            ValueError: If DOCLING_REDIS_URL is not set
         """
-        if self.docling_redis_url:
-            return self.docling_redis_url
-
-        # Auto-construct from file_redis_url or redis_url, replacing /0 with /2
-        base_url = self.file_redis_url or self.redis_url
-        if base_url:
-            if base_url.endswith('/0'):
-                return base_url[:-1] + '2'  # Replace /0 with /2
-            elif '/' not in base_url.split('://')[-1]:
-                # No database specified, append /2
-                return base_url + '/2'
-
-        return "redis://localhost:6379/2"  # Default fallback
+        if not self.docling_redis_url:
+            raise ValueError(
+                "DOCLING_REDIS_URL environment variable is required. "
+                "Set it to: redis://redis.railway.internal:6379/2"
+            )
+        return self.docling_redis_url
 
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None
