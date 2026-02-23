@@ -76,7 +76,7 @@ class DoclingRQClient:
             # Enqueue job with docling-serve RQ worker function
             # Use the correct function path based on docling-serve implementation
             job = self.queue.enqueue(
-                "docling_serve.convert_document",
+                "docling_jobkit.orchestrators.rq.worker.docling_task",
                 args=(presigned_url, filename, mime_type),
                 job_timeout='30m',
                 result_ttl=14400  # 4 hours
