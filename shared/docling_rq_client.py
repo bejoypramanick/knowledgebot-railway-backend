@@ -73,6 +73,7 @@ class DoclingRQClient:
             Exception: If enqueuing fails
         """
         try:
+            scratch_dir = "/data/scratchpad"
             task_id = str(uuid.uuid4())
 
             # Build task data according to docling_jobkit Task schema
@@ -98,6 +99,7 @@ class DoclingRQClient:
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
                 task_data,
+                scratch_dir=scratch_dir,
                 job_timeout='30m',
                 result_ttl=14400  # 4 hours
             )
