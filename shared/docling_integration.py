@@ -153,6 +153,34 @@ async def process_with_docling(
             timeout_seconds=timeout_seconds
         )
 
+        # Check if json_content is an S3 key path (not actual JSON)
+        # S3 key paths start with "docling-results/" and don't start with '{' or '['
+        if json_content and isinstance(json_content, str):
+            if json_content.startswith('docling-results/') and not json_content.startswith('{'):
+                logger.info(f"📦 [S3_DOWNLOAD] JSON stored in S3, downloading from: {json_content}")
+                try:
+                    # Download from Railway Storage S3
+                    import boto3
+                    s3_client = boto3.client(
+                        's3',
+                        endpoint_url=railway_storage_url,
+                        aws_access_key_id=railway_access_key,
+                        aws_secret_access_key=railway_secret_key,
+                        region_name=railway_region or 'us-east-1'
+                    )
+
+                    # Extract bucket and key from the path
+                    s3_response = s3_client.get_object(
+                        Bucket=railway_bucket,
+                        Key=json_content
+                    )
+                    json_content = s3_response['Body'].read().decode('utf-8')
+                    logger.info(f"✅ [S3_DOWNLOAD] Successfully downloaded JSON from S3: {len(json_content)} chars")
+                except Exception as e:
+                    logger.error(f"❌ [S3_DOWNLOAD] Failed to download from S3: {e}")
+                    # Return error instead of key path
+                    return None, {"error": f"Failed to download from S3: {str(e)}"}
+
         # Log the content format and metadata
         content_format = metadata.get("content_format", "json")
         logger.info(f"📄 [DOCLING_RQ] Content format: {content_format}")

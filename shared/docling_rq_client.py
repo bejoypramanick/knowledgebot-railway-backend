@@ -279,22 +279,36 @@ class DoclingRQClient:
                         if result.startswith('docling:results:'):
                             logger.info(f"📝 [RQ_RESULT] Result is Redis key reference: {result}")
                             try:
-                                # Fetch the actual content from Redis using the key
-                                redis_content = self.redis_conn.get(result)
-                                if redis_content:
-                                    markdown = redis_content.decode('utf-8') if isinstance(redis_content, bytes) else redis_content
-                                    logger.info(f"✅ [RQ_REDIS_FETCH] Successfully fetched content from Redis key: {result}")
+                                # Fetch the value from Redis using the key
+                                # Value could be either: S3 key path OR actual JSON content
+                                redis_value = self.redis_conn.get(result)
+                                if redis_value:
+                                    redis_value_str = redis_value.decode('utf-8') if isinstance(redis_value, bytes) else redis_value
+                                    logger.info(f"✅ [RQ_REDIS_FETCH] Successfully fetched from Redis key: {result}")
+                                    logger.info(f"📋 [RQ_REDIS_VALUE] Value type check - starts with 'docling-results': {redis_value_str.startswith('docling-results')}")
+
+                                    # Check if value is an S3 key path (e.g., "docling-results/task_id/result.json")
+                                    # or actual JSON content (starts with '{' or '[')
+                                    if redis_value_str.startswith('docling-results/') or (not redis_value_str.startswith('{') and not redis_value_str.startswith('[')):
+                                        # This is an S3 key path stored in Redis
+                                        logger.info(f"📦 [S3_KEY_FROM_REDIS] S3 key found in Redis: {redis_value_str}")
+                                        markdown = redis_value_str  # Return the S3 key for caller to fetch
+                                    else:
+                                        # This is actual JSON content
+                                        logger.info(f"📄 [JSON_FROM_REDIS] Actual JSON content found in Redis")
+                                        markdown = redis_value_str
+                                    metadata = {}
                                 else:
                                     logger.error(f"❌ [RQ_REDIS_FETCH] Redis key {result} not found or expired")
                                     markdown = ""
-                                metadata = {}
+                                    metadata = {}
                             except Exception as e:
                                 logger.error(f"❌ [RQ_REDIS_FETCH] Failed to fetch from Redis key {result}: {e}")
                                 markdown = ""
                                 metadata = {}
                         else:
-                            # Direct JSON content as string
-                            logger.info(f"📝 [RQ_RESULT] Result is direct JSON string")
+                            # Direct JSON content or S3 key as string
+                            logger.info(f"📝 [RQ_RESULT] Result is direct string (JSON or S3 key)")
                             markdown = result
                             metadata = {}
                     else:
