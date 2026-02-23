@@ -154,7 +154,10 @@ class DoclingRQClient:
                     "do_ocr": False,  # TODO: Enable after models are cached
                     "do_table_structure": True
                 },
-                "export_to_json": True  # Export Document as JSON (not Markdown)
+                "options": {
+                    "to_formats": ["json"],  # Only export JSON (prevents ZIP wrapping)
+                    "return_as_file": False  # Return raw JSON, not wrapped in ZIP
+                }
             }
 
             # Add Railway Storage target if configured - docling-serve will upload result directly to Railway Storage
