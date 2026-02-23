@@ -25,11 +25,13 @@ class Settings(BaseSettings):
     # Gemini FileSearch Store Configuration (required from Railway env)
     gemini_file_search_store_name: Optional[str] = None  # FileSearch store display name - MUST be set in Railway env
 
-    # Redis Configuration
+    # Redis Configuration (used by celery_app.py to connect to Celery broker)
+    file_redis_url: Optional[str] = None  # FILE_REDIS_URL from Railway
+    # Fallback to REDIS_URL if FILE_REDIS_URL not set
     redis_url: str = "redis://localhost:6379/0"  # DB 0: Celery file queue
 
     # Docling RQ Configuration (separate Redis DB to avoid collisions)
-    docling_redis_url: Optional[str] = None  # DB 2: Docling queue (auto-constructs from redis_url if not set)
+    docling_redis_url: Optional[str] = None  # DB 2: Docling queue (auto-constructs from file_redis_url if not set)
     docling_enabled: bool = True  # Set to False to disable docling and use raw uploads
     docling_timeout_seconds: int = 1800  # Processing timeout (30 minutes - handles queue wait time)
     docling_rq_queue_name: str = "docling"  # Redis queue name for docling jobs
@@ -50,13 +52,14 @@ class Settings(BaseSettings):
         if self.docling_redis_url:
             return self.docling_redis_url
 
-        # Auto-construct from redis_url, replacing /0 with /2
-        if self.redis_url:
-            if self.redis_url.endswith('/0'):
-                return self.redis_url[:-1] + '2'  # Replace /0 with /2
-            elif '/' not in self.redis_url.split('://')[-1]:
+        # Auto-construct from file_redis_url or redis_url, replacing /0 with /2
+        base_url = self.file_redis_url or self.redis_url
+        if base_url:
+            if base_url.endswith('/0'):
+                return base_url[:-1] + '2'  # Replace /0 with /2
+            elif '/' not in base_url.split('://')[-1]:
                 # No database specified, append /2
-                return self.redis_url + '/2'
+                return base_url + '/2'
 
         return "redis://localhost:6379/2"  # Default fallback
 

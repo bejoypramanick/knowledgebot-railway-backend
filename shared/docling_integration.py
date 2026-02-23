@@ -29,7 +29,7 @@ def _get_settings():
         # Try to import from the caller's context (worker or knowledgebase_ingestion)
         from core.config import settings
         logger.info(f"🔧 [DOCLING] Using settings from core.config (timeout: {settings.docling_timeout_seconds}s)")
-        logger.info(f"🔧 [DOCLING] Redis DB 2 (separate from Celery DB 0/1)")
+        logger.info(f"🔧 [DOCLING] Using {settings.file_redis_url or settings.redis_url} (DB 0) → auto-construct DB 2")
         return settings
     except ImportError:
         try:
