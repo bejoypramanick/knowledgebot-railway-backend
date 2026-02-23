@@ -138,9 +138,9 @@ class DoclingRQClient:
             task_id = str(uuid.uuid4())
 
             # Build task data according to docling_jobkit RQ Task schema
-            # Note: In docling-serve v1.x+, parameters are split between top-level and options
-            # - Top level: to_formats, return_as_file, target
-            # - options: conversion parameters (do_ocr, do_table_structure, include_images)
+            # Note: In docling-serve v1.x+, parameters are split between top-level and convert_options
+            # - Top level: to_formats, return_as_file, target, convert_options
+            # - convert_options: conversion parameters (do_ocr, do_table_structure, include_images)
             task_data = {
                 "task_id": task_id,
                 "task_type": "convert",  # Lowercase enum value
@@ -154,8 +154,8 @@ class DoclingRQClient:
                 # Top-level export parameters
                 "to_formats": ["json"],      # Only export JSON (prevents ZIP wrapping)
                 "return_as_file": False,     # Return raw JSON, not wrapped in ZIP
-                # Conversion options
-                "options": {
+                # Conversion options (MUST be named convert_options, not options)
+                "convert_options": {
                     "do_ocr": False,           # TODO: Enable after models are cached
                     "do_table_structure": True,
                     "include_images": False    # CRITICAL: Prevent ZIP bundling even with single format
