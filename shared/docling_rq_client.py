@@ -70,7 +70,11 @@ class DoclingRQClient:
                     "presigned_url": presigned_url,
                     "filename": filename,
                     "mime_type": mime_type,
-                    "task_id": task_id
+                    "task_id": task_id,
+                    "options": {
+                    "do_ocr": True,           # Enable/Disable OCR
+                    "do_table_structure": True # Enable/Disable Table extraction
+                }   
                     # Add other fields if needed from task_data examples:
                     # "task_id": some_uuid (optional, RQ generates one),
                     # "options": {} for extra conversion flags
