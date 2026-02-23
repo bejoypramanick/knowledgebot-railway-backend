@@ -15,16 +15,14 @@ restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
 # Environment variables needed (set in Railway dashboard):
-# - REDIS_URL=redis://redis.railway.internal:6379/0  (or FILE_REDIS_URL)
+# - REDIS_URL or FILE_REDIS_URL (DB 0 for Celery file queue)
+# - DOCLING_REDIS_URL (DB 2 for Docling RQ queue, auto-constructed from REDIS_URL if not set)
 # - DATABASE_URL=postgresql://...
 # - GEMINI_API_KEY=...
-# - DOCLING_SERVICE_URL=http://docling.railway.internal:8080
 # - GEMINI_FILE_SEARCH_STORE_NAME=knowledgebotsearchstore-xxxxx
-# - DOCLING_ENABLED=true (optional, default: true)
-# - DOCLING_TIMEOUT_SECONDS=1800 (optional, default: 1800 - 30 minutes)
-# - DOCLING_FALLBACK_TO_RAW=true (optional, default: true)
 #
 # This worker processes:
 # - File uploads (process_file_upload_task)
 # - File status: Queued → processing → completed/failed
 # - Celery queue: file_processing (Redis DB 0)
+# - Enqueues document conversion to Docling RQ workers (Redis DB 2)

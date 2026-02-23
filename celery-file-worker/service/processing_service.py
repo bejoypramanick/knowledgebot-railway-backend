@@ -32,7 +32,7 @@ from utils.validation import (
     sanitize_filename,
     detect_mime_type_from_extension
 )
-from utils.files import calculate_sha256, stream_to_temp_file
+from utils.files import calculate_sha256
 from service.file_service import FileService
 
 logger = get_otel_logger("processing_service", "celery-file-worker")
