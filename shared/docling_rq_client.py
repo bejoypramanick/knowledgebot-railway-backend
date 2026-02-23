@@ -61,12 +61,24 @@ class DoclingRQClient:
         try:
             scratch_dir = "/data/scratchpad"   # confirm this matches worker mount
             task_id = str(uuid.uuid4())
-
+            task_data = {
+                "task_type": "convert",           # required – tells worker what to do
+                "presigned_url": presigned_url,
+                "filename": filename,
+                "mime_type": mime_type,
+                "options": {
+                    "do_ocr": False,
+                    "do_table_structure": False,
+                    # add more if needed, e.g.:
+                    # "do_picture_description": False,
+                    # "pipeline": "standard",
+                },
+                # optional extras the worker might use:
+                # "scratch_dir": scratch_dir,     # sometimes passed here instead
+            }
             job = self.queue.enqueue(
                 "docling_jobkit.orchestrators.rq.worker.docling_task",
-                presigned_url=presigned_url,
-                filename=filename,
-                mime_type=mime_type,
+                task_data,
                 task_type="convert",
                 task_id=task_id,
                 options={
