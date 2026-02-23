@@ -338,38 +338,78 @@ class DoclingRQClient:
                                                 logger.debug(f"📊 [RQ_DESERIALIZE] First 20 bytes (hex): {redis_value[:20].hex()}")
 
                                         # If deserialization succeeded, check if it's a ZipArchiveResult
-                                        if deserialized_data:
-                                            if isinstance(deserialized_data, dict):
-                                                if deserialized_data.get('kind') == 'ZipArchiveResult':
-                                                    logger.info(f"📦 [ZIP_RESULT] Detected ZipArchiveResult object from Redis")
-                                                    # Extract the ZIP content and extract JSON from it
-                                                    zip_bytes = deserialized_data.get('content')
-                                                    if zip_bytes:
-                                                        try:
-                                                            import zipfile
-                                                            import io
+                                        if deserialized_data and isinstance(deserialized_data, dict):
+                                            logger.info(f"📊 [RQ_DESERIALIZE] Top-level keys: {list(deserialized_data.keys())}")
 
-                                                            logger.info(f"🗜️ [ZIP_EXTRACT] Extracting JSON from ZipArchiveResult...")
-                                                            with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zip_file:
-                                                                json_files = [f for f in zip_file.namelist() if f.endswith('.json')]
-                                                                if json_files:
-                                                                    json_file = json_files[0]
-                                                                    logger.info(f"✅ [ZIP_EXTRACT] Found JSON file: {json_file}")
-                                                                    with zip_file.open(json_file) as f:
-                                                                        redis_value_str = f.read().decode('utf-8')
-                                                                        logger.info(f"✅ [ZIP_EXTRACT] Extracted JSON - length: {len(redis_value_str)} chars")
-                                                                else:
-                                                                    logger.error(f"❌ [ZIP_EXTRACT] No JSON files found in ZipArchiveResult")
-                                                                    markdown = ""
-                                                                    metadata = {}
-                                                                    raise Exception("No JSON files in ZipArchiveResult")
-                                                        except Exception as zip_err:
-                                                            logger.error(f"❌ [ZIP_EXTRACT] Failed to extract from ZipArchiveResult: {zip_err}")
-                                                            import traceback
-                                                            logger.error(f"📊 [ZIP_EXTRACT] Traceback: {traceback.format_exc()}")
-                                                            markdown = ""
-                                                            metadata = {}
-                                                            raise
+                                            # The MessagePack structure from docling-serve is nested:
+                                            # { "result": { "kind": "ZipArchiveResult", "content": <zip_bytes> }, ... }
+                                            # Navigate to find the ZipArchiveResult at any level
+                                            zip_result = None
+
+                                            # Check top-level first
+                                            if deserialized_data.get('kind') == 'ZipArchiveResult':
+                                                zip_result = deserialized_data
+                                            # Check inside 'result' key (docling-serve nests it here)
+                                            elif isinstance(deserialized_data.get('result'), dict):
+                                                inner = deserialized_data['result']
+                                                logger.info(f"📊 [RQ_DESERIALIZE] result keys: {list(inner.keys())}")
+                                                if inner.get('kind') == 'ZipArchiveResult':
+                                                    zip_result = inner
+
+                                            if zip_result:
+                                                logger.info(f"📦 [ZIP_RESULT] Detected ZipArchiveResult object from Redis")
+                                                zip_content = zip_result.get('content')
+                                                if zip_content:
+                                                    # content may be bytes or may need conversion
+                                                    if isinstance(zip_content, str):
+                                                        zip_content = zip_content.encode('latin-1')
+                                                    logger.info(f"📦 [ZIP_RESULT] ZIP content size: {len(zip_content)} bytes, first 4 bytes: {zip_content[:4]}")
+
+                                                    try:
+                                                        import zipfile
+                                                        import io
+
+                                                        logger.info(f"🗜️ [ZIP_EXTRACT] Extracting JSON from ZipArchiveResult...")
+                                                        with zipfile.ZipFile(io.BytesIO(zip_content)) as zip_file:
+                                                            all_files = zip_file.namelist()
+                                                            logger.info(f"📋 [ZIP_EXTRACT] Files in archive: {all_files}")
+                                                            json_files = [f for f in all_files if f.endswith('.json')]
+                                                            md_files = [f for f in all_files if f.endswith('.md')]
+                                                            if json_files:
+                                                                json_file = json_files[0]
+                                                                logger.info(f"✅ [ZIP_EXTRACT] Found JSON file: {json_file}")
+                                                                with zip_file.open(json_file) as f:
+                                                                    redis_value_str = f.read().decode('utf-8')
+                                                                    logger.info(f"✅ [ZIP_EXTRACT] Extracted JSON - length: {len(redis_value_str)} chars")
+                                                            elif md_files:
+                                                                md_file = md_files[0]
+                                                                logger.info(f"✅ [ZIP_EXTRACT] Found Markdown file: {md_file}")
+                                                                with zip_file.open(md_file) as f:
+                                                                    redis_value_str = f.read().decode('utf-8')
+                                                                    logger.info(f"✅ [ZIP_EXTRACT] Extracted Markdown - length: {len(redis_value_str)} chars")
+                                                            else:
+                                                                logger.error(f"❌ [ZIP_EXTRACT] No JSON or Markdown files in archive: {all_files}")
+                                                                markdown = ""
+                                                                metadata = {}
+                                                                raise Exception(f"No extractable files in ZipArchiveResult: {all_files}")
+                                                    except zipfile.BadZipFile as zip_err:
+                                                        logger.error(f"❌ [ZIP_EXTRACT] Not a valid ZIP file: {zip_err}")
+                                                        import traceback
+                                                        logger.error(f"📊 [ZIP_EXTRACT] Traceback: {traceback.format_exc()}")
+                                                        markdown = ""
+                                                        metadata = {}
+                                                        raise
+                                                    except Exception as zip_err:
+                                                        logger.error(f"❌ [ZIP_EXTRACT] Failed to extract from ZipArchiveResult: {zip_err}")
+                                                        import traceback
+                                                        logger.error(f"📊 [ZIP_EXTRACT] Traceback: {traceback.format_exc()}")
+                                                        markdown = ""
+                                                        metadata = {}
+                                                        raise
+                                                else:
+                                                    logger.error(f"❌ [ZIP_RESULT] ZipArchiveResult has no 'content' field. Keys: {list(zip_result.keys())}")
+                                            else:
+                                                logger.warning(f"⚠️ [RQ_DESERIALIZE] Deserialized data is not a ZipArchiveResult. Checking all keys...")
 
                                         # If deserialization didn't help or didn't produce ZipArchiveResult, try text decoding
                                         if not redis_value_str:
