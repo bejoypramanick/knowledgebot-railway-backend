@@ -3,10 +3,8 @@ import asyncio
 import logging
 import os
 import tempfile
+import time
 from typing import Optional, Tuple
-
-import httpx
-from httpx import Timeout
 
 logger = logging.getLogger("docling_integration")
 
@@ -30,6 +28,7 @@ def _get_settings():
         # Try to import from the caller's context (worker or knowledgebase_ingestion)
         from core.config import settings
         logger.info(f"🔧 [DOCLING] Using settings from core.config (timeout: {settings.docling_timeout_seconds}s)")
+        logger.info(f"🔧 [DOCLING] Redis DB 2 (separate from Celery DB 0/1)")
         return settings
     except ImportError:
         try:
@@ -42,9 +41,24 @@ def _get_settings():
             class MinimalSettings:
                 docling_enabled = os.getenv("DOCLING_ENABLED", "true").lower() == "true"
                 docling_timeout_seconds = int(os.getenv("DOCLING_TIMEOUT_SECONDS", "1800"))
-                docling_service_url = os.getenv("DOCLING_SERVICE_URL", "http://localhost:8004")
+                redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+                docling_redis_url = os.getenv("DOCLING_REDIS_URL", None)
+                docling_rq_queue_name = os.getenv("DOCLING_RQ_QUEUE_NAME", "docling")
+                docling_poll_initial_delay = int(os.getenv("DOCLING_POLL_INITIAL_DELAY", "2"))
+                docling_poll_max_interval = int(os.getenv("DOCLING_POLL_MAX_INTERVAL", "30"))
                 docling_fallback_to_raw = os.getenv("DOCLING_FALLBACK_TO_RAW", "true").lower() == "true"
+
+                @property
+                def get_docling_redis_url(self) -> str:
+                    """Get docling Redis URL (DB 2)."""
+                    if self.docling_redis_url:
+                        return self.docling_redis_url
+                    if self.redis_url.endswith('/0'):
+                        return self.redis_url[:-1] + '2'
+                    return self.redis_url.rstrip('/') + '/2'
+
             logger.info(f"🔧 [DOCLING] Using minimal settings from environment (timeout: {MinimalSettings.docling_timeout_seconds}s)")
+            logger.info(f"🔧 [DOCLING] Redis DB 2 (separate from Celery DB 0/1)")
             return MinimalSettings()
 
 
@@ -55,14 +69,13 @@ async def process_with_docling(
     timeout_seconds: Optional[int] = None
 ) -> Tuple[Optional[str], dict]:
     """
-    Call docling service to convert document to markdown using presigned URL.
-    Retries connection failures up to 3 times with exponential backoff.
+    Call docling-serve via Redis Queue to convert document to markdown.
 
     Args:
-        presigned_url: Presigned S3 URL for direct download by docling service
+        presigned_url: Presigned S3 URL for direct download by docling worker
         original_filename: Original filename
         mime_type: MIME type of the file
-        timeout_seconds: Request timeout in seconds
+        timeout_seconds: Job timeout in seconds
 
     Returns:
         Tuple of (markdown_content, metadata) or (None, error_dict) on failure
@@ -72,132 +85,49 @@ async def process_with_docling(
     if timeout_seconds is None:
         timeout_seconds = settings.docling_timeout_seconds
 
-    max_retries = 3
-    retry_delays = [5, 15, 30]  # seconds between retries
-    
-    for attempt in range(max_retries):
-        try:
-            # Configure timeout for this attempt
-            timeout_config = httpx.Timeout(
-                connect=30.0,
-                read=timeout_seconds + 60,  # Add buffer for large files
-                write=30.0,
-                pool=30.0
-            )
-            
-            logger.info(f"🔧 [DOCLING] HTTP timeout config - Connect: 30s, Read: {timeout_seconds + 60}s, Write: 30s, Pool: 30s")
-            
-            async with httpx.AsyncClient(timeout=timeout_config) as client:
-                if attempt > 0:
-                    logger.info(
-                        f"🔄 [DOCLING] Retry attempt {attempt + 1}/{max_retries} for {original_filename}"
-                    )
-                
-                logger.info(
-                    f"📄 [DOCLING] Calling docling service with presigned URL: {settings.docling_service_url} "
-                    f"for {original_filename}"
-                )
-                
-                # Send presigned URL in JSON payload
-                request_data = {
-                    "presigned_url": presigned_url,
-                    "filename": original_filename,
-                    "mime_type": mime_type
-                }
-                
-                response = await client.post(
-                    f"{settings.docling_service_url}/api/v1/docling/process_url",
-                    json=request_data,
-                    timeout=timeout_seconds
-                )
+    try:
+        from shared.docling_rq_client import DoclingRQClient
 
-                logger.info(f"📄 [DOCLING] Response status: {response.status_code}")
+        logger.info(
+            f"📄 [DOCLING_RQ] Enqueuing job for {original_filename} via Redis Queue (DB 2)"
+        )
 
-                if response.status_code == 200:
-                    result = response.json()
+        # Initialize RQ client with docling-specific Redis URL (DB 2)
+        docling_redis_url = settings.get_docling_redis_url if hasattr(settings, 'get_docling_redis_url') else settings.redis_url.replace('/0', '/2') if settings.redis_url.endswith('/0') else settings.redis_url + '/2'
+        client = DoclingRQClient(docling_redis_url)
 
-                    if result.get("success"):
-                        content = result.get("content")
-                        metadata = result.get("metadata", {})
-                        
-                        # Log the content format and metadata
-                        content_format = metadata.get("content_format", "unknown")
-                        logger.info(f"📄 [DOCLING] Content format: {content_format}")
-                        logger.info(f"📊 [DOCLING] Metadata keys: {list(metadata.keys())}")
-                        
-                        if content_format == "json":
-                            logger.info(f"📋 [DOCLING] JSON content length: {len(content)} chars")
-                            logger.info(f"📋 [DOCLING] JSON preview: {content[:200]}...")
-                        else:
-                            logger.info(f"📝 [DOCLING] Markdown content length: {len(content)} chars")
-                            logger.info(f"📝 [DOCLING] Markdown preview: {content[:200]}...")
-                        
-                        logger.info(
-                            f"✅ [DOCLING] Successfully processed {original_filename} via presigned URL"
-                        )
-                        return content, metadata
-                    else:
-                        error_msg = result.get("error", "Unknown error")
-                        logger.error(
-                            f"❌ [DOCLING] Processing failed for {original_filename}: {error_msg}"
-                        )
-                        return None, {"error": error_msg, "filename": original_filename}
-                else:
-                    logger.error(
-                        f"❌ [DOCLING] HTTP error {response.status_code} for {original_filename}"
-                    )
-                    return None, {
-                        "error": f"HTTP {response.status_code}",
-                        "filename": original_filename
-                    }
+        # Enqueue job and poll for result
+        markdown_content, metadata = await client.process_document_async(
+            presigned_url,
+            original_filename,
+            mime_type,
+            timeout_seconds=timeout_seconds
+        )
 
-        except httpx.TimeoutException:
-            
-            # Determine which timeout caused the issue
-            if "connect" in error_msg.lower():
-                logger.error(f"⏱️ [DOCLING_TIMEOUT] CONNECT TIMEOUT - Could not connect to docling service")
-            elif "read" in error_msg.lower():
-                logger.error(f"⏱️ [DOCLING_TIMEOUT] READ TIMEOUT - Server took too long to respond")
-            elif "write" in error_msg.lower():
-                logger.error(f"⏱️ [DOCLING_TIMEOUT] WRITE TIMEOUT - Upload took too long")
-            elif "pool" in error_msg.lower():
-                logger.error(f"⏱️ [DOCLING_TIMEOUT] POOL TIMEOUT - Connection pool issue")
-            else:
-                logger.error(f"⏱️ [DOCLING_TIMEOUT] UNKNOWN TIMEOUT - {error_msg}")
-            
-            return None, {"error": f"HTTP timeout ({error_type}): {error_msg}"}
+        # Log the content format and metadata
+        content_format = metadata.get("content_format", "markdown")
+        logger.info(f"📄 [DOCLING_RQ] Content format: {content_format}")
+        logger.info(f"📊 [DOCLING_RQ] Metadata keys: {list(metadata.keys())}")
 
-        except asyncio.TimeoutError:
-            logger.warning(
-                f"⚠️ [DOCLING] Timeout processing {original_filename} "
-                f"(timeout={timeout_seconds}s)"
-            )
-            return None, {"error": "Docling processing timeout"}
+        if content_format == "json":
+            logger.info(f"📋 [DOCLING_RQ] JSON content length: {len(markdown_content)} chars")
+            logger.info(f"📋 [DOCLING_RQ] JSON preview: {markdown_content[:200]}...")
+        else:
+            logger.info(f"📝 [DOCLING_RQ] Markdown content length: {len(markdown_content)} chars")
+            logger.info(f"📝 [DOCLING_RQ] Markdown preview: {markdown_content[:200]}...")
 
-        except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
-            # Connection errors - retry with backoff
-            if attempt < max_retries - 1:
-                delay = retry_delays[attempt]
-                logger.warning(
-                    f"⚠️ [DOCLING] Connection failed for {original_filename} (attempt {attempt + 1}/{max_retries}): {e}"
-                )
-                logger.info(f"⏳ [DOCLING] Retrying in {delay}s... (docling service may be busy)")
-                await asyncio.sleep(delay)
-                continue
-            else:
-                logger.warning(
-                    f"⚠️ [DOCLING] All connection attempts failed for {original_filename}: {e}"
-                )
-                return None, {"error": f"Connection failed after {max_retries} attempts: {str(e)}"}
+        logger.info(
+            f"✅ [DOCLING_RQ] Successfully processed {original_filename} via Redis Queue"
+        )
+        return markdown_content, metadata
 
-        except Exception as e:
-            logger.warning(
-                f"⚠️ [DOCLING] Error calling docling service for {original_filename}: {e}"
-            )
-            return None, {"error": str(e)}
-    
-    # Should not reach here, but just in case
-    return None, {"error": "Max retries exceeded"}
+    except TimeoutError as e:
+        logger.error(f"⏱️ [DOCLING_RQ] Timeout: {e}")
+        return None, {"error": f"Timeout: {str(e)}"}
+
+    except Exception as e:
+        logger.error(f"❌ [DOCLING_RQ] Error processing {original_filename}: {e}")
+        return None, {"error": str(e)}
 
 
 async def should_use_docling_for_file(
