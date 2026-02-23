@@ -96,7 +96,7 @@ async def process_with_docling(
         )
 
         # Initialize RQ client with docling-specific Redis URL (DB 2)
-        docling_redis_url = settings.get_docling_redis_url if hasattr(settings, 'get_docling_redis_url') else settings.redis_url.replace('/0', '/2') if settings.redis_url.endswith('/0') else settings.redis_url + '/2'
+        docling_redis_url = settings.get_docling_redis_url
         client = DoclingRQClient(docling_redis_url)
 
         # Enqueue job and poll for result
