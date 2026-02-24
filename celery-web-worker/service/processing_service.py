@@ -597,7 +597,16 @@ class ProcessingService:
         logger.info(f"✅ [S3_HTML_UPLOAD] HTML uploaded: {html_s3_key}")
 
         # 2. Generate presigned URL for docling to access
-        presigned_url = s3_file_storage.generate_presigned_url(html_s3_key)
+        success, presigned_url = s3_file_storage.generate_presigned_url(html_s3_key)
+        if not success:
+            logger.error(f"❌ [PRESIGNED_URL] Failed to generate presigned URL: {presigned_url}")
+            # Cleanup temp HTML
+            try:
+                await s3_file_storage.delete_file(html_s3_key)
+            except:
+                pass
+            raise Exception(f"Failed to generate presigned URL for {html_s3_key}")
+
         logger.info(f"🔗 [PRESIGNED_URL] Generated for docling: {presigned_url[:100]}...")
 
         # 3. Call docling queue (same pattern as file worker)
