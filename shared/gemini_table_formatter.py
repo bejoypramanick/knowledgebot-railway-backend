@@ -90,31 +90,38 @@ async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, A
     Returns:
         Dictionary with formatted tables as JSON
     """
+    logger.info("=" * 80)
+    logger.info("🤖 [GEMINI_TABLES] === START TABLE FORMATTING WITH GEMINI ===")
+    logger.info("=" * 80)
+
     if not tables:
-        logger.info("No tables to format")
+        logger.warning("⚠️ [GEMINI_TABLES] No tables to format - returning empty")
         return {"tables": {}}
 
+    logger.info(f"📊 [GEMINI_TABLES] Received {len(tables)} table(s) from docling")
+
     try:
+        logger.info("[GEMINI_TABLES] Getting Gemini client...")
         genai_client = get_genai_client()
         if not genai_client:
-            logger.error("❌ Gemini client not available")
+            logger.error("❌ [GEMINI_TABLES] Gemini client not available")
             return {"tables": {}, "error": "Gemini client not configured"}
 
+        logger.info("✅ [GEMINI_TABLES] Gemini client obtained")
+
         # Prepare table data for Gemini
+        logger.info("[GEMINI_TABLES] Converting tables to JSON...")
         tables_text = json.dumps(tables, indent=2, ensure_ascii=False)
+        logger.info(f"✅ [GEMINI_TABLES] Converted to JSON: {len(tables_text)} chars")
 
-        logger.info(f"🤖 [GEMINI_TABLES] Sending {len(tables)} tables to Gemini for formatting...")
-        logger.info(f"   Tables data size: {len(tables_text)} chars")
-        logger.debug(f"   Tables structure: {[t.get('data', {}).get('num_rows', '?') for t in tables]} rows per table")
-
-        # Log sample of first table if available
-        if tables:
-            first_table = tables[0]
-            num_rows = first_table.get('data', {}).get('num_rows', 0)
-            num_cols = first_table.get('data', {}).get('num_cols', 0)
-            logger.info(f"   First table: {num_rows} rows × {num_cols} cols")
+        logger.info(f"📊 [GEMINI_TABLES] Table statistics:")
+        for idx, table in enumerate(tables):
+            num_rows = table.get('data', {}).get('num_rows', 0)
+            num_cols = table.get('data', {}).get('num_cols', 0)
+            logger.info(f"   Table {idx+1}: {num_rows} rows × {num_cols} cols")
 
         # Create prompt for Gemini to format tables
+        logger.info("[GEMINI_TABLES] Creating prompt for Gemini...")
         prompt = f"""You are a data formatting expert. I have extracted tables from a PDF document using docling.
 
 Please analyze these tables and convert them into a meaningful JSON structure that is:
@@ -136,48 +143,95 @@ Docling tables data:
 {tables_text}
 
 Return the formatted tables as valid JSON."""
+        logger.info(f"✅ [GEMINI_TABLES] Prompt created: {len(prompt)} chars")
 
         # Call Gemini API in thread executor (synchronous API in async context)
+        logger.info("[GEMINI_TABLES] Setting up executor for Gemini API call...")
         loop = asyncio.get_event_loop()
         executor = ThreadPoolExecutor(max_workers=1)
 
         def call_gemini():
-            return genai_client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=prompt
-            )
+            logger.info("[GEMINI_TABLES] >>> Calling genai_client.models.generate_content()...")
+            try:
+                result = genai_client.models.generate_content(
+                    model="gemini-1.5-flash",
+                    contents=prompt
+                )
+                logger.info(f"[GEMINI_TABLES] <<< API call returned successfully")
+                return result
+            except Exception as api_err:
+                logger.error(f"[GEMINI_TABLES] <<< API call FAILED: {api_err}")
+                raise
 
+        logger.info("[GEMINI_TABLES] Running Gemini API in executor...")
         response = await loop.run_in_executor(executor, call_gemini)
+        logger.info(f"✅ [GEMINI_TABLES] Executor returned response: {type(response)}")
 
-        if not response or not response.text:
-            logger.error("❌ Empty response from Gemini")
-            return {"tables": {}, "error": "Empty Gemini response"}
+        logger.info("[GEMINI_TABLES] Checking response...")
+        if not response:
+            logger.error("❌ [GEMINI_TABLES] Response is None/null")
+            return {"tables": {}, "error": "Null response from Gemini"}
 
-        logger.info(f"✅ Gemini formatted tables (response length: {len(response.text)} chars)")
+        logger.info(f"✅ [GEMINI_TABLES] Response object exists: {type(response).__name__}")
+
+        if not hasattr(response, 'text'):
+            logger.error(f"❌ [GEMINI_TABLES] Response has no 'text' attribute. Attributes: {dir(response)}")
+            return {"tables": {}, "error": "Response missing text attribute"}
+
+        if not response.text:
+            logger.error(f"❌ [GEMINI_TABLES] Response text is empty/None")
+            return {"tables": {}, "error": "Empty Gemini response text"}
+
+        logger.info(f"✅ [GEMINI_TABLES] Got response text: {len(response.text)} chars")
+        logger.info(f"📋 [GEMINI_TABLES_RESPONSE] Response preview (first 500 chars):")
+        logger.info(response.text[:500])
 
         # Parse the JSON response
+        logger.info("[GEMINI_TABLES] Parsing JSON response...")
         try:
             # Try to extract JSON from the response
             response_text = response.text.strip()
+            logger.info(f"[GEMINI_TABLES] Response text length: {len(response_text)} chars")
 
             # If wrapped in markdown code block, extract it
             if response_text.startswith("```"):
+                logger.info("[GEMINI_TABLES] Response wrapped in markdown code block - extracting JSON...")
                 json_start = response_text.find('{')
                 json_end = response_text.rfind('}') + 1
                 if json_start >= 0 and json_end > json_start:
                     response_text = response_text[json_start:json_end]
+                    logger.info(f"[GEMINI_TABLES] Extracted JSON: {len(response_text)} chars")
+                else:
+                    logger.warning("[GEMINI_TABLES] Could not find JSON delimiters in code block")
 
+            logger.info("[GEMINI_TABLES] Attempting to parse as JSON...")
             formatted = json.loads(response_text)
-            logger.info(f"📋 Successfully parsed Gemini formatted tables")
+            logger.info(f"✅ [GEMINI_TABLES] Successfully parsed JSON")
+            logger.info(f"📋 [GEMINI_TABLES] Parsed structure keys: {list(formatted.keys())}")
+
+            if "tables" in formatted:
+                logger.info(f"✅ [GEMINI_TABLES] Found 'tables' key with {len(formatted['tables'])} items")
+
+            logger.info("=" * 80)
+            logger.info("✅ [GEMINI_TABLES] === END TABLE FORMATTING - SUCCESS ===")
+            logger.info("=" * 80)
             return formatted
 
         except json.JSONDecodeError as e:
-            logger.error(f"❌ Failed to parse Gemini response as JSON: {e}")
-            logger.debug(f"Response text: {response.text[:500]}")
+            logger.error(f"❌ [GEMINI_TABLES] Failed to parse as JSON: {e}")
+            logger.error(f"[GEMINI_TABLES] Full response text:")
+            for line in response.text.split('\n')[:20]:  # Log first 20 lines
+                logger.error(f"  {line}")
             return {"tables": {}, "error": f"Invalid JSON response: {str(e)}"}
 
     except Exception as e:
-        logger.error(f"❌ Error formatting tables with Gemini: {e}")
+        logger.error(f"❌ [GEMINI_TABLES] Unexpected error: {e}")
+        logger.error(f"[GEMINI_TABLES] Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"[GEMINI_TABLES] Traceback:\n{traceback.format_exc()}")
+        logger.info("=" * 80)
+        logger.info("❌ [GEMINI_TABLES] === END TABLE FORMATTING - ERROR ===")
+        logger.info("=" * 80)
         return {"tables": {}, "error": str(e)}
 
 
