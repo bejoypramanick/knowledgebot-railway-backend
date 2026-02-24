@@ -22,15 +22,16 @@ async def process_html_hybrid(
     Process HTML using hybrid approach:
     1. Extract tables ONLY from docling (no text items)
     2. Format tables with Gemini
-    3. Extract text with trafilatura (excludes tables)
+    3. Extract text with trafilatura (excludes tables, filters out menus/sidebars)
     4. Merge trafilatura text + Gemini-formatted tables
 
     Args:
-        html_content: Raw HTML from crawl4ai (SAME input used by docling)
+        html_content: HTML from crawl4ai (ads/overlays removed, keeps sidebars/navigation)
+                     Trafilatura will extract only article content from full page
         docling_json: Docling JSON output (tables only)
 
     Returns:
-        Final markdown with trafilatura text + formatted tables
+        Final markdown with article text + formatted tables
     """
     logger.info("=" * 80)
     logger.info("[HYBRID] === HYBRID HTML PROCESSING ===")
