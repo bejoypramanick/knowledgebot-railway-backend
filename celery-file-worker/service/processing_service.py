@@ -20,6 +20,7 @@ from shared.docling_integration import (
     create_markdown_temp_file,
     create_json_temp_file
 )
+from shared.docling_content_converter import convert_docling_to_markdown
 from shared.file_search import get_file_search_store_by_display_name
 from shared.html_processor import extract_content_from_html
 from shared.db import get_db_connection
@@ -466,24 +467,29 @@ async def process_file_content(
                     except Exception as parse_err:
                         logger.warning(f"⚠️ [DOCLING_PARSE] Failed to parse: {parse_err}. First 500 chars: {repr(json_content[:500])}")
 
-                    # Use JSON content from Docling service
-                    content_for_upload = json_content
+                    # Convert Docling JSON to Markdown with structured tables
+                    content_for_upload = convert_docling_to_markdown(json_content)
 
-                    # Log the JSON content being sent to Gemini FileStore
-                    logger.info(f"📤 [DOCLING_TO_GEMINI] Sending Docling JSON response to Gemini FileStore:")
-                    logger.info(f"    Content Format: JSON")
+                    # Log the final converted markdown+json being sent to Gemini
+                    logger.info(f"📤 [DOCLING_TO_GEMINI] Final converted Markdown to Gemini FileStore:")
+                    logger.info(f"    Content Format: Markdown (converted from Docling JSON)")
                     logger.info(f"    Total Size: {len(content_for_upload)} characters")
-                    logger.info(f"    File will be created as: {original_filename.rsplit('.', 1)[0]}.json")
+                    logger.info(f"    File will be created as: {original_filename.rsplit('.', 1)[0]}.md")
+                    logger.info(f"📋 [DOCLING_FINAL_MARKDOWN] === BEGIN CONVERTED CONTENT ===")
+                    # Log full content in chunks to avoid log truncation
+                    for chunk_start in range(0, len(content_for_upload), 10000):
+                        logger.info(content_for_upload[chunk_start:chunk_start + 10000])
+                    logger.info(f"📋 [DOCLING_FINAL_MARKDOWN] === END CONVERTED CONTENT ===")
 
-                    # Create temporary JSON file from Docling response
-                    tmp_path = create_json_temp_file(content_for_upload)
+                    # Create temporary Markdown file from converted content
+                    tmp_path = create_markdown_temp_file(content_for_upload)
 
                     # Log temporary file creation and verify content
                     temp_file_size = os.path.getsize(tmp_path)
-                    logger.info(f"📁 [TEMP_FILE_CREATED] Temporary JSON file created from Docling response:")
+                    logger.info(f"📁 [TEMP_FILE_CREATED] Temporary Markdown file created from Docling response:")
                     logger.info(f"    File Path: {tmp_path}")
                     logger.info(f"    File Size: {temp_file_size} bytes")
-                    logger.info(f"    Format: JSON")
+                    logger.info(f"    Format: Markdown")
 
                     # Verify and log the actual content in the temporary file
                     try:
@@ -519,14 +525,14 @@ async def process_file_content(
                     # Switch to processed artifact
                     original_tmp_path = tmp_path
 
-                    # Update filename and MIME type - Docling always returns JSON now
-                    original_filename = original_filename.rsplit('.', 1)[0] + '.json'
-                    detected_mime_type = 'application/json'
-                    logger.info(f"📋 [CONTENT_FORMAT_JSON] Docling response is in JSON format - "
+                    # Update filename and MIME type - Docling JSON converted to Markdown
+                    original_filename = original_filename.rsplit('.', 1)[0] + '.md'
+                    detected_mime_type = 'text/markdown'
+                    logger.info(f"📋 [CONTENT_FORMAT_MD] Docling JSON converted to Markdown - "
                               f"File will be uploaded to Gemini FileStore as: {original_filename} (MIME: {detected_mime_type})")
 
                     processed_successfully = True
-                    logger.info(f"✅ [DOCLING_PROCESSING_COMPLETE] Successfully processed document to JSON format: {original_filename} "
+                    logger.info(f"✅ [DOCLING_PROCESSING_COMPLETE] Successfully processed document to Markdown format: {original_filename} "
                               f"(Original: {original_filename.rsplit('.', 1)[0]}.*)")
                 else:
                     error_msg = docling_metadata.get("error", "Docling processing failed")
@@ -604,10 +610,7 @@ async def process_file_content(
                 }
                 
                 # Set appropriate MIME type based on content format
-                if docling_metadata and docling_metadata.get('content_format') == 'json':
-                    upload_config['mime_type'] = 'application/json'
-                    logger.info(f"📋 [MIME] Setting mime_type='application/json' for JSON content from {original_filename}")
-                elif detected_mime_type == 'text/markdown' or tmp_path.endswith('.md'):
+                if detected_mime_type == 'text/markdown' or tmp_path.endswith('.md'):
                     upload_config['mime_type'] = 'text/markdown'
                     logger.info(f"📝 [MIME] Setting mime_type='text/markdown' for {original_filename}")
                 else:
