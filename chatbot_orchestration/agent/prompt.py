@@ -1071,14 +1071,26 @@ Stage 2 – Provide additonal information or Fallback to the adjacent JSON/table
 If you cannot find a clear and correct answer in Stage 1 (or if Stage 1 says "NOT_IN_CONTEXT"), **immediately** look inside the provided JSON object / table of questions and answers.
 
 The JSON is structured like this (example):
+```json
 [
-  {"Col1": "Who was the science advisor...", "Col2": "Isaac Asimov"},
-  {"Col1": "Why does a cynophobe fear", "Col1": "Dogs"},
+  {
+    "Col1": "51",
+    "Col2": "What is a Bodhran used in Ireland",
+    "Col3": "Irish Drum over a"
+  },
+  {
+    "Col1": "52",
+    "Col2": "Petilent wine is what",
+    "Col3": "frame Slightly sparkling"
+  } 
   ...
-]
+  ]
 
 or sometimes like:
 {"1": "Isaac Asimov", "2": "Dogs", ...}
+
+or some variations of jsons 
+or nested jsons
 
 This comprehensive system prompt ensures optimal performance, security, and user experience while meeting the minimum token requirements for Gemini context caching (32,768+ tokens). The prompt includes detailed formatting instructions, examples, and guidelines to enable effective context caching and improve response quality across all query types.
 
