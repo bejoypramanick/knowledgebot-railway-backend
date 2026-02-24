@@ -468,19 +468,40 @@ async def process_file_content(
                     except Exception as parse_err:
                         logger.warning(f"⚠️ [DOCLING_PARSE] Failed to parse: {parse_err}. First 500 chars: {repr(json_content[:500])}")
 
-                    # Convert Docling JSON to Markdown with structured tables
-                    content_for_upload = convert_docling_to_markdown(json_content)
+                    # Extract tables and send to Gemini for intelligent formatting
+                    from shared.gemini_table_formatter import (
+                        extract_tables_from_docling_json,
+                        extract_non_table_content_from_docling,
+                        format_tables_with_gemini,
+                        merge_content_with_formatted_tables
+                    )
 
-                    # Log the final converted markdown+json being sent to Gemini
-                    logger.info(f"📤 [DOCLING_TO_GEMINI] Final converted Markdown to Gemini FileStore:")
-                    logger.info(f"    Content Format: Markdown (converted from Docling JSON)")
+                    logger.info(f"🔄 [TABLE_EXTRACTION] Extracting tables from docling JSON...")
+                    tables = extract_tables_from_docling_json(json_content)
+
+                    logger.info(f"📝 [TEXT_EXTRACTION] Extracting non-table content...")
+                    text_content = extract_non_table_content_from_docling(json_content)
+
+                    # Send tables to Gemini for formatting
+                    logger.info(f"🤖 [GEMINI_TABLES] Sending {len(tables)} tables to Gemini for formatting...")
+                    formatted_tables = await format_tables_with_gemini(tables)
+
+                    # Merge formatted tables with text content
+                    logger.info(f"📋 [MERGE] Merging text content with formatted tables...")
+                    content_for_upload = merge_content_with_formatted_tables(text_content, formatted_tables)
+
+                    # Log the final merged content being sent to Gemini
+                    logger.info(f"📤 [DOCLING_TO_GEMINI] Final merged content for Gemini FileStore:")
+                    logger.info(f"    Content Format: Markdown with formatted tables")
                     logger.info(f"    Total Size: {len(content_for_upload)} characters")
+                    logger.info(f"    Text content: {len(text_content)} chars")
+                    logger.info(f"    Tables: {len(tables)} extracted, formatted by Gemini")
                     logger.info(f"    File will be created as: {original_filename.rsplit('.', 1)[0]}.md")
-                    logger.info(f"📋 [DOCLING_FINAL_MARKDOWN] === BEGIN CONVERTED CONTENT ===")
+                    logger.info(f"📋 [DOCLING_FINAL_MARKDOWN] === BEGIN MERGED CONTENT ===")
                     # Log full content in chunks to avoid log truncation
                     for chunk_start in range(0, len(content_for_upload), 10000):
                         logger.info(content_for_upload[chunk_start:chunk_start + 10000])
-                    logger.info(f"📋 [DOCLING_FINAL_MARKDOWN] === END CONVERTED CONTENT ===")
+                    logger.info(f"📋 [DOCLING_FINAL_MARKDOWN] === END MERGED CONTENT ===")
 
                     # Upload converted markdown to S3 for later download
                     md_filename = original_filename.rsplit('.', 1)[0] + '.md'
