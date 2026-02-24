@@ -597,25 +597,32 @@ class ProcessingService:
         logger.info(f"✅ [S3_HTML_UPLOAD] HTML uploaded: {html_s3_key}")
 
         # 2. Generate presigned URL for docling to access
-        success, presigned_url = s3_file_storage.generate_presigned_url(html_s3_key)
+        logger.info(f"🔗 [S3] Generating presigned URL for S3 object: {html_s3_key}")
+        success, result = s3_file_storage.generate_presigned_url(html_s3_key, expiration=3600)
         if not success:
-            logger.error(f"❌ [PRESIGNED_URL] Failed to generate presigned URL: {presigned_url}")
+            logger.error(f"❌ [S3] Failed to generate presigned URL: {result}")
             # Cleanup temp HTML
             try:
                 await s3_file_storage.delete_file(html_s3_key)
             except:
                 pass
-            raise Exception(f"Failed to generate presigned URL for {html_s3_key}")
+            raise Exception(f"Failed to generate presigned URL: {result}")
 
-        logger.info(f"🔗 [PRESIGNED_URL] Generated for docling: {presigned_url[:100]}...")
+        presigned_url = result
+        logger.info(f"✅ [S3] Generated presigned URL for {html_s3_key}")
+        logger.info(f"🔍 [DEBUG] presigned_url type: {type(presigned_url)}")
+        logger.info(f"🔍 [DEBUG] presigned_url length: {len(presigned_url) if presigned_url else 'None'}")
+        logger.info(f"🔍 [DEBUG] presigned_url starts with http: {presigned_url.startswith('http') if presigned_url else 'None'}")
 
         # 3. Call docling queue (same pattern as file worker)
         try:
+            logger.info(f"🔍 [DEBUG] About to call process_with_docling with presigned_url: {presigned_url}")
             json_content, docling_metadata = await process_with_docling(
                 presigned_url=presigned_url,
                 original_filename=html_filename,
                 mime_type="text/html"
             )
+            logger.info(f"🔍 [DEBUG] process_with_docling returned: json_content={bool(json_content)}, metadata_keys={list(docling_metadata.keys()) if docling_metadata else 'None'}")
 
             logger.info(f"✅ [DOCLING_RESPONSE] Received docling JSON: {len(json_content)} chars")
 
