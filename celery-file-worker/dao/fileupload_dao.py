@@ -58,7 +58,8 @@ class FileUploadDAO:
         docling_images_extracted: int = 0,
         docling_images_with_ocr: int = 0,
         original_file_extension: str = None,
-        original_mime_type: str = None
+        original_mime_type: str = None,
+        processed_content_s3_key: str = None
     ) -> bool:
         """
         Update file record with all processing data after successful upload.
@@ -87,9 +88,10 @@ class FileUploadDAO:
                 docling_images_with_ocr = $11,
                 original_file_extension = $12,
                 original_mime_type = $13,
+                processed_content_s3_key = $14,
                 processing_status = 'completed',
                 updated_at = NOW()
-            WHERE id = $14
+            WHERE id = $15
         """
 
         params = [
@@ -106,6 +108,7 @@ class FileUploadDAO:
             docling_images_with_ocr,
             original_file_extension,
             original_mime_type,
+            processed_content_s3_key,
             file_id
         ]
 

@@ -124,6 +124,7 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
                 "error_message": f['error_message'],
                 "size_bytes": f.get('file_size', 0),  # Map file_size to size_bytes for UI
                 "char_count": f.get('char_count', 0),
+                "processed_content_s3_key": f.get('processed_content_s3_key'),
                 "created_at": f['created_at'].isoformat() if f['created_at'] else None,
                 "updated_at": f['updated_at'].isoformat() if f['updated_at'] else None
             }
@@ -390,6 +391,59 @@ async def delete_all_knowledge_endpoint(request: Request = None):
         raise
     except Exception as e:
         logger.error(f"❌ [DELETE_ALL_ERROR] Error deleting all knowledge: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =================================
+# DOWNLOAD ENDPOINT
+# =================================
+
+@router.get("/download/{file_id}")
+async def download_processed_content(file_id: str, request: Request = None):
+    """
+    Get a presigned download URL for the processed markdown content of a file.
+    Returns a presigned S3 URL that the UI can use to download the converted .md file.
+    """
+    try:
+        # Extract authenticated user information
+        user_email, user_id = extract_user_from_request(request)
+
+        # Look up file record to get processed_content_s3_key and original_filename
+        from shared.db import get_db_connection
+        query = """
+            SELECT original_filename, processed_content_s3_key
+            FROM file_uploads WHERE id = $1
+        """
+        async with get_db_connection() as conn:
+            record = await conn.fetchrow(query, int(file_id))
+
+        if not record:
+            raise HTTPException(status_code=404, detail="File not found")
+
+        s3_key = record['processed_content_s3_key']
+        if not s3_key:
+            raise HTTPException(status_code=404, detail="No processed content available for this file")
+
+        # Generate presigned download URL
+        from shared.s3_file_storage import s3_file_storage
+        success, url = s3_file_storage.generate_presigned_url(s3_key, expiration=3600)
+        if not success:
+            raise HTTPException(status_code=500, detail=f"Failed to generate download URL: {url}")
+
+        # Derive the .md filename from original
+        original = record['original_filename']
+        md_filename = original.rsplit('.', 1)[0] + '.md' if '.' in original else original + '.md'
+
+        return {
+            "success": True,
+            "download_url": url,
+            "filename": md_filename
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating download URL for file {file_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

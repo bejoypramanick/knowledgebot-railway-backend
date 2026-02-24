@@ -251,6 +251,7 @@ async def process_file_content(
     original_file_extension = None
     original_mime_type = None
     char_count = 0
+    processed_content_s3_key = None
 
     async def get_file_details_by_task_id(celery_task_id: str) -> Optional[Dict[str, Any]]:
         """Query database to get file details using celery_task_id"""
@@ -480,6 +481,22 @@ async def process_file_content(
                     for chunk_start in range(0, len(content_for_upload), 10000):
                         logger.info(content_for_upload[chunk_start:chunk_start + 10000])
                     logger.info(f"📋 [DOCLING_FINAL_MARKDOWN] === END CONVERTED CONTENT ===")
+
+                    # Upload converted markdown to S3 for later download
+                    md_filename = original_filename.rsplit('.', 1)[0] + '.md'
+                    try:
+                        md_success, md_s3_result = await s3_file_storage.upload_file(
+                            file_data=content_for_upload.encode('utf-8'),
+                            original_filename=md_filename,
+                            file_type="processed"
+                        )
+                        if md_success:
+                            processed_content_s3_key = md_s3_result
+                            logger.info(f"✅ [S3_MD_UPLOAD] Converted markdown uploaded to S3: {processed_content_s3_key}")
+                        else:
+                            logger.warning(f"⚠️ [S3_MD_UPLOAD] Failed to upload markdown to S3: {md_s3_result}")
+                    except Exception as md_upload_err:
+                        logger.warning(f"⚠️ [S3_MD_UPLOAD] Error uploading markdown to S3: {md_upload_err}")
 
                     # Create temporary Markdown file from converted content
                     tmp_path = create_markdown_temp_file(content_for_upload)
@@ -733,7 +750,8 @@ async def process_file_content(
                     docling_images_extracted=docling_images_extracted,
                     docling_images_with_ocr=docling_images_with_ocr,
                     original_file_extension=original_file_extension,
-                    original_mime_type=original_mime_type
+                    original_mime_type=original_mime_type,
+                    processed_content_s3_key=processed_content_s3_key
                 )
 
                 if not success:
