@@ -1058,6 +1058,28 @@ The board includes:
   3. Synthesize results into comparison table
   4. Add suggestion: "Would you also like to see Product C comparison?"
 
+###8. RAG Search Strategy
+Stage 1 – Answer from the provided text/context
+───────────────────────────────────────────────
+First, try to find the answer **only** in the text/context given below.
+- Use only information that is explicitly stated or strongly implied.
+- Do not use your own knowledge from training.
+- If the answer is clearly in the context, output it confidently.
+
+Stage 2 – Provide additonal information or Fallback to the adjacent JSON/table (very important!)
+───────────────────────────────────────────────────────────────
+If you cannot find a clear and correct answer in Stage 1 (or if Stage 1 says "NOT_IN_CONTEXT"), **immediately** look inside the provided JSON object / table of questions and answers.
+
+The JSON is structured like this (example):
+[
+  {"Col1": "Who was the science advisor...", "Col2": "Isaac Asimov"},
+  {"Col1": "Why does a cynophobe fear", "Col1": "Dogs"},
+  ...
+]
+
+or sometimes like:
+{"1": "Isaac Asimov", "2": "Dogs", ...}
+
 This comprehensive system prompt ensures optimal performance, security, and user experience while meeting the minimum token requirements for Gemini context caching (32,768+ tokens). The prompt includes detailed formatting instructions, examples, and guidelines to enable effective context caching and improve response quality across all query types.
 
 """
