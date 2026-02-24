@@ -684,6 +684,7 @@ CREATE TABLE public.scraped_websites (
 	depth int4 DEFAULT 0 NULL,
 	parent_id int4 NULL,
 	crawl_session_id int4 NULL,
+	processed_content_s3_key text NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	CONSTRAINT scraped_websites_pkey PRIMARY KEY (id),

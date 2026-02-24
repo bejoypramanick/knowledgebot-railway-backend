@@ -15,6 +15,16 @@ from urllib.parse import urljoin, urlparse
 from shared.otel_logger import get_otel_logger
 from shared.file_search import get_file_search_store_by_display_name
 from shared.file_metrics import calculate_metrics
+from shared.docling_integration import process_with_docling
+from shared.gemini_table_formatter import (
+    extract_tables_from_docling_json,
+    extract_text_content_from_docling,
+    format_tables_with_gemini,
+    merge_content_with_formatted_tables,
+    reconstruct_equations_in_text
+)
+from shared.equation_extractor import extract_and_fix_equations_with_vision
+from shared.s3_file_storage import s3_file_storage
 
 from models.value_objects import (
     CrawlConfig,
@@ -219,14 +229,23 @@ class ProcessingService:
             job_context: JobContext,
             crawl_config: CrawlConfig
         ) -> Optional[PageMetrics]:
-            """Process one page: convert → upload → record"""
+            """Process one page: convert (docling) → upload → record"""
             logger.info(f"📄 [PIPELINE] Processing: {page_data.page_url}")
 
             try:
                 start_time = time.time()
 
-                # Convert to markdown for Gemini FileStore
-                markdown_content = await self._preparePageAsMarkdown(page_data.page_html, page_data.page_url, remove_ads=True)
+                # Convert HTML to markdown via docling
+                # HTML is pre-cleaned by crawl4ai (menus, navbars, ads removed)
+                try:
+                    markdown_content, processed_content_s3_key = await self._preparePageAsMarkdown(
+                        page_data.page_html, page_data.page_url, remove_ads=True
+                    )
+                except Exception as docling_error:
+                    logger.error(f"   ❌ Docling processing failed: {docling_error}")
+                    logger.warning(f"   ⏭️ Skipping page due to docling error")
+                    return None
+
                 page_data = PageData(
                     page_url=page_data.page_url,
                     page_html=page_data.page_html,
@@ -241,14 +260,14 @@ class ProcessingService:
                 if not upload_result:
                     logger.warning(f"   ⚠️ Upload failed, skipping this page")
                     return None
-                
+
                 # Store current page data for MIME type detection
                 self._current_page_data = page_data
 
                 logger.info(f"   ✅ Uploaded to Gemini: {upload_result.document_name}")
 
                 # Record
-                await self._recordPageToDB(page_data, upload_result, job_context, crawl_config)
+                await self._recordPageToDB(page_data, upload_result, job_context, crawl_config, processed_content_s3_key)
 
                 # Metrics
                 metrics = calculate_metrics(markdown_content)
@@ -260,7 +279,7 @@ class ProcessingService:
                     processing_time_seconds=processing_time
                 )
             except Exception as e:
-                logger.error(f"   ❌ Error: {e}")
+                logger.error(f"   ❌ Pipeline error: {e}")
                 return None
 
 
@@ -469,25 +488,38 @@ class ProcessingService:
         semaphore: asyncio.Semaphore,
         delay: float
     ) -> Optional[Tuple[str, str, Optional[str], Optional[str], Optional[str]]]:
-        """Fetch single page via crawl4ai - returns (url, html, title, description, session_id)"""
+        """
+        Fetch single page via crawl4ai with HTML cleaning.
+
+        Crawl4ai removes menus, navbars, ads via built-in cleaning options.
+        Returns: (url, cleaned_html, title, description, session_id)
+        """
         async with semaphore:
             try:
                 from crawl4ai import AsyncWebCrawler
                 async with AsyncWebCrawler() as crawler:
-                    result = await crawler.arun(url=page_url, timeout=30, js_code=None)
+                    # Use crawl4ai with cleaning options to remove menus, navbars, ads, etc.
+                    result = await crawler.arun(
+                        url=page_url,
+                        timeout=30,
+                        js_code=None,
+                        remove_overlay_elements=True,  # Remove modals, overlays, popups
+                        remove_unwanted_elements=True,  # Remove script, style, nav, footer, etc.
+                        remove_forms=True               # Remove form elements
+                    )
 
                     if result.success and result.html:
                         if delay > 0:
                             await asyncio.sleep(delay)
-                        logger.info(f"✅ Fetched {len(result.html)} bytes from {page_url}")
-                        
+                        logger.info(f"✅ Fetched and cleaned {len(result.html)} bytes from {page_url}")
+
                         # Extract title and description from metadata
                         title = None
                         description = None
                         if result.metadata:
                             title = result.metadata.get('title')
                             description = result.metadata.get('description')
-                        
+
                         return (page_url, result.html, title, description, result.session_id)
 
                     logger.warning(f"⚠️ Failed to fetch {page_url}")
@@ -533,56 +565,102 @@ class ProcessingService:
             return False
         return True
 
-    async def _preparePageAsMarkdown(self, html_content: str, page_url: str, remove_ads: bool = True) -> str:
-        """Convert HTML content to structured markdown using trafilatura"""
+    async def _preparePageAsMarkdown(self, html_content: str, page_url: str, remove_ads: bool = True) -> Tuple[str, Optional[str]]:
+        """
+        Process HTML with docling queue (same as file worker).
+        HTML is pre-cleaned by crawl4ai to remove menus, navbars, ads.
+
+        Returns:
+            Tuple of (markdown_content, processed_content_s3_key)
+        """
+        import hashlib
+
+        logger.info(f"📄 [DOCLING_WEB] Processing page with docling: {page_url}")
+
+        # Create URL hash for file naming
+        url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
+
+        # 1. Upload cleaned HTML to S3 temporarily
+        html_filename = f"page_{url_hash}.html"
+        logger.info(f"📤 [S3_HTML_UPLOAD] Uploading cleaned HTML to S3...")
+
+        html_upload_success, html_s3_key = await s3_file_storage.upload_file(
+            file_data=html_content.encode('utf-8'),
+            original_filename=html_filename,
+            file_type="web-worker-temp"  # Temporary storage
+        )
+
+        if not html_upload_success:
+            logger.error(f"❌ [S3_HTML_UPLOAD] Failed to upload HTML to S3")
+            raise Exception(f"Failed to upload HTML to S3 for {page_url}")
+
+        logger.info(f"✅ [S3_HTML_UPLOAD] HTML uploaded: {html_s3_key}")
+
+        # 2. Generate presigned URL for docling to access
+        presigned_url = s3_file_storage.generate_presigned_url(html_s3_key)
+        logger.info(f"🔗 [PRESIGNED_URL] Generated for docling: {presigned_url[:100]}...")
+
+        # 3. Call docling queue (same pattern as file worker)
         try:
-            import trafilatura
-            from trafilatura import extract
-            
-            # Extract content using trafilatura
-            extracted = extract(
-                html_content,
-                include_images=True,
-                include_tables=True,
-                include_links=True,
-                output_format='markdown',
-                with_metadata=True
+            json_content, docling_metadata = await process_with_docling(
+                presigned_url=presigned_url,
+                original_filename=html_filename,
+                mime_type="text/html"
             )
-            
-            if extracted:
-                logger.info(f"📋 [TRAFILE] Extracted markdown content: {len(extracted)} chars")
-                return extracted
-            else:
-                # Fallback to manual processing if markdown extraction fails
-                logger.warning(f"⚠️ [TRAFILE] Markdown extraction failed, using manual fallback")
-                return await self._cleanTextManually(html_content)
-                
-        except Exception as e:
-            logger.error(f"❌ [TRAFILE] HTML to markdown conversion failed: {e}")
-            raise
 
-    async def _cleanTextManually(self, html_content: str) -> str:
-        """Fallback: manual HTML cleaning if trafilatura fails"""
-        from markdownify import markdownify as md
-        from bs4 import BeautifulSoup
+            logger.info(f"✅ [DOCLING_RESPONSE] Received docling JSON: {len(json_content)} chars")
 
-        soup = BeautifulSoup(html_content, 'lxml')
-        for element in soup(["script", "style", "nav", "footer", "header", "aside", "form", "button", "meta", "link", "noscript"]):
-            element.extract()
+            # 4. Extract tables and text separately
+            tables = extract_tables_from_docling_json(json_content)
+            text_content = extract_text_content_from_docling(json_content)
 
-        return md(str(soup), heading_style="atx")
+            # 5. Extract equations using Gemini Vision
+            logger.info(f"📐 [EQUATIONS_VISION] Extracting equations from images...")
+            extracted_equations = await extract_and_fix_equations_with_vision(json_content)
+            if extracted_equations:
+                text_content = text_content + "\n\n" + extracted_equations
 
-    async def _normalizeMarkdownText(self, markdown: str) -> str:
-        """Remove empty lines, noise, and excessive blank lines"""
-        lines = [line.rstrip() for line in markdown.split('\n')]
-        lines = [line for line in lines if line.strip()]
-        lines = [line for line in lines if len(line) > 2 or line.startswith('#')]
+            # 6. Reconstruct remaining equations
+            text_content = await reconstruct_equations_in_text(text_content)
 
-        markdown = '\n'.join(lines)
-        while '\n\n\n' in markdown:
-            markdown = markdown.replace('\n\n\n', '\n\n')
+            # 7. Format tables with Gemini
+            logger.info(f"🤖 [GEMINI_TABLES] Sending {len(tables)} tables to Gemini...")
+            formatted_tables = await format_tables_with_gemini(tables)
 
-        return markdown
+            # 8. Merge content
+            markdown_content = merge_content_with_formatted_tables(text_content, formatted_tables)
+
+            # 9. Upload final markdown to S3 (for download endpoint)
+            md_filename = f"page_{url_hash}.md"
+            md_success, md_s3_key = await s3_file_storage.upload_file(
+                file_data=markdown_content.encode('utf-8'),
+                original_filename=md_filename,
+                file_type="processed"
+            )
+
+            processed_content_s3_key = md_s3_key if md_success else None
+            logger.info(f"✅ [S3_MD_UPLOAD] Processed markdown uploaded: {processed_content_s3_key}")
+
+            # 10. Cleanup temporary HTML from S3
+            try:
+                await s3_file_storage.delete_file(html_s3_key)
+                logger.info(f"🗑️ [CLEANUP] Deleted temporary HTML: {html_s3_key}")
+            except Exception as cleanup_err:
+                logger.warning(f"⚠️ [CLEANUP] Failed to delete temp HTML: {cleanup_err}")
+
+            return markdown_content, processed_content_s3_key
+
+        except Exception as docling_err:
+            logger.error(f"❌ [DOCLING_ERROR] Docling processing failed: {docling_err}")
+
+            # Cleanup temp HTML
+            try:
+                await s3_file_storage.delete_file(html_s3_key)
+            except:
+                pass
+
+            # Re-raise error - no fallback to trafilatura
+            raise Exception(f"Docling processing failed for {page_url}: {docling_err}")
 
     async def _extractDocumentsFromPage(
         self, html_content: str, page_url: str, page_markdown: str
@@ -893,7 +971,8 @@ class ProcessingService:
             page_data: PageData,
             upload_result: UploadResult,
             job_context: JobContext,
-            crawl_config: CrawlConfig
+            crawl_config: CrawlConfig,
+            processed_content_s3_key: str = None
         ) -> Optional[int]:
             """Record single page in database"""
             metrics = calculate_metrics(page_data.markdown)
@@ -909,7 +988,8 @@ class ProcessingService:
                     upload_result=upload_result,
                     file_size=metrics.get('file_size_bytes', 0),
                     char_count=metrics.get('char_count', 0),
-                    mark_completed=True  # Single-page mode - mark as completed
+                    mark_completed=True,  # Single-page mode - mark as completed
+                    processed_content_s3_key=processed_content_s3_key
                 )
 
                 return job_context.website_id
@@ -928,7 +1008,8 @@ class ProcessingService:
                     upload_result=upload_result,
                     file_size=metrics.get('file_size_bytes', 0),
                     char_count=metrics.get('char_count', 0),
-                    mark_completed=False  # Multi-page mode - keep status as 'processing'
+                    mark_completed=False,  # Multi-page mode - keep status as 'processing'
+                    processed_content_s3_key=processed_content_s3_key
                 )
 
                 return job_context.website_id
@@ -945,7 +1026,8 @@ class ProcessingService:
                 char_count=calculate_metrics(page_data.markdown).get('char_count', 0),
                 title=page_data.title,
                 description=page_data.description,
-                crawl_session_id=page_data.session_id
+                crawl_session_id=page_data.session_id,
+                processed_content_s3_key=processed_content_s3_key
             )
 
             # Don't check parent completion here - it will be checked after ALL pages are crawled
@@ -984,11 +1066,12 @@ class ProcessingService:
         upload_result: UploadResult,
         file_size: int,
         char_count: int,
-        mark_completed: bool = True
+        mark_completed: bool = True,
+        processed_content_s3_key: str = None
     ) -> bool:
         """Update parent website record with single page data"""
         logger.info(f"💾 [UPDATE_WEBSITE] Updating website {website_id} with page data")
-        
+
         return await self.scraping_dao.update_website_with_page_data(
             website_id=website_id,
             gemini_file_name=upload_result.document_name,
@@ -999,7 +1082,8 @@ class ProcessingService:
             description=page_data.description,
             crawl_session_id=page_data.session_id,
             file_search_metadata=upload_result.file_search_metadata,
-            mark_completed=mark_completed
+            mark_completed=mark_completed,
+            processed_content_s3_key=processed_content_s3_key
         )
 
     # ==================== UTILITIES ====================

@@ -270,7 +270,8 @@ class ScrapingDAO:
         char_count: int = 0,
         title: str = None,
         description: str = None,
-        crawl_session_id: str = None
+        crawl_session_id: str = None,
+        processed_content_s3_key: str = None
     ) -> Optional[int]:
         """
         Record a child page immediately after it's uploaded to Gemini.
@@ -310,13 +311,13 @@ class ScrapingDAO:
                 parent_id, original_url, processing_status,
                 gemini_file_name, gemini_file_uri, metadata, depth, user_role_id,
                 file_size, char_count, title, description, crawl_session_id,
-                pages_scraped,
+                pages_scraped, processed_content_s3_key,
                 created_at, updated_at
             ) VALUES (
                 $1, $2, $3,
                 $4, $5, $6::jsonb, $7, $8,
                 $9, $10, $11, $12, $13,
-                $14,
+                $14, $15,
                 NOW(), NOW()
             ) RETURNING id
         """
@@ -335,7 +336,8 @@ class ScrapingDAO:
             title,
             description,
             crawl_session_id,
-            1  # pages_scraped = 1 for individual pages
+            1,  # pages_scraped = 1 for individual pages
+            processed_content_s3_key
         ]
 
         try:
@@ -435,7 +437,8 @@ class ScrapingDAO:
         description: str,
         crawl_session_id: str,
         file_search_metadata: Dict[str, Any],
-        mark_completed: bool = True
+        mark_completed: bool = True,
+        processed_content_s3_key: str = None
     ) -> bool:
         """
         Update parent website record with single page data.
@@ -491,9 +494,10 @@ class ScrapingDAO:
                     crawl_session_id = $7,
                     pages_scraped = $8,
                     metadata = $9::jsonb,
+                    processed_content_s3_key = $10,
                     processing_status = 'completed',
                     updated_at = NOW()
-                WHERE id = $10
+                WHERE id = $11
             """
         else:
             # Don't update processing_status - keep it as 'processing' for multi-page crawls
@@ -508,8 +512,9 @@ class ScrapingDAO:
                     crawl_session_id = $7,
                     pages_scraped = $8,
                     metadata = $9::jsonb,
+                    processed_content_s3_key = $10,
                     updated_at = NOW()
-                WHERE id = $10
+                WHERE id = $11
             """
 
         params = [
@@ -522,6 +527,7 @@ class ScrapingDAO:
             crawl_session_id,
             1,  # pages_scraped = 1 for single page
             json.dumps(merged_metadata),
+            processed_content_s3_key,
             website_id
         ]
 
