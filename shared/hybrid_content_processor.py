@@ -87,26 +87,26 @@ async def process_html_hybrid(
 
 def extract_text_with_trafilatura(html_content: str) -> Optional[str]:
     """
-    Extract text from HTML using trafilatura (no filtering).
-    IMPORTANT: include_tables=False to avoid duplication with docling tables.
+    Extract text from HTML using trafilatura.
+    CRITICAL: Exclude only tables (docling handles tables).
+    Extract everything else: sidebars, navigation, comments, all text content.
 
     Args:
         html_content: HTML with only ads/menus removed by crawl4ai
 
     Returns:
-        Extracted text as markdown, or None if extraction fails
+        Extracted text as markdown (all content except tables), or None if extraction fails
     """
     try:
         import trafilatura
 
-        logger.info("[TRAFILATURA] Extracting text from HTML (no filtering, tables excluded)...")
-        
+        logger.info("[TRAFILATURA] Extracting text from HTML (only exclude tables)...")
+
         extracted = trafilatura.extract(
             html_content,
             include_tables=False,  # CRITICAL: Don't extract tables (docling will)
-            output_format='markdown',
-            include_comments=False,
-            favor_precision=True
+            output_format='markdown'
+            # Extract everything else: sidebars, navigation, comments, all text
         )
         
         if extracted:
