@@ -498,16 +498,16 @@ class ProcessingService:
             try:
                 from crawl4ai import AsyncWebCrawler
                 async with AsyncWebCrawler() as crawler:
-                    # Use crawl4ai to remove only menus/ads (overlays and forms)
-                    # Keep everything else: sidebars, navigation, etc (trafilatura will filter)
+                    # Get page as-is without any removal
+                    # Trafilatura will extract text content from full page
                     logger.info(f"🔍 [CRAWL4AI] Fetching {page_url}...")
                     result = await crawler.arun(
                         url=page_url,
                         timeout=30,
                         js_code=None,
-                        remove_overlay_elements=True,  # Remove modals, overlays, popups (ads)
-                        remove_unwanted_elements=False,  # Keep sidebars, navigation (trafilatura will extract text)
-                        remove_forms=True               # Remove form elements (not content)
+                        remove_overlay_elements=False,  # Keep overlays
+                        remove_unwanted_elements=False,  # Keep all elements
+                        remove_forms=False               # Keep forms
                     )
 
                     if result.success and result.html:
