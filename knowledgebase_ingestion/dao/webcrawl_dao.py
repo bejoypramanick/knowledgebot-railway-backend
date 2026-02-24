@@ -272,7 +272,8 @@ class WebCrawlDAO:
                 created_at,
                 updated_at,
                 celery_task_id,
-                char_count
+                char_count,
+                processed_content_s3_key
             FROM scraped_websites
             {where_clause}
             ORDER BY depth ASC, created_at DESC
@@ -321,7 +322,8 @@ class WebCrawlDAO:
                             created_at,
                             updated_at,
                             celery_task_id,
-                            char_count
+                            char_count,
+                            processed_content_s3_key
                         FROM scraped_websites
                         WHERE parent_id IS NOT NULL
                         AND processing_status NOT IN ('pending', 'processing', 'queued', 'completed')
@@ -379,7 +381,8 @@ class WebCrawlDAO:
                 created_at,
                 updated_at,
                 celery_task_id,
-                char_count
+                char_count,
+                processed_content_s3_key
             FROM scraped_websites
             {where_clause}
             ORDER BY depth ASC, created_at ASC
@@ -452,6 +455,7 @@ class WebCrawlDAO:
             "created_at": record['created_at'].isoformat() if record['created_at'] else None,
             "updated_at": record['updated_at'].isoformat() if record['updated_at'] else None,
             "celery_task_id": record['celery_task_id'],
+            "processed_content_s3_key": record.get('processed_content_s3_key'),
             "scraping_config": scraping_config,
             "file_type": file_type,  # Add file_type for UI display
             "children": []  # Will be populated by caller
