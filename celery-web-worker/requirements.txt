@@ -9,19 +9,13 @@ gevent>=24.2.1
 nest-asyncio>=1.5.8
 asyncpg==0.29.0
 sqlalchemy==2.0.23
-psycopg2-binary>=2.9.0
-pydantic[email]>=2.12.0
+pydantic>=2.7.0
 pydantic-settings>=2.3.0
 google-genai>=1.60.0
 python-multipart==0.0.6
 httpx==0.28.1
 aiofiles>=24.0.0
 python-dotenv==1.0.0
-# File processing utilities
-puremagic>=1.28
-psutil>=6.1.0
-email-validator>=2.0.0
-bleach>=6.0.0
 # MessagePack for docling-serve result deserialization
 msgpack>=1.0.5
 # Additional requirements for website crawling
