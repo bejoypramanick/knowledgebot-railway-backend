@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     docling_enabled: bool = True  # Set to False to disable docling and use raw uploads
     docling_timeout_seconds: int = 1800  # Processing timeout (30 minutes - handles queue wait time)
     docling_fallback_to_raw: bool = True  # Fallback to raw upload if docling fails/times out
+    docling_redis_url: str  # DOCLING_REDIS_URL from Railway (required - DB 2)
+    docling_rq_queue_name: str = "docling"  # Redis Queue name for docling jobs
+    docling_rq_job_timeout_minutes: int = 60  # RQ job timeout in minutes
+    docling_poll_initial_delay: int = 2  # Initial polling delay in seconds
+    docling_poll_max_interval: int = 60  # Max polling interval in seconds
 
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None
@@ -41,6 +46,21 @@ class Settings(BaseSettings):
         'env_file': ".env",
         'case_sensitive': False
     }
+
+    def get_docling_redis_url(self) -> str:
+        """
+        Get the docling-specific Redis URL (DB 2).
+
+        Returns:
+            Redis connection URL for docling queue
+        """
+        if not self.docling_redis_url:
+            raise ValueError(
+                "DOCLING_REDIS_URL environment variable not set. "
+                "Required for docling document processing via Redis Queue (DB 2)."
+            )
+
+        return self.docling_redis_url
 
 
 settings = Settings()

@@ -98,7 +98,7 @@ async def process_with_docling(
 
         # Initialize RQ client with docling-specific Redis URL (DB 2) and queue name
         # Pass timeout configurations and Railway Storage output settings from config
-        docling_redis_url = settings.get_docling_redis_url
+        docling_redis_url = settings.get_docling_redis_url()
         docling_queue_name = settings.docling_rq_queue_name
 
         # Get Railway Storage configuration (optional)
