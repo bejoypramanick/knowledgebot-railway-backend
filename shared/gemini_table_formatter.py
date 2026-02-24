@@ -242,28 +242,48 @@ def merge_content_with_formatted_tables(
     """
     Merge non-table text content with formatted tables into a single markdown document.
 
+    IMPORTANT: Only includes Gemini-formatted output, NO raw docling data.
+    This prevents duplication when sending to FileSearch.
+
     Args:
         text_content: Markdown text without tables
         formatted_tables: Dictionary with formatted tables from Gemini
 
     Returns:
-        Merged markdown content
+        Merged markdown content (text + only formatted tables, NO raw docling JSON)
     """
-    # Add formatted tables section
+    logger.info("=" * 80)
+    logger.info("[MERGE] === MERGING TEXT + FORMATTED TABLES ===")
+    logger.info("=" * 80)
+    logger.info(f"[MERGE] Text content size: {len(text_content)} chars")
+
+    # Add formatted tables section ONLY if Gemini successfully formatted them
     tables_section = ""
 
     if formatted_tables and "tables" in formatted_tables:
         tables_data = formatted_tables["tables"]
         if tables_data:
+            logger.info(f"[MERGE] Adding formatted tables section...")
             tables_section = "\n\n## Formatted Tables\n\n```json\n"
             tables_section += json.dumps(tables_data, indent=2, ensure_ascii=False)
             tables_section += "\n```"
+            logger.info(f"✅ [MERGE] Tables section created: {len(tables_section)} chars")
+        else:
+            logger.warning("[MERGE] Formatted tables is empty")
+    elif formatted_tables.get("error"):
+        logger.warning(f"[MERGE] ⚠️ Gemini formatting had error: {formatted_tables.get('error')}")
+        logger.warning("[MERGE] Skipping formatted tables section - no output to include")
 
-    # Combine text and tables
+    # Combine text and formatted tables ONLY
     merged = text_content
     if tables_section:
         merged += tables_section
 
-    logger.info(f"📝 Merged content: {len(merged)} chars (text: {len(text_content)}, tables: {len(tables_section)})")
+    logger.info("=" * 80)
+    logger.info(f"✅ [MERGE] Final merged content: {len(merged)} chars")
+    logger.info(f"   ✓ Text content: {len(text_content)} chars")
+    logger.info(f"   ✓ Formatted tables: {len(tables_section)} chars")
+    logger.info(f"   ✗ NO raw docling JSON included")
+    logger.info("=" * 80)
 
     return merged

@@ -159,11 +159,13 @@ def _render_table(table: dict) -> str:
             return f"```\n{text}\n```"
         return ""
 
-    # Build 2D grid, filling spanned cells so no gaps
+    # Build 2D grid
     grid = [["" for _ in range(num_cols)] for _ in range(num_rows)]
     # Track col_header and row_header per cell position
     is_col_header = [[False] * num_cols for _ in range(num_rows)]
     is_row_header = [[False] * num_cols for _ in range(num_rows)]
+    # Track which cells actually belong to which starting row (for spanning cells)
+    cell_start_rows = [[None for _ in range(num_cols)] for _ in range(num_rows)]
 
     for cell in table_cells:
         text = cell.get("text", "")
@@ -174,12 +176,25 @@ def _render_table(table: dict) -> str:
         ch = cell.get("col_header", False)
         rh = cell.get("row_header", False)
 
-        # Fill all positions this cell spans
+        # Only fill starting position with actual text (avoid duplication in spanning cells)
+        # Other spanned positions get filled with empty or marker
+        if r_start < num_rows and c_start < num_cols:
+            grid[r_start][c_start] = text
+            is_col_header[r_start][c_start] = ch
+            is_row_header[r_start][c_start] = rh
+            cell_start_rows[r_start][c_start] = r_start
+
+        # Mark spanned positions so we know they're covered but don't duplicate the text
         for r in range(r_start, min(r_end, num_rows)):
             for c in range(c_start, min(c_end, num_cols)):
-                grid[r][c] = text
-                is_col_header[r][c] = ch
-                is_row_header[r][c] = rh
+                if r != r_start or c != c_start:  # Not the starting cell
+                    # Mark that this cell is covered by a spanning cell
+                    if grid[r][c] == "":  # Only if not already filled
+                        grid[r][c] = ""  # Keep empty, don't duplicate
+                        if cell_start_rows[r][c] is None:
+                            cell_start_rows[r][c] = r_start  # Track where it came from
+                    is_col_header[r][c] = is_col_header[r][c] or ch
+                    is_row_header[r][c] = is_row_header[r][c] or rh
 
     # Identify header rows: rows where ALL cells are col_header
     header_row_indices = []
