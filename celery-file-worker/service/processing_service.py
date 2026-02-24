@@ -478,8 +478,6 @@ async def process_file_content(
                     logger.info(f"📤 [DOCLING_TO_GEMINI] Final merged content for Gemini FileStore:")
                     logger.info(f"    Content Format: Markdown with formatted tables")
                     logger.info(f"    Total Size: {len(content_for_upload)} characters")
-                    logger.info(f"    Text content: {len(text_content)} chars")
-                    logger.info(f"    Tables: {len(tables)} extracted, formatted by Gemini")
                     logger.info(f"    File will be created as: {original_filename.rsplit('.', 1)[0]}.md")
                     logger.info(f"📋 [DOCLING_FINAL_MARKDOWN] === BEGIN MERGED CONTENT ===")
                     # Log full content in chunks to avoid log truncation
