@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     docling_rq_job_timeout_minutes: int = 60  # RQ job timeout in minutes
     docling_poll_initial_delay: int = 2  # Initial polling delay in seconds
     docling_poll_max_interval: int = 60  # Max polling interval in seconds
+    s3_docling_prefix: str = "docling-results"  # S3 key prefix for docling outputs (from S3_DOCLING_PREFIX env var)
 
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None
