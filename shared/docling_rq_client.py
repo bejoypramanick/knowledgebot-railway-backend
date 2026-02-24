@@ -154,9 +154,13 @@ class DoclingRQClient:
                 # Top-level orchestrator parameters
                
                 # Pipeline options for Docling Engine
-                "convert_options": {
-                        "do_ocr": False,                    # TODO: Enable after models are cached
+                "convert_options": {     
+                        "do_ocr": True,              
                         "do_table_structure": True,
+                        "table_structure_options": {
+                            "mode":"accurate",
+                            "do_cell_matching": False,
+                        },
                         "include_images": False, # CRITICAL: Prevents ZIP bundling
                         "export_options": {
                             "format": "json"
