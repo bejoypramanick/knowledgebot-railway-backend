@@ -142,10 +142,11 @@ def _render_text(item: dict) -> str:
 
 def _render_table(table: dict) -> str:
     """
-    Convert a table item to a clean, simple JSON that an LLM can easily understand.
+    Convert a docling table to clean JSON using all cell metadata.
 
-    Uses docling's col_header flag to identify header rows (not just row 0).
-    Ensures unique column keys so no data is lost from duplicate headers.
+    Uses col_header/row_header flags and cell spans from docling to
+    reconstruct the table exactly as it appears in the PDF, then outputs
+    a simple JSON that an LLM can understand.
     """
     data = table.get("data", {})
     table_cells = data.get("table_cells", [])
@@ -158,19 +159,70 @@ def _render_table(table: dict) -> str:
             return f"```\n{text}\n```"
         return ""
 
-    # Build 2D grid and track which rows are headers via col_header flag
+    # Build 2D grid, filling spanned cells so no gaps
     grid = [["" for _ in range(num_cols)] for _ in range(num_rows)]
-    header_rows = set()
-    for cell in table_cells:
-        row = cell.get("start_row_offset_idx", 0)
-        col = cell.get("start_col_offset_idx", 0)
-        cell_text = cell.get("text", "")
-        if 0 <= row < num_rows and 0 <= col < num_cols:
-            grid[row][col] = cell_text
-        if cell.get("col_header", False):
-            header_rows.add(row)
+    # Track col_header and row_header per cell position
+    is_col_header = [[False] * num_cols for _ in range(num_rows)]
+    is_row_header = [[False] * num_cols for _ in range(num_rows)]
 
-    # Determine page provenance
+    for cell in table_cells:
+        text = cell.get("text", "")
+        r_start = cell.get("start_row_offset_idx", 0)
+        c_start = cell.get("start_col_offset_idx", 0)
+        r_end = cell.get("end_row_offset_idx", r_start + 1)
+        c_end = cell.get("end_col_offset_idx", c_start + 1)
+        ch = cell.get("col_header", False)
+        rh = cell.get("row_header", False)
+
+        # Fill all positions this cell spans
+        for r in range(r_start, min(r_end, num_rows)):
+            for c in range(c_start, min(c_end, num_cols)):
+                grid[r][c] = text
+                is_col_header[r][c] = ch
+                is_row_header[r][c] = rh
+
+    # Identify header rows: rows where ALL cells are col_header
+    header_row_indices = []
+    for r in range(num_rows):
+        if all(is_col_header[r][c] for c in range(num_cols)):
+            header_row_indices.append(r)
+
+    # Identify row_header columns: columns where ALL data cells are row_header
+    first_data_row = (max(header_row_indices) + 1) if header_row_indices else 0
+    row_header_cols = set()
+    if first_data_row < num_rows:
+        for c in range(num_cols):
+            if all(is_row_header[r][c] for r in range(first_data_row, num_rows)):
+                row_header_cols.add(c)
+
+    # Build column names from header rows
+    if header_row_indices:
+        # For multi-row headers, join vertically (e.g. "Revenue" + "Q1" -> "Revenue - Q1")
+        col_names = []
+        for c in range(num_cols):
+            parts = []
+            for r in header_row_indices:
+                val = grid[r][c].strip()
+                if val and val not in parts:
+                    parts.append(val)
+            col_names.append(" - ".join(parts) if parts else "")
+    else:
+        col_names = []
+
+    # Make column names unique and non-empty
+    headers = _make_unique_headers(col_names, num_cols)
+
+    # Build data rows as dicts
+    json_rows = []
+    for r in range(first_data_row, num_rows):
+        row_dict = {}
+        for c in range(num_cols):
+            row_dict[headers[c]] = grid[r][c]
+        # Skip completely empty rows
+        if any(v.strip() for v in row_dict.values()):
+            json_rows.append(row_dict)
+
+    # Page provenance
     prov = table.get("prov", [])
     page_str = ""
     if prov:
@@ -178,29 +230,7 @@ def _render_table(table: dict) -> str:
         if page_no:
             page_str = f" (Page {page_no})"
 
-    # Build column headers from flagged header rows, or use Col1, Col2, ...
-    if header_rows:
-        # Use the last header row as column names (handles multi-row headers)
-        last_header_row = max(header_rows)
-        raw_headers = [grid[last_header_row][c].strip() for c in range(num_cols)]
-    else:
-        raw_headers = []
-
-    # Ensure unique, non-empty headers — append suffix for duplicates
-    headers = _make_unique_headers(raw_headers, num_cols)
-
-    # Data rows = everything after the header rows
-    first_data_row = (max(header_rows) + 1) if header_rows else 0
-    json_rows = []
-    for row in grid[first_data_row:]:
-        row_dict = {}
-        for i, val in enumerate(row):
-            key = headers[i] if i < len(headers) else f"Col{i+1}"
-            row_dict[key] = val
-        json_rows.append(row_dict)
-
     json_block = json.dumps(json_rows, indent=2, ensure_ascii=False)
-
     return f"### Table{page_str}\n\n```json\n{json_block}\n```"
 
 
