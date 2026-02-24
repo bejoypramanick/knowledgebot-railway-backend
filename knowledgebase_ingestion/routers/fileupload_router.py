@@ -401,49 +401,73 @@ async def delete_all_knowledge_endpoint(request: Request = None):
 @router.get("/download/{file_id}")
 async def download_processed_content(file_id: str, request: Request = None):
     """
-    Get a presigned download URL for the processed markdown content of a file.
+    Get a presigned download URL for the processed markdown content of a file or website.
     Returns a presigned S3 URL that the UI can use to download the converted .md file.
+    Supports both file_uploads and scraped_websites tables.
     """
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
-        # Look up file record to get processed_content_s3_key and original_filename
         from shared.db import get_db_connection
-        query = """
-            SELECT original_filename, processed_content_s3_key
-            FROM file_uploads WHERE id = $1
-        """
-        async with get_db_connection() as conn:
-            record = await conn.fetchrow(query, int(file_id))
-
-        if not record:
-            raise HTTPException(status_code=404, detail="File not found")
-
-        s3_key = record['processed_content_s3_key']
-        if not s3_key:
-            raise HTTPException(status_code=404, detail="No processed content available for this file")
-
-        # Generate presigned download URL
         from shared.s3_file_storage import s3_file_storage
-        success, url = s3_file_storage.generate_presigned_url(s3_key, expiration=3600)
-        if not success:
-            raise HTTPException(status_code=500, detail=f"Failed to generate download URL: {url}")
 
-        # Derive the .md filename from original
-        original = record['original_filename']
-        md_filename = original.rsplit('.', 1)[0] + '.md' if '.' in original else original + '.md'
+        async with get_db_connection() as conn:
+            # Try file_uploads table first
+            file_query = """
+                SELECT original_filename as name, processed_content_s3_key
+                FROM file_uploads WHERE id = $1
+            """
+            record = await conn.fetchrow(file_query, int(file_id))
 
-        return {
-            "success": True,
-            "download_url": url,
-            "filename": md_filename
-        }
+            # If not found, try scraped_websites table
+            if not record:
+                website_query = """
+                    SELECT original_url as name, processed_content_s3_key
+                    FROM scraped_websites WHERE id = $1
+                """
+                record = await conn.fetchrow(website_query, int(file_id))
+
+            if not record:
+                raise HTTPException(status_code=404, detail="File or website not found")
+
+            s3_key = record['processed_content_s3_key']
+            if not s3_key:
+                raise HTTPException(status_code=404, detail="No processed content available for this item")
+
+            # Generate presigned download URL
+            success, url = s3_file_storage.generate_presigned_url(s3_key, expiration=3600)
+            if not success:
+                raise HTTPException(status_code=500, detail=f"Failed to generate download URL: {url}")
+
+            # Derive the .md filename
+            # For files: strip extension and add .md
+            # For websites: use URL slug and add .md
+            original = record['name']
+            if '.' in original and not original.startswith('http'):
+                # Likely a filename
+                md_filename = original.rsplit('.', 1)[0] + '.md'
+            elif original.startswith('http'):
+                # Likely a URL - extract domain/path
+                from urllib.parse import urlparse
+                parsed = urlparse(original)
+                path = parsed.path.strip('/').replace('/', '_')
+                domain = parsed.netloc.replace('www.', '')
+                md_filename = f"{domain}_{path}.md" if path else f"{domain}.md"
+            else:
+                # Fallback
+                md_filename = original + '.md'
+
+            return {
+                "success": True,
+                "download_url": url,
+                "filename": md_filename
+            }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error generating download URL for file {file_id}: {e}")
+        logger.error(f"Error generating download URL for item {file_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
