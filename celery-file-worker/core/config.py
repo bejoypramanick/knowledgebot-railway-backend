@@ -38,7 +38,6 @@ class Settings(BaseSettings):
     docling_poll_max_interval: int = 60  # Maximum polling interval in seconds (increased from 30 for longer jobs)
     docling_fallback_to_raw: bool = True  # Fallback to raw upload if docling fails/times out
 
-    @property
     def get_docling_redis_url(self) -> str:
         """
         Get docling Redis URL (must be explicitly set in environment).
