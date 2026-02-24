@@ -579,12 +579,16 @@ class ProcessingService:
         import hashlib
 
         logger.info(f"📄 [DOCLING_WEB] Processing page with docling: {page_url}")
-        logger.info(f"📄 [DOCLING_WEB] HTML size before docling: {len(html_content)} bytes")
+        logger.info(f"📄 [DOCLING_WEB] HTML size: {len(html_content)} bytes")
 
         # Create URL hash for file naming
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
 
-        # 1. Upload cleaned HTML to S3 temporarily
+        # Calculate hash of HTML content to verify both docling and trafilatura get identical input
+        html_hash = hashlib.md5(html_content.encode('utf-8')).hexdigest()[:8]
+        logger.info(f"📄 [HTML_HASH] Input HTML hash: {html_hash}")
+
+        # 1. Upload cleaned HTML to S3 temporarily (same input that trafilatura will receive)
         html_filename = f"page_{url_hash}.html"
         logger.info(f"📤 [S3_HTML_UPLOAD] Uploading HTML to S3 ({len(html_content)} bytes)...")
 

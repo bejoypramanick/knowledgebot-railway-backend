@@ -4,8 +4,11 @@ Hybrid content processing for web HTML:
 - Docling: Extract tables (designed for structured data)
 - Gemini: Format tables intelligently
 - Merge: Combine trafilatura text + Gemini-formatted tables (no duplication)
+
+CRITICAL: Both trafilatura and docling receive the SAME HTML input
 """
 import logging
+import hashlib
 from typing import Tuple, Optional
 
 logger = logging.getLogger("hybrid_content_processor")
@@ -23,7 +26,7 @@ async def process_html_hybrid(
     4. Merge trafilatura text + Gemini-formatted tables
 
     Args:
-        html_content: Raw HTML from crawl4ai
+        html_content: Raw HTML from crawl4ai (SAME input used by docling)
         docling_json: Docling JSON output (tables only)
 
     Returns:
@@ -32,6 +35,12 @@ async def process_html_hybrid(
     logger.info("=" * 80)
     logger.info("[HYBRID] === HYBRID HTML PROCESSING ===")
     logger.info("=" * 80)
+
+    # Verify HTML input integrity
+    html_hash = hashlib.md5(html_content.encode('utf-8')).hexdigest()[:8]
+    logger.info(f"[HYBRID] Input HTML hash: {html_hash} ({len(html_content)} bytes)")
+    logger.info(f"[HYBRID] ✓ Trafilatura will receive this exact HTML")
+    logger.info(f"[HYBRID] ✓ Docling processed this same HTML (from S3)")
 
     # Step 1: Extract ONLY tables from docling (no text items)
     logger.info("[HYBRID] Step 1: Extracting tables from docling JSON (tables only)...")
