@@ -13,7 +13,7 @@ import logging
 logger = logging.getLogger("docling_content_converter")
 
 
-def convert_docling_to_markdown(json_content: str) -> str:
+def convert_docling_to_markdown(json_content: str, include_tables: bool = True) -> str:
     """
     Convert docling JSON output to a markdown document.
 
@@ -22,9 +22,10 @@ def convert_docling_to_markdown(json_content: str) -> str:
 
     Args:
         json_content: Raw JSON string from docling conversion
+        include_tables: Whether to include tables in output (default True)
 
     Returns:
-        Markdown string with text content and structured tables
+        Markdown string with text content and structured tables (if include_tables=True)
     """
     try:
         doc = json.loads(json_content)
@@ -33,7 +34,7 @@ def convert_docling_to_markdown(json_content: str) -> str:
         return json_content
 
     texts = doc.get("texts", [])
-    tables = doc.get("tables", [])
+    tables = doc.get("tables", []) if include_tables else []
     groups = doc.get("groups", [])
     body = doc.get("body", {})
     children = body.get("children", [])

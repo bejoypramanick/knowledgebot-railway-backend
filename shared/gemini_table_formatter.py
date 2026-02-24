@@ -138,31 +138,15 @@ def extract_text_content_from_docling(json_content: str) -> str:
 
     from shared.docling_content_converter import convert_docling_to_markdown
 
-    # Convert to markdown (includes tables temporarily)
-    markdown_content = convert_docling_to_markdown(json_content)
-
-    # Remove table sections (they start with ### Table)
-    lines = markdown_content.split('\n')
-    result_lines = []
-    skip_table = False
-
-    for line in lines:
-        if line.startswith('### Table'):
-            skip_table = True
-            continue
-        if skip_table and line.startswith('```'):
-            skip_table = False
-            continue
-        if not skip_table:
-            result_lines.append(line)
+    # Convert to markdown WITHOUT tables (they'll be formatted by Gemini)
+    text = convert_docling_to_markdown(json_content, include_tables=False)
 
     # Clean up excess blank lines
-    content = '\n'.join(result_lines)
-    while '\n\n\n' in content:
-        content = content.replace('\n\n\n', '\n\n')
+    while '\n\n\n' in text:
+        text = text.replace('\n\n\n', '\n\n')
 
-    text = content.strip()
-    logger.info(f"📝 Extracted text content: {len(text)} chars (no tables)")
+    text = text.strip()
+    logger.info(f"📝 Extracted text content: {len(text)} chars (NO raw tables - Gemini will format)")
     return text
 
 
