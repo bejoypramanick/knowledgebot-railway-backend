@@ -17,61 +17,61 @@ async def process_html_hybrid(
 ) -> str:
     """
     Process HTML using hybrid approach:
-    1. Extract text with trafilatura (excludes tables)
-    2. Extract tables with docling
-    3. Format tables with Gemini
+    1. Extract tables ONLY from docling (no text items)
+    2. Format tables with Gemini
+    3. Extract text with trafilatura (excludes tables)
     4. Merge trafilatura text + Gemini-formatted tables
-    
+
     Args:
         html_content: Raw HTML from crawl4ai
-        docling_json: Docling JSON output (has tables)
-        
+        docling_json: Docling JSON output (tables only)
+
     Returns:
         Final markdown with trafilatura text + formatted tables
     """
     logger.info("=" * 80)
     logger.info("[HYBRID] === HYBRID HTML PROCESSING ===")
     logger.info("=" * 80)
-    
-    # Step 1: Extract article text with trafilatura
-    logger.info("[HYBRID] Step 1: Extracting article text with trafilatura (NO tables)...")
-    text_content = extract_text_with_trafilatura(html_content)
-    
-    if not text_content:
-        logger.error("[HYBRID] ❌ Trafilatura failed to extract text")
-        raise Exception("Failed to extract text from HTML with trafilatura")
-    
-    logger.info(f"[HYBRID] ✅ Trafilatura extracted: {len(text_content)} chars")
-    
-    # Step 2: Extract tables with docling
-    logger.info("[HYBRID] Step 2: Extracting tables from docling JSON...")
+
+    # Step 1: Extract ONLY tables from docling (no text items)
+    logger.info("[HYBRID] Step 1: Extracting tables from docling JSON (tables only)...")
     from shared.gemini_table_formatter import extract_tables_from_docling_json
     tables = extract_tables_from_docling_json(docling_json)
     logger.info(f"[HYBRID] ✅ Docling found {len(tables)} tables")
-    
-    # Step 3: Format tables with Gemini
+
+    # Step 2: Format tables with Gemini
     if tables:
-        logger.info(f"[HYBRID] Step 3: Formatting {len(tables)} tables with Gemini...")
+        logger.info(f"[HYBRID] Step 2: Formatting {len(tables)} tables with Gemini...")
         from shared.gemini_table_formatter import format_tables_with_gemini
         formatted_tables = await format_tables_with_gemini(tables)
         logger.info(f"[HYBRID] ✅ Tables formatted by Gemini")
     else:
         logger.info("[HYBRID] No tables to format")
         formatted_tables = {"tables_markdown": ""}
-    
+
+    # Step 3: Extract article text with trafilatura (AFTER docling tables are processed)
+    logger.info("[HYBRID] Step 3: Extracting article text with trafilatura (NO tables)...")
+    text_content = extract_text_with_trafilatura(html_content)
+
+    if not text_content:
+        logger.error("[HYBRID] ❌ Trafilatura failed to extract text")
+        raise Exception("Failed to extract text from HTML with trafilatura")
+
+    logger.info(f"[HYBRID] ✅ Trafilatura extracted: {len(text_content)} chars")
+
     # Step 4: Merge trafilatura text + Gemini-formatted tables
     logger.info("[HYBRID] Step 4: Merging trafilatura text + Gemini-formatted tables...")
     from shared.gemini_table_formatter import merge_content_with_formatted_tables
     final_content = merge_content_with_formatted_tables(text_content, formatted_tables)
-    
+
     logger.info("=" * 80)
     logger.info(f"[HYBRID] ✅ === HYBRID PROCESSING COMPLETE ===")
     logger.info(f"[HYBRID] Final content: {len(final_content)} chars")
+    logger.info(f"[HYBRID]   ✓ Docling tables: {len(tables)} tables (Gemini formatted)")
     logger.info(f"[HYBRID]   ✓ Trafilatura text: {len(text_content)} chars")
-    logger.info(f"[HYBRID]   ✓ Docling tables: {len(tables)} tables")
     logger.info(f"[HYBRID]   ✓ NO duplication (trafilatura excluded tables)")
     logger.info("=" * 80)
-    
+
     return final_content
 
 
