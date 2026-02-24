@@ -23,7 +23,6 @@ from shared.gemini_table_formatter import (
     merge_content_with_formatted_tables,
     reconstruct_equations_in_text
 )
-from shared.equation_extractor import extract_and_fix_equations_with_vision
 from shared.s3_file_storage import s3_file_storage
 
 from models.value_objects import (
@@ -569,6 +568,7 @@ class ProcessingService:
         """
         Process HTML with docling queue (same as file worker).
         HTML is pre-cleaned by crawl4ai to remove menus, navbars, ads.
+        Extracts: text + tables, with text-based equation reconstruction.
 
         Returns:
             Tuple of (markdown_content, processed_content_s3_key)
@@ -614,23 +614,17 @@ class ProcessingService:
             tables = extract_tables_from_docling_json(json_content)
             text_content = extract_text_content_from_docling(json_content)
 
-            # 5. Extract equations using Gemini Vision
-            logger.info(f"📐 [EQUATIONS_VISION] Extracting equations from images...")
-            extracted_equations = await extract_and_fix_equations_with_vision(json_content)
-            if extracted_equations:
-                text_content = text_content + "\n\n" + extracted_equations
-
-            # 6. Reconstruct remaining equations
+            # 5. Reconstruct broken equations in text (text-only)
             text_content = await reconstruct_equations_in_text(text_content)
 
-            # 7. Format tables with Gemini
+            # 6. Format tables with Gemini
             logger.info(f"🤖 [GEMINI_TABLES] Sending {len(tables)} tables to Gemini...")
             formatted_tables = await format_tables_with_gemini(tables)
 
-            # 8. Merge content
+            # 7. Merge content
             markdown_content = merge_content_with_formatted_tables(text_content, formatted_tables)
 
-            # 9. Upload final markdown to S3 (for download endpoint)
+            # 8. Upload final markdown to S3 (for download endpoint)
             md_filename = f"page_{url_hash}.md"
             md_success, md_s3_key = await s3_file_storage.upload_file(
                 file_data=markdown_content.encode('utf-8'),
@@ -641,7 +635,7 @@ class ProcessingService:
             processed_content_s3_key = md_s3_key if md_success else None
             logger.info(f"✅ [S3_MD_UPLOAD] Processed markdown uploaded: {processed_content_s3_key}")
 
-            # 10. Cleanup temporary HTML from S3
+            # 9. Cleanup temporary HTML from S3
             try:
                 await s3_file_storage.delete_file(html_s3_key)
                 logger.info(f"🗑️ [CLEANUP] Deleted temporary HTML: {html_s3_key}")
