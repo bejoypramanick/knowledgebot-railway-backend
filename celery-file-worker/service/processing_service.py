@@ -473,7 +473,8 @@ async def process_file_content(
                         extract_tables_from_docling_json,
                         extract_text_content_from_docling,
                         format_tables_with_gemini,
-                        merge_content_with_formatted_tables
+                        merge_content_with_formatted_tables,
+                        reconstruct_equations_in_text
                     )
 
                     logger.info(f"🔄 [TABLE_EXTRACTION] Extracting raw tables from docling JSON (with coordinates/bounding boxes)...")
@@ -481,6 +482,10 @@ async def process_file_content(
 
                     logger.info(f"📝 [TEXT_EXTRACTION] Extracting text content (headings, paragraphs)...")
                     text_content = extract_text_content_from_docling(json_content)
+
+                    # Reconstruct equations broken by docling
+                    logger.info(f"📐 [EQUATIONS] Reconstructing mathematical equations in text...")
+                    text_content = await reconstruct_equations_in_text(text_content)
 
                     # Send tables to Gemini for formatting
                     logger.info(f"🤖 [GEMINI_TABLES] Sending {len(tables)} tables to Gemini for formatting...")
