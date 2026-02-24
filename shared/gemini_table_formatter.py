@@ -16,13 +16,21 @@ logger = get_otel_logger("gemini_table_formatter", "docling")
 
 def extract_tables_from_docling_json(json_content: str) -> List[Dict[str, Any]]:
     """
-    Extract all tables from docling JSON output.
+    Extract all tables from docling JSON output WITHOUT post-processing.
+
+    Returns raw docling table data with all metadata:
+    - Bounding boxes and coordinates
+    - Cell positions (start/end row/col indices)
+    - Text content
+    - Header flags
+
+    This raw metadata is sent to Gemini for intelligent alignment and formatting.
 
     Args:
         json_content: Raw JSON string from docling
 
     Returns:
-        List of table objects with metadata
+        List of raw docling table objects with full metadata (bounding boxes, coordinates, etc.)
     """
     try:
         doc = json.loads(json_content)
@@ -31,20 +39,31 @@ def extract_tables_from_docling_json(json_content: str) -> List[Dict[str, Any]]:
         return []
 
     tables = doc.get("tables", [])
-    logger.info(f"📊 Extracted {len(tables)} tables from docling JSON")
+    logger.info(f"📊 Extracted {len(tables)} raw table(s) from docling JSON (no post-processing)")
+
+    # Log metadata available for Gemini
+    for idx, table in enumerate(tables):
+        data = table.get('data', {})
+        num_rows = data.get('num_rows', 0)
+        num_cols = data.get('num_cols', 0)
+        cells = data.get('table_cells', [])
+        bbox = table.get('bbox', None)
+        logger.info(f"   Table {idx+1}: {num_rows}×{num_cols} cells={len(cells)} bbox={bbox}")
 
     return tables
 
 
-def extract_non_table_content_from_docling(json_content: str) -> str:
+def extract_text_content_from_docling(json_content: str) -> str:
     """
-    Extract all non-table content (texts, groups) from docling JSON as markdown.
+    Extract all text content (headings, paragraphs, lists) from docling JSON as markdown.
+
+    Does NOT include tables - those are handled separately by Gemini.
 
     Args:
         json_content: Raw JSON string from docling
 
     Returns:
-        Markdown string with non-table content
+        Markdown string with text content only
     """
     try:
         doc = json.loads(json_content)
@@ -54,10 +73,10 @@ def extract_non_table_content_from_docling(json_content: str) -> str:
 
     from shared.docling_content_converter import convert_docling_to_markdown
 
-    # Convert to markdown (this includes tables, we'll filter them out later)
+    # Convert to markdown (includes tables temporarily)
     markdown_content = convert_docling_to_markdown(json_content)
 
-    # Remove table sections from markdown (they start with ### Table)
+    # Remove table sections (they start with ### Table)
     lines = markdown_content.split('\n')
     result_lines = []
     skip_table = False
@@ -66,18 +85,20 @@ def extract_non_table_content_from_docling(json_content: str) -> str:
         if line.startswith('### Table'):
             skip_table = True
             continue
-        if skip_table:
-            if line.startswith('```'):
-                skip_table = False
+        if skip_table and line.startswith('```'):
+            skip_table = False
             continue
-        result_lines.append(line)
+        if not skip_table:
+            result_lines.append(line)
 
     # Clean up excess blank lines
     content = '\n'.join(result_lines)
     while '\n\n\n' in content:
         content = content.replace('\n\n\n', '\n\n')
 
-    return content.strip()
+    text = content.strip()
+    logger.info(f"📝 Extracted text content: {len(text)} chars (no tables)")
+    return text
 
 
 async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -122,27 +143,36 @@ async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, A
 
         # Create prompt for Gemini to format tables
         logger.info("[GEMINI_TABLES] Creating prompt for Gemini...")
-        prompt = f"""You are a data formatting expert. I have extracted tables from a PDF document using docling.
+        prompt = f"""You are a table analysis and formatting expert. I have extracted raw table data from a PDF using docling.
 
-Please analyze these tables and convert them into a meaningful JSON structure that is:
-1. Easy to understand and search
-2. Preserves all data relationships
-3. Uses descriptive keys and structures
-4. Groups related data logically
+The data includes:
+- Cell coordinates (bounding boxes) for alignment
+- Cell positions (start_row_offset_idx, end_row_offset_idx, start_col_offset_idx, end_col_offset_idx)
+- Text content for each cell
+- Header flags (col_header, row_header) to identify structure
+- Spans information for multi-row/multi-column cells
 
-For each table:
-- Identify the row/column headers
-- Create a consistent JSON structure
-- Use the first column as a key if it's unique (like ID, number, name)
-- Preserve all cell values exactly
+YOUR TASK:
+1. Use the bounding box coordinates to determine correct row/column alignment
+2. Handle cells that span multiple rows/columns properly (use their bounding boxes to infer position)
+3. Create a meaningful JSON structure that represents the table logically
+4. Add a "summary" field describing what the table contains (purpose, key columns, data type)
+5. Preserve all cell values exactly
 
-Return ONLY valid JSON with a "tables" key containing your formatted result.
-Do not include explanations, only the JSON output.
+REQUIREMENTS:
+- Return ONLY valid JSON
+- Include "tables" key with list of formatted tables
+- For each table include:
+  * "summary": Brief description of table contents and purpose
+  * "headers": Column headers identified from data
+  * "rows": Properly aligned rows as array of objects with column headers as keys
+- Do NOT include raw docling metadata in output
+- Do NOT include explanations, only JSON
 
-Docling tables data:
+Docling raw table data (includes coordinates and spans):
 {tables_text}
 
-Return the formatted tables as valid JSON."""
+Return the formatted tables with summaries as valid JSON."""
         logger.info(f"✅ [GEMINI_TABLES] Prompt created: {len(prompt)} chars")
 
         # Call Gemini API in thread executor (synchronous API in async context)

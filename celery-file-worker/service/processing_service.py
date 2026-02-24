@@ -471,16 +471,16 @@ async def process_file_content(
                     # Extract tables and send to Gemini for intelligent formatting
                     from shared.gemini_table_formatter import (
                         extract_tables_from_docling_json,
-                        extract_non_table_content_from_docling,
+                        extract_text_content_from_docling,
                         format_tables_with_gemini,
                         merge_content_with_formatted_tables
                     )
 
-                    logger.info(f"🔄 [TABLE_EXTRACTION] Extracting tables from docling JSON...")
+                    logger.info(f"🔄 [TABLE_EXTRACTION] Extracting raw tables from docling JSON (with coordinates/bounding boxes)...")
                     tables = extract_tables_from_docling_json(json_content)
 
-                    logger.info(f"📝 [TEXT_EXTRACTION] Extracting non-table content...")
-                    text_content = extract_non_table_content_from_docling(json_content)
+                    logger.info(f"📝 [TEXT_EXTRACTION] Extracting text content (headings, paragraphs)...")
+                    text_content = extract_text_content_from_docling(json_content)
 
                     # Send tables to Gemini for formatting
                     logger.info(f"🤖 [GEMINI_TABLES] Sending {len(tables)} tables to Gemini for formatting...")
