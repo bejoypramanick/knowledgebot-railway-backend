@@ -29,7 +29,7 @@ def _get_settings():
         # Try to import from the caller's context (worker or knowledgebase_ingestion)
         from core.config import settings
         logger.info(f"🔧 [DOCLING] Using settings from core.config (timeout: {settings.docling_timeout_seconds}s)")
-        logger.info(f"🔧 [DOCLING] Using explicit DOCLING_REDIS_URL={settings.get_docling_redis_url}")
+        logger.info(f"🔧 [DOCLING] Using explicit DOCLING_REDIS_URL={settings.get_docling_redis_url()}")
         return settings
     except ImportError:
         try:
@@ -55,7 +55,6 @@ def _get_settings():
                 docling_poll_max_interval = int(os.getenv("DOCLING_POLL_MAX_INTERVAL", "30"))
                 docling_fallback_to_raw = os.getenv("DOCLING_FALLBACK_TO_RAW", "true").lower() == "true"
 
-                @property
                 def get_docling_redis_url(self) -> str:
                     """Get explicit docling Redis URL."""
                     return self.docling_redis_url
