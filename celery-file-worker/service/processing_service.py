@@ -476,6 +476,7 @@ async def process_file_content(
                         merge_content_with_formatted_tables,
                         reconstruct_equations_in_text
                     )
+                    from shared.equation_extractor import extract_and_fix_equations_with_vision
 
                     logger.info(f"🔄 [TABLE_EXTRACTION] Extracting raw tables from docling JSON (with coordinates/bounding boxes)...")
                     tables = extract_tables_from_docling_json(json_content)
@@ -483,7 +484,14 @@ async def process_file_content(
                     logger.info(f"📝 [TEXT_EXTRACTION] Extracting text content (headings, paragraphs)...")
                     text_content = extract_text_content_from_docling(json_content)
 
-                    # Reconstruct equations broken by docling
+                    # Extract equations using Gemini Vision to avoid docling OCR errors
+                    logger.info(f"📐 [EQUATIONS_VISION] Extracting equations from PDF images using Gemini Vision...")
+                    extracted_equations = await extract_and_fix_equations_with_vision(json_content)
+                    if extracted_equations:
+                        logger.info(f"✅ [EQUATIONS_VISION] Extracted equations from PDF images, appending to content")
+                        text_content = text_content + "\n\n" + extracted_equations
+
+                    # Reconstruct remaining broken equations in text
                     logger.info(f"📐 [EQUATIONS] Reconstructing mathematical equations in text...")
                     text_content = await reconstruct_equations_in_text(text_content)
 
