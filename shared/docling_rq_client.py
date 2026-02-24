@@ -147,7 +147,8 @@ class DoclingRQClient:
                 "sources": [
                     {
                         "kind": "http",
-                        "url": presigned_url
+                        "url": presigned_url,
+                        "filename": filename
                     }
                 ],
                 # Top-level orchestrator parameters
