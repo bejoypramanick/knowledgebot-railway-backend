@@ -23,6 +23,7 @@ from shared.gemini_table_formatter import (
     merge_content_with_formatted_tables,
     process_docling_content
 )
+from shared.hybrid_content_processor import process_html_hybrid
 from shared.s3_file_storage import s3_file_storage
 
 from models.value_objects import (
@@ -497,15 +498,15 @@ class ProcessingService:
             try:
                 from crawl4ai import AsyncWebCrawler
                 async with AsyncWebCrawler() as crawler:
-                    # Use crawl4ai with minimal cleaning to preserve content
-                    # Only remove overlays and forms, but keep article content
-                    logger.info(f"🔍 [CRAWL4AI] Fetching {page_url} with minimal cleaning...")
+                    # Use crawl4ai with aggressive noise removal
+                    # Remove overlays, unwanted elements, and forms to get clean content
+                    logger.info(f"🔍 [CRAWL4AI] Fetching {page_url} with aggressive noise removal...")
                     result = await crawler.arun(
                         url=page_url,
                         timeout=30,
                         js_code=None,
                         remove_overlay_elements=True,  # Remove modals, overlays, popups
-                        remove_unwanted_elements=False,  # DON'T remove elements - keep all content
+                        remove_unwanted_elements=True,  # Remove sidebars, ads, navigation noise
                         remove_forms=True               # Remove form elements (usually not content)
                     )
 
@@ -665,10 +666,10 @@ class ProcessingService:
             except Exception as parse_err:
                 logger.warning(f"⚠️ [DOCLING_STRUCTURE] Failed to parse: {parse_err}. First 500 chars: {repr(json_content[:500])}")
 
-            # Use unified docling processing (same as file worker)
-            # This ensures both file worker and web worker process docling content identically
-            logger.info(f"🔄 [DOCLING_PROCESS] Using unified docling processing pipeline...")
-            markdown_content = await process_docling_content(json_content)
+            # Use hybrid processing: trafilatura for text + docling for tables
+            # This ensures clean article text is extracted while preserving table intelligence
+            logger.info(f"🔄 [HYBRID_PROCESS] Using hybrid processing (trafilatura + docling)...")
+            markdown_content = await process_html_hybrid(html_content, json_content)
 
             # 7. Upload final markdown to S3 (for download endpoint)
             md_filename = f"page_{url_hash}.md"
