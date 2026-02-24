@@ -4,7 +4,9 @@ Tables are extracted, sent to Gemini for intelligent formatting,
 then merged back with non-table content.
 """
 import json
+import asyncio
 from typing import Optional, Dict, Any, List
+from concurrent.futures import ThreadPoolExecutor
 
 from core.ai import get_genai_client
 from shared.otel_logger import get_otel_logger
@@ -101,8 +103,16 @@ async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, A
         # Prepare table data for Gemini
         tables_text = json.dumps(tables, indent=2, ensure_ascii=False)
 
-        logger.info(f"🤖 Sending {len(tables)} tables to Gemini for formatting...")
-        logger.debug(f"Tables data size: {len(tables_text)} chars")
+        logger.info(f"🤖 [GEMINI_TABLES] Sending {len(tables)} tables to Gemini for formatting...")
+        logger.info(f"   Tables data size: {len(tables_text)} chars")
+        logger.debug(f"   Tables structure: {[t.get('data', {}).get('num_rows', '?') for t in tables]} rows per table")
+
+        # Log sample of first table if available
+        if tables:
+            first_table = tables[0]
+            num_rows = first_table.get('data', {}).get('num_rows', 0)
+            num_cols = first_table.get('data', {}).get('num_cols', 0)
+            logger.info(f"   First table: {num_rows} rows × {num_cols} cols")
 
         # Create prompt for Gemini to format tables
         prompt = f"""You are a data formatting expert. I have extracted tables from a PDF document using docling.
@@ -127,11 +137,17 @@ Docling tables data:
 
 Return the formatted tables as valid JSON."""
 
-        # Call Gemini API
-        response = genai_client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt
-        )
+        # Call Gemini API in thread executor (synchronous API in async context)
+        loop = asyncio.get_event_loop()
+        executor = ThreadPoolExecutor(max_workers=1)
+
+        def call_gemini():
+            return genai_client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=prompt
+            )
+
+        response = await loop.run_in_executor(executor, call_gemini)
 
         if not response or not response.text:
             logger.error("❌ Empty response from Gemini")
