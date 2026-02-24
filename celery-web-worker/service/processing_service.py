@@ -20,8 +20,7 @@ from shared.gemini_table_formatter import (
     extract_tables_from_docling_json,
     extract_text_content_from_docling,
     format_tables_with_gemini,
-    merge_content_with_formatted_tables,
-    reconstruct_equations_in_text
+    merge_content_with_formatted_tables
 )
 from shared.s3_file_storage import s3_file_storage
 
@@ -640,21 +639,17 @@ class ProcessingService:
                 # Log first 200 chars as sample
                 logger.info(f"📝 [EXTRACT] Text sample (first 200 chars): {text_content[:200]}...")
 
-            # 5. Reconstruct broken equations in text (text-only)
-            text_content = await reconstruct_equations_in_text(text_content)
-            logger.info(f"📐 [EQUATIONS] After reconstruction: {len(text_content)} chars")
-
-            # 6. Format tables with Gemini
+            # 5. Format tables with Gemini
             logger.info(f"🤖 [GEMINI_TABLES] Sending {len(tables)} tables to Gemini...")
             formatted_tables = await format_tables_with_gemini(tables)
             logger.info(f"🤖 [GEMINI_TABLES] Received {len(formatted_tables)} formatted tables")
 
-            # 7. Merge content
+            # 6. Merge content
             logger.info(f"🔗 [MERGE] Merging {len(text_content)} text chars + {len(formatted_tables)} formatted tables...")
             markdown_content = merge_content_with_formatted_tables(text_content, formatted_tables)
             logger.info(f"✅ [MERGE] Final markdown: {len(markdown_content)} chars")
 
-            # 8. Upload final markdown to S3 (for download endpoint)
+            # 7. Upload final markdown to S3 (for download endpoint)
             md_filename = f"page_{url_hash}.md"
             md_success, md_s3_key = await s3_file_storage.upload_file(
                 file_data=markdown_content.encode('utf-8'),
