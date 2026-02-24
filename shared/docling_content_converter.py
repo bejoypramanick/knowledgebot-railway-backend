@@ -57,11 +57,35 @@ def convert_docling_to_markdown(json_content: str, include_tables: bool = True) 
         return _fallback_extract(texts, tables)
 
     logger.info(f"✅ [STRUCTURE] Using body.children with {len(children)} children")
+    
+    # Track which text indices are rendered from body.children
+    rendered_text_indices = set()
     parts = []
     for child in children:
-        _render_child(child, texts, tables, groups, parts)
+        _render_child(child, texts, tables, groups, parts, rendered_text_indices)
 
     logger.info(f"📝 [OUTPUT] Generated {len(parts)} content blocks from structure")
+    
+    # INVESTIGATE: Show which text items were skipped
+    total_text_items = len(texts)
+    skipped_count = total_text_items - len(rendered_text_indices)
+    if skipped_count > 0:
+        logger.warning(f"⚠️  [INVESTIGATION] {skipped_count} out of {total_text_items} text items NOT in body.children")
+        logger.warning(f"⚠️  [INVESTIGATION] Rendered indices count: {len(rendered_text_indices)}")
+        
+        # Find skipped indices
+        skipped_indices = [i for i in range(total_text_items) if i not in rendered_text_indices]
+        logger.warning(f"⚠️  [INVESTIGATION] First 30 skipped indices: {skipped_indices[:30]}")
+        
+        # Show samples of skipped items to check if they contain article content
+        logger.warning(f"⚠️  [INVESTIGATION] === SAMPLE SKIPPED TEXT ITEMS ===")
+        for idx in skipped_indices[:10]:
+            if idx < len(texts):
+                skipped_text = texts[idx].get("text", "")[:200]
+                skipped_label = texts[idx].get("label", "unknown")
+                logger.warning(f"⚠️  [INVESTIGATION] Index {idx} ({skipped_label}): {repr(skipped_text)}")
+        logger.warning(f"⚠️  [INVESTIGATION] === END SAMPLE ===")
+    
     return "\n\n".join(parts)
 
 
@@ -107,7 +131,7 @@ def _resolve_ref(ref: str):
     return collection, idx
 
 
-def _render_child(child, texts, tables, groups, parts):
+def _render_child(child, texts, tables, groups, parts, rendered_text_indices=None):
     """Render a single body child item to markdown, appending to parts."""
     ref = child.get("$ref")
     if not ref:
@@ -118,6 +142,8 @@ def _render_child(child, texts, tables, groups, parts):
         return
 
     if collection == "texts" and 0 <= idx < len(texts):
+        if rendered_text_indices is not None:
+            rendered_text_indices.add(idx)
         md = _render_text(texts[idx])
         if md:
             parts.append(md)
@@ -130,7 +156,7 @@ def _render_child(child, texts, tables, groups, parts):
     elif collection == "groups" and 0 <= idx < len(groups):
         group = groups[idx]
         for group_child in group.get("children", []):
-            _render_child(group_child, texts, tables, groups, parts)
+            _render_child(group_child, texts, tables, groups, parts, rendered_text_indices)
 
 
 def _render_text(item: dict) -> str:
