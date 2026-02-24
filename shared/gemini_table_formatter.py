@@ -154,7 +154,7 @@ Return the formatted tables as valid JSON."""
             logger.info("[GEMINI_TABLES] >>> Calling genai_client.models.generate_content()...")
             try:
                 result = genai_client.models.generate_content(
-                    model="gemini-1.5-flash",
+                    model="gemini-2.5-flash",
                     contents=prompt
                 )
                 logger.info(f"[GEMINI_TABLES] <<< API call returned successfully")
