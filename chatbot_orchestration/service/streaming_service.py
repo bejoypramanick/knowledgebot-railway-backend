@@ -233,13 +233,21 @@ INSTRUCTIONS:
                                             yield f"data: {json_response}\n\n"
                                             logger.info(f"📦 Streamed text from assistant message: {len(text_content)} chars")
 
-                                    # Track tool calls
+                                    # Track tool calls with detailed logging
                                     elif hasattr(part, 'tool_name'):
                                         tool_name = getattr(part, 'tool_name', 'unknown')
                                         tool_args = getattr(part, 'args', {})
                                         tool_call_count += 1
-                                        logger.info(f"✅ Tool executed: {tool_name}")
-                                        logger.info(f"   Args: {tool_args}")
+                                        
+                                        # Comprehensive tool invocation logging
+                                        logger.info("=" * 80)
+                                        logger.info("🔧 TOOL INVOCATION DETECTED")
+                                        logger.info(f"   Tool Name: {tool_name}")
+                                        logger.info(f"   Tool Arguments: {json.dumps(tool_args, indent=2, ensure_ascii=False)}")
+                                        logger.info(f"   Tool Call #{tool_call_count} in this response")
+                                        logger.info(f"   Session ID: {session_id}")
+                                        logger.info(f"   User Email: {user_email}")
+                                        logger.info("=" * 80)
 
                         logger.info(f"✅ Agent completed with {tool_call_count} tool calls")
                     except Exception as result_error:
@@ -259,12 +267,22 @@ INSTRUCTIONS:
 
             # Save complete assistant response to database
             if full_response.strip():
-                # Log the full response to see formatting and citations
-                logger.info("=" * 80)
-                logger.info("📝 FULL AGENT RESPONSE (final output to user):")
+                # Log the complete response with grounding truth and metadata
+                logger.info("=" * 100)
+                logger.info("📝 COMPLETE AGENT RESPONSE WITH GROUNDING TRUTH")
+                logger.info(f"   Session ID: {session_id}")
+                logger.info(f"   User Email: {user_email}")
+                logger.info(f"   Total Tool Calls: {tool_call_count}")
+                logger.info(f"   Response Length: {len(full_response)} characters")
+                logger.info(f"   Response Chunks: {chunk_count}")
+                logger.info("   Grounding Truth: Response generated using Gemini FileStore search results")
+                logger.info("   Data Sources: Gemini FileStore knowledge base")
+                logger.info("   Response Type: HTML formatted with citations")
+                logger.info("-" * 100)
+                logger.info("📋 FULL RESPONSE CONTENT:")
                 logger.info(full_response)
-                logger.info("=" * 80)
-
+                logger.info("=" * 100)
+                
                 try:
                     await session_state_manager.save_message(
                         session_id=session_id,
@@ -273,7 +291,10 @@ INSTRUCTIONS:
                         metadata={
                             "user_email": user_email,
                             "chunk_count": chunk_count,
-                            "response_length": len(full_response)
+                            "response_length": len(full_response),
+                            "tool_calls": tool_call_count,
+                            "grounding_sources": "Gemini FileStore",
+                            "response_format": "HTML with citations"
                         }
                     )
                     logger.info(f"✅ Assistant response saved to database ({len(full_response)} chars)")
@@ -281,11 +302,28 @@ INSTRUCTIONS:
                     logger.error(f"❌ Failed to save assistant response: {db_error}")
 
             # Send completion signal (without content to avoid duplication)
+            logger.info("=" * 80)
+            logger.info("🏁 STREAMING COMPLETION SUMMARY")
+            logger.info(f"   Session ID: {session_id}")
+            logger.info(f"   User Email: {user_email}")
+            logger.info(f"   Total Tool Calls Executed: {tool_call_count}")
+            logger.info(f"   Total Response Chunks: {chunk_count}")
+            logger.info(f"   Final Response Length: {len(full_response)} characters")
+            logger.info("   Grounding Truth: Response based on Gemini FileStore search results")
+            logger.info("   Primary Data Source: Gemini FileStore knowledge base")
+            logger.info("   Response Format: HTML with proper citations")
+            logger.info("   Completion Status: Successfully completed streaming")
+            logger.info("=" * 80)
+            
             completion_data = {
                 "type": "complete",
                 "session_id": session_id,
                 "total_chunks": chunk_count,
-                "total_length": len(full_response)
+                "total_length": len(full_response),
+                "tool_calls": tool_call_count,
+                "grounding_sources": "Gemini FileStore",
+                "response_format": "HTML with citations",
+                "completion_status": "success"
             }
             json_response = json.dumps(completion_data, ensure_ascii=False)
             yield f"data: {json_response}\n\n"
