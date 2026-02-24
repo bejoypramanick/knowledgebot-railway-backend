@@ -39,16 +39,29 @@ def convert_docling_to_markdown(json_content: str, include_tables: bool = True) 
     body = doc.get("body", {})
     children = body.get("children", [])
 
+    logger.info(f"📊 [DOCLING_STRUCTURE] Total texts: {len(texts)}, tables: {len(tables)}, groups: {len(groups)}")
+    logger.info(f"📊 [DOCLING_STRUCTURE] Body children: {len(children)}")
+
+    # Log text labels distribution for debugging
+    if texts:
+        label_counts = {}
+        for text in texts:
+            label = text.get("label", "text")
+            label_counts[label] = label_counts.get(label, 0) + 1
+        logger.info(f"📊 [TEXT_LABELS] Distribution: {label_counts}")
+
     if not children:
         # No body.children — fall back to extracting text values directly
         # from top-level arrays (still strips all bounding box / provenance noise)
-        logger.warning("No body.children found, extracting from top-level texts/tables arrays")
+        logger.warning(f"⚠️ [FALLBACK] No body.children found, using fallback extraction from {len(texts)} texts and {len(tables)} tables")
         return _fallback_extract(texts, tables)
 
+    logger.info(f"✅ [STRUCTURE] Using body.children with {len(children)} children")
     parts = []
     for child in children:
         _render_child(child, texts, tables, groups, parts)
 
+    logger.info(f"📝 [OUTPUT] Generated {len(parts)} content blocks from structure")
     return "\n\n".join(parts)
 
 
@@ -59,14 +72,23 @@ def _fallback_extract(texts: list, tables: list) -> str:
     still strips all bounding box / provenance / ref noise).
     """
     parts = []
+    text_count = 0
+    skipped_texts = 0
+
     for item in texts:
         md = _render_text(item)
         if md:
             parts.append(md)
+            text_count += 1
+        else:
+            skipped_texts += 1
+
     for item in tables:
         md = _render_table(item)
         if md:
             parts.append(md)
+
+    logger.info(f"📝 [FALLBACK_EXTRACT] Extracted {text_count} texts, skipped {skipped_texts} empty texts, added {len([p for p in parts if p.startswith('```json')])} tables")
     return "\n\n".join(parts) if parts else ""
 
 
@@ -137,7 +159,12 @@ def _render_text(item: dict) -> str:
     if label == "caption":
         return f"*{text}*"
 
-    # Default: plain paragraph
+    # Handle page breaks and structural elements
+    if label in ["page_break", "footnote_ref", "page_footer", "page_header"]:
+        return ""  # Skip structural elements
+
+    # Default: plain paragraph or text
+    # Includes labels like "text", "paragraph", "paragraph_continuation", etc.
     return text
 
 
