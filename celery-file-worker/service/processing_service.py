@@ -468,40 +468,11 @@ async def process_file_content(
                     except Exception as parse_err:
                         logger.warning(f"⚠️ [DOCLING_PARSE] Failed to parse: {parse_err}. First 500 chars: {repr(json_content[:500])}")
 
-                    # Extract tables and send to Gemini for intelligent formatting
-                    from shared.gemini_table_formatter import (
-                        extract_tables_from_docling_json,
-                        extract_text_content_from_docling,
-                        format_tables_with_gemini,
-                        merge_content_with_formatted_tables,
-                        reconstruct_equations_in_text
-                    )
-                    from shared.equation_extractor import extract_and_fix_equations_with_vision
+                    # Use unified docling processing
+                    from shared.gemini_table_formatter import process_docling_content
 
-                    logger.info(f"🔄 [TABLE_EXTRACTION] Extracting raw tables from docling JSON (with coordinates/bounding boxes)...")
-                    tables = extract_tables_from_docling_json(json_content)
-
-                    logger.info(f"📝 [TEXT_EXTRACTION] Extracting text content (headings, paragraphs)...")
-                    text_content = extract_text_content_from_docling(json_content)
-
-                    # Extract equations using Gemini Vision to avoid docling OCR errors
-                    logger.info(f"📐 [EQUATIONS_VISION] Extracting equations from PDF images using Gemini Vision...")
-                    extracted_equations = await extract_and_fix_equations_with_vision(json_content)
-                    if extracted_equations:
-                        logger.info(f"✅ [EQUATIONS_VISION] Extracted equations from PDF images, appending to content")
-                        text_content = text_content + "\n\n" + extracted_equations
-
-                    # Reconstruct remaining broken equations in text
-                    logger.info(f"📐 [EQUATIONS] Reconstructing mathematical equations in text...")
-                    text_content = await reconstruct_equations_in_text(text_content)
-
-                    # Send tables to Gemini for formatting
-                    logger.info(f"🤖 [GEMINI_TABLES] Sending {len(tables)} tables to Gemini for formatting...")
-                    formatted_tables = await format_tables_with_gemini(tables)
-
-                    # Merge formatted tables with text content
-                    logger.info(f"📋 [MERGE] Merging text content with formatted tables...")
-                    content_for_upload = merge_content_with_formatted_tables(text_content, formatted_tables)
+                    logger.info(f"🔄 [DOCLING_PROCESS] Using unified docling processing pipeline...")
+                    content_for_upload = await process_docling_content(json_content)
 
                     # Log the final merged content being sent to Gemini
                     logger.info(f"📤 [DOCLING_TO_GEMINI] Final merged content for Gemini FileStore:")

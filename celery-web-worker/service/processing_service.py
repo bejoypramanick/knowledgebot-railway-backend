@@ -20,7 +20,8 @@ from shared.gemini_table_formatter import (
     extract_tables_from_docling_json,
     extract_text_content_from_docling,
     format_tables_with_gemini,
-    merge_content_with_formatted_tables
+    merge_content_with_formatted_tables,
+    process_docling_content
 )
 from shared.s3_file_storage import s3_file_storage
 
@@ -628,29 +629,46 @@ class ProcessingService:
 
             logger.info(f"✅ [DOCLING_RESPONSE] Received docling JSON: {len(json_content)} chars")
 
-            # 4. Extract tables and text separately
-            logger.info(f"📊 [EXTRACT] Extracting tables from docling JSON...")
-            tables = extract_tables_from_docling_json(json_content)
-            logger.info(f"📊 [EXTRACT] Found {len(tables)} tables")
+            # Validate json_content is not empty
+            if not json_content or len(json_content) == 0:
+                logger.error(f"❌ [DOCLING_ERROR] json_content is empty!")
+                raise Exception("Docling returned empty JSON")
 
-            logger.info(f"📝 [EXTRACT] Extracting text content from docling JSON...")
-            text_content = extract_text_content_from_docling(json_content)
-            logger.info(f"📝 [EXTRACT] Extracted text: {len(text_content)} chars")
-            if not text_content:
-                logger.warning(f"⚠️ [EXTRACT] No text content extracted! Docling JSON may have missing body.children structure")
-            else:
-                # Log first 200 chars as sample
-                logger.info(f"📝 [EXTRACT] Text sample (first 200 chars): {text_content[:200]}...")
+            # Log comprehensive docling JSON structure (same as file worker)
+            try:
+                import json as json_lib
+                parsed = json_lib.loads(json_content) if isinstance(json_content, str) and json_content.strip().startswith(('{', '[')) else None
+                if parsed and isinstance(parsed, dict):
+                    logger.info(f"📊 [DOCLING_STRUCTURE] Top-level keys: {list(parsed.keys())}")
+                    # Log texts, tables, groups structure
+                    texts_count = len(parsed.get('texts', []))
+                    tables_list = parsed.get('tables', [])
+                    tables_count = len(tables_list) if tables_list else 0
+                    groups_count = len(parsed.get('groups', []))
+                    body_children = parsed.get('body', {}).get('children', [])
 
-            # 5. Format tables with Gemini
-            logger.info(f"🤖 [GEMINI_TABLES] Sending {len(tables)} tables to Gemini...")
-            formatted_tables = await format_tables_with_gemini(tables)
-            logger.info(f"🤖 [GEMINI_TABLES] Received {len(formatted_tables)} formatted tables")
+                    logger.info(f"📊 [DOCLING_STRUCTURE] Content summary:")
+                    logger.info(f"   texts: {texts_count}")
+                    logger.info(f"   tables: {tables_count}")
+                    logger.info(f"   groups: {groups_count}")
+                    logger.info(f"   body.children: {len(body_children)}")
 
-            # 6. Merge content
-            logger.info(f"🔗 [MERGE] Merging {len(text_content)} text chars + {len(formatted_tables)} formatted tables...")
-            markdown_content = merge_content_with_formatted_tables(text_content, formatted_tables)
-            logger.info(f"✅ [MERGE] Final markdown: {len(markdown_content)} chars")
+                    # Log text labels distribution for debugging
+                    if parsed.get('texts'):
+                        label_counts = {}
+                        for text in parsed['texts']:
+                            label = text.get('label', 'text')
+                            label_counts[label] = label_counts.get(label, 0) + 1
+                        logger.info(f"📊 [DOCLING_TEXT_LABELS] Distribution: {label_counts}")
+                else:
+                    logger.warning(f"⚠️ [DOCLING_STRUCTURE] Not valid JSON. First 500 chars: {repr(json_content[:500])}")
+            except Exception as parse_err:
+                logger.warning(f"⚠️ [DOCLING_STRUCTURE] Failed to parse: {parse_err}. First 500 chars: {repr(json_content[:500])}")
+
+            # Use unified docling processing (same as file worker)
+            # This ensures both file worker and web worker process docling content identically
+            logger.info(f"🔄 [DOCLING_PROCESS] Using unified docling processing pipeline...")
+            markdown_content = await process_docling_content(json_content)
 
             # 7. Upload final markdown to S3 (for download endpoint)
             md_filename = f"page_{url_hash}.md"

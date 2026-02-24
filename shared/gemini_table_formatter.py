@@ -413,3 +413,56 @@ def merge_content_with_formatted_tables(
     logger.info("=" * 80)
 
     return merged
+
+
+async def process_docling_content(json_content: str) -> str:
+    """
+    Unified function for processing docling JSON content.
+    Both file worker and web worker use this to ensure identical processing.
+
+    This function:
+    1. Extracts tables from docling JSON
+    2. Extracts text content from docling JSON
+    3. Sends tables to Gemini for intelligent formatting
+    4. Merges formatted tables back with text content
+
+    Args:
+        json_content: Raw JSON string from docling conversion
+
+    Returns:
+        Final markdown content with merged text and formatted tables
+    """
+    logger.info("=" * 80)
+    logger.info("[DOCLING_PROCESS] === UNIFIED DOCLING PROCESSING ===")
+    logger.info("=" * 80)
+
+    # 1. Extract tables
+    logger.info("[DOCLING_PROCESS] Step 1: Extracting tables...")
+    tables = extract_tables_from_docling_json(json_content)
+    logger.info(f"[DOCLING_PROCESS] Found {len(tables)} tables")
+
+    # 2. Extract text
+    logger.info("[DOCLING_PROCESS] Step 2: Extracting text content...")
+    text_content = extract_text_content_from_docling(json_content)
+    logger.info(f"[DOCLING_PROCESS] Extracted {len(text_content)} chars of text")
+
+    if not text_content:
+        logger.warning("[DOCLING_PROCESS] ⚠️ No text content extracted!")
+    else:
+        logger.info(f"[DOCLING_PROCESS] Text sample: {text_content[:200]}...")
+
+    # 3. Format tables with Gemini
+    logger.info("[DOCLING_PROCESS] Step 3: Formatting tables with Gemini...")
+    formatted_tables = await format_tables_with_gemini(tables)
+    logger.info(f"[DOCLING_PROCESS] Tables formatting complete")
+
+    # 4. Merge content
+    logger.info("[DOCLING_PROCESS] Step 4: Merging text and formatted tables...")
+    merged_content = merge_content_with_formatted_tables(text_content, formatted_tables)
+    logger.info(f"[DOCLING_PROCESS] Merged content size: {len(merged_content)} chars")
+
+    logger.info("=" * 80)
+    logger.info(f"[DOCLING_PROCESS] === PROCESSING COMPLETE ===")
+    logger.info("=" * 80)
+
+    return merged_content
