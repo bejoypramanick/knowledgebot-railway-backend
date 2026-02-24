@@ -436,6 +436,43 @@ async def process_docling_content(json_content: str) -> str:
     logger.info("[DOCLING_PROCESS] === UNIFIED DOCLING PROCESSING ===")
     logger.info("=" * 80)
 
+    # Inspect raw docling JSON structure before extraction
+    try:
+        import json as json_lib
+        doc = json_lib.loads(json_content) if isinstance(json_content, str) else json_content
+        if isinstance(doc, dict):
+            logger.info("[DOCLING_PROCESS] === RAW JSON INSPECTION ===")
+            texts_list = doc.get('texts', [])
+            tables_list = doc.get('tables', [])
+            groups_list = doc.get('groups', [])
+            body = doc.get('body', {})
+            children = body.get('children', [])
+
+            logger.info(f"[DOCLING_PROCESS] Raw JSON counts:")
+            logger.info(f"  texts: {len(texts_list)}")
+            logger.info(f"  tables: {len(tables_list)}")
+            logger.info(f"  groups: {len(groups_list)}")
+            logger.info(f"  body.children: {len(children)}")
+
+            # Show text types/labels
+            if texts_list:
+                labels = {}
+                for t in texts_list:
+                    label = t.get('label', 'unknown')
+                    labels[label] = labels.get(label, 0) + 1
+                logger.info(f"[DOCLING_PROCESS] Text labels: {labels}")
+
+                # Show sample of each label type
+                shown_labels = set()
+                for t in texts_list:
+                    label = t.get('label', 'unknown')
+                    if label not in shown_labels:
+                        text_val = t.get('text', '')[:100]
+                        logger.info(f"[DOCLING_PROCESS]   {label} sample: {text_val}")
+                        shown_labels.add(label)
+    except Exception as e:
+        logger.warning(f"[DOCLING_PROCESS] Could not inspect raw JSON: {e}")
+
     # 1. Extract tables
     logger.info("[DOCLING_PROCESS] Step 1: Extracting tables...")
     tables = extract_tables_from_docling_json(json_content)
@@ -447,9 +484,12 @@ async def process_docling_content(json_content: str) -> str:
     logger.info(f"[DOCLING_PROCESS] Extracted {len(text_content)} chars of text")
 
     if not text_content:
-        logger.warning("[DOCLING_PROCESS] ⚠️ No text content extracted!")
+        logger.warning("[DOCLING_PROCESS] ⚠️ NO TEXT CONTENT EXTRACTED!")
+        logger.warning("[DOCLING_PROCESS] This is the root cause of missing content")
+        logger.warning("[DOCLING_PROCESS] Check RAW JSON INSPECTION logs above to see what's in the JSON")
     else:
-        logger.info(f"[DOCLING_PROCESS] Text sample: {text_content[:200]}...")
+        logger.info(f"[DOCLING_PROCESS] Text sample (first 300 chars):")
+        logger.info(f"[DOCLING_PROCESS] {text_content[:300]}...")
 
     # 3. Format tables with Gemini
     logger.info("[DOCLING_PROCESS] Step 3: Formatting tables with Gemini...")
