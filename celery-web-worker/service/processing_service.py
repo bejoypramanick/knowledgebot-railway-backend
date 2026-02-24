@@ -496,20 +496,22 @@ class ProcessingService:
             try:
                 from crawl4ai import AsyncWebCrawler
                 async with AsyncWebCrawler() as crawler:
-                    # Use crawl4ai with cleaning options to remove menus, navbars, ads, etc.
+                    # Use crawl4ai with minimal cleaning to preserve content
+                    # Only remove overlays and forms, but keep article content
+                    logger.info(f"🔍 [CRAWL4AI] Fetching {page_url} with minimal cleaning...")
                     result = await crawler.arun(
                         url=page_url,
                         timeout=30,
                         js_code=None,
                         remove_overlay_elements=True,  # Remove modals, overlays, popups
-                        remove_unwanted_elements=True,  # Remove script, style, nav, footer, etc.
-                        remove_forms=True               # Remove form elements
+                        remove_unwanted_elements=False,  # DON'T remove elements - keep all content
+                        remove_forms=True               # Remove form elements (usually not content)
                     )
 
                     if result.success and result.html:
                         if delay > 0:
                             await asyncio.sleep(delay)
-                        logger.info(f"✅ Fetched and cleaned {len(result.html)} bytes from {page_url}")
+                        logger.info(f"✅ [CRAWL4AI] Fetched HTML: {len(result.html)} bytes from {page_url}")
 
                         # Extract title and description from metadata
                         title = None
@@ -575,13 +577,14 @@ class ProcessingService:
         import hashlib
 
         logger.info(f"📄 [DOCLING_WEB] Processing page with docling: {page_url}")
+        logger.info(f"📄 [DOCLING_WEB] HTML size before docling: {len(html_content)} bytes")
 
         # Create URL hash for file naming
         url_hash = hashlib.md5(page_url.encode()).hexdigest()[:12]
 
         # 1. Upload cleaned HTML to S3 temporarily
         html_filename = f"page_{url_hash}.html"
-        logger.info(f"📤 [S3_HTML_UPLOAD] Uploading cleaned HTML to S3...")
+        logger.info(f"📤 [S3_HTML_UPLOAD] Uploading HTML to S3 ({len(html_content)} bytes)...")
 
         html_upload_success, html_s3_key = await s3_file_storage.upload_file(
             file_data=html_content.encode('utf-8'),
