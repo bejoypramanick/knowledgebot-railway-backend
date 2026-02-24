@@ -155,12 +155,16 @@ The data includes:
 YOUR TASK:
 1. Use the bounding box coordinates to determine correct row/column alignment
 2. Handle cells that span multiple rows/columns properly (use their bounding boxes to infer position)
-3. Create structured markdown format for each table with:
+3. If table has nested structure (parent-child relationships):
+   - FLATTEN the table so each row is independent
+   - Include parent context in each nested row (use parent IDs/names as columns)
+   - Make relationships explicit through shared parent identifiers
+4. Create structured markdown format for each table with:
    - Title showing table number/name
    - Summary line describing table purpose, key columns, and data type
-   - Column list
+   - Column list (including parent context columns if nested)
    - Data rows in key-value format
-4. Preserve all cell values exactly
+5. Preserve all cell values exactly
 
 OUTPUT FORMAT (Structured Markdown):
 
@@ -179,6 +183,32 @@ OUTPUT FORMAT (Structured Markdown):
 - [Column 3]: [Value 3]
 
 [Continue for all rows...]
+
+NESTED TABLE HANDLING:
+If the original table has nested/hierarchical structure, FLATTEN it like this:
+- Each nested item becomes its own row
+- Include parent identifiers (Parent ID, Parent Name, etc.)
+- Example:
+  **Row 1** (Parent Item)
+  - ID: P1
+  - Name: Parent A
+  - Child ID: C1
+  - Child Name: Child A1
+  - Child Value: Val1
+
+  **Row 2** (Another Child of Parent A)
+  - ID: P1
+  - Name: Parent A
+  - Child ID: C2
+  - Child Name: Child A2
+  - Child Value: Val2
+
+  **Row 3** (Parent Item B)
+  - ID: P2
+  - Name: Parent B
+  - Child ID: C3
+  - Child Name: Child B1
+  - Child Value: Val3
 
 REQUIREMENTS:
 - Use markdown format, NOT JSON
