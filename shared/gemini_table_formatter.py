@@ -155,24 +155,45 @@ The data includes:
 YOUR TASK:
 1. Use the bounding box coordinates to determine correct row/column alignment
 2. Handle cells that span multiple rows/columns properly (use their bounding boxes to infer position)
-3. Create a meaningful JSON structure that represents the table logically
-4. Add a "summary" field describing what the table contains (purpose, key columns, data type)
-5. Preserve all cell values exactly
+3. Create structured markdown format for each table with:
+   - Title showing table number/name
+   - Summary line describing table purpose, key columns, and data type
+   - Column list
+   - Data rows in key-value format
+4. Preserve all cell values exactly
+
+OUTPUT FORMAT (Structured Markdown):
+
+### Table: [Table Name/Number]
+**Summary**: [Brief description of table contents, purpose, key columns, and data type]
+**Columns**: [Comma-separated list of column headers]
+
+**Row 1**
+- [Column 1]: [Value 1]
+- [Column 2]: [Value 2]
+- [Column 3]: [Value 3]
+
+**Row 2**
+- [Column 1]: [Value 1]
+- [Column 2]: [Value 2]
+- [Column 3]: [Value 3]
+
+[Continue for all rows...]
 
 REQUIREMENTS:
-- Return ONLY valid JSON
-- Include "tables" key with list of formatted tables
-- For each table include:
-  * "summary": Brief description of table contents and purpose
-  * "headers": Column headers identified from data
-  * "rows": Properly aligned rows as array of objects with column headers as keys
-- Do NOT include raw docling metadata in output
-- Do NOT include explanations, only JSON
+- Use markdown format, NOT JSON
+- Include summary at top for context
+- Use key-value pairs (-) for each column in each row
+- Number each row clearly (**Row N**)
+- List all columns in "Columns:" line
+- Make it easy to read and search
+- Do NOT include raw docling metadata
+- Do NOT include explanations, only the formatted markdown output
 
 Docling raw table data (includes coordinates and spans):
 {tables_text}
 
-Return the formatted tables with summaries as valid JSON."""
+Return the formatted tables in the markdown KV format shown above."""
         logger.info(f"✅ [GEMINI_TABLES] Prompt created: {len(prompt)} chars")
 
         # Call Gemini API in thread executor (synchronous API in async context)
@@ -216,43 +237,39 @@ Return the formatted tables with summaries as valid JSON."""
         logger.info(f"📋 [GEMINI_TABLES_RESPONSE] Response preview (first 500 chars):")
         logger.info(response.text[:500])
 
-        # Parse the JSON response
-        logger.info("[GEMINI_TABLES] Parsing JSON response...")
+        # Handle markdown response (structured KV format)
+        logger.info("[GEMINI_TABLES] Processing markdown response...")
         try:
-            # Try to extract JSON from the response
             response_text = response.text.strip()
             logger.info(f"[GEMINI_TABLES] Response text length: {len(response_text)} chars")
 
-            # If wrapped in markdown code block, extract it
-            if response_text.startswith("```"):
-                logger.info("[GEMINI_TABLES] Response wrapped in markdown code block - extracting JSON...")
-                json_start = response_text.find('{')
-                json_end = response_text.rfind('}') + 1
-                if json_start >= 0 and json_end > json_start:
-                    response_text = response_text[json_start:json_end]
-                    logger.info(f"[GEMINI_TABLES] Extracted JSON: {len(response_text)} chars")
-                else:
-                    logger.warning("[GEMINI_TABLES] Could not find JSON delimiters in code block")
+            # Response is now markdown format, not JSON
+            # Return it wrapped in a structure for the merge function
+            if not response_text:
+                logger.error("❌ [GEMINI_TABLES] Empty response text")
+                return {"tables_markdown": "", "error": "Empty response"}
 
-            logger.info("[GEMINI_TABLES] Attempting to parse as JSON...")
-            formatted = json.loads(response_text)
-            logger.info(f"✅ [GEMINI_TABLES] Successfully parsed JSON")
-            logger.info(f"📋 [GEMINI_TABLES] Parsed structure keys: {list(formatted.keys())}")
+            logger.info(f"✅ [GEMINI_TABLES] Received formatted markdown ({len(response_text)} chars)")
+            logger.info("[GEMINI_TABLES] Markdown preview (first 500 chars):")
+            logger.info(response_text[:500])
 
-            if "tables" in formatted:
-                logger.info(f"✅ [GEMINI_TABLES] Found 'tables' key with {len(formatted['tables'])} items")
+            # Return markdown content wrapped in expected format
+            result = {
+                "tables_markdown": response_text,
+                "format": "markdown_kv"
+            }
 
             logger.info("=" * 80)
             logger.info("✅ [GEMINI_TABLES] === END TABLE FORMATTING - SUCCESS ===")
             logger.info("=" * 80)
-            return formatted
+            return result
 
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ [GEMINI_TABLES] Failed to parse as JSON: {e}")
+        except Exception as e:
+            logger.error(f"❌ [GEMINI_TABLES] Error processing response: {e}")
             logger.error(f"[GEMINI_TABLES] Full response text:")
             for line in response.text.split('\n')[:20]:  # Log first 20 lines
                 logger.error(f"  {line}")
-            return {"tables": {}, "error": f"Invalid JSON response: {str(e)}"}
+            return {"tables_markdown": "", "error": str(e)}
 
     except Exception as e:
         logger.error(f"❌ [GEMINI_TABLES] Unexpected error: {e}")
@@ -272,15 +289,15 @@ def merge_content_with_formatted_tables(
     """
     Merge non-table text content with formatted tables into a single markdown document.
 
-    IMPORTANT: Only includes Gemini-formatted output, NO raw docling data.
+    IMPORTANT: Only includes Gemini-formatted output (markdown KV format), NO raw docling data.
     This prevents duplication when sending to FileSearch.
 
     Args:
         text_content: Markdown text without tables
-        formatted_tables: Dictionary with formatted tables from Gemini
+        formatted_tables: Dictionary with formatted tables from Gemini (markdown format)
 
     Returns:
-        Merged markdown content (text + only formatted tables, NO raw docling JSON)
+        Merged markdown content (text + formatted tables markdown)
     """
     logger.info("=" * 80)
     logger.info("[MERGE] === MERGING TEXT + FORMATTED TABLES ===")
@@ -290,16 +307,15 @@ def merge_content_with_formatted_tables(
     # Add formatted tables section ONLY if Gemini successfully formatted them
     tables_section = ""
 
-    if formatted_tables and "tables" in formatted_tables:
-        tables_data = formatted_tables["tables"]
-        if tables_data:
-            logger.info(f"[MERGE] Adding formatted tables section...")
-            tables_section = "\n\n## Formatted Tables\n\n```json\n"
-            tables_section += json.dumps(tables_data, indent=2, ensure_ascii=False)
-            tables_section += "\n```"
+    if formatted_tables and "tables_markdown" in formatted_tables:
+        tables_markdown = formatted_tables["tables_markdown"]
+        if tables_markdown:
+            logger.info(f"[MERGE] Adding formatted tables (markdown KV format)...")
+            # Add section header and the markdown content
+            tables_section = "\n\n---\n\n## Extracted Tables\n\n" + tables_markdown
             logger.info(f"✅ [MERGE] Tables section created: {len(tables_section)} chars")
         else:
-            logger.warning("[MERGE] Formatted tables is empty")
+            logger.warning("[MERGE] Formatted tables markdown is empty")
     elif formatted_tables.get("error"):
         logger.warning(f"[MERGE] ⚠️ Gemini formatting had error: {formatted_tables.get('error')}")
         logger.warning("[MERGE] Skipping formatted tables section - no output to include")
@@ -312,8 +328,9 @@ def merge_content_with_formatted_tables(
     logger.info("=" * 80)
     logger.info(f"✅ [MERGE] Final merged content: {len(merged)} chars")
     logger.info(f"   ✓ Text content: {len(text_content)} chars")
-    logger.info(f"   ✓ Formatted tables: {len(tables_section)} chars")
+    logger.info(f"   ✓ Formatted tables (markdown): {len(tables_section)} chars")
     logger.info(f"   ✗ NO raw docling JSON included")
+    logger.info(f"   ✓ Format: Markdown KV (optimized for RAG search)")
     logger.info("=" * 80)
 
     return merged
