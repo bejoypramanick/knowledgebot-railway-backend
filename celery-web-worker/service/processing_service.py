@@ -496,7 +496,20 @@ class ProcessingService:
         """
         async with semaphore:
             try:
-                from crawl4ai import AsyncWebCrawler
+                from crawl4ai import AsyncWebCrawler, BrowserConfig
+
+                # JavaScript to unhide all hidden elements
+                js_code = """
+                document.querySelectorAll('table, p, div, span, [style*="display: none"], [style*="visibility: hidden"], .hidden, [hidden]').forEach(el => {
+                    el.style.display = el.tagName === 'TABLE' ? 'table' : 'block';
+                    el.style.visibility = 'visible !important';
+                    el.style.opacity = '1';
+                    el.hidden = false;
+                });
+                """
+
+                browser_config = BrowserConfig(headless=True)
+
                 async with AsyncWebCrawler() as crawler:
                     # Get page as-is without any removal
                     # Trafilatura will extract text content from full page
@@ -504,7 +517,8 @@ class ProcessingService:
                     result = await crawler.arun(
                         url=page_url,
                         timeout=30,
-                        js_code=None,
+                        js_code=js_code,
+                        browser_config=browser_config,
                         remove_overlay_elements=False,  # Keep overlays
                         remove_unwanted_elements=False,  # Keep all elements
                         remove_forms=False               # Keep forms
