@@ -26,9 +26,11 @@ The image includes:
 
 ## Deployment on Railway
 
-### 1. Update Railway Configuration
+### 1. Set Runtime Environment Variables
 
-Set the following environment variables:
+All paths are **decided at deploy time** - configure them once and change anytime without rebuilding!
+
+**Go to Railway Dashboard → Service Variables and set:**
 
 ```
 DOCLING_SERVE_ARTIFACTS_PATH=/opt/app-root/src/models
@@ -37,6 +39,8 @@ DOCLING_SERVE_SCRATCH_PATH=/app/scratchpad
 DOCLING_SERVE_ENABLE_UI=1
 DOCLING_SERVE_LOG_LEVEL=INFO
 ```
+
+These paths are **not hardcoded** in the image - you configure them at runtime!
 
 ### 2. Configure Railway Service
 
@@ -98,22 +102,33 @@ Models are organized in the `RapidOcr/` subdirectory:
 | **Reliability** | Depends on network | Always available |
 | **Consistency** | May vary | Guaranteed same image |
 
-## Environment Variables
+## Environment Variables (Set at Runtime on Railway)
 
-### Required
+### Where Models Are Located in Image
+```
+/opt/app-root/src/models/RapidOcr/  (models baked into image)
+```
 
+### Set These on Railway (Decide at Deploy Time)
+
+**Required - Point to image model location:**
 ```bash
 DOCLING_SERVE_ARTIFACTS_PATH=/opt/app-root/src/models
 ```
 
-### Recommended
-
+**Recommended - Set as needed:**
 ```bash
 DOCLING_SERVE_LOAD_MODELS_AT_BOOT=false  # Models already in image
-DOCLING_SERVE_SCRATCH_PATH=/app/scratchpad
-DOCLING_SERVE_ENABLE_UI=1
-DOCLING_SERVE_LOG_LEVEL=INFO
+DOCLING_SERVE_SCRATCH_PATH=/app/scratchpad  # Temp directory
+DOCLING_SERVE_ENABLE_UI=1  # Enable web UI
+DOCLING_SERVE_LOG_LEVEL=INFO  # Logging level
 ```
+
+### Key Point
+✅ Models are **pre-downloaded and embedded in image** at `/opt/app-root/src/models`
+✅ You **decide the paths at deploy time** via Railway env vars
+✅ Change paths anytime without rebuilding image
+✅ Container uses whatever you set in Railway
 
 ## Building Locally
 
