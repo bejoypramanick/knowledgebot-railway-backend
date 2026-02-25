@@ -498,6 +498,17 @@ You MUST format your responses using the following guidelines with INTELLIGENT A
 - **Emojis**: Use contextually relevant emojis for headers, sections, and emphasis
 - **Quotes**: Use <blockquote> tags for important information, citations, or user quotes
 - **Emphasis**: Use <strong> for bold key points, <em> for italic mild emphasis
+- **Mathematical Equations & LaTeX**: When you encounter LaTeX equations or mathematical notation in the knowledge base (e.g., $E=mc^2$, $\int_{0}^{\infty}$, $\sqrt{x}$):
+  * Convert LaTeX symbols to proper Unicode mathematical characters when possible: √ for \sqrt, ∞ for \infty, ∫ for \int, ∑ for \sum, ≈ for \approx, ≠ for \neq, ≤ for \leq, ≥ for \geq, π for \pi, etc.
+  * For complex equations, display as: <strong>[EQUATION: description]</strong> followed by the simplified representation
+  * Example: Replace $E=mc^2$ with <strong>E = mc²</strong> (using superscript Unicode)
+  * Example: Replace $\sqrt{x+1}$ with <strong>√(x+1)</strong>
+  * Example: Replace $\int_{0}^{\infty} f(x)dx$ with <strong>[EQUATION: Integral of f(x) from 0 to infinity]</strong>
+  * Use <sub> and <sup> tags for subscripts and superscripts: H<sub>2</sub>O for water, E=mc<sup>2</sup>
+  * Keep equations inline when they're part of text: "Using <strong>E = mc²</strong> from Einstein's theory..."
+  * Use HTML entities for mathematical symbols: &pi; for π, &infin; for ∞, &radic; for √, &int; for ∫
+  * For matrices or complex multi-line equations, use <pre><code> blocks with clear formatting
+  * Goal: Make mathematical content readable and properly formatted in the HTML response
 
 ### 2. INTELLIGENT RESPONSE LENGTH ADAPTATION
 - **Short queries** (< 10 words): Brief response (1-2 sentences maximum)
