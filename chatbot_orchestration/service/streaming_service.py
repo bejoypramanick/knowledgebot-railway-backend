@@ -99,127 +99,36 @@ class StreamingService:
             chunk_count = 0
             tool_call_count = 0
 
-            # HYBRID APPROACH: Manually call search_knowledge_base to ensure it happens,
-            # but allow other tools to be called if needed. Prevent duplicate calls.
-            try:
-                from ..tools.knowledge_tools import search_knowledge_base
-                import re
-                logger.info("Manually calling search_knowledge_base to ensure KB search happens...")
-
-                # ========================================================================
-                # PROFESSIONAL: Pass conversation history to FileSearch for better context
-                # ========================================================================
-                # Format chat history per Gemini API specification for search_knowledge_base
-                # Extract last N messages (e.g., 5) to balance context and token usage
-                conversation_history = []
-                max_history_messages = 5  # Keep last 5 messages for context
-
-                if chat_history:
-                    # Extract previous messages (excluding current message being processed)
-                    for hist_msg in chat_history[-max_history_messages:]:
-                        try:
-                            role = hist_msg.get('role', '').lower()
-                            content = hist_msg.get('content', '')
-
-                            # Map database role names to Gemini API format
-                            if role == 'user':
-                                conversation_history.append({
-                                    "role": "user",
-                                    "text": content
-                                })
-                            elif role in ['assistant', 'model']:
-                                conversation_history.append({
-                                    "role": "model",
-                                    "text": content
-                                })
-                        except Exception as e:
-                            logger.warning(f"⚠️ Error formatting history message: {e}")
-                            continue
-
-                    logger.info(f"📚 Formatted {len(conversation_history)} messages from chat history for FileSearch context")
-
-                # Call search_knowledge_base with conversation context
-                # Per Gemini API spec (https://ai.google.dev/api/generate-content)
-                kb_results = await search_knowledge_base(
-                    query=message,
-                    conversation_history=conversation_history if conversation_history else None
-                )
-                logger.info(f"KB Search completed: {len(kb_results)} chars returned")
-
-                # Remove all emojis and icons from KB results
-                # Pattern matches emoji characters and common icon ranges
-                emoji_pattern = re.compile(
-                    "["
-                    "\U0001F300-\U0001F9FF"  # emoticons, symbols, pictographs
-                    "\U0001F600-\U0001F64F"  # emoticons
-                    "\U0001F300-\U0001F5FF"  # symbols & pictographs
-                    "\U0001F680-\U0001F6FF"  # transport & map
-                    "\U0001F1E0-\U0001F1FF"  # flags
-                    "\U00002702-\U000027B0"  # dingbats
-                    "\U000024C2-\U0001F251"  # enclosed characters
-                    "\u2600-\u26FF"          # miscellaneous symbols
-                    "\u2700-\u27BF"          # dingbats
-                    "]+", re.UNICODE
-                )
-                kb_results = emoji_pattern.sub('', kb_results)
-                logger.info(f"Emojis removed from KB results: {len(kb_results)} chars")
-
-                # Inject KB results into message AND tell agent NOT to call KB again
-                # This prevents redundant calls while still allowing other tools if needed
-                enriched_message = f"""USER QUERY: {message}
-
-KNOWLEDGE BASE ALREADY SEARCHED: The knowledge base search was already performed for you.
-
-RAW KNOWLEDGE BASE SEARCH RESULTS:
-{kb_results}
-
-CRITICAL FORMATTING INSTRUCTIONS (MANDATORY - NON-NEGOTIABLE):
-1. You MUST reformat the knowledge base results above into PROPER HTML
-2. You CANNOT output plain text - EVERY response must use HTML tags
-3. You MUST wrap paragraphs in <p></p> tags
-4. You MUST wrap important terms/names in <strong></strong> tags
-5. You MUST wrap emphasized text in <em></em> tags
-6. You MUST use <ul><li> for lists or facts
-7. You MUST include citations in proper HTML format
-8. You MUST NOT use plain text, markdown, or line breaks without HTML tags
-9. You MUST NOT include any emojis, icons, or special symbols in the response
-10. Format example: <p>Here's <strong>important info</strong> with <em>emphasis</em>.</p>
-
-OTHER INSTRUCTIONS:
-- Do NOT call search_knowledge_base again - results already provided above
-- If you need additional data, you may call other tools (database, human agent)
-- Answer the user's question using the KB results above
-- Always include citations with source URLs using <a href="URL" target="_blank">text</a>"""
-
-                logger.info(f"Enriched message with KB results: {len(enriched_message)} chars")
-            except Exception as kb_error:
-                logger.warning(f"Manual KB search failed: {kb_error}")
-                # Even if KB search fails, tell agent it was already attempted
-                enriched_message = f"""USER QUERY: {message}
-
-KNOWLEDGE BASE ALREADY SEARCHED: Knowledge base search was attempted but failed.
-
-CRITICAL FORMATTING INSTRUCTIONS (MANDATORY - NON-NEGOTIABLE):
-1. You MUST respond in PROPER HTML format
-2. You CANNOT output plain text - EVERY response must use HTML tags
-3. You MUST wrap paragraphs in <p></p> tags
-4. You MUST wrap important information in <strong></strong> tags
-5. You MUST NOT include any emojis, icons, or special symbols in the response
-6. Format example: <p><strong>Important:</strong> The knowledge base search failed.</p>
-
-INSTRUCTIONS:
-1. Inform the user that knowledge base search encountered an error
-2. Offer to connect them to a human agent or try alternative queries
-3. Use HTML formatting for EVERY part of your response - no plain text
-4. NO emojis or icons allowed"""
+            # ========================================================================
+            # INTELLIGENT APPROACH: Let agent control knowledge base search
+            # ========================================================================
+            # Agent has search_knowledge_base as a tool
+            # Agent analyzes conversation context and decides:
+            # 1. Ask user for clarification if needed
+            # 2. Enhance query based on conversation understanding
+            # 3. Call search_knowledge_base with optimized query
+            # 4. Integrate KB results into response
+            #
+            # Tool automatically fetches conversation history from session_id
+            # so it can enhance search context with previous messages
+            # ========================================================================
 
             try:
                 # Use agent.iter() for proper streaming + tool execution
-                logger.info("🔧 Using agent.iter() with pre-searched KB results and duplicate prevention")
+                logger.info("🚀 Intelligent RAG Mode: Letting agent control knowledge base search")
+                logger.info(f"📝 Agent will analyze: '{message[:100]}...'")
+                logger.info(f"📚 Agent has access to {len(pydantic_messages)} messages of conversation history")
+                logger.info(f"🔧 Agent tools: search_knowledge_base (with auto-context), query_railway_postgres, request_human_agent_connection")
 
+                # Pass ORIGINAL message (NOT enriched) to agent
+                # Agent decides whether to:
+                # - Ask for clarification
+                # - Enhance query and search KB
+                # - Use other tools
+                # - Respond from knowledge
                 async with agent.iter(
-                    enriched_message,
-                    message_history=pydantic_messages,
+                    message,  # ✅ ORIGINAL message - agent decides what to do
+                    message_history=pydantic_messages,  # ✅ Full conversation context
                     deps=session_deps
                 ) as run:
                     logger.info("🚀 Starting agent iteration (streaming + tools)")

@@ -8,11 +8,13 @@ import re
 import json
 import logging
 from typing import List, Dict, Any, Optional
+from pydantic_ai import RunContext
 
 from google.genai import types
 from shared.otel_logger import get_otel_logger
 
 from ..core.ai import get_genai_client
+from ..core.dependencies import ChatSessionDeps
 from ..schemas.models import SearchResult
 
 logger = get_otel_logger("knowledge_tools", "chatbot-orchestration")
@@ -111,40 +113,89 @@ async def get_citation_hierarchy(urls: List[str]) -> Dict[str, Any]:
         return build_citation_tree(urls)
 
 async def search_knowledge_base(
-    query: str,
-    conversation_history: Optional[List[Dict[str, Any]]] = None
+    ctx: RunContext[ChatSessionDeps],
+    query: str
 ) -> str:
     """
-    Search knowledge base using Gemini FileSearch with conversation context.
+    Search knowledge base using Gemini FileSearch with full conversation context.
 
-    Implements professional multi-turn conversation support per Gemini API specification.
-    Conversation history enables better understanding of follow-up questions and context.
+    INTELLIGENT RAG IMPLEMENTATION:
+    - Agent decides WHEN and WHAT to search based on conversation understanding
+    - Tool automatically fetches conversation history from agent session
+    - Enhances query understanding with full conversation context
+    - Follows Gemini API specification for multi-turn conversations
 
     Args:
-        query: The current user question/search query
-        conversation_history: Optional list of previous messages to provide context.
-            Format: [{"role": "user", "text": "..."}, {"role": "model", "text": "..."}, ...]
-            Pass last N messages (e.g., 5-10) to balance context and token usage.
-            Follows Gemini API Content object specification.
+        ctx: Pydantic AI RunContext containing ChatSessionDeps with session_id
+        query: The user's search query (may be enhanced by agent)
+               Agent may rephrase based on conversation context
+               Example: "Tell me more" → Agent passes "Tell me more about Feature X"
 
     Returns:
-        String containing RAG-powered response with source citations
+        String containing RAG-powered response with source citations and metadata
+
+    Behavior:
+    - Automatically fetches conversation history from session_id in context
+    - Enhances FileSearch query understanding with conversation context
+    - Agent decides WHEN to invoke this tool and WHAT query to use
+    - Enables intelligent follow-up question handling
 
     Reference:
     - Gemini API Docs: https://ai.google.dev/gemini-api/docs/text-generation
     - FileSearch Tool: https://blog.google/innovation-and-ai/technology/developers-tools/file-search-gemini-api/
     - Multi-turn Conversations: https://ai.google.dev/gemini-api/docs/interactions
     """
-    # Reject empty queries to prevent duplicate tool call attempts
+    # Reject empty queries to prevent tool call failures
     if not query or not query.strip():
-        logger.warning("❌ search_knowledge_base called with EMPTY query - rejecting to prevent infinite loops")
-        return "TOOL_CALL_REJECTED: Empty query provided. Please ensure a valid search query is passed to the tool."
+        logger.warning("❌ search_knowledge_base called with EMPTY query")
+        return "ERROR: Empty search query. Please provide a valid search question."
 
-    logger.info(f"🔍 Tool called: search_knowledge_base with query: {query[:100]}...")
-    if conversation_history:
-        logger.info(f"📚 Conversation context: {len(conversation_history)} messages provided")
+    # Extract session_id from pydantic_ai context
+    session_id = ctx.deps.session_id
+
+    logger.info(f"🔍 Tool called: search_knowledge_base")
+    logger.info(f"📝 Agent query: {query[:100]}...")
+    logger.info(f"🔑 Session ID: {session_id}")
+
+    # Step 1: Fetch conversation history automatically
+    conversation_history = None
+    try:
+        from ..service.session_manager import session_state_manager
+        chat_history = await session_state_manager.get_chat_history(session_id)
+        logger.info(f"📚 Retrieved {len(chat_history)} messages from session history")
+
+            # Format chat history per Gemini API specification
+            conversation_history = []
+            max_history_messages = 5  # Keep last 5 messages for token efficiency
+
+            for hist_msg in chat_history[-max_history_messages:]:
+                try:
+                    role = hist_msg.get('role', '').lower()
+                    content = hist_msg.get('content', '')
+
+                    # Map database role names to Gemini API format
+                    if role == 'user':
+                        conversation_history.append({
+                            "role": "user",
+                            "text": content
+                        })
+                    elif role in ['assistant', 'model']:
+                        conversation_history.append({
+                            "role": "model",
+                            "text": content
+                        })
+                except Exception as e:
+                    logger.warning(f"⚠️ Error formatting history message: {e}")
+                    continue
+
+            if conversation_history:
+                logger.info(f"📚 Formatted {len(conversation_history)} messages for FileSearch context")
+        except Exception as session_err:
+            logger.warning(f"⚠️ Could not fetch conversation history: {session_err}")
+            logger.info(f"📚 Proceeding with query alone (no conversation context)")
+            conversation_history = None
     else:
-        logger.info(f"📚 No conversation history - first message in this search")
+        logger.info(f"📚 No session ID provided - searching with query alone")
 
     genai_client = get_genai_client()
     if not genai_client:
