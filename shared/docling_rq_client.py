@@ -224,8 +224,7 @@ class DoclingRQClient:
                 task_data,
                 scratch_dir=scratch_dir,
                 job_timeout=job_timeout_str,  # Configurable job timeout (default 60 minutes)
-                result_ttl=14400,  # 4 hours - results stored in Redis for 4 hours
-                artifacts_path="/app"
+                result_ttl=14400  # 4 hours - results stored in Redis for 4 hours
             )
 
             logger.info(f"✅ [RQ_ENQUEUE] Job enqueued: {job.id} for {filename}")
