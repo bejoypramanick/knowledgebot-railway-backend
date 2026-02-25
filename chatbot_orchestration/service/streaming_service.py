@@ -105,7 +105,45 @@ class StreamingService:
                 from ..tools.knowledge_tools import search_knowledge_base
                 import re
                 logger.info("Manually calling search_knowledge_base to ensure KB search happens...")
-                kb_results = await search_knowledge_base(message)
+
+                # ========================================================================
+                # PROFESSIONAL: Pass conversation history to FileSearch for better context
+                # ========================================================================
+                # Format chat history per Gemini API specification for search_knowledge_base
+                # Extract last N messages (e.g., 5) to balance context and token usage
+                conversation_history = []
+                max_history_messages = 5  # Keep last 5 messages for context
+
+                if chat_history:
+                    # Extract previous messages (excluding current message being processed)
+                    for hist_msg in chat_history[-max_history_messages:]:
+                        try:
+                            role = hist_msg.get('role', '').lower()
+                            content = hist_msg.get('content', '')
+
+                            # Map database role names to Gemini API format
+                            if role == 'user':
+                                conversation_history.append({
+                                    "role": "user",
+                                    "text": content
+                                })
+                            elif role in ['assistant', 'model']:
+                                conversation_history.append({
+                                    "role": "model",
+                                    "text": content
+                                })
+                        except Exception as e:
+                            logger.warning(f"⚠️ Error formatting history message: {e}")
+                            continue
+
+                    logger.info(f"📚 Formatted {len(conversation_history)} messages from chat history for FileSearch context")
+
+                # Call search_knowledge_base with conversation context
+                # Per Gemini API spec (https://ai.google.dev/api/generate-content)
+                kb_results = await search_knowledge_base(
+                    query=message,
+                    conversation_history=conversation_history if conversation_history else None
+                )
                 logger.info(f"KB Search completed: {len(kb_results)} chars returned")
 
                 # Remove all emojis and icons from KB results

@@ -110,16 +110,30 @@ async def get_citation_hierarchy(urls: List[str]) -> Dict[str, Any]:
         # Fall back to building tree from flat list
         return build_citation_tree(urls)
 
-async def search_knowledge_base(query: str) -> str:
+async def search_knowledge_base(
+    query: str,
+    conversation_history: Optional[List[Dict[str, Any]]] = None
+) -> str:
     """
-    Search knowledge base using Gemini FileSearch for relevant information.
+    Search knowledge base using Gemini FileSearch with conversation context.
 
-    Use this tool for questions about:
-    - Content in uploaded documents, PDFs, text files
-    - Scraped website content stored in knowledge base
-    - Technical documentation and research papers
-    - Company policies and procedures
-    - Any content that should be retrieved from stored documents
+    Implements professional multi-turn conversation support per Gemini API specification.
+    Conversation history enables better understanding of follow-up questions and context.
+
+    Args:
+        query: The current user question/search query
+        conversation_history: Optional list of previous messages to provide context.
+            Format: [{"role": "user", "text": "..."}, {"role": "model", "text": "..."}, ...]
+            Pass last N messages (e.g., 5-10) to balance context and token usage.
+            Follows Gemini API Content object specification.
+
+    Returns:
+        String containing RAG-powered response with source citations
+
+    Reference:
+    - Gemini API Docs: https://ai.google.dev/gemini-api/docs/text-generation
+    - FileSearch Tool: https://blog.google/innovation-and-ai/technology/developers-tools/file-search-gemini-api/
+    - Multi-turn Conversations: https://ai.google.dev/gemini-api/docs/interactions
     """
     # Reject empty queries to prevent duplicate tool call attempts
     if not query or not query.strip():
@@ -127,6 +141,10 @@ async def search_knowledge_base(query: str) -> str:
         return "TOOL_CALL_REJECTED: Empty query provided. Please ensure a valid search query is passed to the tool."
 
     logger.info(f"🔍 Tool called: search_knowledge_base with query: {query[:100]}...")
+    if conversation_history:
+        logger.info(f"📚 Conversation context: {len(conversation_history)} messages provided")
+    else:
+        logger.info(f"📚 No conversation history - first message in this search")
 
     genai_client = get_genai_client()
     if not genai_client:
@@ -152,10 +170,67 @@ async def search_knowledge_base(query: str) -> str:
 
         logger.info(f"🔍 Using File Search store: {file_search_store_name}")
 
-        # Generate response using FileSearch tool
+        # ============================================================================
+        # PROFESSIONAL IMPLEMENTATION: Format conversation history per Gemini API spec
+        # ============================================================================
+        # Gemini API documentation specifies:
+        # - contents: array of Content objects with alternating user/model roles
+        # - Each Content: {role: "user"|"model", parts: [{text: "..."}]}
+        # - FileSearch tool uses full history for better context understanding
+        # Reference: https://ai.google.dev/api/generate-content
+        # ============================================================================
+
+        # Build contents array following Gemini API specification
+        contents = []
+
+        # Step 1: Add conversation history if provided
+        if conversation_history and isinstance(conversation_history, list):
+            logger.info(f"📌 Building contents array: adding {len(conversation_history)} historical messages")
+
+            for i, msg in enumerate(conversation_history):
+                try:
+                    # Validate message structure per Gemini API spec
+                    role = msg.get("role", "").lower()
+                    text = msg.get("text", "")
+
+                    # Validate role and text
+                    if not role or not text:
+                        logger.warning(f"⚠️  Skipping history message {i}: invalid format (missing role or text)")
+                        continue
+
+                    if role not in ["user", "model"]:
+                        logger.warning(f"⚠️  Skipping history message {i}: invalid role '{role}' (must be 'user' or 'model')")
+                        continue
+
+                    # Create Content object per Gemini API specification
+                    # Content = {role, parts} where parts is array of Part objects
+                    content = types.Content(
+                        role=role,
+                        parts=[types.Part(text=text)]
+                    )
+                    contents.append(content)
+                    logger.debug(f"✅ Added {role} message {i}: {text[:60]}...")
+
+                except Exception as msg_err:
+                    logger.warning(f"⚠️  Error processing history message {i}: {msg_err}")
+                    continue
+
+        # Step 2: Add current user query as latest message
+        logger.info(f"📌 Adding current user query to contents array")
+        current_message = types.Content(
+            role="user",
+            parts=[types.Part(text=query)]
+        )
+        contents.append(current_message)
+
+        logger.info(f"📚 Contents array finalized: {len(contents)} total messages")
+        logger.info(f"💬 Calling Gemini API with FileSearch tool (full conversation context)")
+
+        # Step 3: Call Gemini API with full conversation context
+        # FileSearch will use entire conversation for better RAG results
         response = genai_client.models.generate_content(
             model="gemini-2.5-flash",
-            contents=query,
+            contents=contents,  # ✅ PROFESSIONAL: Full conversation per Gemini API spec
             config=types.GenerateContentConfig(
                 tools=[
                     types.Tool(
