@@ -1,0 +1,47 @@
+[build]
+dockerfilePath = "docker-serve/Dockerfile"
+rootDirectory = "."
+
+[deploy]
+# Docling Serve with pre-downloaded models
+# This service provides document conversion via RQ (Redis Queue)
+# All models are baked into the image for fast startup (2-3 min vs 10+ min)
+
+# Start command uses the base image entrypoint (docling-serve run)
+# No explicit startCommand needed - uses CMD from Dockerfile
+
+# Restart policy for reliability
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+# Environment variables needed (set in Railway dashboard):
+# - REDIS_URL=redis://redis.railway.internal:6379/2
+#   CRITICAL: Redis connection for RQ queue (must use DB 2, not DB 0 or 1)
+#   Docling-serve listens on this queue for jobs from workers
+#
+# - DOCLING_SERVE_ARTIFACTS_PATH=/opt/app-root/src/models
+#   CRITICAL: Points to parent folder containing RapidOcr/ (where models are baked into image)
+#
+# - DOCLING_SERVE_LOAD_MODELS_AT_BOOT=false
+#   CRITICAL: Models already in image, don't download at startup (saves 10+ minutes)
+#
+# - DOCLING_SERVE_SCRATCH_PATH=/app/scratchpad
+#   CRITICAL: Temporary directory for processing documents
+#
+# - DOCLING_SERVE_ENABLE_UI=1
+#   RECOMMENDED: Enable web UI for monitoring at /ui endpoint
+#
+# - DOCLING_SERVE_LOG_LEVEL=INFO
+#   RECOMMENDED: Logging level (DEBUG, INFO, WARNING, ERROR)
+#
+# Volumes needed:
+# - Mount /app/scratchpad for temporary processing files
+# - Mount /app/results for output storage (optional)
+#
+# This service:
+# - Listens for document conversion jobs on Redis Queue (RQ) at DB 2
+# - Processes PDFs, images, and web content with OCR/layout understanding
+# - Returns results as MessagePack-serialized ZIP archives in Redis
+# - Can optionally upload results to Railway Storage S3
+# - Communicates with file/web workers via Redis DB 2
+#

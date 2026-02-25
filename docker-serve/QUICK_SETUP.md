@@ -7,6 +7,7 @@
 **Copy & paste these exactly**:
 
 ```
+REDIS_URL=redis://redis.railway.internal:6379/2
 DOCLING_SERVE_ARTIFACTS_PATH=/opt/app-root/src/models
 DOCLING_SERVE_LOAD_MODELS_AT_BOOT=false
 DOCLING_SERVE_SCRATCH_PATH=/app/scratchpad
@@ -96,6 +97,7 @@ DOCLING_ENABLED=true
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
+| `REDIS_URL` | `redis://redis.railway.internal:6379/2` | **CRITICAL** - Redis connection for RQ queue (must be DB 2) |
 | `DOCLING_SERVE_ARTIFACTS_PATH` | `/opt/app-root/src/models` | Where pre-downloaded models are stored in the image |
 | `DOCLING_SERVE_LOAD_MODELS_AT_BOOT` | `false` | Skip model download (already in image) |
 | `DOCLING_SERVE_SCRATCH_PATH` | `/app/scratchpad` | Temp directory for processing documents |

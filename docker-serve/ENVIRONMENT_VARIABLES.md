@@ -16,6 +16,20 @@ Web Worker (Celery)   ─┘
 
 ## Environment Variables for docker-serve on Railway
 
+### 0. **CRITICAL - Redis Queue Connection**
+
+```bash
+REDIS_URL=redis://redis.railway.internal:6379/2
+```
+- **Description**: Where docling-serve listens for jobs from the RQ queue
+- **Value**: `redis://redis.railway.internal:6379/2`
+- **Why**: Docling-serve needs this to:
+  - Listen for document conversion jobs from workers
+  - Store results and job status
+  - Communicate with celery workers
+- **Important**: **Must use DB 2** (not DB 0 or DB 1, which are for Celery)
+- **Default**: None - must be explicitly set
+
 ### 1. **CRITICAL - Docling Model Configuration**
 
 These tell docling-serve where to find the pre-downloaded models:
@@ -42,7 +56,7 @@ DOCLING_SERVE_LOAD_MODELS_AT_BOOT=false
 - **Value**: `false` (models are already in the image, no need to download)
 - **Why**: Models are pre-baked, skips 10+ min startup time
 
-### 2. **CRITICAL - Temporary Scratch Directory**
+### 2. **CRITICAL - Temporary Scratch Directory (still critical)**
 
 ```bash
 DOCLING_SERVE_SCRATCH_PATH=/app/scratchpad
@@ -52,7 +66,7 @@ DOCLING_SERVE_SCRATCH_PATH=/app/scratchpad
 - **Why**: Docling needs space to extract and process documents
 - **Note**: You can mount a Railway volume here if you need persistence across restarts
 
-### 3. **RECOMMENDED - UI and Logging**
+### 3. **RECOMMENDED - UI and Logging (still recommended)**
 
 ```bash
 DOCLING_SERVE_ENABLE_UI=1
@@ -70,15 +84,6 @@ DOCLING_SERVE_LOG_LEVEL=INFO
 - **Default**: `INFO`
 - **Why**: Use `DEBUG` for troubleshooting, `INFO` for production
 
-### 4. **OPTIONAL - Redis Queue Configuration**
-
-```bash
-REDIS_URL=redis://redis.railway.internal:6379/2
-```
-- **Description**: Full Redis connection URL for the RQ queue
-- **Default**: Usually auto-configured by docling-serve
-- **Note**: Only set if you need to override defaults
-- **Important**: **Must use DB 2** (not DB 0 or DB 1 which are used by Celery)
 
 ---
 
@@ -87,6 +92,9 @@ REDIS_URL=redis://redis.railway.internal:6379/2
 Copy and paste these into Railway Dashboard → docker-serve service → Variables:
 
 ```
+# Redis Queue Connection (CRITICAL - docling-serve must connect to listen for jobs)
+REDIS_URL=redis://redis.railway.internal:6379/2
+
 # Model Configuration (CRITICAL)
 DOCLING_SERVE_ARTIFACTS_PATH=/opt/app-root/src/models
 DOCLING_SERVE_LOAD_MODELS_AT_BOOT=false
@@ -95,9 +103,6 @@ DOCLING_SERVE_SCRATCH_PATH=/app/scratchpad
 # UI and Logging (RECOMMENDED)
 DOCLING_SERVE_ENABLE_UI=1
 DOCLING_SERVE_LOG_LEVEL=INFO
-
-# Redis Queue (OPTIONAL - only if you need custom Redis config)
-# REDIS_URL=redis://redis.railway.internal:6379/2
 ```
 
 ---
