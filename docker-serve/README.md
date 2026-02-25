@@ -16,8 +16,21 @@ This Dockerfile builds a complete docling-serve image with all models baked in a
 
 ## Models Included
 
-The image includes:
-- 🔍 **RapidOCR Models** - Detection, recognition, classification
+All models are downloaded directly to the parent folder with complete directory structure:
+
+```
+/opt/app-root/src/models/
+├── onnx/              (ONNX format models)
+│   ├── PP-OCRv4/
+│   └── ...other models
+├── paddle/            (Paddle format models)
+│   └── ...
+└── fonts/             (Font files)
+    └── FZYTK.TTF
+```
+
+Includes:
+- 🔍 **RapidOCR Models** - Detection, recognition, classification (ONNX + Paddle)
 - 📄 **Docling Layout Models** - Page layout understanding
 - 🎨 **Supporting Models** - Fonts and dependencies
 - 📐 **Performance Optimizations** - Table structure recognition
@@ -77,17 +90,17 @@ This downloads:
 - ✅ Font files (FZYTK.TTF, etc.)
 - ✅ Supporting dependencies
 
-Models are organized in the `RapidOcr/` subdirectory:
+Models are downloaded directly to the parent directory:
 ```
-/opt/app-root/src/models/RapidOcr/
+/opt/app-root/src/models/
 ├── onnx/
-│   ├── PP-OCRv4/
-│   │   ├── det/
-│   │   ├── rec/
-│   │   └── cls/
-│   └── ...
+│   └── PP-OCRv4/
+│       ├── det/
+│       ├── rec/
+│       └── cls/
 ├── paddle/
-│   └── ...
+│   └── PP-OCRv4/
+│       └── ...
 └── fonts/
     └── FZYTK.TTF
 ```
