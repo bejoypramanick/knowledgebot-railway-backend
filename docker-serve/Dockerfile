@@ -10,7 +10,7 @@ ARG BUILD_MODELS_PATH=/opt/app-root/src/models
 
 # 2. Download all models with RapidOcr parent folder
 # docling-tools creates RapidOcr parent directory automatically inside the output path
-RUN docling-tools models download --all -o ${BUILD_MODELS_PATH}/RapidOcr
+RUN docling-tools models download --all -o ${BUILD_MODELS_PATH}
 
 # Change ownership back to the default user for security (includes RapidOcr parent and all children)
 RUN chown -R 1001:0 ${BUILD_MODELS_PATH}
