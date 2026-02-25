@@ -155,10 +155,11 @@ class DoclingRQClient:
                
                 # Pipeline options for Docling Engine
                 "convert_options": {     
-                        "do_ocr": True,              
+                        "do_ocr": True,          
                         "do_table_structure": True,
                         "do_formula_enrichment": True,
                         "do_code_enrichment": True,
+                        "do_chart_extraction":True,
                         "table_structure_options": {
                             "mode":"accurate",
                             "do_cell_matching": False,
@@ -223,7 +224,8 @@ class DoclingRQClient:
                 task_data,
                 scratch_dir=scratch_dir,
                 job_timeout=job_timeout_str,  # Configurable job timeout (default 60 minutes)
-                result_ttl=14400  # 4 hours - results stored in Redis for 4 hours
+                result_ttl=14400,  # 4 hours - results stored in Redis for 4 hours
+                artifacts_path="/app"
             )
 
             logger.info(f"✅ [RQ_ENQUEUE] Job enqueued: {job.id} for {filename}")
