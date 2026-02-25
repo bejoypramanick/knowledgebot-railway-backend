@@ -16,17 +16,22 @@ This Dockerfile builds a complete docling-serve image with all models baked in a
 
 ## Models Included
 
-All models are downloaded directly to the parent folder with complete directory structure:
+All models are downloaded with the `RapidOcr` parent folder included:
 
 ```
 /opt/app-root/src/models/
-├── onnx/              (ONNX format models)
-│   ├── PP-OCRv4/
-│   └── ...other models
-├── paddle/            (Paddle format models)
-│   └── ...
-└── fonts/             (Font files)
-    └── FZYTK.TTF
+└── RapidOcr/         (Parent folder, auto-created by docling-tools)
+    ├── onnx/         (ONNX format models)
+    │   ├── PP-OCRv4/
+    │   │   ├── det/
+    │   │   ├── rec/
+    │   │   └── cls/
+    │   └── ...other models
+    ├── paddle/       (Paddle format models)
+    │   └── PP-OCRv4/
+    │       └── rec/
+    └── fonts/        (Font files)
+        └── FZYTK.TTF
 ```
 
 Includes:
@@ -138,7 +143,8 @@ DOCLING_SERVE_LOG_LEVEL=INFO  # Logging level
 ```
 
 ### Key Point
-✅ Models are **pre-downloaded and embedded in image** at `/opt/app-root/src/models`
+✅ Models are **pre-downloaded and embedded in image** at `/opt/app-root/src/models/RapidOcr/`
+✅ Set `DOCLING_SERVE_ARTIFACTS_PATH=/opt/app-root/src/models` (parent of RapidOcr)
 ✅ You **decide the paths at deploy time** via Railway env vars
 ✅ Change paths anytime without rebuilding image
 ✅ Container uses whatever you set in Railway

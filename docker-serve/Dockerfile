@@ -8,11 +8,11 @@ USER root
 # This is used only during build, paths can be overridden at runtime via Railway env vars
 ARG BUILD_MODELS_PATH=/opt/app-root/src/models
 
-# 2. Download all models to the parent folder
-# All models (onnx, paddle, fonts, etc.) downloaded directly to BUILD_MODELS_PATH
-RUN docling-tools models download --all -o ${BUILD_MODELS_PATH}
+# 2. Download all models with RapidOcr parent folder
+# docling-tools creates RapidOcr parent directory automatically inside the output path
+RUN docling-tools models download --all -o ${BUILD_MODELS_PATH}/RapidOcr
 
-# Change ownership back to the default user for security
+# Change ownership back to the default user for security (includes RapidOcr parent and all children)
 RUN chown -R 1001:0 ${BUILD_MODELS_PATH}
 
 # Switch back to the non-root user provided by the base image
