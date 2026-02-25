@@ -157,6 +157,8 @@ class DoclingRQClient:
                 "convert_options": {     
                         "do_ocr": True,              
                         "do_table_structure": True,
+                        "do_formula_enrichment": True,
+                        "do_code_enrichment": True,
                         "table_structure_options": {
                             "mode":"accurate",
                             "do_cell_matching": False,

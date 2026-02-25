@@ -232,9 +232,9 @@ async def process_file_content(
     2. Download from S3
     3. Validation (extension, MIME, size, duplicates)
     4. Format conversion (HTML→Markdown, PDF→Markdown via Docling)
-    4. Gemini upload
-    5. Database record creation
-    6. Delete from S3
+    5. Gemini upload
+    6. Database record creation
+    7. Delete from S3
 
     Called directly from Celery task.
     """
