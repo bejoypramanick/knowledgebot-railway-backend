@@ -1,6 +1,7 @@
 """Shared configuration settings for celery-file-worker."""
 from typing import Optional
 
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -29,7 +30,7 @@ class Settings(BaseSettings):
     file_redis_url: Optional[str] = None  # FILE_REDIS_URL from Railway (required)
 
     # Docling RQ Configuration (separate Redis DB to avoid collisions)
-    docling_redis_url: str  # DOCLING_SERVE_ENG_RQ_REDIS_URL from Railway (required - Redis for docling-serve RQ queue)
+    docling_redis_url: str = Field(..., validation_alias="DOCLING_SERVE_ENG_RQ_REDIS_URL")  # DOCLING_SERVE_ENG_RQ_REDIS_URL from Railway (required - Redis for docling-serve RQ queue)
     docling_rq_queue_name: str = "convert"  # DOCLING_RQ_QUEUE_NAME from Railway (default: "convert" - must match docling-serve worker queue)
     docling_enabled: bool = True  # Set to False to disable docling and use raw uploads
     docling_timeout_seconds: int = 3600  # Processing timeout (default 1 hour = 3600 seconds - configurable via DOCLING_TIMEOUT_SECONDS env var)
