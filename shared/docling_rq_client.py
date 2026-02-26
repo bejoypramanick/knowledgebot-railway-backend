@@ -232,6 +232,35 @@ class DoclingRQClient:
             logger.info(f"   Presigned URL: {presigned_url[:50]}...")
             logger.info(f"   MIME type: {mime_type}")
 
+            logger.info(f"✅ [RQ_ENQUEUE] Job enqueued: {job.id} for {filename}")
+            logger.info(f"   Task ID: {task_id}")
+            logger.info(f"   Presigned URL: {presigned_url[:50]}...")
+            logger.info(f"   MIME type: {mime_type}")
+
+            # ========================================================================
+            # PUB/SUB NOTIFICATION - Wake up docling-serve RQ worker immediately
+            # ========================================================================
+            # Per docling-jobkit spec, publish queued event to docling:updates channel
+            # This prevents docling-serve from needing to poll the queue
+            # Message format: {"task_id": "...", "task_type": "convert", "event": "queued"}
+            try:
+                pubsub_channel = "docling:updates"
+                pubsub_message = {
+                    "task_id": task_id,
+                    "task_type": "convert",
+                    "event": "queued"
+                }
+                
+                # Publish to pub/sub channel
+                self.redis_conn.publish(pubsub_channel, json.dumps(pubsub_message))
+                
+                logger.info(f"📢 [PUB_SUB] Published queued event: task_id={task_id}")
+                logger.info(f"   Channel: {pubsub_channel}")
+                logger.info(f"   Message: {json.dumps(pubsub_message)}")
+            except Exception as pubsub_err:
+                logger.warning(f"⚠️  [PUB_SUB] Failed to publish event: {pubsub_err}")
+                logger.info(f"   Docling-serve will still process via queue polling (fallback)")
+
             return job.id
 
         except Exception as e:
