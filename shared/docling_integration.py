@@ -49,18 +49,18 @@ def _get_settings():
             class MinimalSettings:
                 docling_enabled = os.getenv("DOCLING_ENABLED", "true").lower() == "true"
                 docling_timeout_seconds = int(os.getenv("DOCLING_TIMEOUT_SECONDS", "1800"))
-                docling_redis_url = os.getenv("DOCLING_REDIS_URL")
+                docling_redis_url = os.getenv("DOCLING_SERVE_ENG_RQ_REDIS_URL")
                 docling_rq_queue_name = os.getenv("DOCLING_RQ_QUEUE_NAME", "convert")
+                docling_rq_job_timeout_minutes = int(os.getenv("DOCLING_RQ_JOB_TIMEOUT_MINUTES", "60"))
                 docling_poll_initial_delay = int(os.getenv("DOCLING_POLL_INITIAL_DELAY", "2"))
                 docling_poll_max_interval = int(os.getenv("DOCLING_POLL_MAX_INTERVAL", "30"))
-                docling_fallback_to_raw = os.getenv("DOCLING_FALLBACK_TO_RAW", "true").lower() == "true"
 
                 def get_docling_redis_url(self) -> str:
                     """Get explicit docling Redis URL."""
                     return self.docling_redis_url
 
             logger.info(f"🔧 [DOCLING] Using minimal settings from environment (timeout: {MinimalSettings.docling_timeout_seconds}s)")
-            logger.info(f"🔧 [DOCLING] Using explicit DOCLING_REDIS_URL={docling_redis_url}")
+            logger.info(f"🔧 [DOCLING] Using explicit DOCLING_SERVE_ENG_RQ_REDIS_URL={docling_redis_url}")
             return MinimalSettings()
 
 
