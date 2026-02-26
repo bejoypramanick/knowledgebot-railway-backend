@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # Docling RQ Configuration (separate Redis DB to avoid collisions)
     docling_redis_url: str  # DOCLING_SERVE_ENG_RQ_REDIS_URL from Railway (required - Redis for docling-serve RQ queue)
     docling_rq_queue_name: str = "convert"  # DOCLING_RQ_QUEUE_NAME from Railway (default: "convert" - must match docling-serve worker queue)
-    docling_serve_eng_rq_sub_channel: str = "docling-results"  # DOCLING_SERVE_ENG_RQ_SUB_CHANNEL from Railway (Redis pub/sub channel docling-serve listens on)
+    docling_serve_eng_rq_sub_channel: str = "docling-results-file"  # DOCLING_SERVE_ENG_RQ_FILE_SUB_CHANNEL from Railway (Redis pub/sub channel for file worker results)
     docling_enabled: bool = True  # Set to False to disable docling and use raw uploads
     docling_timeout_seconds: int = 3600  # Processing timeout (default 1 hour = 3600 seconds - configurable via DOCLING_TIMEOUT_SECONDS env var)
     docling_rq_job_timeout_minutes: int = 60  # RQ job timeout in minutes (default 1 hour - matches polling timeout)

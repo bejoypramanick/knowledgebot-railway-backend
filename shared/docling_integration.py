@@ -51,7 +51,7 @@ def _get_settings():
                 docling_timeout_seconds = int(os.getenv("DOCLING_TIMEOUT_SECONDS", "1800"))
                 docling_redis_url = os.getenv("DOCLING_SERVE_ENG_RQ_REDIS_URL")
                 docling_rq_queue_name = os.getenv("DOCLING_RQ_QUEUE_NAME", "convert")
-                docling_serve_eng_rq_sub_channel = os.getenv("DOCLING_SERVE_ENG_RQ_SUB_CHANNEL", "docling-results")
+                docling_serve_eng_rq_sub_channel = os.getenv("DOCLING_SERVE_ENG_RQ_SUB_CHANNEL", "docling-results-unknown")
                 docling_poll_initial_delay = int(os.getenv("DOCLING_POLL_INITIAL_DELAY", "2"))
                 docling_poll_max_interval = int(os.getenv("DOCLING_POLL_MAX_INTERVAL", "30"))
                 docling_fallback_to_raw = os.getenv("DOCLING_FALLBACK_TO_RAW", "true").lower() == "true"

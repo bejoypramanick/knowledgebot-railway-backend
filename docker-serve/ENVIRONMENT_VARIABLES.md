@@ -120,9 +120,9 @@ FILE_REDIS_URL=redis://redis-XXXXX.railway.internal:6379/0
 # Redis for Docling-Serve RQ queue (DB 2) - CRITICAL
 DOCLING_SERVE_ENG_RQ_REDIS_URL=redis://redis-XXXXX.railway.internal:6379/2
 
-# Docling RQ queue and pub/sub channel
+# Docling RQ queue and pub/sub channel (file worker results)
 DOCLING_RQ_QUEUE_NAME=convert
-DOCLING_SERVE_ENG_RQ_SUB_CHANNEL=docling-results
+DOCLING_SERVE_ENG_RQ_FILE_SUB_CHANNEL=docling-results-file
 
 # Docling configuration
 DOCLING_ENABLED=true
@@ -146,9 +146,9 @@ WEB_REDIS_URL=redis://redis-XXXXX.railway.internal:6379/1
 # Redis for Docling-Serve RQ queue (DB 2) - CRITICAL
 DOCLING_SERVE_ENG_RQ_REDIS_URL=redis://redis-XXXXX.railway.internal:6379/2
 
-# Docling RQ queue and pub/sub channel
+# Docling RQ queue and pub/sub channel (web worker results)
 DOCLING_RQ_QUEUE_NAME=convert
-DOCLING_SERVE_ENG_RQ_SUB_CHANNEL=docling-results
+DOCLING_SERVE_ENG_RQ_WEB_SUB_CHANNEL=docling-results-web
 
 # Docling configuration
 DOCLING_ENABLED=true
