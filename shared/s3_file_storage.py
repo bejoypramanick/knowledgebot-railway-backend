@@ -174,33 +174,69 @@ class S3FileStorage:
             logger.error(f"❌ Unexpected error deleting file: {e}")
             return False
 
-    def generate_presigned_url(self, s3_key: str, expiration: int = 3600) -> Tuple[bool, str]:
+    def _verify_object_exists(self, s3_key: str) -> bool:
+        """
+        Verify that an S3 object exists before generating presigned URLs.
+
+        This prevents 404 errors when docling-serve tries to download from presigned URLs.
+        Uses HEAD request which is faster than GET.
+
+        Args:
+            s3_key: S3 object key to verify
+
+        Returns:
+            True if object exists, False otherwise
+        """
+        try:
+            self._s3_client.head_object(Bucket=self.bucket_name, Key=s3_key)
+            logger.info(f"✅ [S3_VERIFY] Object exists: {s3_key}")
+            return True
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                logger.warning(f"⚠️ [S3_VERIFY] Object not found: {s3_key}")
+            else:
+                logger.warning(f"⚠️ [S3_VERIFY] Error checking object: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"⚠️ [S3_VERIFY] Unexpected error: {e}")
+            return False
+
+    def generate_presigned_url(self, s3_key: str, expiration: int = 3600, verify_exists: bool = True) -> Tuple[bool, str]:
         """
         Generate a presigned URL for S3 object access
-        
+
         Args:
             s3_key: S3 object key
             expiration: URL expiration time in seconds (default: 1 hour)
-            
+            verify_exists: If True, verify object exists before generating URL (prevents 404s)
+
         Returns:
             Tuple of (success, url) or (False, error_message)
         """
         if not self.is_available():
             logger.warning("⚠️ Railway storage not available, cannot generate presigned URL")
             return False, "Storage not available"
-        
+
+        # Verify object exists to prevent 404 errors downstream
+        if verify_exists:
+            logger.info(f"🔍 [S3_VERIFY] Checking if object exists before generating presigned URL...")
+            if not self._verify_object_exists(s3_key):
+                error_msg = f"Object not found in S3 (cannot generate presigned URL): {s3_key}"
+                logger.error(f"❌ {error_msg}")
+                return False, error_msg
+
         try:
             logger.info(f"🔗 Generating presigned URL for S3 object: {s3_key}")
-            
+
             presigned_url = self._s3_client.generate_presigned_url(
                 'get_object',
                 Params={'Bucket': self.bucket_name, 'Key': s3_key},
                 ExpiresIn=expiration
             )
-            
+
             logger.info(f"✅ Generated presigned URL for {s3_key} (expires in {expiration}s)")
             return True, presigned_url
-            
+
         except ClientError as e:
             error_msg = f"Failed to generate presigned URL: {e}"
             logger.error(f"❌ {error_msg}")
