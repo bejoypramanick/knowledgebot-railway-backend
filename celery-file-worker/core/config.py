@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     file_redis_url: Optional[str] = None  # FILE_REDIS_URL from Railway (required)
 
     # Docling RQ Configuration (separate Redis DB to avoid collisions)
-    docling_redis_url: str  # DOCLING_REDIS_URL from Railway (required - DB 2)
+    docling_redis_url: str  # DOCLING_SERVE_ENG_RQ_REDIS_URL from Railway (required - Redis for docling-serve RQ queue)
     docling_rq_queue_name: str = "convert"  # DOCLING_RQ_QUEUE_NAME from Railway (default: "convert" - must match docling-serve worker queue)
     docling_enabled: bool = True  # Set to False to disable docling and use raw uploads
     docling_timeout_seconds: int = 3600  # Processing timeout (default 1 hour = 3600 seconds - configurable via DOCLING_TIMEOUT_SECONDS env var)
@@ -40,20 +40,17 @@ class Settings(BaseSettings):
 
     def get_docling_redis_url(self) -> str:
         """
-        Get docling Redis URL (must be explicitly set in environment).
+        Get docling-serve RQ Redis URL (must be explicitly set in environment).
 
-        This keeps docling messages separate from Celery queues:
-        - DB 0: FILE_REDIS_URL (file processing tasks)
-        - DB 1: WEB_REDIS_URL (web processing tasks)
-        - DB 2: DOCLING_REDIS_URL (docling RQ jobs and results)
+        This is the Redis instance where docling-serve listens for RQ jobs.
 
         Raises:
-            ValueError: If DOCLING_REDIS_URL is not set
+            ValueError: If DOCLING_SERVE_ENG_RQ_REDIS_URL is not set
         """
         if not self.docling_redis_url:
             raise ValueError(
-                "DOCLING_REDIS_URL environment variable is required. "
-                "Set it to: redis://redis.railway.internal:6379/2"
+                "DOCLING_SERVE_ENG_RQ_REDIS_URL environment variable is required. "
+                "Set it to: redis://redis-XXXXX.railway.internal:6379/2"
             )
         return self.docling_redis_url
 

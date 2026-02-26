@@ -39,11 +39,11 @@ def _get_settings():
             return settings
         except ImportError:
             # Create minimal settings from environment
-            docling_redis_url = os.getenv("DOCLING_REDIS_URL")
+            docling_redis_url = os.getenv("DOCLING_SERVE_ENG_RQ_REDIS_URL")
             if not docling_redis_url:
                 raise ValueError(
-                    "DOCLING_REDIS_URL environment variable is required. "
-                    "Set it to: redis://redis.railway.internal:6379/2"
+                    "DOCLING_SERVE_ENG_RQ_REDIS_URL environment variable is required. "
+                    "Set it to your actual Redis host (e.g., redis://redis-XXXXX.railway.internal:6379/2)"
                 )
 
             class MinimalSettings:

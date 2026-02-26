@@ -93,7 +93,7 @@ Copy and paste these into Railway Dashboard → docker-serve service → Variabl
 
 ```
 # Redis Queue Connection (CRITICAL - docling-serve must connect to listen for jobs)
-REDIS_URL=redis://redis.railway.internal:6379/2
+REDIS_URL=redis://redis-XXXXX.railway.internal:6379/2
 
 # Model Configuration (CRITICAL)
 DOCLING_SERVE_ARTIFACTS_PATH=/opt/app-root/src/models
@@ -115,10 +115,10 @@ The file worker and web worker use these environment variables (you set these in
 
 ```bash
 # Redis for Celery file queue (DB 0)
-FILE_REDIS_URL=redis://redis.railway.internal:6379/0
+FILE_REDIS_URL=redis://redis-XXXXX.railway.internal:6379/0
 
-# Redis for Docling RQ queue (DB 2) - CRITICAL
-DOCLING_REDIS_URL=redis://redis.railway.internal:6379/2
+# Redis for Docling-Serve RQ queue (DB 2) - CRITICAL
+DOCLING_SERVE_ENG_RQ_REDIS_URL=redis://redis-XXXXX.railway.internal:6379/2
 
 # Docling RQ queue name (must match docker-serve's queue)
 DOCLING_RQ_QUEUE_NAME=convert
@@ -140,10 +140,10 @@ RAILWAY_STORAGE_SECRET_KEY=your-secret-key
 
 ```bash
 # Redis for Celery web queue (DB 1)
-WEB_REDIS_URL=redis://redis.railway.internal:6379/1
+WEB_REDIS_URL=redis://redis-XXXXX.railway.internal:6379/1
 
-# Redis for Docling RQ queue (DB 2) - CRITICAL
-DOCLING_REDIS_URL=redis://redis.railway.internal:6379/2
+# Redis for Docling-Serve RQ queue (DB 2) - CRITICAL
+DOCLING_SERVE_ENG_RQ_REDIS_URL=redis://redis-XXXXX.railway.internal:6379/2
 
 # Docling RQ queue name (must match docker-serve's queue)
 DOCLING_RQ_QUEUE_NAME=convert
