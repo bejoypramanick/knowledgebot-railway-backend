@@ -59,35 +59,12 @@ class AgentManager:
             custom_prompt = persona_config.get('system_instructions', None)
 
             # Get the comprehensive system prompt
+            # This includes all RAG enforcement rules (critical enforcement at top of prompt)
             base_prompt = get_system_prompt(custom_prompt=custom_prompt, response_policy=None)
 
-            # ADD CRITICAL OVERRIDE: Force RAG tool usage for all non-greeting queries
-            force_rag_instruction = """
-
-🚨 CRITICAL OVERRIDE - MUST READ AND FOLLOW:
-
-FOR EVERY USER MESSAGE:
-1. Is it ONLY a greeting (hello, hi, good morning)?
-   - YES → Respond without using tools
-   - NO → Go to step 2 IMMEDIATELY
-
-2. BEFORE answering, ALWAYS:
-   - FIRST: Call search_knowledge_base tool
-   - Enhance the user's question with conversation history context
-   - Example: User says "list down equations" → search for "equations battery storage RUL ML"
-   - WAIT for RAG results before responding
-
-3. NEVER answer without calling search_knowledge_base first (unless greeting)
-   - ❌ WRONG: Directly answer "Can you specify what equations?"
-   - ✅ RIGHT: Call tool → "Based on knowledge base: [equations from RAG]"
-
-4. If RAG returns no results → Say "I don't have this in knowledge base"
-   - ❌ WRONG: Use training data
-   - ✅ RIGHT: Refer to human agent or ask to upload docs
-
-THIS OVERRIDES ALL OTHER INSTRUCTIONS."""
-
-            return base_prompt + force_rag_instruction
+            # No additional overrides - prompt.py handles all critical rules
+            # Single source of truth prevents inconsistency and maintenance burden
+            return base_prompt
         except Exception as e:
             logger.error(f"❌ Failed to build system prompt: {e}")
             # Return fallback system prompt

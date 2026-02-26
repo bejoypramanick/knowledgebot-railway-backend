@@ -112,49 +112,22 @@ async def get_citation_hierarchy(urls: List[str]) -> Dict[str, Any]:
         # Fall back to building tree from flat list
         return build_citation_tree(urls)
 
-async def search_knowledge_base(
-    ctx: RunContext[ChatSessionDeps],
-    query: str
-) -> str:
+
+async def _perform_rag_search(session_id: str, query: str) -> str:
     """
-    Search knowledge base using Gemini FileSearch with full conversation context.
+    Internal RAG search function - pure business logic with no RunContext dependency.
+    Can be called directly by service layer or as agent tool.
 
-    INTELLIGENT RAG IMPLEMENTATION:
-    - Agent decides WHEN and WHAT to search based on conversation understanding
-    - Tool automatically fetches conversation history from agent session
-    - Enhances query understanding with full conversation context
-    - Follows Gemini API specification for multi-turn conversations
-
-    Args:
-        ctx: Pydantic AI RunContext containing ChatSessionDeps with session_id
-        query: The user's search query (may be enhanced by agent)
-               Agent may rephrase based on conversation context
-               Example: "Tell me more" → Agent passes "Tell me more about Feature X"
-
-    Returns:
-        String containing RAG-powered response with source citations and metadata
-
-    Behavior:
-    - Automatically fetches conversation history from session_id in context
-    - Enhances FileSearch query understanding with conversation context
-    - Agent decides WHEN to invoke this tool and WHAT query to use
-    - Enables intelligent follow-up question handling
-
-    Reference:
-    - Gemini API Docs: https://ai.google.dev/gemini-api/docs/text-generation
-    - FileSearch Tool: https://blog.google/innovation-and-ai/technology/developers-tools/file-search-gemini-api/
-    - Multi-turn Conversations: https://ai.google.dev/gemini-api/docs/interactions
+    This is the core RAG implementation extracted from search_knowledge_base.
+    All FileSearch logic, citation extraction, and formatting is here.
     """
     # Reject empty queries to prevent tool call failures
     if not query or not query.strip():
-        logger.warning("❌ search_knowledge_base called with EMPTY query")
+        logger.warning("❌ _perform_rag_search called with EMPTY query")
         return "ERROR: Empty search query. Please provide a valid search question."
 
-    # Extract session_id from pydantic_ai context
-    session_id = ctx.deps.session_id
-
-    logger.info(f"🔍 Tool called: search_knowledge_base")
-    logger.info(f"📝 Agent query: {query[:100]}...")
+    logger.info(f"🔍 RAG search initiated")
+    logger.info(f"📝 Query: {query[:100]}...")
     logger.info(f"🔑 Session ID: {session_id}")
 
     # Step 1: Fetch conversation history automatically
@@ -451,14 +424,14 @@ async def search_knowledge_base(
             logger.warning("⚠️ Knowledge base returned no relevant results")
             # Return explicit "no results" message to prevent infinite tool loops
             no_results_msg = "No relevant information found in knowledge base for this query."
-            logger.info(f"✅ Tool completed: search_knowledge_base (no results)")
+            logger.info(f"✅ Internal RAG search completed: _perform_rag_search (no results)")
             logger.info("=" * 80)
             logger.info("📦 KB SEARCH RESULT:")
             logger.info(no_results_msg)
             logger.info("=" * 80)
             return no_results_msg
 
-        logger.info(f"✅ Tool completed: search_knowledge_base (returned {len(enhanced_content)} chars)")
+        logger.info(f"✅ Internal RAG search completed: _perform_rag_search (returned {len(enhanced_content)} chars)")
         logger.info("=" * 80)
         logger.info("📦 FINAL ENHANCED CONTENT (with citations):")
         logger.info(enhanced_content)
@@ -466,8 +439,36 @@ async def search_knowledge_base(
         return enhanced_content
 
     except Exception as e:
-        logger.error(f"❌ Tool failed: search_knowledge_base - {e}", exc_info=True)
+        logger.error(f"❌ Internal RAG search failed: _perform_rag_search - {e}", exc_info=True)
         return f"Error performing FileSearch: {str(e)}"
+
+
+async def search_knowledge_base(
+    ctx: RunContext[ChatSessionDeps],
+    query: str
+) -> str:
+    """
+    Agent tool: Search knowledge base using Gemini FileSearch.
+
+    This is a thin wrapper around the internal _perform_rag_search() function.
+    The actual RAG implementation is in _perform_rag_search, which can be called
+    directly by the service layer or through this tool by the agent.
+
+    Args:
+        ctx: Pydantic AI RunContext containing ChatSessionDeps with session_id
+        query: The user's search query (may be enhanced by agent)
+
+    Returns:
+        String containing RAG-powered response with source citations
+    """
+    session_id = ctx.deps.session_id
+
+    logger.info(f"🔍 Tool called: search_knowledge_base")
+    logger.info(f"📝 Agent query: {query[:100]}...")
+    logger.info(f"🔑 Session ID: {session_id}")
+
+    # Delegate to internal RAG search function
+    return await _perform_rag_search(session_id, query)
 
 async def query_railway_postgres(query: str) -> str:
     """

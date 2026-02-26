@@ -99,31 +99,6 @@ class StreamingService:
             chunk_count = 0
             tool_call_count = 0
 
-            # ========================================================================
-            # PRE-FLIGHT CHECK: Detect if RAG tool call is needed BEFORE agent response
-            # ========================================================================
-            # If chat history exists + message is vague/follow-up → REQUIRE RAG tool call
-            # This prevents model from answering without searching knowledge base
-            # ========================================================================
-
-            should_force_rag_search = False
-            rag_search_reason = ""
-
-            if len(pydantic_messages) > 0:  # Chat history exists
-                message_lower = message.lower()
-                vague_patterns = [
-                    "list down", "list all", "provide", "show me", "tell me more",
-                    "explain", "what are", "how to", "help with", "need",
-                    "what about", "how do", "which", "what's the", "describe",
-                    "can you", "could you", "please", "more details", "more information"
-                ]
-
-                # Check if message matches vague patterns
-                if any(pattern in message_lower for pattern in vague_patterns):
-                    should_force_rag_search = True
-                    rag_search_reason = f"Message matches vague pattern ('{message[:50]}...') with {len(pydantic_messages)} messages of history"
-                    logger.info(f"⚠️ PRE-FLIGHT: Will force RAG search - {rag_search_reason}")
-
             try:
                 # Use agent.iter() for proper streaming + tool execution
                 logger.info("🚀 Intelligent RAG Mode: Letting agent control knowledge base search")
@@ -210,58 +185,19 @@ class StreamingService:
                         logger.info(f"✅ Agent completed with {tool_call_count} tool calls")
 
                         # ================================================================
-                        # FORCE RAG SEARCH IF NEEDED
+                        # MONITORING: Track if agent answered without tools for non-greeting
                         # ================================================================
-                        # If should_force_rag_search=True but agent didn't call RAG tool
-                        # → Force the tool call directly with context-enhanced query
-                        if should_force_rag_search and tool_call_count == 0:
-                            logger.warning(f"⚠️ FORCE RAG: Agent didn't call search_knowledge_base despite {rag_search_reason}")
-                            logger.info(f"🔧 Forcing RAG tool call with context-enhanced query...")
+                        # Log warning if agent didn't use tools for substantive queries
+                        if tool_call_count == 0 and len(message.strip()) > 10:
+                            # Check if message is non-greeting
+                            greeting_patterns = ["hi", "hello", "hey", "good morning", "good afternoon", "greetings"]
+                            is_greeting = any(g in message.lower() for g in greeting_patterns)
 
-                            try:
-                                # Import the tool directly
-                                from ..tools.knowledge_tools import search_knowledge_base
-
-                                # Extract conversation context for enhanced query
-                                context_topics = []
-                                for prev_msg in pydantic_messages[-3:]:  # Last 3 messages
-                                    if hasattr(prev_msg, 'parts'):
-                                        for part in prev_msg.parts:
-                                            if hasattr(part, 'content'):
-                                                content = getattr(part, 'content', '')
-                                                if len(content) > 20:
-                                                    context_topics.append(content[:100])
-
-                                # Build enhanced query with context
-                                enhanced_query = f"{message}"
-                                if context_topics:
-                                    enhanced_query = f"{message} context: {' '.join(context_topics[:2])}"
-
-                                logger.info(f"🔍 Calling search_knowledge_base with enhanced query: {enhanced_query[:100]}...")
-
-                                # Call the RAG tool directly (this will search and return results)
-                                rag_result = await search_knowledge_base(session_deps, enhanced_query)
-
-                                logger.info(f"✅ RAG search returned {len(rag_result)} chars")
-
-                                # Override the agent's response with RAG results
-                                if rag_result and rag_result.strip():
-                                    full_response = rag_result
-                                    logger.info(f"✅ Using RAG results instead of agent's answer")
-
-                                    # Stream the RAG results
-                                    response_data = {
-                                        "type": "chunk",
-                                        "content": rag_result,
-                                        "session_id": session_id,
-                                        "chunk_index": 1
-                                    }
-                                    json_response = json.dumps(response_data, ensure_ascii=False)
-                                    yield f"data: {json_response}\n\n"
-
-                            except Exception as force_rag_error:
-                                logger.error(f"❌ Error forcing RAG search: {force_rag_error}")
-                                # Let original response stand if force-RAG fails
+                            if not is_greeting:
+                                logger.warning(f"⚠️ Agent answered without tools for non-greeting query")
+                                logger.warning(f"📝 Query: {message[:100]}")
+                                logger.warning(f"📚 History: {len(pydantic_messages)} messages")
+                                logger.warning(f"📄 Response length: {len(full_response)} chars")
 
                     except Exception as result_error:
                         logger.error(f"❌ Error extracting results: {result_error}", exc_info=True)
