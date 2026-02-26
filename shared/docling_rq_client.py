@@ -42,7 +42,7 @@ class DoclingRQClient:
     def __init__(
         self,
         redis_url: str,
-        queue_name: str = "docling",
+        queue_name: str = "convert",
         job_timeout_minutes: int = 60,
         polling_timeout_seconds: int = 3600,
         poll_initial_delay: int = 2,
