@@ -152,12 +152,12 @@ class DoclingRQClient:
                 # Top-level orchestrator parameters
                
                 # Pipeline options for Docling Engine
-                "convert_options": {     
-                        "do_ocr": True,          
+                "convert_options": {
+                        "do_ocr": True,
                         "do_table_structure": True,
                         "do_formula_enrichment": True,
                         "do_code_enrichment": True,
-                        "do_chart_extraction":True,
+                        "do_chart_extraction": False,
                         "table_structure_options": {
                             "mode":"accurate",
                             "do_cell_matching": False,
