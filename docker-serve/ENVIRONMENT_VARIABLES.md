@@ -121,7 +121,7 @@ FILE_REDIS_URL=redis://redis.railway.internal:6379/0
 DOCLING_REDIS_URL=redis://redis.railway.internal:6379/2
 
 # Docling RQ queue name (must match docker-serve's queue)
-DOCLING_RQ_QUEUE_NAME=docling
+DOCLING_RQ_QUEUE_NAME=convert
 
 # Docling configuration
 DOCLING_ENABLED=true
@@ -145,8 +145,8 @@ WEB_REDIS_URL=redis://redis.railway.internal:6379/1
 # Redis for Docling RQ queue (DB 2) - CRITICAL
 DOCLING_REDIS_URL=redis://redis.railway.internal:6379/2
 
-# Docling RQ queue name
-DOCLING_RQ_QUEUE_NAME=docling
+# Docling RQ queue name (must match docker-serve's queue)
+DOCLING_RQ_QUEUE_NAME=convert
 
 # Docling configuration
 DOCLING_ENABLED=true
