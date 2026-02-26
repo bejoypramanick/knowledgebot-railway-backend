@@ -164,38 +164,36 @@ async def search_knowledge_base(
         chat_history = await session_state_manager.get_chat_history(session_id)
         logger.info(f"📚 Retrieved {len(chat_history)} messages from session history")
 
-            # Format chat history per Gemini API specification
-            conversation_history = []
-            max_history_messages = 5  # Keep last 5 messages for token efficiency
+        # Format chat history per Gemini API specification
+        conversation_history = []
+        max_history_messages = 5  # Keep last 5 messages for token efficiency
 
-            for hist_msg in chat_history[-max_history_messages:]:
-                try:
-                    role = hist_msg.get('role', '').lower()
-                    content = hist_msg.get('content', '')
+        for hist_msg in chat_history[-max_history_messages:]:
+            try:
+                role = hist_msg.get('role', '').lower()
+                content = hist_msg.get('content', '')
 
-                    # Map database role names to Gemini API format
-                    if role == 'user':
-                        conversation_history.append({
-                            "role": "user",
-                            "text": content
-                        })
-                    elif role in ['assistant', 'model']:
-                        conversation_history.append({
-                            "role": "model",
-                            "text": content
-                        })
-                except Exception as e:
-                    logger.warning(f"⚠️ Error formatting history message: {e}")
-                    continue
+                # Map database role names to Gemini API format
+                if role == 'user':
+                    conversation_history.append({
+                        "role": "user",
+                        "text": content
+                    })
+                elif role in ['assistant', 'model']:
+                    conversation_history.append({
+                        "role": "model",
+                        "text": content
+                    })
+            except Exception as e:
+                logger.warning(f"⚠️ Error formatting history message: {e}")
+                continue
 
-            if conversation_history:
-                logger.info(f"📚 Formatted {len(conversation_history)} messages for FileSearch context")
-        except Exception as session_err:
-            logger.warning(f"⚠️ Could not fetch conversation history: {session_err}")
-            logger.info(f"📚 Proceeding with query alone (no conversation context)")
-            conversation_history = None
-    else:
-        logger.info(f"📚 No session ID provided - searching with query alone")
+        if conversation_history:
+            logger.info(f"📚 Formatted {len(conversation_history)} messages for FileSearch context")
+    except Exception as session_err:
+        logger.warning(f"⚠️ Could not fetch conversation history: {session_err}")
+        logger.info(f"📚 Proceeding with query alone (no conversation context)")
+        conversation_history = None
 
     genai_client = get_genai_client()
     if not genai_client:
