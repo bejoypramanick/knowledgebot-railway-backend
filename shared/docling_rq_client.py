@@ -1,5 +1,6 @@
 """Redis Queue client for docling-serve integration."""
 import asyncio
+import json
 import time
 from typing import Tuple
 from urllib.parse import urlparse, urlunparse
@@ -43,6 +44,7 @@ class DoclingRQClient:
         self,
         redis_url: str,
         queue_name: str = "convert",
+        worker_type: str = "file",  # NEW: Identifies which worker (file or web)
         job_timeout_minutes: int = 60,
         polling_timeout_seconds: int = 3600,
         poll_initial_delay: int = 2,
@@ -60,6 +62,7 @@ class DoclingRQClient:
         Args:
             redis_url: Redis connection URL (e.g., redis://host:6379/0)
             queue_name: Redis queue name (must match docling-serve worker's queue)
+            worker_type: Type of worker (file or web) - used for job ownership tracking
             job_timeout_minutes: RQ job timeout in minutes (default 60 minutes = 1 hour)
             polling_timeout_seconds: Max time to poll for results in seconds (default 3600 = 1 hour)
             poll_initial_delay: Initial polling interval in seconds (default 2)
@@ -73,6 +76,7 @@ class DoclingRQClient:
         """
         self.redis_conn = Redis.from_url(redis_url)
         self.queue = Queue(queue_name, connection=self.redis_conn)
+        self.worker_type = worker_type
         self.job_timeout_minutes = job_timeout_minutes
         self.polling_timeout_seconds = polling_timeout_seconds
         self.poll_initial_delay = poll_initial_delay
@@ -88,16 +92,10 @@ class DoclingRQClient:
 
         logger.info(f"🔌 [RQ_CLIENT] Initialized with Redis URL: {_redact_redis_url(redis_url)}")
         logger.info(f"🔌 [RQ_CLIENT] Using queue: {queue_name}")
+        logger.info(f"🔌 [RQ_CLIENT] Worker type: {worker_type}")
         logger.info(f"⏱️  [RQ_CLIENT] Job timeout: {job_timeout_minutes} minutes")
         logger.info(f"⏱️  [RQ_CLIENT] Polling timeout: {polling_timeout_seconds} seconds ({polling_timeout_seconds/60:.1f} minutes)")
         logger.info(f"⏱️  [RQ_CLIENT] Poll intervals: {poll_initial_delay}s initial, {poll_max_interval}s max")
-
-        # Log Railway Storage configuration (for debugging)
-        logger.info(f"💾 [RAILWAY_STORAGE_DEBUG] Bucket: {railway_bucket_name}")
-        logger.info(f"💾 [RAILWAY_STORAGE_DEBUG] Region: {railway_region}")
-        logger.info(f"💾 [RAILWAY_STORAGE_DEBUG] URL: {railway_storage_url}")
-        logger.info(f"💾 [RAILWAY_STORAGE_DEBUG] Access Key present: {bool(railway_storage_access_key)}")
-        logger.info(f"💾 [RAILWAY_STORAGE_DEBUG] Secret Key present: {bool(railway_storage_secret_key)}")
 
         if railway_bucket_name and railway_storage_url and railway_storage_access_key and railway_storage_secret_key:
             logger.info(f"💾 [RAILWAY_STORAGE] Docling will upload results to: Railway Storage {railway_bucket_name}/{s3_docling_prefix}/ (region: {railway_region})")
@@ -238,6 +236,55 @@ class DoclingRQClient:
             logger.info(f"   MIME type: {mime_type}")
 
             # ========================================================================
+
+            # ========================================================================
+            # STORE JOB METADATA - For worker ownership tracking
+            # ========================================================================
+            # Store metadata so we can verify this job belongs to this worker
+            # when results come back from docling-serve
+            try:
+                import time
+                metadata_key = f"docling:job:metadata:{task_id}"
+                metadata_value = {
+                    "worker_type": self.worker_type,
+                    "job_id": job.id,
+                    "filename": filename,
+                    "enqueued_at": time.time(),
+                    "mime_type": mime_type
+                }
+
+                # Store with TTL equal to job timeout + 1 hour buffer
+                ttl = (self.job_timeout_minutes * 60) + 3600
+                self.redis_conn.setex(
+                    metadata_key,
+                    ttl,
+                    json.dumps(metadata_value)
+                )
+
+                logger.info(f"💾 [METADATA] Stored job metadata for task_id={task_id}")
+                logger.info(f"   Key: {metadata_key}")
+                logger.info(f"   Worker: {self.worker_type}")
+                logger.info(f"   TTL: {ttl}s")
+
+                # ================================================================
+                # STORE REVERSE MAPPING - job_id -> task_id lookup
+                # ================================================================
+                # Store reverse mapping so we can verify ownership when polling
+                # This allows us to go: job_id -> task_id -> metadata
+                try:
+                    mapping_key = f"docling:job_mapping:{job.id}"
+                    self.redis_conn.setex(
+                        mapping_key,
+                        ttl,
+                        task_id
+                    )
+                    logger.info(f"🔗 [JOB_MAPPING] Stored reverse mapping: {job.id} -> {task_id}")
+                except Exception as mapping_err:
+                    logger.warning(f"⚠️  [JOB_MAPPING] Failed to store job_id->task_id mapping: {mapping_err}")
+
+            except Exception as metadata_err:
+                logger.warning(f"⚠️  [METADATA] Failed to store metadata: {metadata_err}")
+                logger.info(f"   Job will still process, but ownership tracking disabled")
             # PUB/SUB NOTIFICATION - Wake up docling-serve RQ worker immediately
             # ========================================================================
             # Per docling-jobkit spec, publish queued event to docling:updates channel
@@ -315,6 +362,62 @@ class DoclingRQClient:
                 if job.is_finished:
                     result = job.result
                     logger.info(f"✅ [RQ_SUCCESS] Job {job_id} completed successfully")
+
+                    # ================================================================
+                    # VERIFY JOB OWNERSHIP - Multi-worker routing check
+                    # ================================================================
+                    # Before processing result, verify this job belongs to this worker
+                    # This prevents file worker from processing web worker jobs (and vice versa)
+                    try:
+                        mapping_key = f"docling:job_mapping:{job_id}"
+                        task_id = self.redis_conn.get(mapping_key)
+
+                        if task_id:
+                            # Decode task_id if it's bytes
+                            if isinstance(task_id, bytes):
+                                task_id = task_id.decode('utf-8')
+
+                            logger.info(f"🔐 [OWNERSHIP_VERIFY] Found task_id for job {job_id}: {task_id}")
+
+                            # Now fetch the metadata to check worker_type
+                            metadata_key = f"docling:job:metadata:{task_id}"
+                            metadata_json = self.redis_conn.get(metadata_key)
+
+                            if metadata_json:
+                                # Decode metadata if it's bytes
+                                if isinstance(metadata_json, bytes):
+                                    metadata_json = metadata_json.decode('utf-8')
+
+                                metadata = json.loads(metadata_json)
+                                stored_worker_type = metadata.get('worker_type')
+
+                                if stored_worker_type and stored_worker_type != self.worker_type:
+                                    logger.error(f"❌ [OWNERSHIP_VERIFY] Job {job_id} does NOT belong to this worker!")
+                                    logger.error(f"   Expected worker: {self.worker_type}")
+                                    logger.error(f"   Stored worker:   {stored_worker_type}")
+                                    logger.error(f"   Task ID: {task_id}")
+                                    raise Exception(
+                                        f"Job {job_id} belongs to {stored_worker_type} worker, "
+                                        f"not {self.worker_type} worker. This indicates a configuration issue."
+                                    )
+                                else:
+                                    logger.info(f"✅ [OWNERSHIP_VERIFY] Job ownership verified!")
+                                    logger.info(f"   Worker: {stored_worker_type or 'unknown'}")
+                                    logger.info(f"   Task ID: {task_id}")
+                            else:
+                                logger.warning(f"⚠️  [OWNERSHIP_VERIFY] Metadata not found for task {task_id}")
+                                logger.warning(f"   Proceeding with result processing (metadata may have expired)")
+                        else:
+                            logger.warning(f"⚠️  [OWNERSHIP_VERIFY] No task_id mapping found for job {job_id}")
+                            logger.warning(f"   Proceeding with result processing (mapping may have expired)")
+
+                    except Exception as ownership_err:
+                        # Only re-raise if it's an ownership mismatch (serious error)
+                        if "does NOT belong" in str(ownership_err):
+                            raise
+                        # For other errors (lookup failed, etc), log and continue
+                        logger.warning(f"⚠️  [OWNERSHIP_VERIFY] Failed to verify job ownership: {ownership_err}")
+                        logger.warning(f"   Proceeding with result processing (ownership check skipped)")
 
                     # Validate result structure
                     if isinstance(result, dict):

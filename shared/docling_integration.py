@@ -68,7 +68,8 @@ async def process_with_docling(
     presigned_url: str,
     original_filename: str,
     mime_type: str,
-    timeout_seconds: Optional[int] = None
+    timeout_seconds: Optional[int] = None,
+    worker_type: str = None
 ) -> Tuple[Optional[str], dict]:
     """
     Call docling-serve via Redis Queue to convert document to JSON format.
@@ -78,6 +79,8 @@ async def process_with_docling(
         original_filename: Original filename
         mime_type: MIME type of the file
         timeout_seconds: Job timeout in seconds
+        worker_type: Type of worker (file or web) - used for job ownership tracking.
+                    If not provided, defaults to WORKER_TYPE env var or "file"
 
     Returns:
         Tuple of (json_content, metadata) - returns JSON format from docling
@@ -87,6 +90,13 @@ async def process_with_docling(
 
     if timeout_seconds is None:
         timeout_seconds = settings.docling_timeout_seconds
+
+    # Determine worker_type if not provided
+    if worker_type is None:
+        # Try to get from environment variable
+        worker_type = os.getenv("WORKER_TYPE", "file")
+
+    logger.info(f"🔧 [DOCLING] Worker type: {worker_type}")
 
     try:
         from shared.docling_rq_client import DoclingRQClient
@@ -120,6 +130,7 @@ async def process_with_docling(
         client = DoclingRQClient(
             redis_url=docling_redis_url,
             queue_name=docling_queue_name,
+            worker_type=worker_type,
             job_timeout_minutes=settings.docling_rq_job_timeout_minutes,
             polling_timeout_seconds=settings.docling_timeout_seconds,
             poll_initial_delay=settings.docling_poll_initial_delay,

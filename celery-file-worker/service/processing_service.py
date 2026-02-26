@@ -407,7 +407,8 @@ async def process_file_content(
                 json_content, docling_metadata = await process_with_docling(
                     presigned_url=presigned_url,  # Use presigned URL only
                     original_filename=original_filename,
-                    mime_type=detected_mime_type
+                    mime_type=detected_mime_type,
+                    worker_type="file"
                 )
                 logger.info(f"🔍 [DEBUG] process_with_docling returned: json_content={bool(json_content)}, metadata_keys={list(docling_metadata.keys()) if docling_metadata else 'None'}")
 
