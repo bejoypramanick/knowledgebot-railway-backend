@@ -25,30 +25,38 @@ class StreamingService:
     def _convert_db_messages_to_pydantic_ai(self, db_messages: List[Dict[str, Any]]) -> List[Any]:
         """Convert database messages to Pydantic AI message format."""
         pydantic_messages = []
-        
+
         for msg in db_messages:
             try:
+                # Extract message content - database can use different field names
+                # Try: 'content' (preferred), 'message' (DB format), 'text' (fallback)
+                content = msg.get('content', '') or msg.get('message', '') or msg.get('text', '')
+
+                if not content and not msg.get('content'):
+                    logger.warning(f"⚠️ WARNING: Message has no content - checking DB structure")
+                    logger.warning(f"⚠️ Available fields: {list(msg.keys())}")
+
                 if msg.get('role') == 'user':
                     # Convert user message
                     user_msg = ModelRequest(
-                        parts=[UserPromptPart(content=msg.get('content', ''))]
+                        parts=[UserPromptPart(content=content)]
                     )
                     pydantic_messages.append(user_msg)
-                    logger.debug(f"🔄 Converted user message: {msg.get('content', '')[:50]}...")
-                    
+                    logger.debug(f"🔄 Converted user message: {content[:50]}...")
+
                 elif msg.get('role') == 'assistant':
                     # Convert assistant message
                     assistant_msg = ModelResponse(
-                        parts=[TextPart(content=msg.get('content', ''))]
+                        parts=[TextPart(content=content)]
                     )
                     pydantic_messages.append(assistant_msg)
-                    logger.debug(f"🔄 Converted assistant message: {msg.get('content', '')[:50]}...")
-                    
+                    logger.debug(f"🔄 Converted assistant message: {content[:50]}...")
+
             except Exception as e:
                 logger.warning(f"⚠️ Failed to convert message: {e}")
                 logger.warning(f"⚠️ Message data: {msg}")
                 continue
-        
+
         logger.info(f"✅ Converted {len(pydantic_messages)} messages to Pydantic AI format")
         return pydantic_messages
 
