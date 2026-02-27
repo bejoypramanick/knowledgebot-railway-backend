@@ -13,6 +13,11 @@ from opentelemetry.trace import Status, StatusCode
 task_id_ctx_var: ContextVar[Optional[str]] = ContextVar("task_id", default=None)
 session_id_ctx_var: ContextVar[Optional[str]] = ContextVar("session_id", default=None)
 
+# Admin context variables for audit trail logging
+admin_session_id_ctx_var: ContextVar[Optional[str]] = ContextVar("admin_session_id", default=None)
+admin_email_ctx_var: ContextVar[Optional[str]] = ContextVar("admin_email", default=None)
+admin_role_ctx_var: ContextVar[Optional[str]] = ContextVar("admin_role", default=None)
+
 def set_task_id(task_id: str) -> None:
     """Set the task ID for the current context (will appear in all logs)"""
     task_id_ctx_var.set(task_id)
@@ -32,6 +37,30 @@ def set_session_id(session_id: str) -> None:
 def get_session_id() -> Optional[str]:
     """Get current session ID from context"""
     return session_id_ctx_var.get()
+
+def set_admin_context(session_id: str, email: str, role: str) -> None:
+    """Set admin context for OTEL logging (session_id, email, role)"""
+    admin_session_id_ctx_var.set(session_id)
+    admin_email_ctx_var.set(email)
+    admin_role_ctx_var.set(role)
+
+def get_admin_session_id() -> Optional[str]:
+    """Get current admin session ID from context"""
+    return admin_session_id_ctx_var.get()
+
+def get_admin_email() -> Optional[str]:
+    """Get current admin email from context"""
+    return admin_email_ctx_var.get()
+
+def get_admin_role() -> Optional[str]:
+    """Get current admin role from context"""
+    return admin_role_ctx_var.get()
+
+def clear_admin_context() -> None:
+    """Clear admin context at end of request"""
+    admin_session_id_ctx_var.set(None)
+    admin_email_ctx_var.set(None)
+    admin_role_ctx_var.set(None)
 
 def get_calling_file_info() -> Dict[str, str]:
     """Get complete file info of calling code (3 levels up the stack)"""
@@ -65,17 +94,31 @@ class OpenTelemetryLogger:
         self.tracer = trace.get_tracer(f"{service_name}.{name}")
         
     def _format_message(self, message: str) -> str:
-        """Add task ID and session ID prefix to message if available"""
+        """Add admin/task/session context prefix to message if available"""
+        admin_session_id = get_admin_session_id()
+        admin_email = get_admin_email()
+        admin_role = get_admin_role()
         task_id = get_task_id()
         session_id = get_session_id()
 
-        # Build context prefix with session_id (primary) and task_id (secondary)
+        # Build context prefix: admin context (highest priority), then chat session, then task
         context_parts = []
+
+        # Admin context - highest priority when present
+        if admin_email:
+            admin_str = f"admin:{admin_email}"
+            if admin_role:
+                admin_str += f" role:{admin_role}"
+            if admin_session_id:
+                admin_str += f" admin_session:{admin_session_id[:8]}"
+            context_parts.append(admin_str)
+
+        # Chat session context
         if session_id:
-            # Show first 8 characters of session ID for readability
             context_parts.append(f"session:{session_id[:8]}")
+
+        # Task context
         if task_id:
-            # Show first 8 characters of task ID for readability
             context_parts.append(f"task:{task_id[:8]}")
 
         if context_parts:
@@ -95,11 +138,23 @@ class OpenTelemetryLogger:
         file_prefix = f"[{file_info['full_info']}]"
         full_message = f"{file_prefix} {formatted_message}"
 
-        # Add task ID, session ID, and file info to extra fields
+        # Add admin, task, and session context to extra fields
         extra = extra or {}
+        admin_session_id = get_admin_session_id()
+        admin_email = get_admin_email()
+        admin_role = get_admin_role()
         task_id = get_task_id()
         session_id = get_session_id()
 
+        # Add admin context
+        if admin_session_id:
+            extra['admin_session_id'] = admin_session_id
+        if admin_email:
+            extra['admin_email'] = admin_email
+        if admin_role:
+            extra['admin_role'] = admin_role
+
+        # Add other context
         if task_id:
             extra['task_id'] = task_id
         if session_id:
@@ -128,7 +183,15 @@ class OpenTelemetryLogger:
                 "file.method": file_info['method_name'],
             }
 
-            # Add optional context IDs
+            # Add optional admin context (highest priority)
+            if admin_email:
+                span_attributes["admin_email"] = admin_email
+            if admin_role:
+                span_attributes["admin_role"] = admin_role
+            if admin_session_id:
+                span_attributes["admin_session_id"] = admin_session_id
+
+            # Add other context
             if task_id:
                 span_attributes["task_id"] = task_id
             if session_id:

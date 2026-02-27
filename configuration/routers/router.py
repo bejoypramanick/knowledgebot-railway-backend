@@ -10,8 +10,11 @@ import json
 import asyncio
 from collections import defaultdict
 
-from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger, clear_admin_context
+from shared.admin_audit import audit_action
 from ..service.configuration_service import ConfigurationService
+from ..dao.admin_session_dao import AdminSessionDAO
+from ..dao.admin_action_dao import AdminActionDAO
 from ..service.auth_service import AuthService
 from ..service.chat_log_service import ChatLogService
 from ..service.notifications_service import NotificationsService
@@ -84,7 +87,7 @@ async def get_current_user(request: Request):
     logger.error(f"🔍 Available headers: {list(request.headers.keys())}")
     raise HTTPException(status_code=401, detail="User not found in request state or headers")
 
-# Initialize services
+# Initialize services and DAOs
 config_service = ConfigurationService()
 auth_service = AuthService()
 chat_log_service = ChatLogService()
@@ -92,6 +95,8 @@ notifications_service = NotificationsService(notifications_dao=None)
 performance_service = PerformanceService()
 feedback_service = FeedbackService()
 token_usage_service = TokenUsageService()
+admin_session_dao = AdminSessionDAO()
+admin_action_dao = AdminActionDAO()
 
 # =================================
 # SSE EVENT BROADCASTING SYSTEM
@@ -187,14 +192,19 @@ async def get_chatbot_config(cache: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/chatAgentConfig")
+@audit_action(
+    action_type="config.chatbot.update",
+    action_category="config",
+    resource_type="chatbot_config"
+)
 async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
     """Save chatbot configuration"""
     try:
         logger.info(f"🔍 POST /chatAgentConfig received: {config}")
         logger.info(f"🔍 Request headers: {dict(request.headers)}")
-        
+
         await config_service.save_chatbot_config(config.dict())
-        
+
         logger.info("✅ Chatbot config saved successfully")
         return {"success": True, "message": "Chatbot configuration saved successfully"}
     except Exception as e:
@@ -1286,6 +1296,135 @@ async def get_all_users(user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Error getting users: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# =================================
+# ADMIN SESSION & AUDIT ENDPOINTS
+# =================================
+
+@router.get("/admin/sessions/active")
+async def get_active_sessions(request: Request, user: dict = Depends(get_current_user)):
+    """Get all active admin sessions (admin only)"""
+    try:
+        # Verify admin access
+        email = user.get("email", "")
+        roles = await auth_service.get_user_role(email)
+
+        if "admin" not in roles.get("roles", []):
+            raise HTTPException(status_code=403, detail="Admin access required")
+
+        # Get active sessions
+        sessions = await admin_session_dao.get_active_sessions()
+
+        logger.info(f"✅ Retrieved {len(sessions)} active admin sessions")
+        return {
+            "success": True,
+            "data": sessions,
+            "count": len(sessions)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting active sessions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/admin/audit/actions")
+async def get_audit_actions(
+    request: Request,
+    email: Optional[str] = None,
+    category: Optional[str] = None,
+    success: Optional[bool] = None,
+    limit: int = 100,
+    offset: int = 0,
+    user: dict = Depends(get_current_user)
+):
+    """Get action audit trail with optional filters (admin only)"""
+    try:
+        # Verify admin access
+        current_email = user.get("email", "")
+        roles = await auth_service.get_user_role(current_email)
+
+        if "admin" not in roles.get("roles", []):
+            raise HTTPException(status_code=403, detail="Admin access required")
+
+        # Get actions
+        actions = await admin_action_dao.get_actions(
+            email=email,
+            category=category,
+            success=success,
+            limit=limit,
+            offset=offset
+        )
+
+        logger.info(f"✅ Retrieved {len(actions)} audit actions")
+        return {
+            "success": True,
+            "data": actions,
+            "count": len(actions),
+            "filters": {
+                "email": email,
+                "category": category,
+                "success": success
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting audit actions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/admin/audit/statistics")
+async def get_audit_statistics(
+    request: Request,
+    days: int = 7,
+    user: dict = Depends(get_current_user)
+):
+    """Get action statistics by category (admin only)"""
+    try:
+        # Verify admin access
+        current_email = user.get("email", "")
+        roles = await auth_service.get_user_role(current_email)
+
+        if "admin" not in roles.get("roles", []):
+            raise HTTPException(status_code=403, detail="Admin access required")
+
+        # Get statistics
+        stats = await admin_action_dao.get_action_statistics(days=days)
+
+        logger.info(f"✅ Retrieved audit statistics for {days} days")
+        return {
+            "success": True,
+            "data": stats
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting audit statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/auth/logout")
+async def logout(request: Request, user: dict = Depends(get_current_user)):
+    """Manual logout endpoint"""
+    try:
+        email = user.get("email", "")
+        from shared.otel_logger import get_admin_session_id
+
+        session_id = get_admin_session_id()
+        if session_id:
+            # Logout the session
+            await admin_session_dao.logout_session(session_id, reason="manual")
+            logger.info(f"✅ Admin logged out: {email}")
+
+            # Clear OTEL context
+            clear_admin_context()
+
+        return {"success": True, "message": "Logged out successfully"}
+    except Exception as e:
+        logger.error(f"Error during logout: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # =================================
 # HEALTH ENDPOINTS
