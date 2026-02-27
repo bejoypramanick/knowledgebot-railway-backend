@@ -207,6 +207,10 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
 
         # Step 1: Add conversation history if provided
         if conversation_history and isinstance(conversation_history, list):
+            logger.info(f"🔍 DEBUG: conversation_history contains {len(conversation_history)} messages")
+            if conversation_history:
+                logger.info(f"🔍 DEBUG: First message keys: {list(conversation_history[0].keys())}")
+                logger.info(f"🔍 DEBUG: First message: {conversation_history[0]}")
             logger.info(f"📌 Building contents array: adding {len(conversation_history)} historical messages")
 
             for i, msg in enumerate(conversation_history):
@@ -219,8 +223,8 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                     # Validate role and text
                     if not role or not text:
                         logger.warning(f"⚠️  Skipping history message {i}: invalid format (missing role or text)")
-                        logger.debug(f"   Message keys: {list(msg.keys())}")
-                        logger.debug(f"   Role: '{role}', Text: '{text[:50] if text else 'EMPTY'}'...")
+                        logger.info(f"   Message keys: {list(msg.keys())}")
+                        logger.info(f"   Role: '{role}', Text: '{text[:50] if text else 'EMPTY'}'...")
                         continue
 
                     if role not in ["user", "model"]:
