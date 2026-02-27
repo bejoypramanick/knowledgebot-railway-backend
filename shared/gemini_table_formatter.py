@@ -221,12 +221,22 @@ OUTPUT FORMAT (Structured Markdown):
 **Summary**: [Brief description of table contents, purpose, key columns, and data type]
 **Columns**: [Comma-separated list of column headers]
 
-**Row 1**
+**Row 1 (first row, 1st entry)**
 - [Column 1]: [Value 1]
 - [Column 2]: [Value 2]
 - [Column 3]: [Value 3]
 
-**Row 2**
+**Row 2 (second row, 2nd entry)**
+- [Column 1]: [Value 1]
+- [Column 2]: [Value 2]
+- [Column 3]: [Value 3]
+
+**Row 3 (third row, 3rd entry)**
+- [Column 1]: [Value 1]
+- [Column 2]: [Value 2]
+- [Column 3]: [Value 3]
+
+**Row 4 (fourth row, 4th entry)**
 - [Column 1]: [Value 1]
 - [Column 2]: [Value 2]
 - [Column 3]: [Value 3]
@@ -263,9 +273,15 @@ REQUIREMENTS:
 - Use markdown format, NOT JSON
 - Include summary at top for context
 - Use key-value pairs (-) for each column in each row
-- Number each row clearly (**Row N**)
+- Number each row with BOTH number AND spelled-out position: **Row N (first/second/third/fourth row, Nth entry)**
+  * Row 1 → "Row 1 (first row, 1st entry)"
+  * Row 2 → "Row 2 (second row, 2nd entry)"
+  * Row 3 → "Row 3 (third row, 3rd entry)"
+  * Row 4 → "Row 4 (fourth row, 4th entry)"
+  * Row 5 → "Row 5 (fifth row, 5th entry)"
+  * Continue pattern for all rows
 - List all columns in "Columns:" line
-- Make it easy to read and search
+- Make it easy to read and search - explicit row naming helps RAG find specific rows
 - Do NOT include raw docling metadata
 - Do NOT include explanations, only the formatted markdown output
 
