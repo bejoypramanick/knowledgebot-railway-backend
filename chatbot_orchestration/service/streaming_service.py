@@ -213,22 +213,15 @@ class StreamingService:
                                     # Extract text from TextPart
                                     if isinstance(part, TextPart):
                                         text_content = getattr(part, 'content', '')
+                                        logger.info(f"     🔍 Found TextPart: {len(text_content)} chars, preview: {text_content[:50]}...")
                                         if text_content and full_response == "":
-                                            logger.info(f"     ✅ Found TextPart with {len(text_content)} chars")
+                                            logger.info(f"     ✅ Setting full_response to this TextPart")
                                             chunk_count += 1
                                             full_response = text_content
-
-                                            # Stream the response
-                                            response_data = {
-                                                "type": "chunk",
-                                                "content": text_content,
-                                                "session_id": session_id,
-                                                "chunk_index": chunk_count
-                                            }
-                                            json_response = json.dumps(response_data, ensure_ascii=False)
-                                            # yield f"data: {json_response}\n\n"
- # ← COMMENTED OUT: Stream after enforcement instead
-                                            logger.info(f"📦 Streamed text from assistant message: {len(text_content)} chars")
+                                        elif text_content and full_response != "":
+                                            logger.warning(f"     ⚠️ DUPLICATE TextPart detected! Already have {len(full_response)} chars")
+                                            logger.warning(f"     ⚠️ This TextPart: {len(text_content)} chars")
+                                            logger.warning(f"     ⚠️ Might cause response duplication!")
 
                                     # Track tool calls with detailed logging
                                     elif hasattr(part, 'tool_name'):
@@ -249,68 +242,32 @@ class StreamingService:
                         logger.info(f"✅ Agent completed with {tool_call_count} tool calls")
 
                         # ================================================================
-                        # CRITICAL ENFORCEMENT: No tool calls for non-greeting queries
+                        # CRITICAL MONITORING: Track tool call failures
                         # ================================================================
-                        # Detect non-greeting queries answered without knowledge base search
-                        # ENFORCEMENT: Check for violations (including short follow-up queries)
-                        if tool_call_count == 0 and message.strip():  # Any non-empty message
-                            # Check if message is non-greeting
+                        # The system prompt requires ALL non-greeting queries to call at least 1 tool
+                        # This is now a hard requirement in the prompt (Path A: greeting-only, Path B: tools required)
+                        if tool_call_count == 0 and message.strip():
                             greeting_patterns = ["hi", "hello", "hey", "good morning", "good afternoon", "greetings"]
                             is_greeting = any(g in message.lower() for g in greeting_patterns)
-
-                            # Check if there's conversation history (follow-up query)
                             has_history = len(pydantic_messages) > 0
 
                             if not is_greeting:
                                 logger.error("=" * 100)
-                                logger.error("🚨 CRITICAL RAG ENFORCEMENT VIOLATION 🚨")
+                                logger.error("🚨 CRITICAL: TOOL CALL REQUIREMENT NOT MET")
                                 logger.error("=" * 100)
-                                logger.error("RULE VIOLATED: Agent answered without calling search_knowledge_base")
-                                logger.error(f"Query Type: {'Follow-up with history' if has_history else 'First message'}")
+                                logger.error(f"Message Type: {'Follow-up with history' if has_history else 'First message'}")
                                 logger.error(f"Query: '{message}'")
-                                logger.error(f"Conversation History: {len(pydantic_messages)} messages")
-                                logger.error(f"Tool Calls Made: 0 (SHOULD BE 1+)")
-                                logger.error(f"Response Length: {len(full_response)} chars")
+                                logger.error(f"Tool Calls Made: 0 ❌ (REQUIRED: ≥1)")
                                 logger.error("")
-                                logger.error("EXPECTED BEHAVIOR (from system prompt Rule 1 & 4):")
-                                logger.error("  1. Extract context from conversation history")
-                                logger.error("  2. Build context-enhanced query")
-                                logger.error(f"  3. Call search_knowledge_base with enhanced query")
-                                logger.error("  4. Answer ONLY using RAG results")
+                                logger.error("SYSTEM PROMPT REQUIREMENT:")
+                                logger.error("- Non-greeting queries MUST follow Path B (call at least 1 tool)")
+                                logger.error("- This is a hard requirement for response quality")
+                                logger.error("- The model failed to follow the prompt's tool-first decision tree")
                                 logger.error("")
-                                if has_history:
-                                    logger.error("⚠️ This is a follow-up query with conversation context")
-                                    logger.error("⚠️ Agent MUST use search_knowledge_base for follow-ups per Rule 4")
-                                    logger.error("⚠️ Answering from training data = RULE VIOLATION")
-
-                                # ================================================================
-                                # HARD ENFORCEMENT: Force RAG search if agent didnt but should have
-                                # ================================================================
-                                # If agent made no tool calls AND there is history AND its not a greeting
-                                # → FORCE a RAG search call as failsafe
-                                if tool_call_count == 0 and has_history and not is_greeting:
-                                    logger.warning("")
-                                    logger.warning("🔧 ACTIVATING HARD RAG ENFORCEMENT FAILSAFE")
-                                    logger.warning(f"   Forcing search_knowledge_base call with user query: '{message[:100]}...'")
-                                    
-                                    try:
-                                        # Import search_knowledge_base if not already imported
-                                        from ..tools.knowledge_tools import _perform_rag_search
-                                        
-                                        # Perform RAG search with the original user query
-                                        forced_rag_results = await _perform_rag_search(session_id, message)
-                                        
-                                        logger.warning(f"✅ Forced RAG search returned: {len(forced_rag_results)} characters")
-                                        logger.warning(f"   Replacing agents training-data response with RAG results")
-                                        
-                                        # Override the response with RAG results
-                                        full_response = forced_rag_results
-                                        logger.warning("✅ HARD ENFORCEMENT APPLIED: Response replaced with RAG results")
-                                        logger.warning("=" * 100)
-                                        
-                                    except Exception as enforce_error:
-                                        logger.error(f"❌ Hard enforcement RAG search failed: {enforce_error}")
-                                        logger.warning("   Proceeding with agent response (not ideal)")
+                                logger.error("EXPECTED BEHAVIOR:")
+                                logger.error("- search_knowledge_base() for knowledge questions")
+                                logger.error("- query_railway_postgres() for system data")
+                                logger.error("- request_human_agent_connection() for escalation")
                                 logger.error("=" * 100)
 
                     except Exception as result_error:
@@ -336,12 +293,17 @@ class StreamingService:
             # Now that enforcement has been applied (if needed), stream the response in chunks
             if full_response:
                 logger.info("📤 Streaming final response in chunks (after enforcement check)...")
+                logger.info(f"🔍 DEBUG: full_response length = {len(full_response)} chars")
+                logger.info(f"🔍 DEBUG: full_response preview = {full_response[:100]}...")
+
                 # Break response into chunks for streaming (500 chars per chunk for smooth experience)
                 chunk_size = 500
                 chunks = [full_response[i:i+chunk_size] for i in range(0, len(full_response), chunk_size)]
-                
+                logger.info(f"🔍 DEBUG: Created {len(chunks)} chunks")
+
                 for idx, chunk in enumerate(chunks, 1):
                     if chunk.strip():  # Only stream non-empty chunks
+                        logger.info(f"🔍 DEBUG: Streaming chunk {idx}/{len(chunks)}: {len(chunk)} chars")
                         response_data = {
                             "type": "chunk",
                             "content": chunk,
@@ -351,22 +313,8 @@ class StreamingService:
                         json_response = json.dumps(response_data, ensure_ascii=False)
                         yield f"data: {json_response}\n\n"
                         chunk_count = idx
-                
-                logger.info(f"📦 Streamed final response in {len(chunks)} chunks ({len(full_response)} chars total)")
 
-            # ================================================================
-            # Now that enforcement has been applied (if needed), stream the response
-            if full_response:
-                logger.info("📤 Streaming final response (after enforcement check)...")
-                response_data = {
-                    "type": "chunk",
-                    "content": full_response,
-                    "session_id": session_id,
-                    "chunk_index": 1
-                }
-                json_response = json.dumps(response_data, ensure_ascii=False)
-                yield f"data: {json_response}\n\n"
-                logger.info(f"📦 Streamed final response: {len(full_response)} chars")
+                logger.info(f"📦 Streamed final response in {len(chunks)} chunks ({len(full_response)} chars total)")
 
             # Save complete assistant response to database
             if full_response.strip():
