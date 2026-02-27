@@ -34,19 +34,28 @@ def get_genai_client():
         logger.error("❌ GEMINI_API_KEY is not set - Gemini client cannot be initialized")
     return genai_client
 
-# Initialize Gemini Model with caching
+# Initialize Gemini Model with caching and reasoning logging
 if GEMINI_API_KEY:
     try:
         logger.info(f"🔧 Attempting to initialize Gemini model: {MODEL_NAME}")
-        # Pydantic AI's GeminiModel with 15-minute caching
+        # Pydantic AI's GeminiModel with 15-minute caching and reasoning logging
         gemini_model = GoogleModel(
             MODEL_NAME,
             settings=GoogleModelSettings(
                 # Enable caching with 15-minute TTL
-                cache_ttl=900  # 15 minutes in seconds
+                cache_ttl=900,  # 15 minutes in seconds
+                # Enable extended thinking for reasoning visibility (Gemini 2.0 feature)
+                # This allows us to see the model's internal reasoning process
+                thinking_config={
+                    "type": "enabled",
+                    "budget_tokens": 24000  # Allow substantial reasoning capacity
+                } if "thinking" in os.environ.get("GEMINI_FEATURES", "").lower() else None
             )
         )
-        logger.info(f"✅ Gemini model '{MODEL_NAME}' initialized with 15-minute caching")
+        thinking_status = "with reasoning logging" if os.environ.get("GEMINI_FEATURES", "").lower() else "without reasoning"
+        logger.info(f"✅ Gemini model '{MODEL_NAME}' initialized with 15-minute caching {thinking_status}")
+        if "thinking" in os.environ.get("GEMINI_FEATURES", "").lower():
+            logger.info("   🧠 Extended thinking enabled - model reasoning will be logged")
     except Exception as e:
         gemini_model = None
         logger.error(f"❌ Failed to initialize GeminiModel '{MODEL_NAME}': {e}")

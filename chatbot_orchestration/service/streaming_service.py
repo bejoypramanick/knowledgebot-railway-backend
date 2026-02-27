@@ -163,6 +163,39 @@ class StreamingService:
                         all_messages = run.all_messages()
                         logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
 
+                        # Log model reasoning if available
+                        logger.info("=" * 100)
+                        logger.info("🧠 MODEL REASONING & DECISION PROCESS")
+                        logger.info("=" * 100)
+                        for i, msg in enumerate(all_messages):
+                            msg_type = type(msg).__name__
+                            logger.info(f"📌 Message {i}: {msg_type}")
+
+                            # Log model request details (shows model's decision making)
+                            if hasattr(msg, '__class__') and 'ModelRequest' in msg_type:
+                                if hasattr(msg, 'parts'):
+                                    logger.info(f"   🤔 Model reasoning/decision:")
+                                    for part in msg.parts:
+                                        part_type = type(part).__name__
+                                        # Log thinking/reasoning content if present
+                                        if hasattr(part, 'content'):
+                                            content = getattr(part, 'content', '')
+                                            # Truncate long reasoning for readability
+                                            preview = content[:300] if len(content) > 300 else content
+                                            logger.info(f"      [{part_type}] {preview}")
+
+                            # Log tool usage decisions
+                            if hasattr(msg, 'parts'):
+                                for part in msg.parts:
+                                    if hasattr(part, 'tool_name'):
+                                        tool_name = getattr(part, 'tool_name', 'unknown')
+                                        tool_args = getattr(part, 'args', {})
+                                        logger.info(f"   🔧 Model decision: Call {tool_name}")
+                                        logger.info(f"      Why: To search knowledge base for enhanced context")
+                                        logger.info(f"      Query: {tool_args.get('query', 'N/A')[:100]}")
+
+                        logger.info("=" * 100)
+
                         # Extract assistant response and tool calls
                         for i, msg in enumerate(all_messages):
                             msg_type = type(msg).__name__
