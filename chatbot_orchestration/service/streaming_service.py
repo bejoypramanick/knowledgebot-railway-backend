@@ -88,6 +88,18 @@ class StreamingService:
             chat_history = await session_state_manager.get_chat_history(session_id)
             logger.info(f"✅ Retrieved {len(chat_history)} messages from chat history")
 
+            # DEBUG: Log exact messages being passed to agent
+            if chat_history:
+                logger.info("=" * 100)
+                logger.info("🔍 DEBUG: EXACT MESSAGES FROM DATABASE")
+                logger.info("=" * 100)
+                for i, msg in enumerate(chat_history):
+                    logger.info(f"Message {i}:")
+                    logger.info(f"  Role: {msg.get('role')}")
+                    logger.info(f"  Content length: {len(msg.get('message', msg.get('content', '')))} chars")
+                    logger.info(f"  Content preview: {msg.get('message', msg.get('content', ''))[:150]}...")
+                logger.info("=" * 100)
+
             # Log detailed chat history
             if chat_history:
                 logger.info("=" * 100)
