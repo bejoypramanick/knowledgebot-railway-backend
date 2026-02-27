@@ -9,8 +9,9 @@ from contextvars import ContextVar
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
 
-# Context variable to store task ID for logging
+# Context variables to store task ID and session ID for logging
 task_id_ctx_var: ContextVar[Optional[str]] = ContextVar("task_id", default=None)
+session_id_ctx_var: ContextVar[Optional[str]] = ContextVar("session_id", default=None)
 
 def set_task_id(task_id: str) -> None:
     """Set the task ID for the current context (will appear in all logs)"""
@@ -19,6 +20,18 @@ def set_task_id(task_id: str) -> None:
 def get_task_id() -> Optional[str]:
     """Get current task ID from context"""
     return task_id_ctx_var.get()
+
+def set_session_id(session_id: str) -> None:
+    """Set the session ID for the current context (will appear in all logs)
+
+    This is useful for tracking all logs for a specific user/chat session.
+    Call this at the start of stream_agent_response() with the session_id.
+    """
+    session_id_ctx_var.set(session_id)
+
+def get_session_id() -> Optional[str]:
+    """Get current session ID from context"""
+    return session_id_ctx_var.get()
 
 def get_calling_file_info() -> Dict[str, str]:
     """Get complete file info of calling code (3 levels up the stack)"""
@@ -52,55 +65,78 @@ class OpenTelemetryLogger:
         self.tracer = trace.get_tracer(f"{service_name}.{name}")
         
     def _format_message(self, message: str) -> str:
-        """Add task ID prefix to message if available"""
+        """Add task ID and session ID prefix to message if available"""
         task_id = get_task_id()
+        session_id = get_session_id()
+
+        # Build context prefix with session_id (primary) and task_id (secondary)
+        context_parts = []
+        if session_id:
+            # Show first 8 characters of session ID for readability
+            context_parts.append(f"session:{session_id[:8]}")
         if task_id:
             # Show first 8 characters of task ID for readability
-            return f"[{task_id[:8]}] {message}"
+            context_parts.append(f"task:{task_id[:8]}")
+
+        if context_parts:
+            context_str = " ".join(context_parts)
+            return f"[{context_str}] {message}"
         return message
         
     def _log_with_context(self, level: int, message: str, extra: Dict[str, Any] = None):
         """Log message with OpenTelemetry context using standard logging"""
         # Get calling file info automatically
         file_info = get_calling_file_info()
-        
-        # Add task ID to message
+
+        # Add task ID and session ID to message
         formatted_message = self._format_message(message)
-        
+
         # Add file info to message for debugging
         file_prefix = f"[{file_info['full_info']}]"
         full_message = f"{file_prefix} {formatted_message}"
-        
-        # Add task ID and file info to extra fields
+
+        # Add task ID, session ID, and file info to extra fields
         extra = extra or {}
         task_id = get_task_id()
+        session_id = get_session_id()
+
         if task_id:
             extra['task_id'] = task_id
+        if session_id:
+            extra['session_id'] = session_id
+
         extra.update({
             'file_path': file_info['file_path'],
             'line_number': file_info['line_number'],
             'method_name': file_info['method_name']
         })
-        
-        # Standard logger automatically includes otelTraceID and otelSpanID 
+
+        # Standard logger automatically includes otelTraceID and otelSpanID
         # from shared/telemetry.py LoggingInstrumentor
         self.logger.log(level, full_message, extra=extra)
-        
+
         # Add span attributes if span exists
         span = trace.get_current_span()
         if span and span.is_recording():
+            span_attributes = {
+                "log.level": logging.getLevelName(level),
+                "log.message": message,
+                "log.logger": self.logger.name,
+                "service.name": self.service_name,
+                "file.path": file_info['file_path'],
+                "file.line": file_info['line_number'],
+                "file.method": file_info['method_name'],
+            }
+
+            # Add optional context IDs
+            if task_id:
+                span_attributes["task_id"] = task_id
+            if session_id:
+                span_attributes["session_id"] = session_id
+
             span.add_event(
                 name="log",
-                attributes={
-                    "log.level": logging.getLevelName(level),
-                    "log.message": message,
-                    "log.logger": self.logger.name,
-                    "service.name": self.service_name,
-                    "file.path": file_info['file_path'],
-                    "file.line": file_info['line_number'],
-                    "file.method": file_info['method_name'],
-                    **({"task_id": task_id} if task_id else {})
-                }
+                attributes=span_attributes
             )
     
     def info(self, message: str, **kwargs):

@@ -8,7 +8,7 @@ import asyncio
 from typing import Any, Dict, List, AsyncGenerator
 
 from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
-from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger, set_session_id
 
 from ..core.dependencies import ChatSessionDeps
 from .session_manager import session_state_manager
@@ -53,15 +53,18 @@ class StreamingService:
         return pydantic_messages
 
     async def stream_agent_response(
-        self, 
-        agent, 
-        message: str, 
-        session_id: str, 
+        self,
+        agent,
+        message: str,
+        session_id: str,
         user_email: str = "anonymous@example.com"
     ) -> AsyncGenerator[str, None]:
         """Stream agent response with proper formatting and error handling."""
-        
+
         try:
+            # Set session_id in OTEL context - all logs will now include session_id
+            set_session_id(session_id)
+
             logger.info(f"🚀 Starting agent stream for session: {session_id}")
             logger.info(f"📝 Message: {message[:100]}...")
 
