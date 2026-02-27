@@ -141,10 +141,16 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         conversation_history = []
         max_history_messages = 5  # Keep last 5 messages for token efficiency
 
-        for hist_msg in chat_history[-max_history_messages:]:
+        for i, hist_msg in enumerate(chat_history[-max_history_messages:]):
             try:
+                # Debug: Show what's actually in the message
+                if i == 0:
+                    logger.info(f"🔍 DEBUG: Raw chat_history[0] keys: {list(hist_msg.keys())}")
+                    logger.info(f"🔍 DEBUG: Raw chat_history[0]: {hist_msg}")
+                
                 role = hist_msg.get('role', '').lower()
-                content = hist_msg.get('content', '')
+                # Try both 'content' and 'message' fields (database uses 'content', but check what's available)
+                content = hist_msg.get('content', '') or hist_msg.get('message', '')
 
                 # Map database role names to Gemini API format
                 if role == 'user':
