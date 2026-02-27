@@ -226,7 +226,8 @@ class StreamingService:
                                                 "chunk_index": chunk_count
                                             }
                                             json_response = json.dumps(response_data, ensure_ascii=False)
-                                            yield f"data: {json_response}\n\n"
+                                            # yield f"data: {json_response}\n\n"
+ # ← COMMENTED OUT: Stream after enforcement instead
                                             logger.info(f"📦 Streamed text from assistant message: {len(text_content)} chars")
 
                                     # Track tool calls with detailed logging
@@ -326,6 +327,23 @@ class StreamingService:
                 json_response = json.dumps(error_response, ensure_ascii=False)
                 yield f"data: {json_response}\n\n"
                 return
+
+
+            # ================================================================
+            # STREAM THE RESPONSE (after enforcement check)
+            # ================================================================
+            # Now that enforcement has been applied (if needed), stream the response
+            if full_response:
+                logger.info("📤 Streaming final response (after enforcement check)...")
+                response_data = {
+                    "type": "chunk",
+                    "content": full_response,
+                    "session_id": session_id,
+                    "chunk_index": 1
+                }
+                json_response = json.dumps(response_data, ensure_ascii=False)
+                yield f"data: {json_response}\n\n"
+                logger.info(f"📦 Streamed final response: {len(full_response)} chars")
 
             # Save complete assistant response to database
             if full_response.strip():
