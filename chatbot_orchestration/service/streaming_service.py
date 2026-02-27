@@ -141,10 +141,20 @@ class StreamingService:
                 # - Enhance query and search KB
                 # - Use other tools
                 # - Respond from knowledge
+
+                # Enable extended thinking for debugging - we need to see WHY agent makes decisions
+                from google.genai import types
+                model_settings = types.GenerateContentConfig(
+                    thinking=types.Thinking(
+                        budget_tokens=10000  # Allow up to 10k tokens for reasoning
+                    )
+                )
+
                 async with agent.iter(
                     message,  # ✅ ORIGINAL message - agent decides what to do
                     message_history=pydantic_messages,  # ✅ Full conversation context
-                    deps=session_deps
+                    deps=session_deps,
+                    model_settings=model_settings  # 🧠 Enable extended thinking
                 ) as run:
                     logger.info("🚀 Starting agent iteration (streaming + tools)")
 
@@ -165,11 +175,13 @@ class StreamingService:
                         all_messages = run.all_messages()
                         logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
 
-                        # Log model reasoning if available
+                        # Log model reasoning if available (EXTENDED THINKING)
                         logger.info("=" * 100)
-                        logger.info("🧠 MODEL REASONING & DECISION PROCESS")
+                        logger.info("🧠 MODEL REASONING & DECISION PROCESS (EXTENDED THINKING)")
                         logger.info("=" * 100)
                         sys.stdout.flush()
+
+                        reasoning_found = False
                         for i, msg in enumerate(all_messages):
                             msg_type = type(msg).__name__
                             logger.info(f"📌 Message {i}: {msg_type}")
@@ -183,9 +195,17 @@ class StreamingService:
                                         # Log thinking/reasoning content if present
                                         if hasattr(part, 'content'):
                                             content = getattr(part, 'content', '')
-                                            # Truncate long reasoning for readability
-                                            preview = content[:300] if len(content) > 300 else content
-                                            logger.info(f"      [{part_type}] {preview}")
+                                            if part_type == 'ThinkingPart':
+                                                reasoning_found = True
+                                                logger.info(f"      🧠 THINKING PROCESS:")
+                                                logger.info(f"      {content}")
+                                            else:
+                                                # Truncate long reasoning for readability
+                                                preview = content[:300] if len(content) > 300 else content
+                                                logger.info(f"      [{part_type}] {preview}")
+
+                        if not reasoning_found:
+                            logger.warning("⚠️  No extended thinking captured - model may have skipped reasoning")
 
                             # Log tool usage decisions
                             if hasattr(msg, 'parts'):
