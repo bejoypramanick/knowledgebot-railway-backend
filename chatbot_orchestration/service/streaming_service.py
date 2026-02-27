@@ -6,7 +6,7 @@ Handles streaming responses and message formatting
 import json
 import asyncio
 from typing import Any, Dict, List, AsyncGenerator
-
+import sys
 from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
 from shared.otel_logger import get_otel_logger, set_session_id
 
@@ -93,6 +93,7 @@ class StreamingService:
                     logger.info(f"   Message {i+1} [{role}] (created: {timestamp})")
                     logger.info(f"      Preview: {content}..." if len(msg.get('content', '')) > 200 else f"      Content: {content}")
                 logger.info("=" * 100)
+                sys.stdout.flush()
 
             # Convert chat history to Pydantic AI format
             pydantic_messages = self._convert_db_messages_to_pydantic_ai(chat_history)
@@ -132,6 +133,7 @@ class StreamingService:
                 logger.info(f"   Available Tools: search_knowledge_base, query_railway_postgres, request_human_agent_connection")
                 logger.info(f"   Session Dependencies: Initialized")
                 logger.info("=" * 100)
+                sys.stdout.flush()
 
                 # Pass ORIGINAL message (NOT enriched) to agent
                 # Agent decides whether to:
@@ -167,6 +169,7 @@ class StreamingService:
                         logger.info("=" * 100)
                         logger.info("🧠 MODEL REASONING & DECISION PROCESS")
                         logger.info("=" * 100)
+                        sys.stdout.flush()
                         for i, msg in enumerate(all_messages):
                             msg_type = type(msg).__name__
                             logger.info(f"📌 Message {i}: {msg_type}")

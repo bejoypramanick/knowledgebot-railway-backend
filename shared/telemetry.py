@@ -59,9 +59,18 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
         
-    # Add StreamHandler (STDOUT)
+    # Add StreamHandler (STDOUT) with immediate flushing for real-time log visibility
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
+    stream_handler.setLevel(log_level)
+    # Override emit to flush immediately after each log (ensures real-time output during streaming)
+    original_emit = stream_handler.emit
+    def emit_with_flush(record):
+        original_emit(record)
+        # Flush immediately so logs appear in real-time during streaming/async operations
+        if stream_handler.stream:
+            stream_handler.stream.flush()
+    stream_handler.emit = emit_with_flush
     root_logger.addHandler(stream_handler)
     
     # Instrument standard logging
