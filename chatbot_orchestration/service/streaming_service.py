@@ -142,10 +142,22 @@ class StreamingService:
                 # - Use other tools
                 # - Respond from knowledge
 
+                # Enable extended thinking for debugging
+                from google.genai import types
+                from pydantic_ai.models.google import GoogleModelSettings
+
+                thinking_config = types.ThinkingConfigDict(
+                    include_thoughts=True
+                )
+                model_settings = GoogleModelSettings(
+                    google_thinking_config=thinking_config
+                )
+
                 async with agent.iter(
                     message,  # ✅ ORIGINAL message - agent decides what to do
                     message_history=pydantic_messages,  # ✅ Full conversation context
-                    deps=session_deps
+                    deps=session_deps,
+                    model_settings=model_settings  # 🧠 Enable extended thinking
                 ) as run:
                     logger.info("🚀 Starting agent iteration (streaming + tools)")
 
