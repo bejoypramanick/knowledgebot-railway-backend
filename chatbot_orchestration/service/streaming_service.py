@@ -313,14 +313,21 @@ class StreamingService:
                                     if isinstance(part, TextPart):
                                         text_content = getattr(part, 'content', '')
                                         logger.info(f"     🔍 Found TextPart: {len(text_content)} chars, preview: {text_content[:50]}...")
-                                        if text_content and full_response == "":
-                                            logger.info(f"     ✅ Setting full_response to this TextPart")
-                                            chunk_count += 1
-                                            full_response = text_content
-                                        elif text_content and full_response != "":
-                                            logger.warning(f"     ⚠️ DUPLICATE TextPart detected! Already have {len(full_response)} chars")
-                                            logger.warning(f"     ⚠️ This TextPart: {len(text_content)} chars")
-                                            logger.warning(f"     ⚠️ Might cause response duplication!")
+                                        if text_content:
+                                            if full_response == "":
+                                                logger.info(f"     ✅ Setting full_response to this TextPart (first response)")
+                                                chunk_count = 1
+                                                full_response = text_content
+                                            else:
+                                                # CRITICAL FIX: Use LAST TextPart, not first
+                                                # If agent generates multiple responses (e.g., cached then correct),
+                                                # the last one is most likely the correct/intended response
+                                                logger.warning(f"     ⚠️ MULTIPLE TextParts detected (agent generated multiple responses)")
+                                                logger.warning(f"     ⚠️ Previous response: {len(full_response)} chars")
+                                                logger.warning(f"     ⚠️ New response: {len(text_content)} chars")
+                                                logger.warning(f"     ⚠️ Using LAST response (replacing previous)")
+                                                full_response = text_content  # ← KEY FIX: Use the latest response
+                                                chunk_count += 1
 
                                     # Track tool calls with detailed logging
                                     elif hasattr(part, 'tool_name'):
