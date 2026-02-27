@@ -212,19 +212,39 @@ class StreamingService:
                         logger.info(f"✅ Agent completed with {tool_call_count} tool calls")
 
                         # ================================================================
-                        # MONITORING: Track if agent answered without tools for non-greeting
+                        # CRITICAL ENFORCEMENT: No tool calls for non-greeting queries
                         # ================================================================
-                        # Log warning if agent didn't use tools for substantive queries
+                        # Detect non-greeting queries answered without knowledge base search
                         if tool_call_count == 0 and len(message.strip()) > 10:
                             # Check if message is non-greeting
                             greeting_patterns = ["hi", "hello", "hey", "good morning", "good afternoon", "greetings"]
                             is_greeting = any(g in message.lower() for g in greeting_patterns)
 
+                            # Check if there's conversation history (follow-up query)
+                            has_history = len(pydantic_messages) > 0
+
                             if not is_greeting:
-                                logger.warning(f"⚠️ Agent answered without tools for non-greeting query")
-                                logger.warning(f"📝 Query: {message[:100]}")
-                                logger.warning(f"📚 History: {len(pydantic_messages)} messages")
-                                logger.warning(f"📄 Response length: {len(full_response)} chars")
+                                logger.error("=" * 100)
+                                logger.error("🚨 CRITICAL RAG ENFORCEMENT VIOLATION 🚨")
+                                logger.error("=" * 100)
+                                logger.error("RULE VIOLATED: Agent answered without calling search_knowledge_base")
+                                logger.error(f"Query Type: {'Follow-up with history' if has_history else 'First message'}")
+                                logger.error(f"Query: '{message}'")
+                                logger.error(f"Conversation History: {len(pydantic_messages)} messages")
+                                logger.error(f"Tool Calls Made: 0 (SHOULD BE 1+)")
+                                logger.error(f"Response Length: {len(full_response)} chars")
+                                logger.error("")
+                                logger.error("EXPECTED BEHAVIOR (from system prompt Rule 1 & 4):")
+                                logger.error("  1. Extract context from conversation history")
+                                logger.error("  2. Build context-enhanced query")
+                                logger.error(f"  3. Call search_knowledge_base with enhanced query")
+                                logger.error("  4. Answer ONLY using RAG results")
+                                logger.error("")
+                                if has_history:
+                                    logger.error("⚠️ This is a follow-up query with conversation context")
+                                    logger.error("⚠️ Agent MUST use search_knowledge_base for follow-ups per Rule 4")
+                                    logger.error("⚠️ Answering from training data = RULE VIOLATION")
+                                logger.error("=" * 100)
 
                     except Exception as result_error:
                         logger.error(f"❌ Error extracting results: {result_error}", exc_info=True)
