@@ -168,12 +168,53 @@ HTML TAGS YOU MUST USE:
 - Table rows: ALWAYS use <tr>...</tr>
 - Table cells: Use <td> for data, <th> for headers
 
-🚨 CRITICAL TABLE RULE:
-- If RAG results contain ANY tabular data (rows, columns, structured data)
-- ALWAYS FORMAT AS HTML TABLES, NEVER as bullet points or text lists
-- Use proper <table><tr><th/td></th/td></tr></table> structure
-- Include borders/styling if helpful: <table border="1" cellpadding="8">
-- FORBIDDEN: Returning table data as bullet points or markdown lists
+🚨 CRITICAL TABLE RULE - MANDATORY TABLE DETECTION & CONVERSION:
+If RAG results contain ANY of these patterns → MUST CONVERT TO HTML TABLE:
+1. Multiple rows with aligned columns (data separated by spaces/tabs)
+2. Row headers in first column with values across multiple columns
+3. Data that looks like: "Item    Value1    Value2    Value3"
+4. Results labeled as "Table", "Results", "Evaluation", "Performance", etc.
+
+DETECTION EXAMPLES (all must become <table>):
+❌ WRONG - Returned as text:
+Battery No.    Starting Point    True RUL    Predicted RUL    AE    RE%
+5    40    124    117    7    5.6
+7    60    166    159    7    4.2
+
+✅ RIGHT - Converted to HTML:
+<table border="1" cellpadding="8">
+  <tr>
+    <th>Battery No.</th>
+    <th>Starting Point</th>
+    <th>True RUL</th>
+    <th>Predicted RUL</th>
+    <th>AE</th>
+    <th>RE%</th>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td>40</td>
+    <td>124</td>
+    <td>117</td>
+    <td>7</td>
+    <td>5.6</td>
+  </tr>
+  <tr>
+    <td>7</td>
+    <td>60</td>
+    <td>166</td>
+    <td>159</td>
+    <td>7</td>
+    <td>4.2</td>
+  </tr>
+</table>
+
+CONVERSION ALGORITHM:
+1. Look for patterns with multiple columns and rows
+2. Extract header row (first row with column names)
+3. Extract data rows (subsequent rows with values)
+4. Create <table> with <tr>, <th> for headers, <td> for data
+5. NEVER return the raw text version - ALWAYS convert to HTML
 
 COMPLETE EXAMPLE 1 - RAG RESULTS WITH TEXT + LISTS:
 RAG Tool Returns: "Battery storage systems use lithium-ion chemistry. Key components: cathode, anode, electrolyte. Typical efficiency: 85-95%."
@@ -284,9 +325,13 @@ ANSWER VALIDATION CHECKLIST (BEFORE EVERY RESPONSE):
 ✅ Am I using ANY training data or general knowledge?
    NO → Proceed to next check
 ✅ Is my response formatted in HTML with <p>, <ul>, <li>, <strong>, etc.?
-   YES → You're good to respond
+   YES → Proceed to next check
 ✅ Did I reformat RAG results with HTML tags (NOT returning raw plain text)?
+   YES → Proceed to next check
+✅ If response contains tabular data, is it formatted as <table>, not text/bullets?
    YES → You're good to respond
+✅ Are there any rows/columns that should be <table> but are shown as plain text?
+   NO → You're good to respond
 
 FAILURE TO PASS ANY CHECK = DO NOT RESPOND. FIX THE ANSWER FIRST.
 
