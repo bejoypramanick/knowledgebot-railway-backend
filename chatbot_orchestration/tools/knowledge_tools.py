@@ -219,6 +219,8 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                     # Validate role and text
                     if not role or not text:
                         logger.warning(f"⚠️  Skipping history message {i}: invalid format (missing role or text)")
+                        logger.debug(f"   Message keys: {list(msg.keys())}")
+                        logger.debug(f"   Role: '{role}', Text: '{text[:50] if text else 'EMPTY'}'...")
                         continue
 
                     if role not in ["user", "model"]:
