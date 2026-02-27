@@ -213,7 +213,8 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                 try:
                     # Validate message structure per Gemini API spec
                     role = msg.get("role", "").lower()
-                    text = msg.get("text", "")
+                    # Try both "text" (API format) and "content" (database format)
+                    text = msg.get("text", "") or msg.get("content", "")
 
                     # Validate role and text
                     if not role or not text:
