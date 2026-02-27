@@ -115,11 +115,13 @@ class OpenTelemetryLogger:
 
         # Chat session context
         if session_id:
-            context_parts.append(f"session:{session_id[:8]}")
+            # Show more of the session ID for visibility (not just first 8 chars)
+            context_parts.append(f"session:{session_id[:16]}")
 
         # Task context
         if task_id:
-            context_parts.append(f"task:{task_id[:8]}")
+            # Show more of the task ID for visibility (not just first 8 chars)
+            context_parts.append(f"task:{task_id[:16]}")
 
         if context_parts:
             context_str = " ".join(context_parts)
