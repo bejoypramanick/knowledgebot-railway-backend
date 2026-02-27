@@ -330,7 +330,30 @@ class StreamingService:
 
 
             # ================================================================
-            # STREAM THE RESPONSE (after enforcement check)
+            # ================================================================
+            # STREAM THE RESPONSE IN CHUNKS (after enforcement check)
+            # ================================================================
+            # Now that enforcement has been applied (if needed), stream the response in chunks
+            if full_response:
+                logger.info("📤 Streaming final response in chunks (after enforcement check)...")
+                # Break response into chunks for streaming (500 chars per chunk for smooth experience)
+                chunk_size = 500
+                chunks = [full_response[i:i+chunk_size] for i in range(0, len(full_response), chunk_size)]
+                
+                for idx, chunk in enumerate(chunks, 1):
+                    if chunk.strip():  # Only stream non-empty chunks
+                        response_data = {
+                            "type": "chunk",
+                            "content": chunk,
+                            "session_id": session_id,
+                            "chunk_index": idx
+                        }
+                        json_response = json.dumps(response_data, ensure_ascii=False)
+                        yield f"data: {json_response}\n\n"
+                        chunk_count = idx
+                
+                logger.info(f"📦 Streamed final response in {len(chunks)} chunks ({len(full_response)} chars total)")
+
             # ================================================================
             # Now that enforcement has been applied (if needed), stream the response
             if full_response:
