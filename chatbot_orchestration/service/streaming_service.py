@@ -5,6 +5,7 @@ Handles streaming responses and message formatting
 
 import json
 import asyncio
+import os
 from typing import Any, Dict, List, AsyncGenerator
 import sys
 from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart
@@ -15,6 +16,9 @@ from .session_manager import session_state_manager
 from .agent_manager import agent_manager
 
 logger = get_otel_logger("streaming_service", "chatbot-orchestration")
+
+# Feature flags
+ENABLE_EXTENDED_THINKING = os.getenv("ENABLE_EXTENDED_THINKING", "false").lower() == "true"
 
 class StreamingService:
     """Handles streaming responses for the chatbot."""
@@ -207,23 +211,30 @@ class StreamingService:
                 # - Use other tools
                 # - Respond from knowledge
 
-                # Enable extended thinking for debugging
+                # Extended thinking configuration (flag-based)
                 from google.genai import types
                 from pydantic_ai.models.google import GoogleModelSettings
 
-                thinking_config = types.ThinkingConfigDict(
-                    include_thoughts=True
-                )
-                model_settings = GoogleModelSettings(
-                    google_thinking_config=thinking_config
-                )
+                model_settings = GoogleModelSettings()
+
+                if ENABLE_EXTENDED_THINKING:
+                    logger.info("🧠 Extended thinking ENABLED (via ENABLE_EXTENDED_THINKING env var)")
+                    thinking_config = types.ThinkingConfigDict(
+                        include_thoughts=True
+                    )
+                    model_settings = GoogleModelSettings(
+                        google_thinking_config=thinking_config
+                    )
+                else:
+                    logger.info("🧠 Extended thinking DISABLED (default - set ENABLE_EXTENDED_THINKING=true to enable)")
 
                 logger.info("=" * 100)
                 logger.info("📤 CALLING AGENT.ITER() WITH:")
                 logger.info(f"   Current message: '{message}'")
                 logger.info(f"   Message history length: {len(pydantic_messages)} messages")
                 logger.info(f"   System prompt injected: YES ✅ (fix for Pydantic AI gotcha)")
-                logger.info(f"   Extended thinking: ENABLED")
+                thinking_status = "ENABLED ✅" if ENABLE_EXTENDED_THINKING else "DISABLED (default)"
+                logger.info(f"   Extended thinking: {thinking_status}")
                 logger.info("=" * 100)
 
                 async with agent.iter(
@@ -295,10 +306,13 @@ class StreamingService:
                             logger.info(f"📌 Message {i}: {msg_type}")
 
                             if hasattr(msg, 'parts'):
-                                logger.info(f"   Has {len(msg.parts)} parts")
+                                text_parts = [p for p in msg.parts if isinstance(p, TextPart)]
+                                total_parts = len(msg.parts)
+                                logger.info(f"   Has {total_parts} total parts ({len(text_parts)} TextParts)")
+
                                 for j, part in enumerate(msg.parts):
                                     part_type = type(part).__name__
-                                    logger.info(f"     Part {j}: {part_type}")
+                                    logger.info(f"     Part {j}/{total_parts - 1}: {part_type}")
 
                                     # 🧠 LOG EXTENDED THINKING (if present)
                                     if part_type == 'ThinkingPart':
@@ -312,20 +326,26 @@ class StreamingService:
                                     # Extract text from TextPart
                                     if isinstance(part, TextPart):
                                         text_content = getattr(part, 'content', '')
-                                        logger.info(f"     🔍 Found TextPart: {len(text_content)} chars, preview: {text_content[:50]}...")
+                                        text_part_index = [p for p in msg.parts[:j+1] if isinstance(p, TextPart)].__len__()
+                                        is_last_text_part = text_part_index == len(text_parts)
+
+                                        logger.info(f"     🔍 TextPart {text_part_index}/{len(text_parts)}: {len(text_content)} chars")
+                                        logger.info(f"        Preview: {text_content[:80]}...")
+
                                         if text_content:
                                             if full_response == "":
-                                                logger.info(f"     ✅ Setting full_response to this TextPart (first response)")
+                                                logger.info(f"     ✅ [TextPart #{text_part_index}] Setting as full_response (FIRST TextPart)")
                                                 chunk_count = 1
                                                 full_response = text_content
                                             else:
                                                 # CRITICAL FIX: Use LAST TextPart, not first
                                                 # If agent generates multiple responses (e.g., cached then correct),
                                                 # the last one is most likely the correct/intended response
-                                                logger.warning(f"     ⚠️ MULTIPLE TextParts detected (agent generated multiple responses)")
-                                                logger.warning(f"     ⚠️ Previous response: {len(full_response)} chars")
-                                                logger.warning(f"     ⚠️ New response: {len(text_content)} chars")
-                                                logger.warning(f"     ⚠️ Using LAST response (replacing previous)")
+                                                logger.warning(f"     ⚠️ MULTIPLE TextParts detected!")
+                                                logger.warning(f"     ⚠️ [TextPart #{text_part_index}/{len(text_parts)}] New response: {len(text_content)} chars")
+                                                logger.warning(f"     ⚠️ Previous response was: {len(full_response)} chars")
+                                                logger.warning(f"     ⚠️ Using LAST TextPart (replacing previous)")
+                                                logger.warning(f"     ⚠️ Is this the LAST TextPart? {is_last_text_part}")
                                                 full_response = text_content  # ← KEY FIX: Use the latest response
                                                 chunk_count += 1
 
