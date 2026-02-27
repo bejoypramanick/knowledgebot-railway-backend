@@ -99,6 +99,24 @@ class StreamingService:
             pydantic_messages = self._convert_db_messages_to_pydantic_ai(chat_history)
             logger.info(f"✅ Converted {len(pydantic_messages)} messages to Pydantic AI format")
 
+            # 🔍 DEBUG: Log actual message history content
+            if pydantic_messages:
+                logger.info("=" * 100)
+                logger.info("🔍 DEBUG: MESSAGE HISTORY BEING PASSED TO AGENT")
+                logger.info("=" * 100)
+                for i, msg in enumerate(pydantic_messages):
+                    msg_type = type(msg).__name__
+                    logger.info(f"Message {i}: {msg_type}")
+                    if hasattr(msg, 'parts'):
+                        for j, part in enumerate(msg.parts):
+                            part_type = type(part).__name__
+                            part_content = getattr(part, 'content', '')[:100]
+                            logger.info(f"  Part {j} ({part_type}): {part_content}...")
+                logger.info("=" * 100)
+            else:
+                logger.warning("⚠️  WARNING: pydantic_messages is EMPTY!")
+                logger.warning("⚠️  No conversation history will be passed to model!")
+
             # Save user message to database
             try:
                 await session_state_manager.save_message(
@@ -152,6 +170,13 @@ class StreamingService:
                 model_settings = GoogleModelSettings(
                     google_thinking_config=thinking_config
                 )
+
+                logger.info("=" * 100)
+                logger.info("📤 CALLING AGENT.ITER() WITH:")
+                logger.info(f"   Current message: '{message}'")
+                logger.info(f"   Message history length: {len(pydantic_messages)} messages")
+                logger.info(f"   Extended thinking: ENABLED")
+                logger.info("=" * 100)
 
                 async with agent.iter(
                     message,  # ✅ ORIGINAL message - agent decides what to do
