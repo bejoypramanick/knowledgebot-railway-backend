@@ -131,15 +131,9 @@ class AgentManager:
         # Create agent (caching will be enabled at runtime via model_settings)
         logger.info("🚀 Creating agent for session")
         try:
-            # Create model with extended thinking enabled for debugging
-            from google.genai import types
-            google_model = GoogleModel(
-                MODEL_NAME,
-                config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig()
-                )
-            )
-            logger.info("✅ GoogleModel created with extended thinking enabled")
+            # Create model
+            google_model = GoogleModel(MODEL_NAME)
+            logger.info("✅ GoogleModel created")
 
             # Create agent with system prompt and tools
             # Use end_strategy='exhaustive' to ensure ALL tools execute, not just first output

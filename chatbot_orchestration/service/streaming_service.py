@@ -166,37 +166,43 @@ class StreamingService:
                         all_messages = run.all_messages()
                         logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
 
-                        # Log model reasoning if available (EXTENDED THINKING)
+                        # Log model decision process
                         logger.info("=" * 100)
-                        logger.info("🧠 MODEL REASONING & DECISION PROCESS (EXTENDED THINKING)")
+                        logger.info("🔍 MODEL DECISION PROCESS & TOOL USAGE")
                         logger.info("=" * 100)
+                        logger.info(f"📝 Input message: '{message}'")
+                        logger.info(f"📚 Conversation history length: {len(pydantic_messages)} messages")
+                        logger.info(f"🔧 Tools available: search_knowledge_base, query_railway_postgres, request_human_agent_connection")
                         sys.stdout.flush()
 
-                        reasoning_found = False
+                        tool_calls_made = []
                         for i, msg in enumerate(all_messages):
                             msg_type = type(msg).__name__
                             logger.info(f"📌 Message {i}: {msg_type}")
 
-                            # Log model request details (shows model's decision making)
-                            if hasattr(msg, '__class__') and 'ModelRequest' in msg_type:
-                                if hasattr(msg, 'parts'):
-                                    logger.info(f"   🤔 Model reasoning/decision:")
-                                    for part in msg.parts:
-                                        part_type = type(part).__name__
-                                        # Log thinking/reasoning content if present
-                                        if hasattr(part, 'content'):
-                                            content = getattr(part, 'content', '')
-                                            if part_type == 'ThinkingPart':
-                                                reasoning_found = True
-                                                logger.info(f"      🧠 THINKING PROCESS:")
-                                                logger.info(f"      {content}")
-                                            else:
-                                                # Truncate long reasoning for readability
-                                                preview = content[:300] if len(content) > 300 else content
-                                                logger.info(f"      [{part_type}] {preview}")
+                            # Log tool calls
+                            if hasattr(msg, 'parts'):
+                                for j, part in enumerate(msg.parts):
+                                    part_type = type(part).__name__
 
-                        if not reasoning_found:
-                            logger.warning("⚠️  No extended thinking captured - model may have skipped reasoning")
+                                    # Detect tool calls
+                                    if hasattr(part, 'tool_name'):
+                                        tool_name = getattr(part, 'tool_name', 'unknown')
+                                        tool_calls_made.append(tool_name)
+                                        logger.info(f"   ✅ Tool called: {tool_name}")
+
+                                    # Log text content
+                                    elif part_type == 'TextPart' and hasattr(part, 'content'):
+                                        content = getattr(part, 'content', '')
+                                        preview = content[:200] if len(content) > 200 else content
+                                        logger.info(f"   📝 {part_type}: {preview}...")
+
+                        logger.info("=" * 100)
+                        logger.info(f"📊 SUMMARY: {len(tool_calls_made)} tools called: {tool_calls_made if tool_calls_made else 'NONE'}")
+                        if len(tool_calls_made) == 0 and len(pydantic_messages) > 0:
+                            logger.warning("⚠️  WARNING: This is a follow-up (history exists) but NO tools were called!")
+                            logger.warning("⚠️  Expected: search_knowledge_base should have been called")
+                        logger.info("=" * 100)
 
                             # Log tool usage decisions
                             if hasattr(msg, 'parts'):
