@@ -294,10 +294,10 @@ class StreamingService:
                                     
                                     try:
                                         # Import search_knowledge_base if not already imported
-                                        from ..tools.knowledge_tools import search_knowledge_base
+                                        from ..tools.knowledge_tools import _perform_rag_search
                                         
                                         # Perform RAG search with the original user query
-                                        forced_rag_results = await search_knowledge_base(session_deps, message)
+                                        forced_rag_results = await _perform_rag_search(session_id, message)
                                         
                                         logger.warning(f"✅ Forced RAG search returned: {len(forced_rag_results)} characters")
                                         logger.warning(f"   Replacing agents training-data response with RAG results")
