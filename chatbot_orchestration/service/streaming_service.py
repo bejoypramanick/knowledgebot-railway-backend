@@ -216,18 +216,6 @@ class StreamingService:
                             logger.warning("⚠️  Expected: search_knowledge_base should have been called")
                         logger.info("=" * 100)
 
-                            # Log tool usage decisions
-                            if hasattr(msg, 'parts'):
-                                for part in msg.parts:
-                                    if hasattr(part, 'tool_name'):
-                                        tool_name = getattr(part, 'tool_name', 'unknown')
-                                        tool_args = getattr(part, 'args', {})
-                                        logger.info(f"   🔧 Model decision: Call {tool_name}")
-                                        logger.info(f"      Why: To search knowledge base for enhanced context")
-                                        logger.info(f"      Query: {tool_args.get('query', 'N/A')[:100]}")
-
-                        logger.info("=" * 100)
-
                         # Extract assistant response and tool calls
                         for i, msg in enumerate(all_messages):
                             msg_type = type(msg).__name__
