@@ -145,9 +145,7 @@ class StreamingService:
                 # Enable extended thinking for debugging - we need to see WHY agent makes decisions
                 from google.genai import types
                 model_settings = types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(
-                        budget_tokens=10000  # Allow up to 10k tokens for reasoning
-                    )
+                    thinking_config=types.ThinkingConfig()  # Enable thinking with default settings
                 )
 
                 async with agent.iter(
