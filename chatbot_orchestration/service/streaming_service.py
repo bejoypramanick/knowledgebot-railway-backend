@@ -7,7 +7,7 @@ import json
 import asyncio
 from typing import Any, Dict, List, AsyncGenerator
 import sys
-from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart
 from shared.otel_logger import get_otel_logger, set_session_id
 
 from ..core.dependencies import ChatSessionDeps
@@ -99,6 +99,32 @@ class StreamingService:
             pydantic_messages = self._convert_db_messages_to_pydantic_ai(chat_history)
             logger.info(f"✅ Converted {len(pydantic_messages)} messages to Pydantic AI format")
 
+            # 🚨 PRE-FLIGHT SYSTEM PROMPT INJECTION 🚨
+            # Fix for Pydantic AI gotcha: when message_history is provided, system_prompt is discarded
+            # Solution: Prepend system prompt to message_history so it's included in model context
+            if pydantic_messages:
+                logger.info("=" * 100)
+                logger.info("🚨 PRE-FLIGHT SYSTEM PROMPT INJECTION (Pydantic AI Gotcha Fix)")
+                logger.info("=" * 100)
+                logger.info("Issue: Pydantic AI discards Agent.system_prompt when message_history exists")
+                logger.info("Solution: Prepend system prompt as first message in history")
+                logger.info("=" * 100)
+
+                # Get system prompt from agent
+                from ..agent.prompt import get_system_prompt
+                system_prompt_text = get_system_prompt(custom_prompt=None, response_policy=None)
+
+                # Create SystemPromptPart message
+                system_prompt_msg = ModelRequest(parts=[SystemPromptPart(content=system_prompt_text)])
+
+                # Prepend to message history (CRITICAL: must be first message)
+                pydantic_messages.insert(0, system_prompt_msg)
+                logger.info(f"✅ System prompt prepended to message_history")
+                logger.info(f"   Now message_history has {len(pydantic_messages)} messages (including system prompt)")
+                logger.info(f"   Message 0: System Prompt")
+                logger.info(f"   Message 1+: Conversation history")
+                logger.info("=" * 100)
+
             # 🔍 DEBUG: Log actual message history content
             if pydantic_messages:
                 logger.info("=" * 100)
@@ -116,6 +142,7 @@ class StreamingService:
             else:
                 logger.warning("⚠️  WARNING: pydantic_messages is EMPTY!")
                 logger.warning("⚠️  No conversation history will be passed to model!")
+
 
             # Save user message to database
             try:
@@ -175,11 +202,12 @@ class StreamingService:
                 logger.info("📤 CALLING AGENT.ITER() WITH:")
                 logger.info(f"   Current message: '{message}'")
                 logger.info(f"   Message history length: {len(pydantic_messages)} messages")
+                logger.info(f"   System prompt injected: YES ✅ (fix for Pydantic AI gotcha)")
                 logger.info(f"   Extended thinking: ENABLED")
                 logger.info("=" * 100)
 
                 async with agent.iter(
-                    message,  # ✅ ORIGINAL message - agent decides what to do
+                    message,  # ✅ ORIGINAL message
                     message_history=pydantic_messages,  # ✅ Full conversation context
                     deps=session_deps,
                     model_settings=model_settings  # 🧠 Enable extended thinking
