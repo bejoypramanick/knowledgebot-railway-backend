@@ -280,6 +280,35 @@ class StreamingService:
                                     logger.error("⚠️ This is a follow-up query with conversation context")
                                     logger.error("⚠️ Agent MUST use search_knowledge_base for follow-ups per Rule 4")
                                     logger.error("⚠️ Answering from training data = RULE VIOLATION")
+
+                                # ================================================================
+                                # HARD ENFORCEMENT: Force RAG search if agent didnt but should have
+                                # ================================================================
+                                # If agent made no tool calls AND there is history AND its not a greeting
+                                # → FORCE a RAG search call as failsafe
+                                if tool_call_count == 0 and has_history and not is_greeting:
+                                    logger.warning("")
+                                    logger.warning("🔧 ACTIVATING HARD RAG ENFORCEMENT FAILSAFE")
+                                    logger.warning(f"   Forcing search_knowledge_base call with user query: '{message[:100]}...'")
+                                    
+                                    try:
+                                        # Import search_knowledge_base if not already imported
+                                        from ..tools.knowledge_tools import search_knowledge_base
+                                        
+                                        # Perform RAG search with the original user query
+                                        forced_rag_results = await search_knowledge_base(session_deps, message)
+                                        
+                                        logger.warning(f"✅ Forced RAG search returned: {len(forced_rag_results)} characters")
+                                        logger.warning(f"   Replacing agents training-data response with RAG results")
+                                        
+                                        # Override the response with RAG results
+                                        full_response = forced_rag_results
+                                        logger.warning("✅ HARD ENFORCEMENT APPLIED: Response replaced with RAG results")
+                                        logger.warning("=" * 100)
+                                        
+                                    except Exception as enforce_error:
+                                        logger.error(f"❌ Hard enforcement RAG search failed: {enforce_error}")
+                                        logger.warning("   Proceeding with agent response (not ideal)")
                                 logger.error("=" * 100)
 
                     except Exception as result_error:
