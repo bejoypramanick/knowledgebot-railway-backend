@@ -251,7 +251,8 @@ class StreamingService:
                         # CRITICAL ENFORCEMENT: No tool calls for non-greeting queries
                         # ================================================================
                         # Detect non-greeting queries answered without knowledge base search
-                        if tool_call_count == 0 and len(message.strip()) > 10:
+                        # ENFORCEMENT: Check for violations (including short follow-up queries)
+                        if tool_call_count == 0 and message.strip():  # Any non-empty message
                             # Check if message is non-greeting
                             greeting_patterns = ["hi", "hello", "hey", "good morning", "good afternoon", "greetings"]
                             is_greeting = any(g in message.lower() for g in greeting_patterns)
