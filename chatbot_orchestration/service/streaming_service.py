@@ -80,6 +80,20 @@ class StreamingService:
             chat_history = await session_state_manager.get_chat_history(session_id)
             logger.info(f"✅ Retrieved {len(chat_history)} messages from chat history")
 
+            # Log detailed chat history
+            if chat_history:
+                logger.info("=" * 100)
+                logger.info("📚 CHAT MESSAGE HISTORY (INPUT TO AGENT)")
+                logger.info(f"   Total messages in history: {len(chat_history)}")
+                logger.info("-" * 100)
+                for i, msg in enumerate(chat_history):
+                    role = msg.get('role', 'unknown').upper()
+                    content = msg.get('content', '')[:200]  # Show first 200 chars
+                    timestamp = msg.get('created_at', 'N/A')
+                    logger.info(f"   Message {i+1} [{role}] (created: {timestamp})")
+                    logger.info(f"      Preview: {content}..." if len(msg.get('content', '')) > 200 else f"      Content: {content}")
+                logger.info("=" * 100)
+
             # Convert chat history to Pydantic AI format
             pydantic_messages = self._convert_db_messages_to_pydantic_ai(chat_history)
             logger.info(f"✅ Converted {len(pydantic_messages)} messages to Pydantic AI format")
@@ -108,6 +122,16 @@ class StreamingService:
                 logger.info(f"📝 Agent will analyze: '{message[:100]}...'")
                 logger.info(f"📚 Agent has access to {len(pydantic_messages)} messages of conversation history")
                 logger.info(f"🔧 Agent tools: search_knowledge_base (with auto-context), query_railway_postgres, request_human_agent_connection")
+
+                # Log what the agent is receiving
+                logger.info("=" * 100)
+                logger.info("🤖 AGENT INPUT SUMMARY")
+                logger.info(f"   Current User Message: {message[:150]}...")
+                logger.info(f"   Message History Length: {len(pydantic_messages)} messages")
+                logger.info(f"   Context Window: Full conversation context provided")
+                logger.info(f"   Available Tools: search_knowledge_base, query_railway_postgres, request_human_agent_connection")
+                logger.info(f"   Session Dependencies: Initialized")
+                logger.info("=" * 100)
 
                 # Pass ORIGINAL message (NOT enriched) to agent
                 # Agent decides whether to:
@@ -221,17 +245,22 @@ class StreamingService:
             if full_response.strip():
                 # Log the complete response with grounding truth and metadata
                 logger.info("=" * 100)
-                logger.info("📝 COMPLETE AGENT RESPONSE WITH GROUNDING TRUTH")
+                logger.info("📝 GEMINI RESPONSE WITH GROUNDING TRUTH")
                 logger.info(f"   Session ID: {session_id}")
+                logger.info(f"   User Query: {message[:100]}...")
                 logger.info(f"   User Email: {user_email}")
                 logger.info(f"   Total Tool Calls: {tool_call_count}")
                 logger.info(f"   Response Length: {len(full_response)} characters")
                 logger.info(f"   Response Chunks: {chunk_count}")
-                logger.info("   Grounding Truth: Response generated using Gemini FileStore search results")
-                logger.info("   Data Sources: Gemini FileStore knowledge base")
-                logger.info("   Response Type: HTML formatted with citations")
                 logger.info("-" * 100)
-                logger.info("📋 FULL RESPONSE CONTENT:")
+                logger.info("🔗 GROUNDING TRUTH & DATA SOURCES:")
+                logger.info("   Source: Gemini FileStore (1.5 Flash model)")
+                logger.info("   Search Type: Knowledge base with file retrieval")
+                logger.info("   Processing: Raw docling output formatted by Gemini")
+                logger.info("   Response Format: HTML with proper citations")
+                logger.info("   Data Quality: Grounded in uploaded knowledge base files")
+                logger.info("-" * 100)
+                logger.info("📋 COMPLETE GEMINI RESPONSE CONTENT:")
                 logger.info(full_response)
                 logger.info("=" * 100)
                 
