@@ -227,6 +227,15 @@ class StreamingService:
                                     part_type = type(part).__name__
                                     logger.info(f"     Part {j}: {part_type}")
 
+                                    # 🧠 LOG EXTENDED THINKING (if present)
+                                    if part_type == 'ThinkingPart':
+                                        thinking_content = getattr(part, 'content', '')
+                                        logger.info("=" * 100)
+                                        logger.info("🧠 MODEL EXTENDED THINKING (Reasoning Process)")
+                                        logger.info("=" * 100)
+                                        logger.info(thinking_content)
+                                        logger.info("=" * 100)
+
                                     # Extract text from TextPart
                                     if isinstance(part, TextPart):
                                         text_content = getattr(part, 'content', '')
