@@ -282,7 +282,20 @@ async def scrape_website_async_endpoint(request: Request = None):
             logger.info(f"✅ Website scraping queued: {result.get('task_id')}")
             return result
         else:
-            raise HTTPException(status_code=500, detail=result.get('error', 'Failed to queue scraping'))
+            # Check if this is a duplicate error (409 Conflict) vs other errors (500)
+            if 'already being crawled' in result.get('error', '').lower() or 'duplicate' in result.get('error', '').lower():
+                logger.warning(f"⚠️  Duplicate website detected: {result.get('error')}")
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "success": False,
+                        "error": result.get('error'),
+                        "duplicate_website_id": result.get('duplicate_website_id'),
+                        "reason": "website_duplicate"
+                    }
+                )
+            else:
+                raise HTTPException(status_code=500, detail=result.get('error', 'Failed to queue scraping'))
                 
     except HTTPException:
         raise
