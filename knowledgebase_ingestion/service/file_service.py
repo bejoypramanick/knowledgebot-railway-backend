@@ -38,14 +38,22 @@ class FileService:
             from shared.db import get_db_connection
 
             logger.info(f"🔍 [CHECK_DUPLICATE] Checking for duplicate: filename='{original_filename}', hash='{sha256_hash}'")
+            logger.info(f"🔍 [CHECK_DUPLICATE] Hash is None: {sha256_hash is None}, Hash is empty: {not sha256_hash}")
 
             async with get_db_connection() as conn:
+                logger.info(f"✅ [DB_CONNECTION] Got database connection")
+
                 # Check by filename first - only consider actively processed files
                 logger.info(f"🔍 [FILENAME_CHECK] Searching for filename match: {original_filename}")
-                existing_by_name = await conn.fetchrow(
-                    "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
-                    original_filename
-                )
+                try:
+                    existing_by_name = await conn.fetchrow(
+                        "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
+                        original_filename
+                    )
+                    logger.info(f"🔍 [FILENAME_CHECK_RESULT] Query returned: {existing_by_name}")
+                except Exception as e:
+                    logger.error(f"❌ [FILENAME_CHECK_ERROR] Database error: {e}", exc_info=True)
+                    raise
                 if existing_by_name:
                     logger.info(f"✅ [FILENAME_MATCH] Found by filename: ID={existing_by_name['id']}")
                     return {
@@ -64,22 +72,27 @@ class FileService:
                 # Check by hash if provided - detects same content with different filename
                 if sha256_hash:
                     logger.info(f"🔍 [HASH_CHECK] Searching for hash match: {sha256_hash}")
+                    try:
+                        # Debug: Check all files with this exact hash (regardless of status)
+                        logger.info(f"🔍 [HASH_CHECK] Running debug query for all files with this hash...")
+                        all_with_hash = await conn.fetch(
+                            "SELECT id, original_filename, sha256_hash, processing_status FROM file_uploads WHERE sha256_hash = $1 ORDER BY created_at DESC",
+                            sha256_hash
+                        )
+                        logger.info(f"📊 [HASH_DEBUG] Files with this hash (ALL statuses): {len(all_with_hash)}")
+                        for record in all_with_hash:
+                            logger.info(f"   ID={record['id']}, filename={record['original_filename']}, status={record['processing_status']}")
 
-                    # Debug: Check all files with this exact hash (regardless of status)
-                    all_with_hash = await conn.fetch(
-                        "SELECT id, original_filename, sha256_hash, processing_status FROM file_uploads WHERE sha256_hash = $1 ORDER BY created_at DESC",
-                        sha256_hash
-                    )
-                    logger.info(f"📊 [HASH_DEBUG] Files with this hash (ALL statuses): {len(all_with_hash)}")
-                    for record in all_with_hash:
-                        logger.info(f"   ID={record['id']}, filename={record['original_filename']}, status={record['processing_status']}")
-
-                    # Now check only active files
-                    existing_by_hash = await conn.fetchrow(
-                        "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
-                        sha256_hash
-                    )
-                    logger.info(f"📊 [HASH_CHECK_RESULT] Active file query returned: {existing_by_hash}")
+                        # Now check only active files
+                        logger.info(f"🔍 [HASH_CHECK] Running query for active files only...")
+                        existing_by_hash = await conn.fetchrow(
+                            "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
+                            sha256_hash
+                        )
+                        logger.info(f"📊 [HASH_CHECK_RESULT] Active file query returned: {existing_by_hash}")
+                    except Exception as hash_err:
+                        logger.error(f"❌ [HASH_CHECK_ERROR] Database error during hash check: {hash_err}", exc_info=True)
+                        raise
 
                     if existing_by_hash:
                         logger.info(f"✅ [HASH_MATCH] Found by hash: ID={existing_by_hash['id']}, filename={existing_by_hash['original_filename']}")
