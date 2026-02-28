@@ -234,7 +234,9 @@ async def delete_web_item_endpoint(website_id: str, request: Request = None, har
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ [WEBSITE_DELETE_ERROR] Error deleting website {website_id}: {e}", exc_info=True)
+        import traceback
+        logger.error(f"❌ [WEBSITE_DELETE_ERROR] Error deleting website {website_id}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

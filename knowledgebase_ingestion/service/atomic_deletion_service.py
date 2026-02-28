@@ -146,8 +146,8 @@ class AtomicDeletionService:
                         # Step 1: Get website details and lock the row
                         website_record = await conn.fetchrow("""
                             SELECT id, original_url, celery_task_id, processing_status,
-                                   gemini_file_name, gemini_file_uri, s3_key
-                            FROM scraped_websites 
+                                   gemini_file_name, gemini_file_uri
+                            FROM scraped_websites
                             WHERE id = $1
                             FOR UPDATE
                         """, website_id)
@@ -162,7 +162,6 @@ class AtomicDeletionService:
                         logger.info(f"   Status: {website_record['processing_status']}")
                         logger.info(f"   Celery Task ID: {website_record['celery_task_id']}")
                         logger.info(f"   Gemini File: {website_record['gemini_file_name']}")
-                        logger.info(f"   S3 Key: {website_record['s3_key']}")
                         
                         # Step 2: Cancel Celery task if processing
                         celery_task_id = website_record['celery_task_id']
@@ -179,20 +178,13 @@ class AtomicDeletionService:
                             )
                             span.set_attribute("gemini_deleted", str(gemini_deleted))
                         
-                        # Step 4: Delete from S3
-                        s3_deleted = False
-                        if website_record['s3_key']:
-                            s3_deleted = await self._delete_from_s3(website_record['s3_key'])
-                            span.set_attribute("s3_deleted", str(s3_deleted))
-                        
-                        # Step 5: Mark as deleted in database
+                        # Step 4: Mark as deleted in database
                         await conn.execute("""
-                            UPDATE scraped_websites 
+                            UPDATE scraped_websites
                             SET processing_status = 'deleted',
                                 gemini_file_name = NULL,
                                 gemini_file_uri = NULL,
                                 gemini_state = 'deleted',
-                                s3_key = NULL,
                                 updated_at = NOW(),
                                 error_message = 'Atomically deleted at ' || NOW()::text
                             WHERE id = $1
@@ -200,15 +192,13 @@ class AtomicDeletionService:
                         
                         logger.info(f"✅ [ATOMIC_DELETE] Website {website_id} deleted successfully")
                         logger.info(f"   Gemini deleted: {gemini_deleted}")
-                        logger.info(f"   S3 deleted: {s3_deleted}")
-                        
+
                         return {
                             "success": True,
                             "message": "Website deleted atomically with complete cleanup",
                             "website_id": str(website_id),
                             "celery_task_cancelled": bool(celery_task_id),
-                            "gemini_deleted": gemini_deleted,
-                            "s3_deleted": s3_deleted
+                            "gemini_deleted": gemini_deleted
                         }
                         
             except Exception as e:
