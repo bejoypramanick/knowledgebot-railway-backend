@@ -608,9 +608,17 @@ async def upload_file_async(
 
             # Calculate file hash FIRST
             logger.info("🔐 [HASH_CALCULATION] Calculating file hash")
-            from knowledgebase_ingestion.utils.hash import calculate_file_hash
-            file_sha256 = await calculate_file_hash(file_bytes)
-            logger.info(f"✅ [HASH_CALCULATED] SHA256: {file_sha256}")
+            file_sha256 = None
+            try:
+                from knowledgebase_ingestion.utils.hash import calculate_file_hash
+                file_sha256 = await calculate_file_hash(file_bytes)
+                logger.info(f"✅ [HASH_CALCULATED] SHA256: {file_sha256}")
+                if not file_sha256:
+                    logger.warning(f"⚠️ [HASH_CALCULATION] Hash calculation returned empty/None value")
+            except Exception as hash_err:
+                logger.error(f"❌ [HASH_CALCULATION] Failed to calculate hash: {hash_err}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
 
             # Check for duplicates (by filename and hash)
             logger.info("🔍 [DUPLICATE_CHECK] Checking for duplicate files...")
