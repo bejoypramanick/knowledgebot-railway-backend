@@ -78,8 +78,12 @@ class FileService:
             logger.warning(f"Error checking for duplicate file: {e}")
             return None
 
-    async def delete_existing_file_record(self, db_id: str):
-        """Delete an existing file record from both Gemini and database."""
+    async def delete_existing_file_record(self, db_id: str) -> bool:
+        """Delete an existing file record from both Gemini and database.
+
+        Returns:
+            bool: True if deletion succeeded, False otherwise
+        """
         try:
             from shared.db import get_db_connection
             from knowledgebase_ingestion.core.ai import get_genai_client
@@ -107,11 +111,17 @@ class FileService:
                     except Exception as gemini_error:
                         logger.warning(f"⚠️ Could not delete from Gemini (may already be deleted): {gemini_error}")
 
-                # Then delete from database
-                await conn.execute("DELETE FROM file_uploads WHERE id = $1", numeric_id)
-                logger.info(f"✅ Deleted old file record from database: {db_id}")
+                # Then mark as deleted in database (soft delete instead of hard delete)
+                # This preserves audit trail and prevents orphaned references
+                await conn.execute(
+                    "UPDATE file_uploads SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
+                    numeric_id
+                )
+                logger.info(f"✅ Marked old file record as deleted in database: {db_id}")
+                return True
         except Exception as e:
             logger.error(f"❌ Error deleting existing file record: {e}")
+            return False
 
     async def get_admin_user_role_id(self, user_email: str) -> Optional[int]:
         """Get user_role_id for admin role only - only admins can upload files
@@ -1004,13 +1014,14 @@ class FileService:
                 else:
                     # Delete existing file from both Gemini and DB
                     logger.info(f"🔄 Replacing existing file {original_filename} (ID: {existing_file['id']}, match_type={match_type})")
-                    try:
-                        await self.delete_existing_file_record(existing_file['id'])
+                    deletion_success = await self.delete_existing_file_record(existing_file['id'])
+
+                    if deletion_success:
                         logger.info(f"✅ Successfully deleted existing file {original_filename} from Gemini and DB")
                         return {"allow": True, "reason": "replaced", "match_type": match_type}
-                    except Exception as delete_error:
-                        logger.error(f"❌ Failed to delete existing file during replacement: {delete_error}")
-                        return {"allow": False, "reason": "replacement_failed", "detail": f"Could not delete existing file: {delete_error}"}
+                    else:
+                        logger.error(f"❌ Failed to delete existing file during replacement")
+                        return {"allow": False, "reason": "replacement_failed", "detail": f"Could not delete existing file with ID {existing_file['id']}"}
             logger.info(f"✅ No duplicates found for {original_filename}, allowing new upload")
             return {"allow": True, "reason": "new_file"}
         except Exception as e:
