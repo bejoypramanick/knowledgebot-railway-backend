@@ -193,6 +193,102 @@ curl -X POST http://localhost:8000/api/v1/knowledgebase/files/upload/async \
 
 ---
 
+## 🌐 API Response - Website Duplicates
+
+**Status Code**: 409 Conflict
+
+```json
+{
+  "success": false,
+  "error": "Website is already being crawled or has been crawled",
+  "duplicate_website_id": "123",
+  "duplicate_url": "https://example.com",
+  "duplicate_status": "completed",
+  "recommendation": "Set replace_existing=true to replace it"
+}
+```
+
+**Status Code**: 200 OK (No Duplicate)
+
+```json
+{
+  "success": true,
+  "website_id": "456",
+  "status": "queued",
+  "message": "Website queued for scraping",
+  "pages_discovered": 0,
+  "pages_completed": 0
+}
+```
+
+---
+
+## 📝 Website Duplicate Detection Examples
+
+### Example 1: Crawl Duplicate Website
+
+```bash
+# First crawl
+curl -X POST http://localhost:8000/api/v1/knowledgebase/webcrawl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "max_depth": 2
+  }'
+
+# Response: 200 OK, website_id=123
+
+# Second crawl (same URL)
+curl -X POST http://localhost:8000/api/v1/knowledgebase/webcrawl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "max_depth": 2
+  }'
+
+# Response: 409 Conflict
+{
+  "error": "Website is already being crawled or has been crawled",
+  "duplicate_website_id": "123",
+  "duplicate_status": "completed"
+}
+```
+
+### Example 2: URL Variations (All Same Website)
+
+```bash
+# These URLs are considered DUPLICATES (same website):
+curl -X POST .../webcrawl -d '{"url": "https://example.com"}'
+curl -X POST .../webcrawl -d '{"url": "https://example.com/"}'  # Trailing slash
+curl -X POST .../webcrawl -d '{"url": "HTTPS://EXAMPLE.COM"}'   # Case variation
+curl -X POST .../webcrawl -d '{"url": "https://example.com?utm_source=123"}'  # Query params
+
+# All return: 409 Conflict with same duplicate_website_id
+```
+
+### Example 3: Override Duplicate
+
+```bash
+# Crawl same URL again, force re-crawl
+curl -X POST http://localhost:8000/api/v1/knowledgebase/webcrawl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://example.com",
+    "max_depth": 2,
+    "replace_existing": true
+  }'
+
+# Response: 200 OK
+{
+  "success": true,
+  "website_id": "457",  # NEW website_id
+  "status": "queued"
+  // Old website (ID: 123) automatically marked as deleted
+}
+```
+
+---
+
 ## 🗂️ Database Implementation
 
 ### Hash Storage
@@ -226,28 +322,45 @@ LIMIT 1;
 
 ---
 
-## 🎯 Upcoming: Phase 2 - Website/Webpage Duplicates
+## ✅ Phase 2: Website/Webpage/Sitemap Duplicates (IMPLEMENTED)
 
-### What's Planned
+### How It Works
 
-1. **URL-based Detection** (Already Implemented):
-   - Detect duplicate URLs
-   - Return `duplicate_website_id` on conflict
+**Detection Method**: URL-based comparison (already implemented)
 
-2. **Content-based Detection** (Planned):
-   - Hash extracted text content
-   - Detect same content under different URLs
-   - Handle website mirrors, CDN variations
+```
+1. User submits URL to crawl
+   ↓
+2. Normalize URL (lowercase, remove trailing slash, strip query params)
+   ↓
+3. Check if URL already exists in active crawls
+   ↓
+4. If duplicate found:
+   - If replace_existing=false: Return 409 Conflict, ask user
+   - If replace_existing=true: Mark old crawl as deleted, start new crawl
+   ↓
+5. If no duplicate: Create new website record and start crawling
+```
 
-3. **Database Changes**:
-   ```sql
-   ALTER TABLE scraped_websites
-   ADD COLUMN content_hash VARCHAR(64) NULL,
-   ADD COLUMN content_hash_type VARCHAR(20) DEFAULT 'text';
+### URL Normalization
 
-   CREATE INDEX idx_scraped_websites_content_hash
-   ON scraped_websites(content_hash);
-   ```
+URLs are normalized before comparison to handle variations:
+
+| Original URL | Normalized | Match |
+|---|---|---|
+| `https://example.com` | `https://example.com` | Same |
+| `https://example.com/` | `https://example.com` | Same (trailing slash) |
+| `HTTPS://EXAMPLE.COM` | `https://example.com` | Same (case-insensitive) |
+| `https://example.com?utm=123` | `https://example.com` | Same (query params ignored) |
+| `https://example.com#section` | `https://example.com` | Same (fragments ignored) |
+| `https://example.com/page1` | `https://example.com/page1` | Different |
+
+### Match Type
+
+For websites/webpages/sitemaps:
+- **`url_exact`**: Exact URL match (same website already crawled)
+
+No content hashing needed - URLs uniquely identify websites/pages.
 
 ---
 
@@ -368,7 +481,7 @@ User Action: Retry (transient error)
 
 ## Testing
 
-### Test Cases Implemented
+### Test Cases - File Upload (Phase 1)
 
 1. ✅ Upload unique file → Success
 2. ✅ Upload exact duplicate → 409 Conflict
@@ -376,8 +489,18 @@ User Action: Retry (transient error)
 4. ✅ Upload duplicate with replace_existing=true → Success, old file deleted
 5. ✅ Upload after soft delete → Success (deleted files not counted as active)
 
+### Test Cases - Website/Webpage (Phase 2)
+
+1. ✅ Crawl unique URL → Success
+2. ✅ Crawl duplicate URL → 409 Conflict
+3. ✅ Crawl URL with trailing slash → 409 Conflict (URL normalized)
+4. ✅ Crawl URL with query params → 409 Conflict (params ignored)
+5. ✅ Crawl duplicate with replace_existing=true → Success, old crawl deleted
+6. ✅ Crawl after soft delete → Success (deleted crawls not counted as active)
+
 ### Manual Testing
 
+**Files**:
 ```bash
 # Test 1: Unique file
 curl -X POST http://localhost:8000/api/v1/knowledgebase/files/upload/async \
@@ -396,6 +519,33 @@ curl -X POST http://localhost:8000/api/v1/knowledgebase/files/upload/async \
 # Expected: 200 OK (old file soft deleted)
 ```
 
+**Websites**:
+```bash
+# Test 1: Unique website
+curl -X POST http://localhost:8000/api/v1/knowledgebase/webcrawl \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "max_depth": 2}'
+# Expected: 200 OK
+
+# Test 2: Same website (duplicate)
+curl -X POST http://localhost:8000/api/v1/knowledgebase/webcrawl \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "max_depth": 2}'
+# Expected: 409 Conflict
+
+# Test 3: URL with trailing slash (normalized, duplicate)
+curl -X POST http://localhost:8000/api/v1/knowledgebase/webcrawl \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com/", "max_depth": 2}'
+# Expected: 409 Conflict (same as example.com)
+
+# Test 4: Override duplicate
+curl -X POST http://localhost:8000/api/v1/knowledgebase/webcrawl \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://example.com", "max_depth": 2, "replace_existing": true}'
+# Expected: 200 OK (old crawl soft deleted)
+```
+
 ---
 
 ## Summary
@@ -407,4 +557,9 @@ curl -X POST http://localhost:8000/api/v1/knowledgebase/files/upload/async \
 - Zero data loss guarantee
 - Production-ready
 
-🔜 **Phase 2 Pending**: Website/webpage content-based duplicate detection
+✅ **Phase 2 Complete**: Website/Webpage/Sitemap URL-based duplicate detection
+- Prevents duplicate website crawls
+- URL normalization handles variations (trailing slash, case, query params)
+- Offers override capability (replace_existing=true)
+- Automatic soft delete of old crawl
+- Production-ready
