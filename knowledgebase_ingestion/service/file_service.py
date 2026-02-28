@@ -32,13 +32,13 @@ class FileService:
             return f"URL already existed in {location} when this task ran (duplicate detected)"
         return error_message
 
-    async def check_duplicate_file(self, original_filename: str) -> Optional[Dict[str, Any]]:
-        """Check if a file with the same name already exists (only active files)."""
+    async def check_duplicate_file(self, original_filename: str, sha256_hash: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Check if a file already exists by filename or hash (only active files)."""
         try:
             from shared.db import get_db_connection
 
             async with get_db_connection() as conn:
-                # Check by filename only - only consider active files (exclude failed, deleted, cancelled)
+                # Check by filename first - only consider active files (exclude failed, deleted, cancelled)
                 existing_by_name = await conn.fetchrow(
                     "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
                     original_filename
@@ -54,6 +54,24 @@ class FileService:
                         "version": existing_by_name.get('version', 1),
                         "match_type": "filename"
                     }
+
+                # Check by hash if provided - detects same content with different filename
+                if sha256_hash:
+                    existing_by_hash = await conn.fetchrow(
+                        "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
+                        sha256_hash
+                    )
+                    if existing_by_hash:
+                        return {
+                            "id": str(existing_by_hash['id']),
+                            "original_filename": existing_by_hash['original_filename'],
+                            "display_name": existing_by_hash['display_name'],
+                            "sha256_hash": existing_by_hash['sha256_hash'],
+                            "file_size": existing_by_hash['file_size'],
+                            "gemini_file_name": existing_by_hash['gemini_file_name'],
+                            "version": existing_by_hash.get('version', 1),
+                            "match_type": "hash"  # Same content, different filename
+                        }
 
                 return None
         except Exception as e:
@@ -959,22 +977,37 @@ class FileService:
                 "error": str(e)
             }
 
-    async def handle_duplicate_check(self, original_filename: str, replace_existing: bool = False) -> dict:
-        """Handle duplicate file checking logic by filename"""
+    async def handle_duplicate_check(self, original_filename: str, replace_existing: bool = False, sha256_hash: Optional[str] = None) -> dict:
+        """Handle duplicate file checking logic by filename or hash"""
         try:
-            existing_file = await self.check_duplicate_file(original_filename)
+            existing_file = await self.check_duplicate_file(original_filename, sha256_hash)
             if existing_file:
                 match_type = existing_file.get("match_type", "unknown")
+
+                # Create user-friendly message based on match type
+                if match_type == "hash":
+                    detail_msg = f"This file content already exists with a different name: '{existing_file['original_filename']}'"
+                else:
+                    detail_msg = f"File '{original_filename}' already exists"
+
                 if not replace_existing:
-                    logger.warning(f"⚠️ File {original_filename} already exists. replace_existing=false, rejecting upload.")
-                    return {"allow": False, "reason": "file_exists", "detail": f"File {original_filename} already exists. Set replace_existing=true."}
+                    logger.warning(f"⚠️ {detail_msg}. replace_existing=false, rejecting upload.")
+                    return {
+                        "allow": False,
+                        "reason": "file_exists",
+                        "match_type": match_type,
+                        "existing_file_id": existing_file['id'],
+                        "existing_file_name": existing_file['original_filename'],
+                        "existing_file_hash": existing_file['sha256_hash'],
+                        "detail": f"{detail_msg}. Set replace_existing=true to override."
+                    }
                 else:
                     # Delete existing file from both Gemini and DB
-                    logger.info(f"🔄 Replacing existing file {original_filename} (ID: {existing_file['id']})")
+                    logger.info(f"🔄 Replacing existing file {original_filename} (ID: {existing_file['id']}, match_type={match_type})")
                     try:
                         await self.delete_existing_file_record(existing_file['id'])
                         logger.info(f"✅ Successfully deleted existing file {original_filename} from Gemini and DB")
-                        return {"allow": True, "reason": "replaced"}
+                        return {"allow": True, "reason": "replaced", "match_type": match_type}
                     except Exception as delete_error:
                         logger.error(f"❌ Failed to delete existing file during replacement: {delete_error}")
                         return {"allow": False, "reason": "replacement_failed", "detail": f"Could not delete existing file: {delete_error}"}

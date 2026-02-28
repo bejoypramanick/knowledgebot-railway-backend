@@ -564,6 +564,39 @@ async def upload_file_async(
             file_size = len(file_bytes)
             logger.info(f"✅ [FILE_READ_SUCCESS] File read: {file_size} bytes")
 
+            # Calculate file hash FIRST
+            logger.info("🔐 [HASH_CALCULATION] Calculating file hash")
+            from knowledgebase_ingestion.utils.file import calculate_file_hash
+            file_sha256 = await calculate_file_hash(file_bytes)
+            logger.info(f"✅ [HASH_CALCULATED] SHA256: {file_sha256}")
+
+            # Check for duplicates (by filename and hash)
+            logger.info("🔍 [DUPLICATE_CHECK] Checking for duplicate files...")
+            from knowledgebase_ingestion.service.file_service import get_file_service
+            file_service = get_file_service()
+            duplicate_check = await file_service.handle_duplicate_check(
+                validation_result['original_filename'],
+                replace_existing=replace_existing,
+                sha256_hash=file_sha256
+            )
+
+            if not duplicate_check['allow']:
+                logger.warning(f"⚠️  [DUPLICATE_DETECTED] {duplicate_check.get('detail', 'File duplicate detected')}")
+                error_response = {
+                    "success": False,
+                    "error": "Duplicate file detected",
+                    "reason": duplicate_check.get('reason'),
+                    "match_type": duplicate_check.get('match_type', 'unknown'),
+                    "detail": duplicate_check.get('detail'),
+                    "existing_file_id": duplicate_check.get('existing_file_id'),
+                    "existing_file_name": duplicate_check.get('existing_file_name'),
+                    "existing_file_hash": duplicate_check.get('existing_file_hash'),
+                }
+                logger.error(f"❌ [UPLOAD_REJECTED] {error_response}")
+                raise HTTPException(status_code=409, detail=error_response)
+
+            logger.info(f"✅ [DUPLICATE_CHECK_PASSED] No duplicates found, proceeding with upload")
+
             # Upload to S3
             logger.info(f"☁️  [S3_UPLOAD_START] Uploading to S3 storage")
             logger.info(f"   Filename: {validation_result['filename']}")
@@ -585,10 +618,6 @@ async def upload_file_async(
             s3_key = s3_result
             logger.info(f"✅ [S3_UPLOAD_SUCCESS] File uploaded to S3")
             logger.info(f"   S3 Key: {s3_key}")
-
-            # Calculate file hash
-            file_sha256 = await calculate_file_hash(file_bytes)
-            logger.info(f"   SHA256 Hash: {file_sha256}")
 
             # Create file record in database FIRST with placeholder task_id
             logger.info(f"💾 [DB_INSERT_START] Creating file record in database")
