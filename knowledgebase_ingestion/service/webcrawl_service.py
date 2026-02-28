@@ -149,7 +149,7 @@ async def queue_website_for_scraping(
                     logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE crawl: ID={existing_active['id']}, url={existing_active['original_url']}, status={existing_active['processing_status']}")
                     return {
                         "success": False,
-                        "error": f"Website is already being crawled or has been crawled (ID: {existing_active['id']}, Status: {existing_active['processing_status']}). Set replace_existing=true to replace it.",
+                        "error": f"Website is already being crawled or has been crawled (ID: {existing_active['id']}, Status: {existing_active['processing_status']}).",
                         "duplicate_website_id": existing_active['id']
                     }
             else:

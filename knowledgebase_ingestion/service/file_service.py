@@ -1022,7 +1022,7 @@ class FileService:
                         "existing_file_id": existing_file['id'],
                         "existing_file_name": existing_file['original_filename'],
                         "existing_file_hash": existing_file['sha256_hash'],
-                        "detail": f"{detail_msg}. Set replace_existing=true to override."
+                        "detail": detail_msg
                     }
                 else:
                     # Delete existing file from both Gemini and DB
