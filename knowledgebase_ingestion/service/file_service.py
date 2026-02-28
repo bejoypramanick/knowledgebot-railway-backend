@@ -40,10 +40,10 @@ class FileService:
             logger.info(f"🔍 [CHECK_DUPLICATE] Checking for duplicate: filename='{original_filename}', hash='{sha256_hash}'")
 
             async with get_db_connection() as conn:
-                # Check by filename first - only consider active files (exclude failed, deleted, cancelled)
+                # Check by filename first - only consider non-deleted files
                 logger.info(f"🔍 [FILENAME_CHECK] Searching for filename match: {original_filename}")
                 existing_by_name = await conn.fetchrow(
-                    "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
+                    "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status != 'deleted'",
                     original_filename
                 )
                 if existing_by_name:
@@ -73,7 +73,7 @@ class FileService:
                         logger.info(f"   ID={record['id']}, status={record['processing_status']}, hash={record['sha256_hash'][:16]}...")
 
                     existing_by_hash = await conn.fetchrow(
-                        "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
+                        "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status != 'deleted'",
                         sha256_hash
                     )
                     if existing_by_hash:
