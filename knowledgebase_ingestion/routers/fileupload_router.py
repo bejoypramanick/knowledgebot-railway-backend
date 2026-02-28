@@ -664,12 +664,19 @@ async def upload_file_async(
             placeholder_task_id = str(uuid.uuid4())
             logger.info(f"   Placeholder Task ID: {placeholder_task_id}")
 
+            # Extract file extension from filename
+            import os
+            file_extension = os.path.splitext(validation_result['original_filename'])[1].lower()
+            if file_extension.startswith('.'):
+                file_extension = file_extension[1:]  # Remove leading dot
+
             record_data = {
                 'user_role_id': user_role_id,  # Use user_role_id from database
                 'original_filename': validation_result['original_filename'],
                 'file_display_name': file_display_name or validation_result['filename'],
                 'size_bytes': file_size,
                 'mime_type': validation_result['mime_type'],
+                'file_extension': file_extension,
                 'processing_status': 'pending',
                 'sha256_hash': file_sha256,
                 's3_key': s3_key,
@@ -682,6 +689,7 @@ async def upload_file_async(
             logger.info(f"   file_display_name: {record_data['file_display_name']}")
             logger.info(f"   size_bytes: {record_data['size_bytes']}")
             logger.info(f"   mime_type: {record_data['mime_type']}")
+            logger.info(f"   file_extension: {record_data['file_extension']}")
             logger.info(f"   processing_status: {record_data['processing_status']}")
             logger.info(f"   s3_key: {record_data['s3_key']}")
             logger.info(f"   celery_task_id: {record_data['celery_task_id']}")

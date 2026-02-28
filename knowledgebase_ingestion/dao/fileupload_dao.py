@@ -35,10 +35,10 @@ class FileUploadDAO:
         query = """
             INSERT INTO file_uploads (
                 user_role_id, original_filename, display_name, file_size,
-                mime_type, processing_status, gemini_file_name, gemini_file_uri,
+                mime_type, file_extension, processing_status, gemini_file_name, gemini_file_uri,
                 gemini_state, sha256_hash, s3_key, celery_task_id, char_count, created_at
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW()
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW()
             ) RETURNING id
         """
         params = [
@@ -47,6 +47,7 @@ class FileUploadDAO:
             record_data.get('file_display_name') or record_data.get('display_name'),
             record_data.get('size_bytes') or record_data.get('file_size'),
             record_data.get('mime_type'),
+            record_data.get('file_extension'),
             record_data.get('processing_status'),
             record_data.get('gemini_file_name'),
             record_data.get('gemini_file_uri'),
@@ -65,14 +66,15 @@ class FileUploadDAO:
         logger.info(f"    $3 (display_name): {params[2]}")
         logger.info(f"    $4 (file_size): {params[3]}")
         logger.info(f"    $5 (mime_type): {params[4]}")
-        logger.info(f"    $6 (processing_status): {params[5]}")
-        logger.info(f"    $7 (gemini_file_name): {params[6]}")
-        logger.info(f"    $8 (gemini_file_uri): {params[7]}")
-        logger.info(f"    $9 (gemini_state): {params[8]}")
-        logger.info(f"    $10 (sha256_hash): {params[9]}")
-        logger.info(f"    $11 (s3_key): {params[10]}")
-        logger.info(f"    $12 (celery_task_id): {params[11]}")
-        logger.info(f"    $13 (char_count): {params[12]}")
+        logger.info(f"    $6 (file_extension): {params[5]}")
+        logger.info(f"    $7 (processing_status): {params[6]}")
+        logger.info(f"    $8 (gemini_file_name): {params[7]}")
+        logger.info(f"    $9 (gemini_file_uri): {params[8]}")
+        logger.info(f"    $10 (gemini_state): {params[9]}")
+        logger.info(f"    $11 (sha256_hash): {params[10]}")
+        logger.info(f"    $12 (s3_key): {params[11]}")
+        logger.info(f"    $13 (celery_task_id): {params[12]}")
+        logger.info(f"    $14 (char_count): {params[13]}")
 
         try:
             logger.log_db_operation(query, params)
@@ -96,7 +98,7 @@ class FileUploadDAO:
         """Get file record by ID."""
         query = """
             SELECT id, original_filename, processing_status, error_message,
-                   file_size, char_count, mime_type, created_at, updated_at
+                   file_size, char_count, mime_type, file_extension, gemini_file_uri, created_at, updated_at
             FROM file_uploads WHERE id = $1
         """
         params = {"file_id": file_id}
@@ -112,6 +114,8 @@ class FileUploadDAO:
                         "processing_status": result['processing_status'],
                         "error_message": result['error_message'],
                         "mime_type": result['mime_type'],
+                        "file_extension": result['file_extension'],
+                        "gemini_file_uri": result['gemini_file_uri'],
                         "created_at": result['created_at'],
                         "updated_at": result['updated_at']
                     }
@@ -123,7 +127,7 @@ class FileUploadDAO:
     async def get_all_files(self) -> List[Dict[str, Any]]:
         """Get all files with their status (excludes deleted records)."""
         query = """
-            SELECT id, original_filename, processing_status, error_message, mime_type, created_at, updated_at
+            SELECT id, original_filename, processing_status, error_message, mime_type, file_extension, gemini_file_uri, created_at, updated_at
             FROM file_uploads
             WHERE processing_status != 'deleted'
             ORDER BY updated_at DESC
@@ -142,7 +146,7 @@ class FileUploadDAO:
         """Get all files that are not pending, processing, queued, and not completed (cancelled, deleted, failed)."""
         query = """
             SELECT id, original_filename, processing_status, error_message,
-                   file_size, char_count, mime_type, processed_content_s3_key, created_at, updated_at
+                   file_size, char_count, mime_type, file_extension, gemini_file_uri, processed_content_s3_key, created_at, updated_at
             FROM file_uploads
             WHERE processing_status NOT IN ('pending', 'processing', 'queued', 'completed')
             ORDER BY updated_at DESC
@@ -161,7 +165,7 @@ class FileUploadDAO:
         """Get all files that are pending, processing, queued, or completed."""
         query = """
             SELECT id, original_filename, processing_status, error_message,
-                   file_size, char_count, mime_type, processed_content_s3_key, created_at, updated_at
+                   file_size, char_count, mime_type, file_extension, gemini_file_uri, processed_content_s3_key, created_at, updated_at
             FROM file_uploads
             WHERE processing_status IN ('pending', 'processing', 'queued', 'completed')
             ORDER BY updated_at DESC
@@ -179,7 +183,7 @@ class FileUploadDAO:
     async def get_pending_files(self) -> List[Dict[str, Any]]:
         """Get all files with pending or processing status."""
         query = """
-            SELECT id, original_filename, processing_status, error_message, mime_type, created_at, updated_at
+            SELECT id, original_filename, processing_status, error_message, mime_type, file_extension, gemini_file_uri, created_at, updated_at
             FROM file_uploads
             WHERE processing_status IN ('pending', 'processing')
             ORDER BY updated_at DESC
