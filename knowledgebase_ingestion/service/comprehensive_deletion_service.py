@@ -105,7 +105,9 @@ class ComprehensiveDeletionService:
                 raise ValueError(f"Unknown item type: {item_type}")
 
         except Exception as e:
-            logger.error(f"❌ [DELETION_FAILED] Critical error: {e}", exc_info=True)
+            import traceback
+            logger.error(f"❌ [DELETION_FAILED] Critical error: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             deletion_report["success"] = False
             deletion_report["errors"].append({
                 "step": "unknown",
@@ -253,7 +255,7 @@ class ComprehensiveDeletionService:
                     website_record = await conn.fetchrow(
                         """SELECT
                             id, original_url, domain, parent_id, depth, metadata,
-                            celery_task_id, processing_status, s3_key, processed_content_s3_key
+                            celery_task_id, processing_status
                         FROM scraped_websites
                         WHERE id = $1
                         FOR UPDATE""",
@@ -281,8 +283,7 @@ class ComprehensiveDeletionService:
                         logger.info(f"📍 [LOOKUP_CHILDREN] Fetching child pages...")
                         child_pages = await conn.fetch(
                             """SELECT
-                                id, original_url, celery_task_id, processing_status,
-                                s3_key, processed_content_s3_key
+                                id, original_url, celery_task_id, processing_status
                             FROM scraped_websites
                             WHERE parent_id = $1
                             FOR UPDATE""",
@@ -336,23 +337,7 @@ class ComprehensiveDeletionService:
                     deletion_report["cleanup_summary"]["gemini_files_deleted"] = total_gemini_files
                     deletion_report["cleanup_summary"]["gemini_filesearch_docs_deleted"] = total_filesearch_docs
 
-                    # Step 5: S3 CLEANUP (all pages - raw + processed)
-                    logger.info(f"☁️  [S3_DELETE] Deleting from S3 ({len(all_pages)} pages)...")
-                    s3_keys = []
-                    for page in all_pages:
-                        if page['s3_key']:
-                            s3_keys.append(page['s3_key'])
-                        if page['processed_content_s3_key']:
-                            s3_keys.append(page['processed_content_s3_key'])
-
-                    deleted_count = await self._delete_from_s3_complete(s3_keys)
-                    # Count raw and processed separately for report
-                    raw_count = sum(1 for page in all_pages if page['s3_key'])
-                    processed_count = sum(1 for page in all_pages if page['processed_content_s3_key'])
-                    deletion_report["cleanup_summary"]["s3_raw_files_deleted"] = raw_count
-                    deletion_report["cleanup_summary"]["s3_processed_files_deleted"] = processed_count
-
-                    # Step 6: DATABASE TRANSACTION (atomic - parent + children together)
+                    # Step 5: DATABASE TRANSACTION (atomic - parent + children together)
                     logger.info(f"💾 [DB_TRANSACTION] Updating database ({len(all_pages)} records)...")
 
                     if hard_delete:
@@ -373,8 +358,6 @@ class ComprehensiveDeletionService:
                         await conn.execute(
                             """UPDATE scraped_websites
                             SET processing_status = 'deleted',
-                                s3_key = NULL,
-                                processed_content_s3_key = NULL,
                                 updated_at = NOW(),
                                 error_message = 'Comprehensively deleted'
                             WHERE id = $1""",
@@ -384,8 +367,6 @@ class ComprehensiveDeletionService:
                             await conn.execute(
                                 """UPDATE scraped_websites
                                 SET processing_status = 'deleted',
-                                    s3_key = NULL,
-                                    processed_content_s3_key = NULL,
                                     updated_at = NOW(),
                                     error_message = 'Comprehensively deleted'
                                 WHERE parent_id = $1""",
