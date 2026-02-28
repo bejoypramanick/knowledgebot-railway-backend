@@ -120,6 +120,7 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
                 "type": "file",
                 "source": "upload",  # Add source field for UI filtering
                 "name": f['original_filename'],
+                "mime_type": f.get('mime_type'),  # Include MIME type for UI display
                 "processing_status": f['processing_status'],
                 "error_message": f['error_message'],
                 "size_bytes": f.get('file_size', 0),  # Map file_size to size_bytes for UI
@@ -163,6 +164,7 @@ async def get_file_processing_status(request: Request = None):
                     "id": str(f['id']),
                     "type": "file",
                     "name": f['original_filename'],
+                    "mime_type": f.get('mime_type'),  # Include MIME type
                     "processing_status": f['processing_status'],
                     "error_message": f['error_message'],
                     "created_at": f['created_at'].isoformat() if f['created_at'] else None,
