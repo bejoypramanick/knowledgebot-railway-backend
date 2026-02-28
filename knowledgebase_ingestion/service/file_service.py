@@ -64,18 +64,23 @@ class FileService:
                 # Check by hash if provided - detects same content with different filename
                 if sha256_hash:
                     logger.info(f"🔍 [HASH_CHECK] Searching for hash match: {sha256_hash}")
-                    # First, check all statuses to debug
-                    all_with_hash = await conn.fetch(
-                        "SELECT id, original_filename, sha256_hash, processing_status FROM file_uploads WHERE sha256_hash IS NOT NULL ORDER BY created_at DESC LIMIT 10"
-                    )
-                    logger.info(f"📊 [HASH_DEBUG] Files with hashes in DB: {len(all_with_hash)}")
-                    for record in all_with_hash:
-                        logger.info(f"   ID={record['id']}, status={record['processing_status']}, hash={record['sha256_hash'][:16]}...")
 
+                    # Debug: Check all files with this exact hash (regardless of status)
+                    all_with_hash = await conn.fetch(
+                        "SELECT id, original_filename, sha256_hash, processing_status FROM file_uploads WHERE sha256_hash = $1 ORDER BY created_at DESC",
+                        sha256_hash
+                    )
+                    logger.info(f"📊 [HASH_DEBUG] Files with this hash (ALL statuses): {len(all_with_hash)}")
+                    for record in all_with_hash:
+                        logger.info(f"   ID={record['id']}, filename={record['original_filename']}, status={record['processing_status']}")
+
+                    # Now check only active files
                     existing_by_hash = await conn.fetchrow(
                         "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
                         sha256_hash
                     )
+                    logger.info(f"📊 [HASH_CHECK_RESULT] Active file query returned: {existing_by_hash}")
+
                     if existing_by_hash:
                         logger.info(f"✅ [HASH_MATCH] Found by hash: ID={existing_by_hash['id']}, filename={existing_by_hash['original_filename']}")
                         return {
