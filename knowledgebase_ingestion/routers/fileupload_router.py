@@ -5,6 +5,7 @@ Handles all file upload related endpoints
 from fastapi import APIRouter, HTTPException, Request, UploadFile, Form
 from fastapi.responses import JSONResponse
 from typing import Optional, Dict, Any
+import mimetypes
 
 from knowledgebase_ingestion.utils.auth import extract_user_from_request
 from knowledgebase_ingestion.utils.logging import get_otel_logger
@@ -20,6 +21,15 @@ from shared.redis_message_queue import RedisMessageQueue
 from shared.celery_dispatcher import file_celery
 
 logger = get_otel_logger("fileupload_router", "knowledgebase-ingestion")
+
+
+def get_mime_type_fallback(filename: str, db_mime_type: Optional[str] = None) -> str:
+    """Get MIME type from database or derive from filename as fallback."""
+    if db_mime_type:
+        return db_mime_type
+    # Fallback: derive from filename
+    mime_type, _ = mimetypes.guess_type(filename)
+    return mime_type or "application/octet-stream"
 
 # NOTE: Prefix is provided by include_router() in main.py
 # Do NOT include full path here to avoid double prefix (prefix=/api/v1/knowledgebase in include_router)
@@ -120,7 +130,7 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
                 "type": "file",
                 "source": "upload",  # Add source field for UI filtering
                 "name": f['original_filename'],
-                "mime_type": f.get('mime_type'),  # Include MIME type for UI display
+                "mime_type": get_mime_type_fallback(f['original_filename'], f.get('mime_type')),  # Include MIME type with fallback
                 "processing_status": f['processing_status'],
                 "error_message": f['error_message'],
                 "size_bytes": f.get('file_size', 0),  # Map file_size to size_bytes for UI
@@ -164,7 +174,7 @@ async def get_file_processing_status(request: Request = None):
                     "id": str(f['id']),
                     "type": "file",
                     "name": f['original_filename'],
-                    "mime_type": f.get('mime_type'),  # Include MIME type
+                    "mime_type": get_mime_type_fallback(f['original_filename'], f.get('mime_type')),  # Include MIME type with fallback
                     "processing_status": f['processing_status'],
                     "error_message": f['error_message'],
                     "created_at": f['created_at'].isoformat() if f['created_at'] else None,

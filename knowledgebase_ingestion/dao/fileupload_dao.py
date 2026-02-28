@@ -95,8 +95,8 @@ class FileUploadDAO:
     async def get_file_by_id(self, file_id: int) -> Optional[Dict[str, Any]]:
         """Get file record by ID."""
         query = """
-            SELECT id, original_filename, processing_status, error_message, 
-                   file_size, char_count, created_at, updated_at
+            SELECT id, original_filename, processing_status, error_message,
+                   file_size, char_count, mime_type, created_at, updated_at
             FROM file_uploads WHERE id = $1
         """
         params = {"file_id": file_id}
@@ -111,6 +111,7 @@ class FileUploadDAO:
                         "original_filename": result['original_filename'],
                         "processing_status": result['processing_status'],
                         "error_message": result['error_message'],
+                        "mime_type": result['mime_type'],
                         "created_at": result['created_at'],
                         "updated_at": result['updated_at']
                     }
@@ -122,7 +123,7 @@ class FileUploadDAO:
     async def get_all_files(self) -> List[Dict[str, Any]]:
         """Get all files with their status (excludes deleted records)."""
         query = """
-            SELECT id, original_filename, processing_status, error_message, created_at, updated_at
+            SELECT id, original_filename, processing_status, error_message, mime_type, created_at, updated_at
             FROM file_uploads
             WHERE processing_status != 'deleted'
             ORDER BY updated_at DESC
@@ -141,7 +142,7 @@ class FileUploadDAO:
         """Get all files that are not pending, processing, queued, and not completed (cancelled, deleted, failed)."""
         query = """
             SELECT id, original_filename, processing_status, error_message,
-                   file_size, char_count, processed_content_s3_key, created_at, updated_at
+                   file_size, char_count, mime_type, processed_content_s3_key, created_at, updated_at
             FROM file_uploads
             WHERE processing_status NOT IN ('pending', 'processing', 'queued', 'completed')
             ORDER BY updated_at DESC
@@ -160,7 +161,7 @@ class FileUploadDAO:
         """Get all files that are pending, processing, queued, or completed."""
         query = """
             SELECT id, original_filename, processing_status, error_message,
-                   file_size, char_count, processed_content_s3_key, created_at, updated_at
+                   file_size, char_count, mime_type, processed_content_s3_key, created_at, updated_at
             FROM file_uploads
             WHERE processing_status IN ('pending', 'processing', 'queued', 'completed')
             ORDER BY updated_at DESC
@@ -178,7 +179,7 @@ class FileUploadDAO:
     async def get_pending_files(self) -> List[Dict[str, Any]]:
         """Get all files with pending or processing status."""
         query = """
-            SELECT id, original_filename, processing_status, error_message, created_at, updated_at
+            SELECT id, original_filename, processing_status, error_message, mime_type, created_at, updated_at
             FROM file_uploads
             WHERE processing_status IN ('pending', 'processing')
             ORDER BY updated_at DESC
