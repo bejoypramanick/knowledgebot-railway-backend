@@ -37,13 +37,17 @@ class FileService:
         try:
             from shared.db import get_db_connection
 
+            logger.info(f"🔍 [CHECK_DUPLICATE] Checking for duplicate: filename='{original_filename}', hash='{sha256_hash}'")
+
             async with get_db_connection() as conn:
                 # Check by filename first - only consider active files (exclude failed, deleted, cancelled)
+                logger.info(f"🔍 [FILENAME_CHECK] Searching for filename match: {original_filename}")
                 existing_by_name = await conn.fetchrow(
                     "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
                     original_filename
                 )
                 if existing_by_name:
+                    logger.info(f"✅ [FILENAME_MATCH] Found by filename: ID={existing_by_name['id']}")
                     return {
                         "id": str(existing_by_name['id']),
                         "original_filename": existing_by_name['original_filename'],
@@ -54,14 +58,18 @@ class FileService:
                         "version": existing_by_name.get('version', 1),
                         "match_type": "filename"
                     }
+                else:
+                    logger.info(f"❌ [FILENAME_MATCH] No filename match found")
 
                 # Check by hash if provided - detects same content with different filename
                 if sha256_hash:
+                    logger.info(f"🔍 [HASH_CHECK] Searching for hash match: {sha256_hash}")
                     existing_by_hash = await conn.fetchrow(
                         "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
                         sha256_hash
                     )
                     if existing_by_hash:
+                        logger.info(f"✅ [HASH_MATCH] Found by hash: ID={existing_by_hash['id']}, filename={existing_by_hash['original_filename']}")
                         return {
                             "id": str(existing_by_hash['id']),
                             "original_filename": existing_by_hash['original_filename'],
@@ -72,7 +80,12 @@ class FileService:
                             "version": existing_by_hash.get('version', 1),
                             "match_type": "hash"  # Same content, different filename
                         }
+                    else:
+                        logger.info(f"❌ [HASH_MATCH] No hash match found")
+                else:
+                    logger.info(f"⚠️  [HASH_CHECK] No hash provided - skipping hash check")
 
+                logger.info(f"✅ [NO_DUPLICATE] No duplicate found")
                 return None
         except Exception as e:
             logger.warning(f"Error checking for duplicate file: {e}")
