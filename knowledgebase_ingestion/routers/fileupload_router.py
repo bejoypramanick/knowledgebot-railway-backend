@@ -695,6 +695,7 @@ async def upload_file_async(
             logger.info(f"   mime_type: {record_data['mime_type']}")
             logger.info(f"   file_extension: {record_data['file_extension']}")
             logger.info(f"   processing_status: {record_data['processing_status']}")
+            logger.info(f"   sha256_hash: {record_data['sha256_hash']}")
             logger.info(f"   s3_key: {record_data['s3_key']}")
             logger.info(f"   celery_task_id: {record_data['celery_task_id']}")
 
