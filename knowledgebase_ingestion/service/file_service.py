@@ -64,6 +64,14 @@ class FileService:
                 # Check by hash if provided - detects same content with different filename
                 if sha256_hash:
                     logger.info(f"🔍 [HASH_CHECK] Searching for hash match: {sha256_hash}")
+                    # First, check all statuses to debug
+                    all_with_hash = await conn.fetch(
+                        "SELECT id, original_filename, sha256_hash, processing_status FROM file_uploads WHERE sha256_hash IS NOT NULL ORDER BY created_at DESC LIMIT 10"
+                    )
+                    logger.info(f"📊 [HASH_DEBUG] Files with hashes in DB: {len(all_with_hash)}")
+                    for record in all_with_hash:
+                        logger.info(f"   ID={record['id']}, status={record['processing_status']}, hash={record['sha256_hash'][:16]}...")
+
                     existing_by_hash = await conn.fetchrow(
                         "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
                         sha256_hash
@@ -81,7 +89,7 @@ class FileService:
                             "match_type": "hash"  # Same content, different filename
                         }
                     else:
-                        logger.info(f"❌ [HASH_MATCH] No hash match found")
+                        logger.info(f"❌ [HASH_MATCH] No hash match found for hash: {sha256_hash}")
                 else:
                     logger.info(f"⚠️  [HASH_CHECK] No hash provided - skipping hash check")
 
