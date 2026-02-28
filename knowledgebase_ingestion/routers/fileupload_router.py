@@ -538,6 +538,7 @@ async def upload_file_async(
     file: UploadFile = Form(...),
     file_display_name: Optional[str] = Form(None),
     replace_existing: bool = Form(False),
+    sha256_hash: Optional[str] = Form(None),
     request: Request = None
 ):
     """
@@ -553,6 +554,7 @@ async def upload_file_async(
     logger.info("📥 [UPLOAD_START] New file upload request received")
     logger.info("=" * 80)
     logger.info(f"   Replace existing: {replace_existing}")
+    logger.info(f"   Frontend hash provided: {sha256_hash}")
 
     try:
         # Extract authenticated user information
