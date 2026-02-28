@@ -47,7 +47,7 @@ class FileService:
                 logger.info(f"🔍 [FILENAME_CHECK] Searching for filename match: {original_filename}")
                 try:
                     existing_by_name = await conn.fetchrow(
-                        "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
+                        "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status != 'deleted'",
                         original_filename
                     )
                     logger.info(f"🔍 [FILENAME_CHECK_RESULT] Query returned: {existing_by_name}")
@@ -86,7 +86,7 @@ class FileService:
                         # Now check only active files
                         logger.info(f"🔍 [HASH_CHECK] Running query for active files only...")
                         existing_by_hash = await conn.fetchrow(
-                            "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed')",
+                            "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status != 'deleted'",
                             sha256_hash
                         )
                         logger.info(f"📊 [HASH_CHECK_RESULT] Active file query returned: {existing_by_hash}")
