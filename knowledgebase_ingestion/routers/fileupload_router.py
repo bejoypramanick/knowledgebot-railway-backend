@@ -317,6 +317,13 @@ async def delete_file_endpoint(file_id: str, request: Request = None, hard_delet
         logger.info(f"🗑️  [FILE_DELETE_REQUEST] Deleting file {file_id} (hard_delete={hard_delete})")
         logger.info(f"   Requested by: {user_email}")
 
+        # Validate file_id
+        try:
+            file_id_int = int(file_id)
+        except ValueError as e:
+            logger.error(f"❌ [FILE_DELETE_INVALID_ID] Invalid file_id: {file_id} - {e}")
+            raise HTTPException(status_code=400, detail=f"Invalid file ID format: {file_id}")
+
         from knowledgebase_ingestion.service.comprehensive_deletion_service import (
             comprehensive_deletion_service,
             ItemType
@@ -324,7 +331,7 @@ async def delete_file_endpoint(file_id: str, request: Request = None, hard_delet
 
         # Delete file with complete cleanup
         result = await comprehensive_deletion_service.delete_item(
-            item_id=int(file_id),
+            item_id=file_id_int,
             item_type=ItemType.FILE,
             hard_delete=hard_delete
         )
@@ -346,8 +353,12 @@ async def delete_file_endpoint(file_id: str, request: Request = None, hard_delet
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ [FILE_DELETE_ERROR] Error deleting file {file_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_msg = f"{type(e).__name__}: {str(e)}"
+        error_traceback = traceback.format_exc()
+        logger.error(f"❌ [FILE_DELETE_ERROR] Error deleting file {file_id}: {error_msg}")
+        logger.error(f"   Traceback: {error_traceback}")
+        raise HTTPException(status_code=500, detail=error_msg)
 
 
 @router.post("/delete-all")
