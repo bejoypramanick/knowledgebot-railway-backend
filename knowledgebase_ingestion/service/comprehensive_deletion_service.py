@@ -226,7 +226,9 @@ class ComprehensiveDeletionService:
                     return deletion_report
 
         except Exception as e:
-            logger.error(f"❌ [FILE_DELETION_ERROR] {e}", exc_info=True)
+            import traceback
+            logger.error(f"❌ [FILE_DELETION_ERROR] {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             deletion_report["success"] = False
             deletion_report["errors"].append({
                 "step": DeletionStep.DB_TRANSACTION.value,
@@ -382,7 +384,9 @@ class ComprehensiveDeletionService:
                     return deletion_report
 
         except Exception as e:
-            logger.error(f"❌ [WEBSITE_DELETION_ERROR] {e}", exc_info=True)
+            import traceback
+            logger.error(f"❌ [WEBSITE_DELETION_ERROR] {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             deletion_report["success"] = False
             deletion_report["errors"].append({
                 "step": DeletionStep.DB_TRANSACTION.value,

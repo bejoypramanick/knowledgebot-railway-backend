@@ -734,7 +734,9 @@ async def upload_file_async(
                 logger.info(f"✅ [DB_UPDATE_SUCCESS] DB updated with Celery task ID")
                 logger.info(f"⏱️  [DB_COMMIT_WAIT] Waited for DB commit")
             except Exception as db_err:
-                logger.error(f"❌ [DB_UPDATE_ERROR] Failed to update DB with task ID: {db_err}", exc_info=True)
+                import traceback
+                logger.error(f"❌ [DB_UPDATE_ERROR] Failed to update DB with task ID: {db_err}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 raise
 
             logger.info("=" * 80)
