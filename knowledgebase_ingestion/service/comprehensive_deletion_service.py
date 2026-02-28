@@ -474,9 +474,17 @@ class ComprehensiveDeletionService:
                     if isinstance(metadata, str):
                         metadata = json.loads(metadata)
 
+                    logger.info(f"   📋 Metadata keys: {list(metadata.keys()) if metadata else 'None'}")
+                    logger.info(f"   📋 Metadata type: {metadata.get('type')}")
+                    logger.info(f"   📋 Has file_search_store_name: {'file_search_store_name' in metadata if metadata else False}")
+                    logger.info(f"   📋 Full metadata: {metadata}")
+
                     if metadata.get('type') == 'file_search' or 'file_search_store_name' in metadata:
                         store_name = metadata.get('file_search_store_name')
                         document_name = metadata.get('document_name')
+
+                        logger.info(f"   📍 Store name: {store_name}")
+                        logger.info(f"   📍 Document name: {document_name}")
 
                         if store_name and document_name:
                             try:
@@ -504,8 +512,15 @@ class ComprehensiveDeletionService:
                                     logger.info(f"   ✅ Document already deleted: {document_name}")
                                 else:
                                     logger.warning(f"   ⚠️  Could not delete from FileSearch: {fs_err}")
+                        else:
+                            logger.warning(f"   ⚠️  Missing store_name or document_name in metadata")
+                            logger.warning(f"      store_name: {store_name}, document_name: {document_name}")
+                    else:
+                        logger.info(f"   ℹ️  Metadata doesn't indicate FileSearch (type={metadata.get('type')}, has_store={('file_search_store_name' in metadata if metadata else False)})")
                 except Exception as e:
                     logger.warning(f"   ⚠️  Error processing FileSearch metadata: {e}")
+            else:
+                logger.info(f"   ℹ️  No metadata found for file")
 
         except Exception as e:
             logger.warning(f"   ⚠️  Error deleting from Gemini: {e}")
