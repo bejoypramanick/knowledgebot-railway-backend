@@ -174,27 +174,67 @@ async def cancel_all_web_tasks(request: Request = None):
 # =================================
 
 @router.delete("/web/{website_id}")
-async def delete_web_item(website_id: str, request: Request = None):
+async def delete_web_item_endpoint(website_id: str, request: Request = None, hard_delete: bool = False):
     """
-    Delete a website with transactional safety.
+    Delete a website/page with COMPLETE cleanup of all data points.
+
+    This operation performs comprehensive deletion:
+    1. Terminates parent Celery task (web_crawling queue)
+    2. Terminates child Celery tasks if parent is deleted
+    3. Cleans Redis task states and cancellation flags
+    4. Deletes from Gemini FileSearch (all pages)
+    5. Deletes from S3 (raw + processed markdown for all pages)
+    6. Updates database atomically (parent + children together)
+
+    For parent websites: deletes entire tree (parent + all child pages)
+    For child pages: deletes only that page
+
+    Query Parameters:
+        hard_delete: If true, hard delete from database (default: false, soft delete)
+
+    Returns:
+        Complete deletion report with cleanup summary and child pages affected
     """
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
-        # Delete website atomically with complete cleanup
-        result = await delete_website(int(website_id))
-        
+
+        logger.info(f"🗑️  [WEBSITE_DELETE_REQUEST] Deleting website {website_id} (hard_delete={hard_delete})")
+        logger.info(f"   Requested by: {user_email}")
+
+        from knowledgebase_ingestion.service.comprehensive_deletion_service import (
+            comprehensive_deletion_service,
+            ItemType
+        )
+
+        # Delete website with complete cleanup (auto-detects WEBSITE/WEBPAGE/SITEMAP)
+        result = await comprehensive_deletion_service.delete_item(
+            item_id=int(website_id),
+            item_type=ItemType.WEBSITE,
+            hard_delete=hard_delete
+        )
+
         if result.get('success'):
-            logger.info(f"✅ Website deletion processed: {website_id}")
+            logger.info(f"✅ [WEBSITE_DELETE_SUCCESS] Website {website_id} deleted completely")
+            logger.info(f"   Type: {'Parent Website' if result.get('is_parent') else 'Child Page'}")
+            logger.info(f"   Child pages deleted: {result.get('child_pages_count', 0)}")
+            logger.info(f"   Celery tasks revoked: {result['cleanup_summary']['celery_tasks_revoked']}")
+            logger.info(f"   Redis keys deleted: {result['cleanup_summary']['redis_keys_deleted']}")
+            logger.info(f"   Gemini files deleted: {result['cleanup_summary']['gemini_files_deleted']}")
+            logger.info(f"   Gemini FileSearch docs deleted: {result['cleanup_summary']['gemini_filesearch_docs_deleted']}")
+            logger.info(f"   S3 raw files deleted: {result['cleanup_summary']['s3_raw_files_deleted']}")
+            logger.info(f"   S3 processed files deleted: {result['cleanup_summary']['s3_processed_files_deleted']}")
+            logger.info(f"   DB records affected: {result['cleanup_summary']['db_records_affected']}")
             return result
         else:
-            raise HTTPException(status_code=500, detail=result.get('error', 'Deletion failed'))
-                    
+            error_msg = result.get('errors')[0].get('error') if result.get('errors') else 'Deletion failed'
+            logger.error(f"❌ [WEBSITE_DELETE_FAILED] {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting website {website_id}: {e}")
+        logger.error(f"❌ [WEBSITE_DELETE_ERROR] Error deleting website {website_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

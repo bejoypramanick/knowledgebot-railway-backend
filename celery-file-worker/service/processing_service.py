@@ -765,11 +765,42 @@ async def process_file_content(
 
                 logger.info(f"✅ [DB_UPDATE] Updated file record with all processing data, File ID: {file_id}")
 
-                # STEP 8: S3 CLEANUP PHASE
+                # STEP 8: S3 CLEANUP PHASE - Delete ALL S3 files after successful Gemini upload
+                # After uploading to Gemini FileSearch, we no longer need S3 files:
+                # - Raw file: converted to markdown, no longer needed
+                # - Processed markdown: now in Gemini FileSearch for search/download
+                logger.info(f"🧹 [S3_CLEANUP] Cleaning up ALL S3 files after successful Gemini upload")
+
+                # Delete raw upload file (no longer needed)
+                if s3_key:
+                    try:
+                        deleted_raw = await s3_file_storage.delete_file(s3_key)
+                        if deleted_raw:
+                            logger.info(f"✅ [S3_CLEANUP] Deleted raw file from S3: {s3_key}")
+                        else:
+                            logger.warning(f"⚠️ [S3_CLEANUP] Failed to delete raw file from S3: {s3_key}")
+                    except Exception as s3_cleanup_error:
+                        logger.warning(f"⚠️ [S3_CLEANUP] Error deleting raw file from S3: {s3_cleanup_error}")
+
+                # Delete processed markdown file (now safely stored in Gemini FileSearch)
+                if processed_content_s3_key:
+                    try:
+                        deleted_processed = await s3_file_storage.delete_file(processed_content_s3_key)
+                        if deleted_processed:
+                            logger.info(f"✅ [S3_CLEANUP] Deleted processed markdown from S3: {processed_content_s3_key}")
+                        else:
+                            logger.warning(f"⚠️ [S3_CLEANUP] Failed to delete processed markdown from S3: {processed_content_s3_key}")
+                    except Exception as s3_cleanup_error:
+                        logger.warning(f"⚠️ [S3_CLEANUP] Error deleting processed markdown from S3: {s3_cleanup_error}")
+
+                logger.info(f"✅ [S3_CLEANUP] All S3 files cleaned up - content now in Gemini FileSearch only")
+
+                # Delete temporary local files
                 if tmp_path and os.path.exists(tmp_path):
                     os.unlink(tmp_path)
                 if json_tmp_path and os.path.exists(json_tmp_path):
                     os.unlink(json_tmp_path)
+                logger.info(f"✅ [CLEANUP] Cleaned up temporary local files")
 
                 processing_time = time.perf_counter() - start_time
                 logger.info(f"✅ [SUCCESS] File processing completed: {original_filename}")

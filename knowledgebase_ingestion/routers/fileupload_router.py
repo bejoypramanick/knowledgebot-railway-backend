@@ -293,27 +293,60 @@ async def cancel_all_file_tasks(request: Request = None):
 # =================================
 
 @router.delete("/files/{file_id}")
-async def delete_file(file_id: str, request: Request = None):
+async def delete_file_endpoint(file_id: str, request: Request = None, hard_delete: bool = False):
     """
-    Delete an uploaded file with transactional safety.
+    Delete an uploaded file with COMPLETE cleanup of all data points.
+
+    This operation performs comprehensive deletion:
+    1. Terminates Celery task (file_processing queue)
+    2. Cleans Redis task state and cancellation flags
+    3. Deletes from Gemini (raw file + FileSearch document)
+    4. Deletes from S3 (raw upload + processed markdown)
+    5. Updates database (soft delete by default, hard delete optional)
+
+    Query Parameters:
+        hard_delete: If true, hard delete from database (default: false, soft delete)
+
+    Returns:
+        Complete deletion report with cleanup summary
     """
     try:
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
-        
-        # Delete file atomically with complete cleanup
-        result = await delete_file(int(file_id))
-        
+
+        logger.info(f"🗑️  [FILE_DELETE_REQUEST] Deleting file {file_id} (hard_delete={hard_delete})")
+        logger.info(f"   Requested by: {user_email}")
+
+        from knowledgebase_ingestion.service.comprehensive_deletion_service import (
+            comprehensive_deletion_service,
+            ItemType
+        )
+
+        # Delete file with complete cleanup
+        result = await comprehensive_deletion_service.delete_item(
+            item_id=int(file_id),
+            item_type=ItemType.FILE,
+            hard_delete=hard_delete
+        )
+
         if result.get('success'):
-            logger.info(f"✅ File deletion processed: {file_id}")
+            logger.info(f"✅ [FILE_DELETE_SUCCESS] File {file_id} deleted completely")
+            logger.info(f"   Celery tasks revoked: {result['cleanup_summary']['celery_tasks_revoked']}")
+            logger.info(f"   Redis keys deleted: {result['cleanup_summary']['redis_keys_deleted']}")
+            logger.info(f"   Gemini files deleted: {result['cleanup_summary']['gemini_files_deleted']}")
+            logger.info(f"   Gemini FileSearch docs deleted: {result['cleanup_summary']['gemini_filesearch_docs_deleted']}")
+            logger.info(f"   S3 raw files deleted: {result['cleanup_summary']['s3_raw_files_deleted']}")
+            logger.info(f"   S3 processed files deleted: {result['cleanup_summary']['s3_processed_files_deleted']}")
             return result
         else:
-            raise HTTPException(status_code=500, detail=result.get('error', 'Deletion failed'))
-                    
+            error_msg = result.get('errors')[0].get('error') if result.get('errors') else 'Deletion failed'
+            logger.error(f"❌ [FILE_DELETE_FAILED] {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting file {file_id}: {e}")
+        logger.error(f"❌ [FILE_DELETE_ERROR] Error deleting file {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
