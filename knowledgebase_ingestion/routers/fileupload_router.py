@@ -130,6 +130,7 @@ async def get_all_files(request: Request = None, status: Optional[str] = None):
                 "type": "file",
                 "source": "upload",  # Add source field for UI filtering
                 "name": f['original_filename'],
+                "file_extension": f.get('file_extension'),  # Include file extension
                 "mime_type": get_mime_type_fallback(f['original_filename'], f.get('mime_type')),  # Include MIME type with fallback
                 "processing_status": f['processing_status'],
                 "error_message": f['error_message'],
@@ -174,6 +175,7 @@ async def get_file_processing_status(request: Request = None):
                     "id": str(f['id']),
                     "type": "file",
                     "name": f['original_filename'],
+                    "file_extension": f.get('file_extension'),  # Include file extension
                     "mime_type": get_mime_type_fallback(f['original_filename'], f.get('mime_type')),  # Include MIME type with fallback
                     "processing_status": f['processing_status'],
                     "error_message": f['error_message'],
