@@ -23,7 +23,6 @@ from shared.db import get_db_connection
 from shared.celery_dispatcher import file_celery, web_celery
 from shared.redis_message_queue import RedisMessageQueue
 from shared.s3_file_storage import s3_file_storage
-from shared.exceptions import DatabaseError
 
 logger = get_otel_logger("comprehensive_deletion_service", "knowledgebase-ingestion")
 
