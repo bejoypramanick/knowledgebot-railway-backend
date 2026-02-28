@@ -311,10 +311,12 @@ async def process_file_content(
         s3_key = file_record['s3_key']
         file_size = file_record['file_size']
         user_role_id = file_record['user_role_id']
+        original_sha256_hash = file_record.get('sha256_hash')  # Preserve original hash from upload
 
         logger.info(f"   Display name: {file_display_name}")
         logger.info(f"   S3 key: {s3_key}")
         logger.info(f"   Size: {file_size} bytes")
+        logger.info(f"   Original SHA256 Hash: {original_sha256_hash}")
         
         # Validate s3_key is present
         if not s3_key:
@@ -386,7 +388,13 @@ async def process_file_content(
             }
 
         # Calculate hash (only if we have a local file)
-        sha256_hash = calculate_sha256(tmp_path) if tmp_path else None
+        # If we can't recalculate it (no tmp_path), preserve the original hash from upload
+        if tmp_path:
+            sha256_hash = calculate_sha256(tmp_path)
+            logger.info(f"✅ [HASH] Recalculated SHA256: {sha256_hash}")
+        else:
+            sha256_hash = original_sha256_hash
+            logger.info(f"ℹ️  [HASH] Using original SHA256 from upload (no local file to recalculate): {sha256_hash}")
         
         # Store original file info before any conversion
         original_file_extension = original_filename.rsplit('.', 1)[-1] if '.' in original_filename else ''

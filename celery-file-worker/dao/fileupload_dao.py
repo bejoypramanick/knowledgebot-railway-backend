@@ -155,7 +155,7 @@ class FileUploadDAO:
         """Get file record by file ID."""
         query = """
             SELECT id, user_role_id, original_filename, display_name,
-                   s3_key, file_size, mime_type, processing_status
+                   s3_key, file_size, mime_type, processing_status, sha256_hash
             FROM file_uploads
             WHERE id = $1
         """
