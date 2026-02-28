@@ -566,7 +566,7 @@ async def upload_file_async(
 
             # Calculate file hash FIRST
             logger.info("🔐 [HASH_CALCULATION] Calculating file hash")
-            from knowledgebase_ingestion.utils.file import calculate_file_hash
+            from knowledgebase_ingestion.utils.hash import calculate_file_hash
             file_sha256 = await calculate_file_hash(file_bytes)
             logger.info(f"✅ [HASH_CALCULATED] SHA256: {file_sha256}")
 
