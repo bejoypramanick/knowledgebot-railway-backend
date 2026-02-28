@@ -264,7 +264,13 @@ async def validate_file_upload(file: UploadFile, file_size: int, replace_existin
                     logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE file: ID={existing_active['id']}, filename={existing_active['original_filename']}, status={existing_active['processing_status']}")
                     return {
                         "valid": False,
-                        "error": f"File '{original_filename}' already exists (ID: {existing_active['id']}, Status: {existing_active['processing_status']}). Set replace_existing=true to replace it.",
+                        "is_duplicate": True,
+                        "error": f"File '{original_filename}' already exists",
+                        "reason": "filename_exists",
+                        "match_type": "filename",
+                        "existing_file_id": str(existing_active['id']),
+                        "existing_file_name": existing_active['original_filename'],
+                        "existing_file_status": existing_active['processing_status'],
                         "filename": sanitized_filename,
                         "duplicate_file_id": existing_active['id']
                     }

@@ -548,8 +548,23 @@ async def upload_file_async(
 
         validation_result = await validate_file_upload(file, file_size_initial, replace_existing)
         if not validation_result['valid']:
-            logger.error(f"❌ [VALIDATION_FAILED] {validation_result['error']}")
-            raise HTTPException(status_code=400, detail=validation_result['error'])
+            # Check if it's a duplicate (409) or other validation error (400)
+            if validation_result.get('is_duplicate'):
+                logger.warning(f"⚠️  [DUPLICATE_DETECTED] {validation_result.get('error')}")
+                error_response = {
+                    "success": False,
+                    "error": validation_result.get('error'),
+                    "reason": validation_result.get('reason'),
+                    "match_type": validation_result.get('match_type', 'filename'),
+                    "detail": f"File '{validation_result.get('existing_file_name')}' already exists (Status: {validation_result.get('existing_file_status')})",
+                    "existing_file_id": validation_result.get('existing_file_id'),
+                    "existing_file_name": validation_result.get('existing_file_name'),
+                }
+                logger.error(f"❌ [UPLOAD_REJECTED] {error_response}")
+                raise HTTPException(status_code=409, detail=error_response)
+            else:
+                logger.error(f"❌ [VALIDATION_FAILED] {validation_result['error']}")
+                raise HTTPException(status_code=400, detail=validation_result['error'])
 
         logger.info(f"✅ [VALIDATION_SUCCESS] File validation passed")
         logger.info(f"   Original Name: {validation_result['original_filename']}")
