@@ -13,29 +13,43 @@ class FeedbackDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def create_feedback(self, message_id: str, session_id: str, feedback: str, user_email: Optional[str] = None):
-        """Submit feedback for a chat message."""
-        query = """
-            INSERT INTO chat_feedback (message_id, session_id, feedback, user_email, created_at)
-            VALUES ($1, $2, $3, $4, NOW())
+    async def create_feedback(self, session_id: str, feedback_type: str, user_role_id: Optional[int] = None):
+        """Submit feedback for a chat session.
+
+        Args:
+            session_id: The session ID to provide feedback for
+            feedback_type: Either 'positive' or 'negative'
+            user_role_id: Optional user role ID for audit trail
         """
-        params = {"message_id": message_id, "session_id": session_id, "feedback": feedback, "user_email": user_email}
-        
+        # Validate feedback_type
+        if feedback_type not in ['positive', 'negative']:
+            raise ValueError(f"Invalid feedback_type: {feedback_type}. Must be 'positive' or 'negative'")
+
+        query = """
+            UPDATE chat_sessions
+            SET feedback_type = $1, feedback_provided_at = NOW(), feedback_user_role_id = $2
+            WHERE session_id = $3
+        """
+        params = {"feedback_type": feedback_type, "user_role_id": user_role_id, "session_id": session_id}
+
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                result = await conn.execute(query, message_id, session_id, feedback, user_email)
+                result = await conn.execute(query, feedback_type, user_role_id, session_id)
                 logger.log_db_query(query, params, result)
+                if result == "UPDATE 0":
+                    raise ValueError(f"Session not found: {session_id}")
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
 
     async def get_all_feedback(self) -> List[Dict[str, Any]]:
-        """Get all feedback."""
+        """Get all feedback (sessions with feedback provided)."""
         query = """
-            SELECT id, message_id, session_id, feedback, user_email, created_at
-            FROM chat_feedback
-            ORDER BY created_at DESC
+            SELECT session_id, feedback_type, feedback_provided_at, feedback_user_role_id
+            FROM chat_sessions
+            WHERE feedback_type IS NOT NULL
+            ORDER BY feedback_provided_at DESC
         """
 
         try:
@@ -63,11 +77,11 @@ class FeedbackDAO:
         query = """
             SELECT
                 session_id,
-                feedback,
+                feedback_type,
                 COUNT(*) as count
-            FROM chat_feedback
-            WHERE session_id = ANY($1::text[])
-            GROUP BY session_id, feedback
+            FROM chat_sessions
+            WHERE session_id = ANY($1::text[]) AND feedback_type IS NOT NULL
+            GROUP BY session_id, feedback_type
         """
 
         params = {"session_ids": session_ids}
@@ -82,16 +96,16 @@ class FeedbackDAO:
                 result = {}
                 for record in records:
                     session_id = str(record['session_id'])
-                    feedback_type = record['feedback']
+                    feedback_type = record['feedback_type']
                     count = record['count']
 
                     if session_id not in result:
                         result[session_id] = {'positive': 0, 'negative': 0}
 
                     # Map feedback types to positive/negative
-                    if feedback_type in ['positive', 'thumbs_up', '+1', 'like']:
+                    if feedback_type == 'positive':
                         result[session_id]['positive'] = count
-                    elif feedback_type in ['negative', 'thumbs_down', '-1', 'dislike']:
+                    elif feedback_type == 'negative':
                         result[session_id]['negative'] = count
 
                 # Ensure all session IDs are in result with zero counts if no feedback

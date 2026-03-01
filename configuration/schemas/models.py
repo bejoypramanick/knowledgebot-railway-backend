@@ -145,7 +145,6 @@ class NotificationRequest(BaseModel):
     feedback_requests_enabled: bool = True
 
 class FeedbackRequest(BaseModel):
-    """Request model for message feedback"""
-    message_id: str = Field(..., min_length=1, max_length=255)
+    """Request model for session feedback"""
     session_id: str = Field(..., min_length=1, max_length=255)
-    feedback: str = Field(..., pattern=r'^(positive|negative)$')
+    feedback_type: str = Field(..., pattern=r'^(positive|negative)$')

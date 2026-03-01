@@ -982,8 +982,8 @@ async def update_session_feedback(session_id: str, request: Request):
             user_type=user_type
         )
 
-        # Also record in chat_feedback table via service
-        await chat_log_service.record_session_feedback(session_id, feedback, user_type)
+        # Record feedback in chat_sessions table
+        await chat_log_service.record_session_feedback(session_id, feedback)
 
         return {
             "success": True,
@@ -1183,16 +1183,20 @@ async def get_detailed_token_usage(limit: int = 50, provider: str = None, api_ca
 
 @router.post("/feedback")
 async def submit_feedback(feedback: FeedbackRequest, request: Request):
-    """Submit feedback for a chat message"""
+    """Submit feedback for a chat session"""
     try:
-        user_email = request.headers.get("X-User-Email", "anonymous@example.com")
+        # Get user_role_id from request state (set by middleware)
+        user_role_id = getattr(request.state, "user_role_id", None)
+
         result = await feedback_service.submit_feedback(
-            message_id=feedback.message_id,
             session_id=feedback.session_id,
-            feedback=feedback.feedback,
-            user_email=user_email
+            feedback_type=feedback.feedback_type,
+            user_role_id=user_role_id
         )
-        return {"success": True, "message": "Feedback submitted successfully"}
+        return result
+    except ValueError as e:
+        logger.warning(f"Validation error submitting feedback: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error submitting feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))

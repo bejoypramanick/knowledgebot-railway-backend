@@ -199,7 +199,7 @@ class PerformanceDAO:
             return []
 
     async def get_satisfaction_score(self) -> float:
-        """Calculate average satisfaction score from chat_feedback (thumbs up/down)."""
+        """Calculate average satisfaction score from chat_sessions feedback (thumbs up/down)."""
         query = """
             SELECT
                 AVG(CASE
@@ -207,8 +207,8 @@ class PerformanceDAO:
                     WHEN feedback_type = 'negative' THEN 1.0
                     ELSE 3.0
                 END) as avg_score
-            FROM chat_feedback
-            WHERE created_at >= NOW() - INTERVAL '30 days'
+            FROM chat_sessions
+            WHERE feedback_provided_at >= NOW() - INTERVAL '30 days'
         """
         try:
             logger.log_db_operation(query)
@@ -221,10 +221,10 @@ class PerformanceDAO:
             return 4.0
 
     async def get_satisfaction_over_time(self) -> List[Dict[str, Any]]:
-        """Get monthly satisfaction scores with thumbs up/down counts from chat_feedback."""
+        """Get monthly satisfaction scores with thumbs up/down counts from chat_sessions feedback."""
         query = """
             SELECT
-                TO_CHAR(created_at, 'Mon') as month,
+                TO_CHAR(feedback_provided_at, 'Mon') as month,
                 COUNT(CASE WHEN feedback_type = 'positive' THEN 1 END) as thumbs_up,
                 COUNT(CASE WHEN feedback_type = 'negative' THEN 1 END) as thumbs_down,
                 AVG(CASE
@@ -232,10 +232,10 @@ class PerformanceDAO:
                     WHEN feedback_type = 'negative' THEN 1.0
                     ELSE 3.0
                 END) as satisfaction_score
-            FROM chat_feedback
-            WHERE created_at >= NOW() - INTERVAL '6 months'
-            GROUP BY TO_CHAR(created_at, 'Mon'), DATE_TRUNC('month', created_at)
-            ORDER BY DATE_TRUNC('month', created_at)
+            FROM chat_sessions
+            WHERE feedback_provided_at >= NOW() - INTERVAL '6 months'
+            GROUP BY TO_CHAR(feedback_provided_at, 'Mon'), DATE_TRUNC('month', feedback_provided_at)
+            ORDER BY DATE_TRUNC('month', feedback_provided_at)
         """
         try:
             logger.log_db_operation(query)

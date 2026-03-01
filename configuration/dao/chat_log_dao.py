@@ -475,17 +475,24 @@ class ChatLogDAO:
 
     async def record_session_feedback(self, session_id: str, feedback_type: str, user_role_id: Optional[int] = None) -> bool:
         """Record feedback for a chat session."""
+        # Validate feedback_type
+        if feedback_type not in ['positive', 'negative']:
+            raise ValueError(f"Invalid feedback_type: {feedback_type}. Must be 'positive' or 'negative'")
+
         query = """
-            INSERT INTO chat_feedback (message_id, session_id, feedback_type, user_role_id, created_at)
-            VALUES ($1, $2, $3, $4, NOW())
+            UPDATE chat_sessions
+            SET feedback_type = $1, feedback_provided_at = NOW(), feedback_user_role_id = $2
+            WHERE session_id = $3
         """
-        params = {"session_id": session_id, "feedback_type": feedback_type, "user_role_id": user_role_id}
+        params = {"feedback_type": feedback_type, "user_role_id": user_role_id, "session_id": session_id}
 
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                result = await conn.execute(query, "session_feedback", session_id, feedback_type, user_role_id)
+                result = await conn.execute(query, feedback_type, user_role_id, session_id)
                 logger.log_db_query(query, params, result)
+                if result == "UPDATE 0":
+                    raise ValueError(f"Session not found: {session_id}")
                 return True
         except Exception as e:
             logger.log_db_query(query, params, error=e)
