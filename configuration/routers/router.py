@@ -1291,28 +1291,23 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
             raise HTTPException(status_code=400, detail="User email not found")
         
         logger.info("🔍 About to call auth_service.get_user_role")
+        # Don't catch exceptions - let them propagate so the endpoint returns 503
+        # If database is unavailable, client should know immediately, not get fake data
+        role_result = await auth_service.get_user_role(user_email)
+        logger.info(f"🔍 Role result: {role_result}")
+        logger.info(f"🔍 Role result type: {type(role_result)}")
+
+        # Check if role_result is serializable
+        import json
         try:
-            role_result = await auth_service.get_user_role(user_email)
-            logger.info(f"🔍 Role result: {role_result}")
-            logger.info(f"🔍 Role result type: {type(role_result)}")
-            
-            # Check if role_result is serializable
-            import json
-            try:
-                json.dumps(role_result)
-                logger.info("✅ Role result is JSON serializable")
-            except Exception as e:
-                logger.error(f"❌ Role result is NOT JSON serializable: {e}")
-                logger.error(f"❌ Role result details: {dir(role_result)}")
-            
-            user_roles = role_result.get("roles", ["user"])
-            logger.info(f"🔍 User roles: {user_roles}")
-            
+            json.dumps(role_result)
+            logger.info("✅ Role result is JSON serializable")
         except Exception as e:
-            logger.error(f"❌ Error getting user role: {e}")
-            # Fallback to user role if auth service fails
-            user_roles = ["user"]
-            logger.info(f"🔍 Using fallback roles: {user_roles}")
+            logger.error(f"❌ Role result is NOT JSON serializable: {e}")
+            logger.error(f"❌ Role result details: {dir(role_result)}")
+
+        user_roles = role_result.get("roles", ["user"])
+        logger.info(f"🔍 User roles: {user_roles}")
         
         # Determine primary role (admin > human_agent > user)
         primary_role = "admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user")
