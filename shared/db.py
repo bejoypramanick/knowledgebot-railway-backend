@@ -75,7 +75,7 @@ class DatabaseManager:
             'min_size': min_size,
             'max_size': max_size,
             'command_timeout': 20.0,  # Reasonable timeout for queries
-            'max_inactive_connection_lifetime': 60.0,  # Don't close connections too aggressively
+            'max_inactive_connection_lifetime': 120.0,  # Keep alive longer (was 60.0, caused premature closures)
             'max_queries': 50000,
             'server_settings': {
                 'timezone': 'UTC',
