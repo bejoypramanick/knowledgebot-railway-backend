@@ -27,15 +27,17 @@ class DatabaseManager:
             self._connection_url += '&sslmode=require' if '?' in self._connection_url else '?sslmode=require'
         
         # Get pool size from environment variables with sensible defaults
-        # DB_POOL_MIN_SIZE: Minimum connections per worker (default: 5)
-        # DB_POOL_MAX_SIZE: Maximum connections per worker (default: 10)
-        min_size = int(os.getenv('DB_POOL_MIN_SIZE', '5'))
-        max_size = int(os.getenv('DB_POOL_MAX_SIZE', '10'))
+        # DB_POOL_MIN_SIZE: Minimum connections per worker (default: 10)
+        # DB_POOL_MAX_SIZE: Maximum connections per worker (default: 20)
+        # Note: Configuration service can make 6+ parallel queries, so we need headroom
+        min_size = int(os.getenv('DB_POOL_MIN_SIZE', '10'))
+        max_size = int(os.getenv('DB_POOL_MAX_SIZE', '20'))
         
         # Optimized pool sizing for handling concurrent requests
         # With asyncio, we need enough connections to handle multiple concurrent operations
-        # Setting max_size=10 allows handling multiple concurrent requests per worker
-        # This prevents connection exhaustion errors under typical load
+        # Configuration service makes up to 6 parallel queries per request
+        # Setting max_size=20 allows handling multiple concurrent requests per worker
+        # This prevents connection exhaustion errors when requests overlap
         self._pool_config = {
             'min_size': min_size,
             'max_size': max_size,
@@ -145,7 +147,7 @@ class DatabaseManager:
         
         for attempt in range(max_retries):
             try:
-                async with self._pool.acquire(timeout=5.0) as conn:
+                async with self._pool.acquire(timeout=10.0) as conn:
                     yield conn
                 return
             except Exception as e:
