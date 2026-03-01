@@ -219,7 +219,12 @@ class DatabaseManager:
                         except:
                             pass
                         self._pool = None
-                        await self._create_pool()
+                        try:
+                            await self._create_pool()
+                        except Exception as pool_error:
+                            logger.error(f"❌{cid_str} Failed to recreate pool during retry: {type(pool_error).__name__}: {pool_error}. Will retry connection acquisition.")
+                            # Don't raise - just continue to next retry iteration
+                            pass
                     # Small delay before retry
                     await asyncio.sleep(0.1)
                 else:
