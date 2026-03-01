@@ -157,96 +157,88 @@ class DatabaseManager:
             # Only log the issue - let connection() handle recovery if needed
             # This prevents unnecessary pool closure during temporary issues
 
-    @asynccontextmanager
-    async def connection(self):
+    async def get_connection(self):
+        """Get a connection from the pool with automatic retries.
+
+        IMPORTANT: Caller is responsible for releasing the connection!
+        Use in DAO with try/finally to ensure release.
+
+        Example:
+            conn = await manager.get_connection()
+            try:
+                return await conn.fetch(query)
+            finally:
+                await conn.close()  # asyncpg handles pool return automatically
+        """
         await self.ensure_healthy()
         if not self._pool:
             raise RuntimeError("Database pool not available")
-        
+
         cid = get_correlation_id()
         cid_str = f" [{cid}]" if cid else ""
-        
-        logger.debug(f"🔌{cid_str} Acquiring database connection...")
-        
+
         max_retries = 2
         last_error = None
-        
+
         for attempt in range(max_retries):
-            conn = None
             try:
-                # Safety check: ensure pool exists before trying to acquire
+                # Safety check: ensure pool exists
                 if not self._pool:
-                    logger.error(f"❌{cid_str} Pool is None at start of attempt {attempt + 1}, reinitializing...")
+                    logger.error(f"❌{cid_str} Pool is None, reinitializing...")
                     async with self._lock:
                         if not self._pool:
                             await self._create_pool()
 
-                # Use reasonable timeout for database acquisition (10s)
-                # With sequential queries and conservative pool size, should be fast
-                # Use manual try/finally instead of context manager to prevent
-                # "generator didn't stop after athrow()" errors during exception cleanup
+                # Acquire connection with timeout (asyncpg handles cleanup on close)
+                logger.debug(f"🔌{cid_str} Acquiring database connection (attempt {attempt + 1}/{max_retries})...")
                 conn = await self._pool.acquire(timeout=10.0)
-                try:
-                    yield conn
-                finally:
-                    try:
-                        await conn.release()
-                    except Exception as release_err:
-                        logger.debug(f"Error releasing connection: {release_err}")
-                return
+                logger.debug(f"✅{cid_str} Connection acquired successfully")
+                return conn
+
             except Exception as e:
                 last_error = e
-                error_str = str(e)
                 exc_type = type(e).__name__
-                exc_args = str(e.args) if hasattr(e, 'args') else 'N/A'
-                logger.error(f"❌{cid_str} Failed to acquire DB connection (attempt {attempt + 1}/{max_retries}): {exc_type}: {error_str or exc_args}")
+                error_str = str(e) if str(e) else str(e.args) if hasattr(e, 'args') else 'Unknown'
+                logger.error(f"❌{cid_str} Failed to acquire connection (attempt {attempt + 1}/{max_retries}): {exc_type}: {error_str}")
 
-                # Only retry on specific errors and if we have retries left
+                # Retry on transient errors
                 combined_error = f"{exc_type} {error_str}".lower()
                 should_retry = (
                     attempt < max_retries - 1 and
                     any(err in combined_error for err in [
-                        "event loop is closed",
-                        "bad file descriptor",
-                        "pool is closed",
-                        "timeout",  # Retry on timeout errors
-                        "connection reset",  # Retry on connection reset
-                        "connection refused",  # Retry on connection refused
-                        "disconnected"  # Retry on disconnect
+                        "timeout", "pool is closed", "connection reset",
+                        "connection refused", "disconnected"
                     ])
                 )
-                
-                if should_retry:
-                    logger.warning(f"⚠️{cid_str} Attempting to reinitialize pool due to connection issue")
-                    async with self._lock:
-                        try:
-                            # Only close and reinit if pool exists and is in bad state
-                            if self._pool:
-                                try:
-                                    await self._pool.close()
-                                except Exception as close_err:
-                                    logger.debug(f"Could not close old pool: {close_err}")
 
-                                # Try to recreate pool while keeping old one as fallback
-                                try:
-                                    logger.debug(f"⏳{cid_str} Creating new pool...")
-                                    await self._create_pool()
-                                    logger.info(f"✅{cid_str} Pool successfully recreated")
-                                except Exception as pool_error:
-                                    logger.error(f"❌{cid_str} Failed to recreate pool: {type(pool_error).__name__}: {pool_error}")
-                                    # Keep old pool alive as fallback - don't set to None
-                                    # This prevents AttributeError on next iteration
-                        except Exception as retry_error:
-                            logger.error(f"❌{cid_str} Unexpected error in pool reinit: {retry_error}")
-                    # Small delay before retry
+                if should_retry:
+                    logger.warning(f"⚠️{cid_str} Retrying after transient error")
+                    async with self._lock:
+                        if self._pool:
+                            try:
+                                await self._pool.close()
+                            except Exception:
+                                pass
+                        try:
+                            await self._create_pool()
+                        except Exception as pool_err:
+                            logger.error(f"Failed to recreate pool: {pool_err}")
                     await asyncio.sleep(0.1)
                 else:
-                    # Don't retry for "another operation is in progress" or other errors
                     raise
-        
-        # If we exhausted retries, raise the last error
+
         if last_error:
             raise last_error
+
+    @asynccontextmanager
+    async def connection(self):
+        """Legacy context manager interface for backwards compatibility.
+        Prefer get_connection() for new code."""
+        conn = await self.get_connection()
+        try:
+            yield conn
+        finally:
+            await conn.close()  # Returns connection to pool
 
     async def close(self):
         if self._pool:
@@ -270,9 +262,25 @@ class DatabaseManager:
         async with self.connection() as conn:
             return await conn.fetchval(query, *args)
 
-@asynccontextmanager
 async def get_db_connection():
-    """Unified entry point for getting a DB connection with correlation logging."""
+    """Get a database connection from the pool.
+
+    IMPORTANT: Caller must use try/finally to ensure connection is released.
+
+    Example:
+        conn = await get_db_connection()
+        try:
+            result = await conn.fetch(query)
+        finally:
+            await conn.close()  # Returns to pool
+    """
+    manager = await DatabaseManager.get_instance()
+    return await manager.get_connection()
+
+@asynccontextmanager
+async def get_db_connection_context():
+    """Context manager for database connections (legacy, for backwards compatibility).
+    Prefer get_db_connection() with try/finally in new code."""
     manager = await DatabaseManager.get_instance()
     async with manager.connection() as conn:
         yield conn
