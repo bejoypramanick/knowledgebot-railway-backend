@@ -271,7 +271,12 @@ class OpenTelemetryLogger:
 
         # Also log to console
         if error:
-            self.error(f"❌ DB Query Error: {query} | Error: {error}")
+            # Safely convert error to string, handling generator and other async exceptions
+            try:
+                error_msg = str(error) if str(error) else type(error).__name__
+            except Exception:
+                error_msg = type(error).__name__
+            self.error(f"❌ DB Query Error: {query} | Error: {error_msg}")
         else:
             rows = len(result) if result is not None and hasattr(result, '__len__') and not isinstance(result, (str, bytes)) else 'N/A'
             self.info(f"✅ DB Query Success: {query} | Rows/Result: {rows}")

@@ -160,7 +160,7 @@ class ChatAgentConfigDAO:
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'human_agent'
-            AND u.is_active = true 
+            AND u.is_active = true
             AND urm.is_active = true
         """
         try:
@@ -168,9 +168,14 @@ class ChatAgentConfigDAO:
             async with get_db_connection() as conn:
                 results = await conn.fetch(query)
                 logger.log_db_query(query, None, results)
-                return [row['email'] for row in results]
+                return [row['email'] for row in results] if results else []
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            # Log error safely without exposing generator exceptions
+            try:
+                logger.log_db_query(query, None, error=e)
+            except Exception as log_error:
+                # If logging itself fails, just skip it
+                logger.error(f"Error fetching human agents: {type(e).__name__}")
             return []
 
     async def get_admins(self) -> List[str]:
@@ -181,7 +186,7 @@ class ChatAgentConfigDAO:
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'admin'
-            AND u.is_active = true 
+            AND u.is_active = true
             AND urm.is_active = true
         """
         try:
@@ -189,9 +194,14 @@ class ChatAgentConfigDAO:
             async with get_db_connection() as conn:
                 results = await conn.fetch(query)
                 logger.log_db_query(query, None, results)
-                return [row['email'] for row in results]
+                return [row['email'] for row in results] if results else []
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            # Log error safely without exposing generator exceptions
+            try:
+                logger.log_db_query(query, None, error=e)
+            except Exception as log_error:
+                # If logging itself fails, just skip it
+                logger.error(f"Error fetching admin emails: {type(e).__name__}")
             return []
 
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
