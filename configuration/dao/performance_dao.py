@@ -208,7 +208,8 @@ class PerformanceDAO:
                     ELSE 3.0
                 END) as avg_score
             FROM chat_sessions
-            WHERE feedback_provided_at >= NOW() - INTERVAL '30 days'
+            WHERE feedback_provided_at IS NOT NULL
+            AND feedback_provided_at >= NOW() - INTERVAL '30 days'
         """
         try:
             logger.log_db_operation(query)
@@ -233,7 +234,8 @@ class PerformanceDAO:
                     ELSE 3.0
                 END) as satisfaction_score
             FROM chat_sessions
-            WHERE feedback_provided_at >= NOW() - INTERVAL '6 months'
+            WHERE feedback_provided_at IS NOT NULL
+            AND feedback_provided_at >= NOW() - INTERVAL '6 months'
             GROUP BY TO_CHAR(feedback_provided_at, 'Mon'), DATE_TRUNC('month', feedback_provided_at)
             ORDER BY DATE_TRUNC('month', feedback_provided_at)
         """
