@@ -22,9 +22,16 @@ class DatabaseManager:
         self._pool: Optional[asyncpg.Pool] = None
         self._connection_url = connection_url or os.getenv("DATABASE_URL")
         
-        # Ensure SSL mode is properly configured for Railway
-        if self._connection_url and 'sslmode=' not in self._connection_url:
-            self._connection_url += '&sslmode=require' if '?' in self._connection_url else '?sslmode=require'
+        # Configure SSL for Railway PostgreSQL
+        # Use prefer: allow connection with SSL, but don't fail if unavailable
+        # This is more resilient than require for internal connections
+        if self._connection_url:
+            if 'sslmode=' not in self._connection_url:
+                # Add sslmode=prefer for more resilient connections
+                self._connection_url += '&sslmode=prefer' if '?' in self._connection_url else '?sslmode=prefer'
+                logger.info(f"📊 Added sslmode=prefer to DATABASE_URL for Railway compatibility")
+            else:
+                logger.info(f"📊 DATABASE_URL already has sslmode configured")
         
         # Get pool size from environment variables with sensible defaults
         # DB_POOL_MIN_SIZE: Minimum connections per worker (default: 10)
@@ -91,12 +98,21 @@ class DatabaseManager:
     async def _create_pool(self):
         if not self._connection_url:
             raise RuntimeError("Database URL not configured")
-        
+
         logger.info(f"🆕 Initializing unified DB pool (min={self._pool_config['min_size']}, max={self._pool_config['max_size']})")
-        
+
         try:
+            # Create SSL context that accepts Railway's certificates
+            import ssl
+            ssl_context = ssl.create_default_context()
+            # For Railway internal connections, we can be more lenient with cert verification
+            if 'sslmode=prefer' in self._connection_url:
+                ssl_context.check_hostname = True
+                ssl_context.verify_mode = ssl.CERT_REQUIRED
+
             self._pool = await asyncpg.create_pool(
                 dsn=self._connection_url,
+                ssl=ssl_context if 'sslmode=' in self._connection_url else None,
                 **self._pool_config
             )
             async with self._pool.acquire() as conn:
