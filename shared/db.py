@@ -177,6 +177,13 @@ class DatabaseManager:
         
         for attempt in range(max_retries):
             try:
+                # Safety check: ensure pool exists before trying to acquire
+                if not self._pool:
+                    logger.error(f"❌{cid_str} Pool is None at start of attempt {attempt + 1}, reinitializing...")
+                    async with self._lock:
+                        if not self._pool:
+                            await self._create_pool()
+
                 # Use reasonable timeout for database acquisition (10s)
                 # With sequential queries and conservative pool size, should be fast
                 async with self._pool.acquire(timeout=10.0) as conn:
@@ -208,17 +215,24 @@ class DatabaseManager:
                     logger.warning(f"⚠️{cid_str} Attempting to reinitialize pool due to connection issue")
                     async with self._lock:
                         try:
+                            # Only close and reinit if pool exists and is in bad state
                             if self._pool:
-                                await self._pool.close()
-                        except:
-                            pass
-                        self._pool = None
-                        try:
-                            await self._create_pool()
-                        except Exception as pool_error:
-                            logger.error(f"❌{cid_str} Failed to recreate pool during retry: {type(pool_error).__name__}: {pool_error}. Will retry connection acquisition.")
-                            # Don't raise - just continue to next retry iteration
-                            pass
+                                try:
+                                    await self._pool.close()
+                                except Exception as close_err:
+                                    logger.debug(f"Could not close old pool: {close_err}")
+
+                                # Try to recreate pool while keeping old one as fallback
+                                try:
+                                    logger.debug(f"⏳{cid_str} Creating new pool...")
+                                    await self._create_pool()
+                                    logger.info(f"✅{cid_str} Pool successfully recreated")
+                                except Exception as pool_error:
+                                    logger.error(f"❌{cid_str} Failed to recreate pool: {type(pool_error).__name__}: {pool_error}")
+                                    # Keep old pool alive as fallback - don't set to None
+                                    # This prevents AttributeError on next iteration
+                        except Exception as retry_error:
+                            logger.error(f"❌{cid_str} Unexpected error in pool reinit: {retry_error}")
                     # Small delay before retry
                     await asyncio.sleep(0.1)
                 else:
