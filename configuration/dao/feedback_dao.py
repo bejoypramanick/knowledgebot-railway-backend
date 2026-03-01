@@ -13,13 +13,12 @@ class FeedbackDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def create_feedback(self, session_id: str, feedback_type: str, user_role_id: Optional[int] = None):
+    async def create_feedback(self, session_id: str, feedback_type: str):
         """Submit feedback for a chat session.
 
         Args:
             session_id: The session ID to provide feedback for
             feedback_type: Either 'positive' or 'negative'
-            user_role_id: Optional user role ID for audit trail
         """
         # Validate feedback_type
         if feedback_type not in ['positive', 'negative']:
@@ -27,18 +26,19 @@ class FeedbackDAO:
 
         query = """
             UPDATE chat_sessions
-            SET feedback_type = $1, feedback_provided_at = NOW(), feedback_user_role_id = $2
-            WHERE session_id = $3
+            SET feedback_type = $1, feedback_provided_at = NOW()
+            WHERE session_id = $2
         """
-        params = {"feedback_type": feedback_type, "user_role_id": user_role_id, "session_id": session_id}
+        params = {"feedback_type": feedback_type, "session_id": session_id}
 
         try:
             logger.log_db_operation(query, params)
             async with get_db_connection() as conn:
-                result = await conn.execute(query, feedback_type, user_role_id, session_id)
+                result = await conn.execute(query, feedback_type, session_id)
                 logger.log_db_query(query, params, result)
                 if result == "UPDATE 0":
                     raise ValueError(f"Session not found: {session_id}")
+                return True
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
