@@ -371,45 +371,32 @@ async def generic_proxy_handler(request: Request, path: str):
         # Remove gateway/ prefix for backend service routing
         backend_path = clean_path.replace("gateway/", "", 1) if clean_path.startswith("gateway/") else clean_path
 
-        # Handle admin endpoints that are actually in configuration service
+        # Determine service routing
+        # All backend services register routers with /api/v1/{service_name} prefix
+        # So we need to keep service prefixes intact in the path
         service_path = backend_path  # Default: use backend_path as-is
 
-        if backend_path.startswith("admin/agents/online") or backend_path.startswith("admin/performance/metrics") or backend_path.startswith("admin/chat-sessions"):
+        if backend_path.startswith("configuration/"):
             service_url = get_settings().configuration_service_url
-            logger.info(f"✅ Routing admin endpoint to configuration service: {service_url}")
-        elif backend_path.startswith("admin/"):
-            service_url = get_settings().configuration_service_url
-            logger.info(f"✅ Routing admin endpoint to configuration service: {service_url}")
-        elif backend_path.startswith("users/"):
-            service_url = get_settings().configuration_service_url
-            logger.info(f"✅ Routing users endpoint to configuration service: {service_url}")
-        elif backend_path.startswith("configuration/"):
-            service_url = get_settings().configuration_service_url
-            # Strip the service prefix for the backend URL
-            service_path = backend_path.replace("configuration/", "", 1)
+            # Keep the service prefix - configuration service expects /api/v1/configuration/...
             logger.info(f"✅ Routing to configuration service: {service_url}")
         elif backend_path.startswith("chatbot/"):
             service_url = get_settings().chatbot_orchestration_url
-            # Strip the service prefix for the backend URL
-            service_path = backend_path.replace("chatbot/", "", 1)
+            # Keep the service prefix - chatbot service expects /api/v1/chatbot/...
             logger.info(f"✅ Routing to chatbot service: {service_url}")
         elif backend_path.startswith("knowledgebase/"):
             service_url = get_settings().knowledgebase_ingestion_url
-            # Strip the service prefix for the backend URL
-            service_path = backend_path.replace("knowledgebase/", "", 1)
+            # Keep the service prefix - knowledgebase service expects /api/v1/knowledgebase/...
             logger.info(f"✅ Routing to knowledgebase service: {service_url}")
-        elif backend_path.startswith("webcrawl") or backend_path == "webcrawl":
+        elif backend_path.startswith("webcrawl"):
             service_url = get_settings().knowledgebase_ingestion_url
             logger.info(f"✅ Routing webcrawl to knowledgebase_ingestion service: {service_url}")
-        elif backend_path.startswith("widget/"):
+        elif backend_path.startswith("admin/") or backend_path.startswith("users/") or backend_path.startswith("widget/") or backend_path.startswith("feedback") or backend_path.startswith("messages/"):
+            # These are all configuration service endpoints but without the service prefix
+            # Need to add "configuration/" prefix for proper routing
             service_url = get_settings().configuration_service_url
-            logger.info(f"✅ Routing widget endpoint to configuration service: {service_url}")
-        elif backend_path.startswith("feedback"):
-            service_url = get_settings().configuration_service_url
-            logger.info(f"✅ Routing feedback endpoint to configuration service: {service_url}")
-        elif backend_path.startswith("messages/"):
-            service_url = get_settings().configuration_service_url
-            logger.info(f"✅ Routing messages endpoint to configuration service: {service_url}")
+            service_path = f"configuration/{backend_path}"
+            logger.info(f"✅ Routing to configuration service (non-prefixed endpoint): {service_url}")
         else:
             logger.error(f"❌ Unknown path: {backend_path}")
             return JSONResponse(
