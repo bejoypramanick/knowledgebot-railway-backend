@@ -3,7 +3,6 @@ Chat Agent Configuration Service for Chat Agent Management
 Provides business logic layer for chat agent configuration operations
 """
 from typing import Any, Dict, List, Optional
-import asyncio
 
 from shared.otel_logger import get_otel_logger
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
@@ -19,22 +18,15 @@ class ChatAgentConfigService:
     async def get_chatAgent_config(self):
         """Get complete chatbot configuration with all data transformations"""
         try:
-            # OPTIMIZATION: Parallelize independent database queries
-            (
-                widget_config,
-                security_rows,
-                llm_rows,
-                persona,
-                human_agents_list,
-                admin_emails_list
-            ) = await asyncio.gather(
-                self._chatAgent_dao.get_widget_config(),
-                self._chatAgent_dao.get_security_settings(),
-                self._chatAgent_dao.get_llm_providers(),
-                self._chatAgent_dao.get_active_persona(),
-                self._chatAgent_dao.get_human_agents(),
-                self._chatAgent_dao.get_admins()
-            )
+            # Fetch database queries sequentially to avoid connection pool exhaustion
+            # Sequential approach: reduces peak connection usage from 6 to 1
+            # Performance: slightly slower but prevents timeout errors under load
+            widget_config = await self._chatAgent_dao.get_widget_config()
+            security_rows = await self._chatAgent_dao.get_security_settings()
+            llm_rows = await self._chatAgent_dao.get_llm_providers()
+            persona = await self._chatAgent_dao.get_active_persona()
+            human_agents_list = await self._chatAgent_dao.get_human_agents()
+            admin_emails_list = await self._chatAgent_dao.get_admins()
 
             # Build security settings dict
             security = {
