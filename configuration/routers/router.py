@@ -1340,12 +1340,39 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
         # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        logger.error(f"❌ Error getting user profile: {e}")
-        logger.error(f"❌ Error type: {type(e)}")
-        logger.error(f"❌ Error details: {str(e)}")
+        exc_type = type(e).__name__
+        exc_str = str(e) if str(e) else exc_type
+        logger.error(f"❌ Error getting user profile: {exc_type}: {exc_str}")
         import traceback
         logger.error(f"❌ Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=str(e))
+
+        # Return 503 Service Unavailable for database errors
+        # Clients should understand this means the service is temporarily unavailable
+        status_code = 503 if _is_database_error(e) else 500
+        raise HTTPException(
+            status_code=status_code,
+            detail="Database service temporarily unavailable" if status_code == 503 else "Internal server error"
+        )
+
+def _is_database_error(e: Exception) -> bool:
+    """Check if exception is a database-related error"""
+    exc_type = type(e).__name__
+    exc_str = str(e).lower()
+
+    # Check exception type
+    database_errors = {
+        "TimeoutError", "asyncpg.exceptions.InsufficientPrivilegeError",
+        "asyncpg.exceptions.PostgresConnectionError", "asyncpg.exceptions.ConnectionFailureError",
+        "asyncpg.exceptions.ConnectionDoesNotExistError", "asyncpg.exceptions.InterfaceError",
+        "ConnectionRefusedError", "RuntimeError"
+    }
+
+    if exc_type in database_errors:
+        return True
+
+    # Check error message patterns
+    db_keywords = ["timeout", "pool", "connection", "database", "postgres", "unavailable"]
+    return any(kw in exc_str for kw in db_keywords)
 
 @router.put("/users/profile")
 async def update_user_profile(profile_data: Dict[str, Any], user: dict = Depends(get_current_user)):

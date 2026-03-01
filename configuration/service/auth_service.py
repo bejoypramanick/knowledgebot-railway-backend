@@ -23,17 +23,19 @@ class AuthService:
         try:
             # Get all roles for the user in a single database call
             user_roles_data = await self.auth_dao.get_user_roles(email)
-            
+
             # Extract role names from the results
             roles = [role_data['role_name'] for role_data in user_roles_data]
-            
+
             # Return all roles or default to user
             if not roles:
                 roles = ["user"]
-            
+
             return {"email": email, "roles": roles}
         except Exception as e:
-            logger.error(f"Error getting user role: {e}")
+            exc_type = type(e).__name__
+            exc_msg = str(e) if str(e) else f"({exc_type})"
+            logger.error(f"Error getting user role for {email}: {exc_type}: {exc_msg}")
             raise
 
     async def remove_admin(self, email: str, current_user_email: str) -> dict:
