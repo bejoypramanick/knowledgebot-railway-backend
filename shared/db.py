@@ -75,9 +75,9 @@ class DatabaseManager:
         self._pool_config = {
             'min_size': min_size,
             'max_size': max_size,
-            'command_timeout': 15.0,
-            'max_inactive_connection_lifetime': 60.0,  # Close idle connections after 60s (was 120s)
-            'max_queries': 10000,
+            'command_timeout': 30.0,  # Increased from 15s for slow database
+            'max_inactive_connection_lifetime': 30.0,  # Close idle connections faster (was 60s)
+            'max_queries': 50000,  # Increased from 10000
             'server_settings': {
                 'timezone': 'UTC',
                 'application_name': 'knowledgebot_backend_shared',
@@ -183,7 +183,9 @@ class DatabaseManager:
         
         for attempt in range(max_retries):
             try:
-                async with self._pool.acquire(timeout=10.0) as conn:
+                # Use longer timeout for database acquisition
+                # Railway might have slow connection times, especially on startup/restart
+                async with self._pool.acquire(timeout=20.0) as conn:
                     yield conn
                 return
             except Exception as e:
