@@ -429,3 +429,60 @@ class ChatLogService:
         except Exception as e:
             logger.error(f"Error marking messages as unread for session {session_id}: {e}")
             raise
+
+    async def mark_message_as_read(self, message_id: int, user_email: str) -> bool:
+        """Mark a single message as read by human agent or admin."""
+        try:
+            # Verify user is agent or admin
+            roles = await self.dao.check_user_role(user_email)
+            if not roles["is_agent"] and not roles["is_admin"]:
+                logger.warning(f"User {user_email} is not a human agent or admin")
+                raise HTTPException(status_code=403, detail="Only human agents and admins can mark messages as read")
+
+            success = await self.dao.mark_message_as_read(message_id)
+            if success:
+                logger.info(f"User {user_email} marked message {message_id} as read")
+            else:
+                logger.warning(f"Failed to mark message {message_id} as read")
+            return success
+        except Exception as e:
+            logger.error(f"Error marking message {message_id} as read: {e}")
+            raise
+
+    async def mark_session_messages_as_read(self, session_id: str, user_email: str) -> bool:
+        """Mark all messages in a session as read by human agent or admin."""
+        try:
+            # Verify user is agent or admin
+            roles = await self.dao.check_user_role(user_email)
+            if not roles["is_agent"] and not roles["is_admin"]:
+                logger.warning(f"User {user_email} is not a human agent or admin")
+                raise HTTPException(status_code=403, detail="Only human agents and admins can mark messages as read")
+
+            session_db_id = await self.dao.get_session_db_id(session_id)
+            if not session_db_id:
+                logger.warning(f"Session {session_id} not found")
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            success = await self.dao.mark_session_messages_as_read(session_db_id)
+            if success:
+                logger.info(f"User {user_email} marked all messages in session {session_id} as read")
+            else:
+                logger.warning(f"Failed to mark messages in session {session_id} as read")
+            return success
+        except Exception as e:
+            logger.error(f"Error marking session {session_id} messages as read: {e}")
+            raise
+
+    async def get_unread_message_count(self, session_id: str) -> int:
+        """Get count of unread messages in a session."""
+        try:
+            session_db_id = await self.dao.get_session_db_id(session_id)
+            if not session_db_id:
+                return 0
+
+            count = await self.dao.get_unread_messages_count(session_db_id)
+            logger.info(f"Session {session_id} has {count} unread messages")
+            return count
+        except Exception as e:
+            logger.error(f"Error getting unread message count for session {session_id}: {e}")
+            return 0

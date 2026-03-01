@@ -1046,7 +1046,7 @@ async def mark_session_as_read(session_id: str, request: Request):
     try:
         user_email = request.headers.get("X-User-Email", "admin@example.com")
 
-        await chat_log_service.mark_session_messages_as_read(session_id)
+        await chat_log_service.mark_session_messages_as_read(session_id, user_email)
 
         logger.info(f"Marked session {session_id} as read by {user_email}")
 
@@ -1080,6 +1080,48 @@ async def mark_session_as_unread(session_id: str, request: Request):
         raise
     except Exception as e:
         logger.error(f"Error marking session as unread: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/admin/messages/{message_id}/mark-read")
+async def mark_message_as_read(message_id: int, request: Request):
+    """Mark a single message as read by human agent or admin"""
+    try:
+        user_email = request.headers.get("X-User-Email", "admin@example.com")
+
+        success = await chat_log_service.mark_message_as_read(message_id, user_email)
+
+        logger.info(f"Marked message {message_id} as read by {user_email}")
+
+        return {
+            "success": success,
+            "message": "Message marked as read" if success else "Failed to mark message as read",
+            "message_id": message_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error marking message as read: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/admin/chat-sessions/{session_id}/unread-count")
+async def get_unread_message_count(session_id: str, request: Request):
+    """Get count of unread messages in a session"""
+    try:
+        user_email = request.headers.get("X-User-Email", "admin@example.com")
+
+        count = await chat_log_service.get_unread_message_count(session_id)
+
+        logger.info(f"Retrieved unread message count for session {session_id} by {user_email}")
+
+        return {
+            "success": True,
+            "session_id": session_id,
+            "unread_count": count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting unread message count: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/users/unique-id")
