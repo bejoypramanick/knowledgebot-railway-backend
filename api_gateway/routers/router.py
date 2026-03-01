@@ -372,20 +372,20 @@ async def generic_proxy_handler(request: Request, path: str):
         backend_path = clean_path.replace("gateway/", "", 1) if clean_path.startswith("gateway/") else clean_path
 
         # Determine service routing
-        # Backend services register routers with /{service_name} prefix (internal URLs, no /api/v1)
+        # Backend services register routers with /api/v1/{service_name} prefix
         service_path = backend_path  # Default: use backend_path as-is
 
         if backend_path.startswith("configuration/"):
             service_url = get_settings().configuration_service_url
-            # Keep the service prefix - configuration service expects /configuration/...
+            # Keep the service prefix - configuration service expects /api/v1/configuration/...
             logger.info(f"✅ Routing to configuration service: {service_url}")
         elif backend_path.startswith("chatbot/"):
             service_url = get_settings().chatbot_orchestration_url
-            # Keep the service prefix - chatbot service expects /chatbot/...
+            # Keep the service prefix - chatbot service expects /api/v1/chatbot/...
             logger.info(f"✅ Routing to chatbot service: {service_url}")
         elif backend_path.startswith("knowledgebase/"):
             service_url = get_settings().knowledgebase_ingestion_url
-            # Keep the service prefix - knowledgebase service expects /knowledgebase/...
+            # Keep the service prefix - knowledgebase service expects /api/v1/knowledgebase/...
             logger.info(f"✅ Routing to knowledgebase service: {service_url}")
         elif backend_path.startswith("webcrawl"):
             service_url = get_settings().knowledgebase_ingestion_url
@@ -404,9 +404,9 @@ async def generic_proxy_handler(request: Request, path: str):
             )
 
         # Construct full URL for internal service communication
-        # Internal services are called directly without /api/v1 prefix (that's only for external/gateway endpoints)
+        # Internal services expect /api/v1/{service_name}/{endpoint}
         # The service_path already includes the service prefix (e.g., "configuration/users/profile")
-        full_url = f"{service_url}/{service_path}"
+        full_url = f"{service_url}/api/v1/{service_path}"
         logger.info(f"🌐 Making {request.method} request to: {full_url}")
         logger.info(f"🔍 Service URL: {service_url}")
         logger.info(f"🔍 Original path: {path}")

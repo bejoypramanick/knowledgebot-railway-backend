@@ -200,8 +200,7 @@ async def health_check():
     }
 
 # Include Routers
-# Use /configuration prefix for internal routing (no /api/v1 needed for internal services)
-app.include_router(config_router, prefix="/configuration")
+app.include_router(config_router, prefix="/api/v1/configuration")
 
 # Root endpoint
 @app.get("/")
