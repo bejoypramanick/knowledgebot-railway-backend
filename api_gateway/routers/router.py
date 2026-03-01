@@ -357,7 +357,6 @@ async def generic_proxy_handler(request: Request, path: str):
         
         # Determine service based on URL path
         service_url = None
-        service_path = backend_path  # Track the path to send to the service (may differ from backend_path)
 
         logger.info(f"🔍 Processing path: '{path}'")
 
@@ -366,6 +365,9 @@ async def generic_proxy_handler(request: Request, path: str):
 
         # Remove gateway/ prefix for backend service routing
         backend_path = clean_path.replace("gateway/", "") if clean_path.startswith("gateway/") else clean_path
+
+        # Track the path to send to the service (may differ from backend_path if service prefix needs stripping)
+        service_path = backend_path
 
         # Handle admin endpoints that are actually in configuration service
         if backend_path.startswith("admin/agents/online") or backend_path.startswith("admin/performance/metrics") or backend_path.startswith("admin/chat-sessions"):
