@@ -360,11 +360,16 @@ async def generic_proxy_handler(request: Request, path: str):
 
         logger.info(f"🔍 Processing path: '{path}'")
 
-        # Remove /api/v1/ prefix for routing logic
-        clean_path = path.replace("/api/v1/", "") if path.startswith("/api/v1/") else path
+        # Remove /api/v1/ or api/v1/ prefix for routing logic (handle both with/without leading slash)
+        if path.startswith("/api/v1/"):
+            clean_path = path.replace("/api/v1/", "", 1)
+        elif path.startswith("api/v1/"):
+            clean_path = path.replace("api/v1/", "", 1)
+        else:
+            clean_path = path
 
         # Remove gateway/ prefix for backend service routing
-        backend_path = clean_path.replace("gateway/", "") if clean_path.startswith("gateway/") else clean_path
+        backend_path = clean_path.replace("gateway/", "", 1) if clean_path.startswith("gateway/") else clean_path
 
         # Handle admin endpoints that are actually in configuration service
         service_path = backend_path  # Default: use backend_path as-is
