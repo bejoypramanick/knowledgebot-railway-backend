@@ -611,3 +611,45 @@ class ChatLogDAO:
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
+
+    async def mark_message_as_read(self, message_id: int) -> bool:
+        """Mark a single message as read by human agent or admin."""
+        query = "UPDATE chat_messages SET is_message_read = true, updated_at = NOW() WHERE id = $1"
+        try:
+            params = {"message_id": message_id}
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, message_id)
+                logger.log_db_query(query, params, result)
+                return True
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return False
+
+    async def mark_session_messages_as_read(self, session_id: int) -> bool:
+        """Mark all messages in a session as read by human agent or admin."""
+        query = "UPDATE chat_messages SET is_message_read = true, updated_at = NOW() WHERE session_id = $1"
+        try:
+            params = {"session_id": session_id}
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.execute(query, session_id)
+                logger.log_db_query(query, params, result)
+                return True
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return False
+
+    async def get_unread_messages_count(self, session_id: int) -> int:
+        """Get count of unread messages in a session."""
+        query = "SELECT COUNT(*) as count FROM chat_messages WHERE session_id = $1 AND is_message_read = false"
+        try:
+            params = {"session_id": session_id}
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                result = await conn.fetchval(query, session_id)
+                logger.log_db_query(query, params, result)
+                return result or 0
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return 0

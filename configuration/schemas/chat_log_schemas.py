@@ -9,6 +9,11 @@ class ChatMessageResponse(BaseModel):
     sender: str
     timestamp: str
     session_id: str
+    used_rag: Optional[bool] = False
+    used_postgres: Optional[bool] = False
+    confidence_score: Optional[float] = None
+    sources: Optional[list] = None
+    is_message_read: Optional[bool] = False
 
 class ChatSessionResponse(BaseModel):
     id: str

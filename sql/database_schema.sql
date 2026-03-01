@@ -768,23 +768,20 @@ CREATE TABLE public.chat_messages (
 	"content" text NOT NULL,
 	used_rag bool DEFAULT false NULL,
 	used_postgres bool DEFAULT false NULL,
-	used_neon_db bool DEFAULT false NULL,
-	used_internet_search bool DEFAULT false NULL,
 	confidence_score numeric(3, 2) NULL,
 	sources jsonb DEFAULT '[]'::jsonb NULL,
-	usage_info jsonb DEFAULT '{}'::jsonb NULL,
-	rating int2 NULL,
+	is_message_read bool DEFAULT false NULL,
 	created_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NULL,
 	CONSTRAINT chat_messages_pkey PRIMARY KEY (id),
-	CONSTRAINT chat_messages_rating_check CHECK (((rating >= 1) AND (rating <= 5))),
 	CONSTRAINT chat_messages_session_id_fkey FOREIGN KEY (session_id) REFERENCES public.chat_sessions(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_chat_messages_created_at ON public.chat_messages USING btree (created_at DESC);
-CREATE INDEX idx_chat_messages_rating ON public.chat_messages USING btree (rating);
+CREATE INDEX idx_chat_messages_is_message_read ON public.chat_messages USING btree (is_message_read);
 CREATE INDEX idx_chat_messages_role ON public.chat_messages USING btree (role);
 CREATE INDEX idx_chat_messages_role_created_at ON public.chat_messages USING btree (role, created_at DESC);
 CREATE INDEX idx_chat_messages_session_id ON public.chat_messages USING btree (session_id);
+CREATE INDEX idx_chat_messages_session_unread ON public.chat_messages USING btree (session_id, is_message_read);
 COMMENT ON TABLE public.chat_messages IS 'Individual chat messages within sessions';
 
 ALTER TABLE public.chat_messages OWNER TO postgres;
