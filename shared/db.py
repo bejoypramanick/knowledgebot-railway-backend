@@ -145,7 +145,7 @@ class DatabaseManager:
         
         for attempt in range(max_retries):
             try:
-                async with self._pool.acquire() as conn:
+                async with self._pool.acquire(timeout=5.0) as conn:
                     yield conn
                 return
             except Exception as e:
@@ -162,7 +162,8 @@ class DatabaseManager:
                     any(err in combined_error for err in [
                         "event loop is closed",
                         "bad file descriptor",
-                        "pool is closed"
+                        "pool is closed",
+                        "timeout"  # Retry on timeout errors
                     ])
                 )
                 
