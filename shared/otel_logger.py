@@ -128,7 +128,7 @@ class OpenTelemetryLogger:
             return f"[{context_str}] {message}"
         return message
         
-    def _log_with_context(self, level: int, message: str, extra: Dict[str, Any] = None):
+    def _log_with_context(self, level: int, message: str, extra: Dict[str, Any] = None, **kwargs):
         """Log message with OpenTelemetry context using standard logging"""
         # Get calling file info automatically
         file_info = get_calling_file_info()
@@ -168,9 +168,23 @@ class OpenTelemetryLogger:
             'method_name': file_info['method_name']
         })
 
+        # Extract reserved LogRecord attributes from kwargs (these can't go in extra dict)
+        exc_info = kwargs.pop('exc_info', None)
+        exc_text = kwargs.pop('exc_text', None)
+        stack_info = kwargs.pop('stack_info', None)
+
+        # Prepare logger.log kwargs
+        log_kwargs = {'extra': extra}
+        if exc_info is not None:
+            log_kwargs['exc_info'] = exc_info
+        if exc_text is not None:
+            log_kwargs['exc_text'] = exc_text
+        if stack_info is not None:
+            log_kwargs['stack_info'] = stack_info
+
         # Standard logger automatically includes otelTraceID and otelSpanID
         # from shared/telemetry.py LoggingInstrumentor
-        self.logger.log(level, full_message, extra=extra)
+        self.logger.log(level, full_message, **log_kwargs)
 
         # Add span attributes if span exists
         span = trace.get_current_span()
@@ -205,22 +219,22 @@ class OpenTelemetryLogger:
             )
     
     def info(self, message: str, **kwargs):
-        self._log_with_context(logging.INFO, message, kwargs)
-    
+        self._log_with_context(logging.INFO, message, **kwargs)
+
     def error(self, message: str, **kwargs):
-        self._log_with_context(logging.ERROR, message, kwargs)
+        self._log_with_context(logging.ERROR, message, **kwargs)
         span = trace.get_current_span()
         if span and span.is_recording():
             span.set_status(Status(StatusCode.ERROR, message))
-    
+
     def warning(self, message: str, **kwargs):
-        self._log_with_context(logging.WARNING, message, kwargs)
-    
+        self._log_with_context(logging.WARNING, message, **kwargs)
+
     def debug(self, message: str, **kwargs):
-        self._log_with_context(logging.DEBUG, message, kwargs)
-    
+        self._log_with_context(logging.DEBUG, message, **kwargs)
+
     def critical(self, message: str, **kwargs):
-        self._log_with_context(logging.CRITICAL, message, kwargs)
+        self._log_with_context(logging.CRITICAL, message, **kwargs)
         span = trace.get_current_span()
         if span and span.is_recording():
             span.set_status(Status(StatusCode.ERROR, message))
