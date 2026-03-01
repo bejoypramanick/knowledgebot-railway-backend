@@ -44,16 +44,18 @@ class DatabaseManager:
         min_size_raw = int(min_size_env) if min_size_env else 5
         max_size_raw = int(max_size_env) if max_size_env else 10
 
-        # Keep conservative to avoid exhausting Railway's connection limits
-        # Sequential queries (not parallel) means we don't need huge pools
-        min_size = max(min_size_raw, 5)   # At least 5 minimum connections
-        max_size = max(max_size_raw, 10)  # At least 10 maximum connections
+        # CRITICAL: Cap pool size for Railway PostgreSQL
+        # Railway connections are a shared resource with strict limits
+        # 5 connections is sufficient for sequential queries (no parallel operations)
+        # Larger pools exhaust Railway's connection slots quickly
+        min_size = min(max(min_size_raw, 3), 5)   # Cap at 5 max
+        max_size = min(max(max_size_raw, 5), 8)   # Cap at 8 max
 
-        # Warn if environment variables were too large (Railway constraint)
-        if min_size_env and int(min_size_env) > 10:
-            logger.warning(f"⚠️ [DB_POOL] DB_POOL_MIN_SIZE set to {min_size_env} but Railway limits connections, capping at 10")
-        if max_size_env and int(max_size_env) > 20:
-            logger.warning(f"⚠️ [DB_POOL] DB_POOL_MAX_SIZE set to {max_size_env} but Railway limits connections, capping at 20")
+        # Log what was set vs what we're using
+        if min_size_env and int(min_size_env) != min_size:
+            logger.warning(f"⚠️ [DB_POOL] DB_POOL_MIN_SIZE={min_size_env} exceeds Railway safe limit, capping at {min_size}")
+        if max_size_env and int(max_size_env) != max_size:
+            logger.warning(f"⚠️ [DB_POOL] DB_POOL_MAX_SIZE={max_size_env} exceeds Railway safe limit, capping at {max_size}")
 
         logger.info(f"📊 [DB_POOL_ENV] DB_POOL_MIN_SIZE={min_size_env} (using: {min_size}), DB_POOL_MAX_SIZE={max_size_env} (using: {max_size})")
 
@@ -150,16 +152,10 @@ class DatabaseManager:
             async with self._pool.acquire(timeout=3.0) as conn:
                 await conn.execute("SELECT 1")
         except Exception as e:
-            logger.warning(f"⚠️ DB pool health check failed: {e}. Attempting recovery...")
-            async with self._lock:
-                try:
-                    if self._pool:
-                        await self._pool.close()
-                except Exception as close_err:
-                    logger.warning(f"⚠️ Error closing pool during recovery: {close_err}")
-                finally:
-                    self._pool = None
-                await self._create_pool()
+            logger.warning(f"⚠️ DB pool health check failed: {e}. Will retry on next access.")
+            # Don't close the pool on transient health check failures
+            # Only log the issue - let connection() handle recovery if needed
+            # This prevents unnecessary pool closure during temporary issues
 
     @asynccontextmanager
     async def connection(self):
