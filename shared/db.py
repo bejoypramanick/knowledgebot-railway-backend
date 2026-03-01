@@ -56,8 +56,6 @@ class DatabaseManager:
             'max_size': max_size,
             'command_timeout': 15.0,
             'max_inactive_connection_lifetime': 60.0,  # Close idle connections after 60s (was 120s)
-            'max_connection_lifetime': 300.0,  # Refresh connections every 5 minutes
-            'max_cached_statement_lifetime': 3600,
             'max_queries': 10000,
             'server_settings': {
                 'timezone': 'UTC',
@@ -102,17 +100,10 @@ class DatabaseManager:
         logger.info(f"🆕 Initializing unified DB pool (min={self._pool_config['min_size']}, max={self._pool_config['max_size']})")
 
         try:
-            # Create SSL context that accepts Railway's certificates
-            import ssl
-            ssl_context = ssl.create_default_context()
-            # For Railway internal connections, we can be more lenient with cert verification
-            if 'sslmode=prefer' in self._connection_url:
-                ssl_context.check_hostname = True
-                ssl_context.verify_mode = ssl.CERT_REQUIRED
-
+            # asyncpg handles SSL based on sslmode in connection URL
+            # No need to pass SSL context separately - asyncpg manages it
             self._pool = await asyncpg.create_pool(
                 dsn=self._connection_url,
-                ssl=ssl_context if 'sslmode=' in self._connection_url else None,
                 **self._pool_config
             )
             async with self._pool.acquire() as conn:
