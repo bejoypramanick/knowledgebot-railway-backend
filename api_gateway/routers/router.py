@@ -373,7 +373,7 @@ async def generic_proxy_handler(request: Request, path: str):
         elif backend_path.startswith("admin/"):
             service_url = get_settings().configuration_service_url
             logger.info(f"✅ Routing admin endpoint to configuration service: {service_url}")
-        elif backend_path.startswith("users/unique-id"):
+        elif backend_path.startswith("users/"):
             service_url = get_settings().configuration_service_url
             logger.info(f"✅ Routing users endpoint to configuration service: {service_url}")
         elif backend_path.startswith("configuration/"):
