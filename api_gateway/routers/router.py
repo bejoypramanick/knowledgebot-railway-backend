@@ -372,21 +372,20 @@ async def generic_proxy_handler(request: Request, path: str):
         backend_path = clean_path.replace("gateway/", "", 1) if clean_path.startswith("gateway/") else clean_path
 
         # Determine service routing
-        # All backend services register routers with /api/v1/{service_name} prefix
-        # So we need to keep service prefixes intact in the path
+        # Backend services register routers with /{service_name} prefix (internal URLs, no /api/v1)
         service_path = backend_path  # Default: use backend_path as-is
 
         if backend_path.startswith("configuration/"):
             service_url = get_settings().configuration_service_url
-            # Keep the service prefix - configuration service expects /api/v1/configuration/...
+            # Keep the service prefix - configuration service expects /configuration/...
             logger.info(f"✅ Routing to configuration service: {service_url}")
         elif backend_path.startswith("chatbot/"):
             service_url = get_settings().chatbot_orchestration_url
-            # Keep the service prefix - chatbot service expects /api/v1/chatbot/...
+            # Keep the service prefix - chatbot service expects /chatbot/...
             logger.info(f"✅ Routing to chatbot service: {service_url}")
         elif backend_path.startswith("knowledgebase/"):
             service_url = get_settings().knowledgebase_ingestion_url
-            # Keep the service prefix - knowledgebase service expects /api/v1/knowledgebase/...
+            # Keep the service prefix - knowledgebase service expects /knowledgebase/...
             logger.info(f"✅ Routing to knowledgebase service: {service_url}")
         elif backend_path.startswith("webcrawl"):
             service_url = get_settings().knowledgebase_ingestion_url
