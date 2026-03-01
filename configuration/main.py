@@ -102,13 +102,20 @@ async def lifespan(app: FastAPI):
             app.state.database_url = database_url
             logger.info("🚀 LIFESPAN: About to initialize database")
             try:
-                await database_initializer.initialize_and_validate(database_url)
-                logger.info("✅ LIFESPAN: Database initialized and validated")
+                result = await database_initializer.initialize_and_validate(database_url)
+                if result:
+                    logger.info("✅ LIFESPAN: Database initialized and validated successfully")
+                else:
+                    logger.error("❌ LIFESPAN: Database initialization returned False")
+                    service_status.set_status("error")
+                    raise RuntimeError("Database initialization failed")
             except Exception as e:
                 logger.error(f"❌ LIFESPAN: Failed to initialize database: {e}")
                 import traceback
                 logger.error(f"❌ LIFESPAN: Database error traceback: {traceback.format_exc()}")
-                # Don't fail startup, but log the error
+                service_status.set_status("error")
+                # Fail startup if database can't be initialized
+                raise
         else:
             logger.error("❌ LIFESPAN: DATABASE_URL not set - configuration endpoints will not work")
             app.state.database_url = None
