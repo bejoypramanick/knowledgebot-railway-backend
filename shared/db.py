@@ -172,6 +172,7 @@ class DatabaseManager:
         last_error = None
         
         for attempt in range(max_retries):
+            conn = None
             try:
                 # Safety check: ensure pool exists before trying to acquire
                 if not self._pool:
@@ -182,8 +183,16 @@ class DatabaseManager:
 
                 # Use reasonable timeout for database acquisition (10s)
                 # With sequential queries and conservative pool size, should be fast
-                async with self._pool.acquire(timeout=10.0) as conn:
+                # Use manual try/finally instead of context manager to prevent
+                # "generator didn't stop after athrow()" errors during exception cleanup
+                conn = await self._pool.acquire(timeout=10.0)
+                try:
                     yield conn
+                finally:
+                    try:
+                        await conn.release()
+                    except Exception as release_err:
+                        logger.debug(f"Error releasing connection: {release_err}")
                 return
             except Exception as e:
                 last_error = e
