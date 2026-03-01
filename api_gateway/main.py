@@ -177,7 +177,6 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/gateway/configuration/health",  # Configuration service health
             "/api/v1/gateway/configuration/test",  # Configuration service test endpoint
             "/api/v1/gateway/configuration/version",  # Configuration service version endpoint
-            "/api/v1/gateway/configuration/widgetConfig",  # Public widget configuration endpoint
             "/docs",  # API documentation
             "/redoc",  # ReDoc documentation
             "/openapi.json",  # OpenAPI schema
