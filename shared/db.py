@@ -41,10 +41,31 @@ class DatabaseManager:
         max_size_env = os.getenv('DB_POOL_MAX_SIZE')
 
         # Use environment variables if set, otherwise use defaults
-        min_size = int(min_size_env) if min_size_env else 10
-        max_size = int(max_size_env) if max_size_env else 20
+        # Note: If env vars are set to very small values (1, 2, 3), they're likely wrong
+        # Use sensible minimums to prevent connection pool exhaustion
+        min_size_raw = int(min_size_env) if min_size_env else 10
+        max_size_raw = int(max_size_env) if max_size_env else 20
+
+        # Enforce sensible minimums - never go below these
+        min_size = max(min_size_raw, 10)  # At least 10 minimum connections
+        max_size = max(max_size_raw, 20)  # At least 20 maximum connections
+
+        # Warn if environment variables were too small
+        if min_size_env and int(min_size_env) < 10:
+            logger.warning(f"⚠️ [DB_POOL] DB_POOL_MIN_SIZE set to {min_size_env} but enforcing minimum of 10")
+        if max_size_env and int(max_size_env) < 20:
+            logger.warning(f"⚠️ [DB_POOL] DB_POOL_MAX_SIZE set to {max_size_env} but enforcing minimum of 20")
 
         logger.info(f"📊 [DB_POOL_ENV] DB_POOL_MIN_SIZE={min_size_env} (using: {min_size}), DB_POOL_MAX_SIZE={max_size_env} (using: {max_size})")
+
+        # Log database connection info for debugging
+        db_url = os.getenv("DATABASE_URL")
+        if db_url:
+            # Mask the password in logs
+            masked_url = db_url.split('@')[0] + '@' + db_url.split('@')[1] if '@' in db_url else db_url
+            logger.info(f"📊 [DATABASE_URL] {masked_url}")
+        else:
+            logger.warning("⚠️ [DATABASE_URL] Not set!")
         
         # Optimized pool sizing for handling concurrent requests
         # With asyncio, we need enough connections to handle multiple concurrent operations
