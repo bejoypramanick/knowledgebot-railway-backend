@@ -427,10 +427,13 @@ async def generic_proxy_handler(request: Request, path: str):
             logger.info(f"🔍 User data forwarded: {request.state.user}")
         
         # Make HTTP request to service
-        # Use longer timeout for batch operations (file uploads/deletes)
+        # Use longer timeout for batch operations (file uploads/deletes) and complex queries
         # NOTE: webcrawl uses async Celery, returns immediately with task ID (no long timeout needed)
         request_timeout = 30.0
-        if "batch" in backend_path or "batchupload" in backend_path or "delete/batch" in backend_path:
+        if "chatAgentConfig" in backend_path or "configuration/chatAgentConfig" in backend_path:
+            request_timeout = 60.0  # Configuration aggregates multiple DB queries
+            logger.info(f"⏱️  Using extended timeout {request_timeout}s for chatAgentConfig (multiple parallel queries)")
+        elif "batch" in backend_path or "batchupload" in backend_path or "delete/batch" in backend_path:
             request_timeout = 300.0  # 5 minutes for batch operations
             logger.info(f"⏱️  Using extended timeout {request_timeout}s for batch operation")
         # webcrawl/async returns immediately (task dispatched to Celery), no extended timeout needed
