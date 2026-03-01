@@ -367,6 +367,8 @@ async def generic_proxy_handler(request: Request, path: str):
         backend_path = clean_path.replace("gateway/", "") if clean_path.startswith("gateway/") else clean_path
 
         # Handle admin endpoints that are actually in configuration service
+        service_path = backend_path  # Default: use backend_path as-is
+
         if backend_path.startswith("admin/agents/online") or backend_path.startswith("admin/performance/metrics") or backend_path.startswith("admin/chat-sessions"):
             service_url = get_settings().configuration_service_url
             logger.info(f"✅ Routing admin endpoint to configuration service: {service_url}")
@@ -378,12 +380,18 @@ async def generic_proxy_handler(request: Request, path: str):
             logger.info(f"✅ Routing users endpoint to configuration service: {service_url}")
         elif backend_path.startswith("configuration/"):
             service_url = get_settings().configuration_service_url
+            # Strip the service prefix for the backend URL
+            service_path = backend_path.replace("configuration/", "", 1)
             logger.info(f"✅ Routing to configuration service: {service_url}")
         elif backend_path.startswith("chatbot/"):
             service_url = get_settings().chatbot_orchestration_url
+            # Strip the service prefix for the backend URL
+            service_path = backend_path.replace("chatbot/", "", 1)
             logger.info(f"✅ Routing to chatbot service: {service_url}")
         elif backend_path.startswith("knowledgebase/"):
             service_url = get_settings().knowledgebase_ingestion_url
+            # Strip the service prefix for the backend URL
+            service_path = backend_path.replace("knowledgebase/", "", 1)
             logger.info(f"✅ Routing to knowledgebase service: {service_url}")
         elif backend_path.startswith("webcrawl") or backend_path == "webcrawl":
             service_url = get_settings().knowledgebase_ingestion_url
@@ -404,9 +412,9 @@ async def generic_proxy_handler(request: Request, path: str):
                 content={"error": f"Unknown path: {backend_path}"}
             )
 
-        # Construct full URL using backend_path (with service prefixes intact)
-        # Backend services receive requests at /api/v1/{service_name}/{endpoint}
-        full_url = f"{service_url}/api/v1/{backend_path}"
+        # Construct full URL using service_path (with service prefixes stripped for service-specific paths)
+        # Backend services receive requests at /api/v1/{endpoint}
+        full_url = f"{service_url}/api/v1/{service_path}"
         logger.info(f"🌐 Making {request.method} request to: {full_url}")
         logger.info(f"🔍 Service URL: {service_url}")
         logger.info(f"🔍 Original path: {path}")
