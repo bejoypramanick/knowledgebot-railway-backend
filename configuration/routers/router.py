@@ -223,16 +223,7 @@ async def get_security_settings():
     """Get security settings only"""
     try:
         logger.info("🔍 GET /data/security-settings")
-        from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
-        dao = ChatAgentConfigDAO()
-        security_rows = await dao.get_security_settings()
-
-        # Build security settings dict
-        security = {"response_timeout": 30}
-        for row in security_rows:
-            if row['setting_name'] == 'response_timeout':
-                security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
-
+        security = await config_service.get_security_settings()
         return {"success": True, "data": security}
     except Exception as e:
         logger.error(f"Error getting security settings: {e}")
@@ -243,22 +234,7 @@ async def get_llm_providers():
     """Get LLM providers and token usage"""
     try:
         logger.info("🔍 GET /data/llm-providers")
-        from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
-        dao = ChatAgentConfigDAO()
-        llm_rows = await dao.get_llm_providers()
-
-        # Build LLM tokens dict
-        llm_tokens = {}
-        for row in llm_rows:
-            provider = row['provider_name']
-            token_limit = row['token_limit']
-            used_tokens = row['token_used']
-            llm_tokens[provider] = {
-                "used": used_tokens,
-                "available": (token_limit - used_tokens),
-                "limit": token_limit
-            }
-
+        llm_tokens = await config_service.get_llm_providers()
         return {"success": True, "data": llm_tokens}
     except Exception as e:
         logger.error(f"Error getting LLM providers: {e}")
@@ -269,27 +245,7 @@ async def get_active_persona():
     """Get active persona configuration"""
     try:
         logger.info("🔍 GET /data/active-persona")
-        from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
-        dao = ChatAgentConfigDAO()
-        persona = await dao.get_active_persona()
-
-        # Get all available personas
-        all_personas = []
-        try:
-            all_personas = await dao.get_all_personas()
-            # Use first persona as default if no active persona is set
-            if not persona and all_personas:
-                persona = all_personas[0]
-        except Exception as e:
-            logger.error(f"Error fetching personas: {e}")
-
-        # Build response
-        persona_config = {
-            "system_prompt": persona.get('system_prompt', '') if persona else "",
-            "selected_persona": persona.get('persona_name', 'KnowledgeBot') if persona else "KnowledgeBot",
-            "available_personas": all_personas
-        }
-
+        persona_config = await config_service.get_active_persona()
         return {"success": True, "data": persona_config}
     except Exception as e:
         logger.error(f"Error getting active persona: {e}")
@@ -300,10 +256,7 @@ async def get_human_agents():
     """Get human agents list"""
     try:
         logger.info("🔍 GET /data/human-agents")
-        from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
-        dao = ChatAgentConfigDAO()
-        human_agents_list = await dao.get_human_agents()
-
+        human_agents_list = await config_service.get_human_agents()
         return {"success": True, "data": human_agents_list}
     except Exception as e:
         logger.error(f"Error getting human agents: {e}")
@@ -314,10 +267,7 @@ async def get_admin_emails():
     """Get admin emails list"""
     try:
         logger.info("🔍 GET /data/admin-emails")
-        from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
-        dao = ChatAgentConfigDAO()
-        admin_emails_list = await dao.get_admins()
-
+        admin_emails_list = await config_service.get_admin_emails()
         return {"success": True, "data": admin_emails_list}
     except Exception as e:
         logger.error(f"Error getting admin emails: {e}")

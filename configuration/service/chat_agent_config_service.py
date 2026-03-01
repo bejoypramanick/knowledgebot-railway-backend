@@ -207,3 +207,74 @@ class ChatAgentConfigService:
         except Exception as e:
             logger.error(f"❌ Error saving chatbot config: {e}")
             raise
+
+    async def get_security_settings(self) -> Dict[str, Any]:
+        """Get security settings only"""
+        try:
+            security_rows = await self._chatAgent_dao.get_security_settings()
+            security = {"response_timeout": 30}
+            for row in security_rows:
+                if row['setting_name'] == 'response_timeout':
+                    security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
+            return security
+        except Exception as e:
+            logger.error(f"Error getting security settings: {e}")
+            raise
+
+    async def get_llm_providers(self) -> Dict[str, Any]:
+        """Get LLM providers and token usage"""
+        try:
+            llm_rows = await self._chatAgent_dao.get_llm_providers()
+            llm_tokens = {}
+            for row in llm_rows:
+                provider = row['provider_name']
+                token_limit = row['token_limit']
+                used_tokens = row['token_used']
+                llm_tokens[provider] = {
+                    "used": used_tokens,
+                    "available": (token_limit - used_tokens),
+                    "limit": token_limit
+                }
+            return llm_tokens
+        except Exception as e:
+            logger.error(f"Error getting LLM providers: {e}")
+            raise
+
+    async def get_active_persona(self) -> Dict[str, Any]:
+        """Get active persona configuration"""
+        try:
+            persona = await self._chatAgent_dao.get_active_persona()
+            all_personas = []
+
+            try:
+                all_personas = await self._chatAgent_dao.get_all_personas()
+                if not persona and all_personas:
+                    persona = all_personas[0]
+            except Exception as e:
+                logger.error(f"Error fetching personas: {e}")
+
+            persona_config = {
+                "system_prompt": persona.get('system_prompt', '') if persona else "",
+                "selected_persona": persona.get('persona_name', 'KnowledgeBot') if persona else "KnowledgeBot",
+                "available_personas": all_personas
+            }
+            return persona_config
+        except Exception as e:
+            logger.error(f"Error getting active persona: {e}")
+            raise
+
+    async def get_human_agents(self) -> List[str]:
+        """Get human agents list"""
+        try:
+            return await self._chatAgent_dao.get_human_agents()
+        except Exception as e:
+            logger.error(f"Error getting human agents: {e}")
+            raise
+
+    async def get_admin_emails(self) -> List[str]:
+        """Get admin emails list"""
+        try:
+            return await self._chatAgent_dao.get_admins()
+        except Exception as e:
+            logger.error(f"Error getting admin emails: {e}")
+            raise
