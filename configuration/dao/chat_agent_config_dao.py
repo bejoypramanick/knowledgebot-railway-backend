@@ -16,7 +16,7 @@ class ChatAgentConfigDAO:
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
         """Get complete widget configuration including metadata."""
         query = """
-            SELECT 
+            SELECT
                 display_name, initial_message, auto_show_duration, keep_showing_suggested,
                 theme, primary_color, use_primary_for_header, chat_bubble_color, align_bubble,
                 display_chatbot, profile_picture_url, chat_icon_url, profile_picture_filename,
@@ -33,7 +33,7 @@ class ChatAgentConfigDAO:
                 return result
         except Exception as e:
             logger.log_db_query(query, None, error=e)
-            return None
+            raise  # ← Raise exception instead of silently returning None
 
     async def update_widget_config(self, **kwargs):
         """Update complete widget configuration including metadata in single call."""
@@ -132,7 +132,7 @@ class ChatAgentConfigDAO:
                 return [dict(row) for row in result]
         except Exception as e:
             logger.log_db_query(query, None, error=e)
-            return []
+            raise  # ← Raise exception instead of silently returning []
 
     async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'text'):
         """Upsert security setting."""
@@ -176,7 +176,7 @@ class ChatAgentConfigDAO:
             except Exception as log_error:
                 # If logging itself fails, just skip it
                 logger.error(f"Error fetching human agents: {type(e).__name__}")
-            return []
+            raise  # ← Raise exception instead of silently returning []
 
     async def get_admins(self) -> List[str]:
         """Get all admin emails."""
@@ -202,7 +202,7 @@ class ChatAgentConfigDAO:
             except Exception as log_error:
                 # If logging itself fails, just skip it
                 logger.error(f"Error fetching admin emails: {type(e).__name__}")
-            return []
+            raise  # ← Raise exception instead of silently returning []
 
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
         """Get all LLM providers."""
@@ -219,12 +219,12 @@ class ChatAgentConfigDAO:
                 return [dict(row) for row in result]
         except Exception as e:
             logger.log_db_query(query, None, error=e)
-            return []
+            raise  # ← Raise exception instead of silently returning []
 
     async def get_all_personas(self) -> List[Dict[str, Any]]:
         """Get all personas from database"""
         query = """
-            SELECT id, persona_name, system_prompt, 
+            SELECT id, persona_name, system_prompt,
                     is_active, created_at, updated_at
             FROM public.persona_configurations
             ORDER BY id ASC
@@ -234,15 +234,15 @@ class ChatAgentConfigDAO:
             async with get_db_connection() as conn:
                 rows = await conn.fetch(query)
                 logger.log_db_query(query, None, rows)
-            return [dict(row) for row in rows]
+                return [dict(row) for row in rows]  # ← Return inside try block
         except Exception as e:
             logger.error(f"Error fetching personas: {e}")
-            raise
+            raise  # Already raises, this is fine
 
     async def get_active_persona(self) -> Optional[Dict[str, Any]]:
         """Get active chatbot persona from database."""
         query = """
-            SELECT id, persona_name, persona_description, system_prompt, 
+            SELECT id, persona_name, persona_description, system_prompt,
                    is_active, created_at, updated_at
             FROM persona_configurations
             WHERE is_active = true
@@ -257,7 +257,7 @@ class ChatAgentConfigDAO:
                 return result
         except Exception as e:
             logger.log_db_query(query, None, error=e)
-            return None
+            raise  # ← Raise exception instead of silently returning None
     
     async def update_persona(self, persona_name: str, system_prompt: str, is_active: bool = True):
         """Update existing persona configuration only (no insert)."""

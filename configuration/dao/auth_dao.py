@@ -17,7 +17,7 @@ class AuthDAO:
         """Check if user exists for given email."""
         query = """
             SELECT id, email, display_name, email_verified, created_at, updated_at
-            FROM users 
+            FROM users
             WHERE email = $1
         """
         params = {"email": email}
@@ -29,7 +29,7 @@ class AuthDAO:
                 return result
         except Exception as e:
             logger.log_db_query(query, params, error=e)
-            return None
+            raise  # ← Raise exception instead of returning None
 
     async def check_user_has_role(self, email: str, role_name: str) -> Optional[Dict[str, Any]]:
         """Check if user has specific role and return user role mapping."""
@@ -50,7 +50,7 @@ class AuthDAO:
                 return result
         except Exception as e:
             logger.log_db_query(query, params, error=e)
-            return None
+            raise  # ← Raise exception instead of returning None
 
     async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
         """Check if admin exists for given email."""
@@ -68,8 +68,8 @@ class AuthDAO:
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
-            WHERE u.email = $1 
-            AND u.is_active = true 
+            WHERE u.email = $1
+            AND u.is_active = true
             AND urm.is_active = true
             ORDER BY r.role_name
         """
@@ -82,7 +82,7 @@ class AuthDAO:
                 return [dict(row) for row in results]
         except Exception as e:
             logger.log_db_query(query, params, error=e)
-            return []
+            raise  # ← Raise exception instead of returning []
 
     async def get_user_by_role_id(self, user_role_id: int) -> Optional[Dict[str, Any]]:
         """Get user and role information by user_role_id."""
