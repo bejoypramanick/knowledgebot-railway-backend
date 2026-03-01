@@ -285,34 +285,30 @@ class ChatLogService:
             await self.dao.create_message(session_db_id, 'system', "Chat transferred to another support agent")
         return True
 
-    async def update_chat_session(self, session_id: str, user_email: str, status: Optional[str] = None, 
-                                 assigned_agent: Optional[str] = None, feedback: Optional[str] = None, 
-                                 user_type: Optional[str] = None):
+    async def update_chat_session(self, session_id: str, user_email: str, status: Optional[str] = None,
+                                 assigned_agent: Optional[str] = None):
         """Update a chat session's metadata and status."""
         session_data = await self.dao.get_session_by_id_with_messages(session_id)
         if not session_data:
             raise HTTPException(status_code=404, detail="Chat session not found")
-        
+
         session_db_id = session_data['id']
         metadata = session_data['metadata'] or {}
         if isinstance(metadata, str):
             metadata = json.loads(metadata)
-        
+
         if status is not None:
             metadata['status'] = status
             if status == 'closed':
                 await self.dao.archive_session(session_id, 'closed')
-        
+
         if assigned_agent is not None:
             if assigned_agent == '' or assigned_agent is None:
                 if 'assigned_agent' in metadata:
                     del metadata['assigned_agent']
             else:
                 metadata['assigned_agent'] = assigned_agent
-        
-        if feedback is not None and user_type is not None:
-            metadata[f"{user_type}_feedback"] = feedback
-        
+
         await self.dao.update_chat_session_metadata(session_db_id, metadata)
         
         if status == 'closed' and not assigned_agent:
@@ -360,15 +356,6 @@ class ChatLogService:
         if not assigned_agent:
             raise HTTPException(status_code=503, detail="No available agents to assign chat")
         return assigned_agent
-
-    async def record_session_feedback(self, session_id: str, feedback_type: str, user_role_id: Optional[int] = None):
-        """Record feedback for a chat session"""
-        try:
-            await self.dao.record_session_feedback(session_id, feedback_type, user_role_id)
-            logger.info(f"Feedback '{feedback_type}' recorded for session {session_id}")
-        except Exception as e:
-            logger.error(f"Error recording session feedback: {e}")
-            raise
 
     async def delete_session_messages(self, session_id: str) -> bool:
         """Delete all messages for a chat session."""

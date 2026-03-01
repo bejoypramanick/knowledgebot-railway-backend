@@ -963,40 +963,6 @@ async def transfer_session(session_id: str, request: Request):
         logger.error(f"Error transferring session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/admin/chat-sessions/{session_id}/feedback")
-async def update_session_feedback(session_id: str, request: Request):
-    """Update feedback for a chat session"""
-    try:
-        body = await request.json()
-        feedback = body.get("feedback")  # positive or negative
-        user_type = body.get("user_type", "customer")  # customer or agent
-        user_email = request.headers.get("X-User-Email", "user@example.com")
-
-        if feedback not in ["positive", "negative"]:
-            raise HTTPException(status_code=400, detail="Feedback must be 'positive' or 'negative'")
-
-        await chat_log_service.update_chat_session(
-            session_id=session_id,
-            user_email=user_email,
-            feedback=feedback,
-            user_type=user_type
-        )
-
-        # Record feedback in chat_sessions table
-        await chat_log_service.record_session_feedback(session_id, feedback)
-
-        return {
-            "success": True,
-            "message": "Feedback recorded",
-            "session_id": session_id,
-            "feedback": feedback
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error updating session feedback: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @router.post("/admin/chat-sessions/{session_id}/request-agent")
 async def request_human_agent(session_id: str):
     """Request a human agent for a chat session"""
