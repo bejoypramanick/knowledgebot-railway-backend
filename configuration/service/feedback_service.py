@@ -34,3 +34,21 @@ class FeedbackService:
         except Exception as e:
             logger.error(f"Error getting all feedback: {e}")
             raise
+
+    async def get_feedback_counts_by_sessions(self, session_ids: List[str]) -> Dict[str, Dict[str, int]]:
+        """Get feedback counts for multiple sessions
+
+        Args:
+            session_ids: List of session IDs to get feedback for
+
+        Returns:
+            Dictionary with session_id as key and {positive: count, negative: count} as value
+        """
+        try:
+            logger.info(f"Getting feedback counts for sessions: {session_ids}")
+            result = await self.feedback_dao.get_feedback_counts_by_sessions(session_ids)
+            logger.info(f"Feedback counts retrieved: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Error getting feedback counts by sessions: {e}")
+            raise

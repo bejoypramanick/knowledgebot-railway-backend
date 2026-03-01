@@ -37,7 +37,7 @@ class FeedbackDAO:
             FROM feedback
             ORDER BY created_at DESC
         """
-        
+
         try:
             logger.log_db_operation(query)
             async with get_db_connection() as conn:
@@ -46,4 +46,60 @@ class FeedbackDAO:
                 return records
         except Exception as e:
             logger.log_db_query(query, None, error=e)
+            raise
+
+    async def get_feedback_counts_by_sessions(self, session_ids: List[str]) -> Dict[str, Dict[str, int]]:
+        """Get feedback counts (positive and negative) for multiple sessions.
+
+        Args:
+            session_ids: List of session IDs to get feedback counts for
+
+        Returns:
+            Dictionary with session_id as key and {positive: count, negative: count} as value
+        """
+        if not session_ids:
+            return {}
+
+        query = """
+            SELECT
+                session_id,
+                feedback,
+                COUNT(*) as count
+            FROM feedback
+            WHERE session_id = ANY($1::text[])
+            GROUP BY session_id, feedback
+        """
+
+        params = {"session_ids": session_ids}
+
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_connection() as conn:
+                records = await conn.fetch(query, session_ids)
+                logger.log_db_query(query, params, records)
+
+                # Transform results into expected format
+                result = {}
+                for record in records:
+                    session_id = str(record['session_id'])
+                    feedback_type = record['feedback']
+                    count = record['count']
+
+                    if session_id not in result:
+                        result[session_id] = {'positive': 0, 'negative': 0}
+
+                    # Map feedback types to positive/negative
+                    if feedback_type in ['positive', 'thumbs_up', '+1', 'like']:
+                        result[session_id]['positive'] = count
+                    elif feedback_type in ['negative', 'thumbs_down', '-1', 'dislike']:
+                        result[session_id]['negative'] = count
+
+                # Ensure all session IDs are in result with zero counts if no feedback
+                for session_id in session_ids:
+                    if session_id not in result:
+                        result[session_id] = {'positive': 0, 'negative': 0}
+
+                return result
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
             raise

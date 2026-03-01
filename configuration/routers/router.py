@@ -1207,6 +1207,40 @@ async def get_feedback():
         logger.error(f"Error getting feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/feedback/counts")
+async def get_feedback_counts(request: Request):
+    """Get feedback counts for multiple sessions
+
+    Query Parameters:
+        session_ids: Comma-separated list of session IDs (e.g., "269,268,267")
+
+    Returns:
+        Dictionary with session_id as key and {positive: count, negative: count} as value
+    """
+    try:
+        # Get session_ids from query parameters
+        session_ids_str = request.query_params.get("session_ids", "")
+
+        if not session_ids_str:
+            return {"success": True, "data": {}}
+
+        # Parse comma-separated session IDs
+        session_ids = [sid.strip() for sid in session_ids_str.split(",") if sid.strip()]
+
+        if not session_ids:
+            return {"success": True, "data": {}}
+
+        logger.info(f"🔍 Getting feedback counts for {len(session_ids)} sessions")
+
+        # Get feedback counts for all sessions
+        counts = await feedback_service.get_feedback_counts_by_sessions(session_ids)
+
+        return {"success": True, "data": counts}
+
+    except Exception as e:
+        logger.error(f"Error getting feedback counts: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # =================================
 # USER ENDPOINTS
 # =================================
