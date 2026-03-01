@@ -78,7 +78,7 @@ class DatabaseManager:
             'server_settings': {
                 'timezone': 'UTC',
                 'application_name': 'knowledgebot_backend_shared',
-                'statement_timeout': '15000'
+                'statement_timeout': '60000'  # 60s - allow slow queries without cancellation
             }
         }
         self._last_health_check = 0
