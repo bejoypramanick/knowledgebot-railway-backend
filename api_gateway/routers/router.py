@@ -357,45 +357,63 @@ async def generic_proxy_handler(request: Request, path: str):
         
         # Determine service based on URL path
         service_url = None
-        
+        service_path = backend_path  # Track the path to send to the service (may differ from backend_path)
+
         logger.info(f"🔍 Processing path: '{path}'")
-        
+
         # Remove /api/v1/ prefix for routing logic
         clean_path = path.replace("/api/v1/", "") if path.startswith("/api/v1/") else path
-        
+
         # Remove gateway/ prefix for backend service routing
         backend_path = clean_path.replace("gateway/", "") if clean_path.startswith("gateway/") else clean_path
-        
+
         # Handle admin endpoints that are actually in configuration service
         if backend_path.startswith("admin/agents/online") or backend_path.startswith("admin/performance/metrics") or backend_path.startswith("admin/chat-sessions"):
             service_url = get_settings().configuration_service_url
+            service_path = backend_path  # admin/* endpoints don't have a service prefix to strip
             logger.info(f"✅ Routing admin endpoint to configuration service: {service_url}")
         elif backend_path.startswith("admin/"):
             service_url = get_settings().configuration_service_url
+            service_path = backend_path  # admin/* endpoints don't have a service prefix to strip
             logger.info(f"✅ Routing admin endpoint to configuration service: {service_url}")
         elif backend_path.startswith("users/unique-id"):
             service_url = get_settings().configuration_service_url
+            service_path = backend_path  # users/* endpoints don't have a service prefix to strip
             logger.info(f"✅ Routing users endpoint to configuration service: {service_url}")
         elif backend_path.startswith("configuration/"):
             service_url = get_settings().configuration_service_url
+            # Strip the "configuration/" prefix since the configuration service doesn't expect it
+            service_path = backend_path.replace("configuration/", "", 1)
             logger.info(f"✅ Routing to configuration service: {service_url}")
+            logger.info(f"🔍 Stripped 'configuration/' prefix - service_path: {service_path}")
         elif backend_path.startswith("chatbot/"):
             service_url = get_settings().chatbot_orchestration_url
+            # Strip the "chatbot/" prefix
+            service_path = backend_path.replace("chatbot/", "", 1)
             logger.info(f"✅ Routing to chatbot service: {service_url}")
+            logger.info(f"🔍 Stripped 'chatbot/' prefix - service_path: {service_path}")
         elif backend_path.startswith("knowledgebase/"):
             service_url = get_settings().knowledgebase_ingestion_url
+            # Strip the "knowledgebase/" prefix
+            service_path = backend_path.replace("knowledgebase/", "", 1)
             logger.info(f"✅ Routing to knowledgebase service: {service_url}")
+            logger.info(f"🔍 Stripped 'knowledgebase/' prefix - service_path: {service_path}")
         elif backend_path.startswith("webcrawl") or backend_path == "webcrawl":
             service_url = get_settings().knowledgebase_ingestion_url
+            service_path = backend_path  # webcrawl doesn't have a prefix to strip
             logger.info(f"✅ Routing webcrawl to knowledgebase_ingestion service: {service_url}")
         elif backend_path.startswith("widget/"):
             service_url = get_settings().configuration_service_url
+            # Strip the "widget/" prefix? Actually, widget/* might need the prefix. Check the config service
+            service_path = backend_path  # Keep widget/ prefix for now
             logger.info(f"✅ Routing widget endpoint to configuration service: {service_url}")
         elif backend_path.startswith("feedback"):
             service_url = get_settings().configuration_service_url
+            service_path = backend_path  # feedback/* endpoints don't have a service prefix to strip
             logger.info(f"✅ Routing feedback endpoint to configuration service: {service_url}")
         elif backend_path.startswith("messages/"):
             service_url = get_settings().configuration_service_url
+            service_path = backend_path  # messages/* endpoints don't have a service prefix to strip
             logger.info(f"✅ Routing messages endpoint to configuration service: {service_url}")
         else:
             logger.error(f"❌ Unknown path: {backend_path}")
@@ -403,14 +421,15 @@ async def generic_proxy_handler(request: Request, path: str):
                 status_code=404,
                 content={"error": f"Unknown path: {backend_path}"}
             )
-        
-        # Construct full URL using backend_path (without gateway/ prefix)
-        full_url = f"{service_url}/api/v1/{backend_path}"
+
+        # Construct full URL using service_path (with service prefixes stripped)
+        full_url = f"{service_url}/api/v1/{service_path}"
         logger.info(f"🌐 Making {request.method} request to: {full_url}")
         logger.info(f"🔍 Service URL: {service_url}")
         logger.info(f"🔍 Original path: {path}")
         logger.info(f"🔍 Clean path: {clean_path}")
         logger.info(f"🔍 Backend path: {backend_path}")
+        logger.info(f"🔍 Service path (sent to backend): {service_path}")
         
         # Prepare headers
         headers = dict(request.headers)
