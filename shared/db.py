@@ -48,14 +48,16 @@ class DatabaseManager:
             'min_size': min_size,
             'max_size': max_size,
             'command_timeout': 15.0,
-            'max_inactive_connection_lifetime': 120.0,
+            'max_inactive_connection_lifetime': 60.0,  # Close idle connections after 60s (was 120s)
+            'max_connection_lifetime': 300.0,  # Refresh connections every 5 minutes
+            'max_cached_statement_lifetime': 3600,
             'max_queries': 10000,
             'server_settings': {
                 'timezone': 'UTC',
                 'application_name': 'knowledgebot_backend_shared',
-                'tcp_keepalives_idle': '30',
-                'tcp_keepalives_interval': '10',
-                'tcp_keepalives_count': '3',
+                'tcp_keepalives_idle': '10',  # More aggressive keepalive (was 30s)
+                'tcp_keepalives_interval': '5',  # (was 10s)
+                'tcp_keepalives_count': '5',  # (was 3)
                 'statement_timeout': '15000'
             }
         }
@@ -171,7 +173,10 @@ class DatabaseManager:
                         "event loop is closed",
                         "bad file descriptor",
                         "pool is closed",
-                        "timeout"  # Retry on timeout errors
+                        "timeout",  # Retry on timeout errors
+                        "connection reset",  # Retry on connection reset
+                        "connection refused",  # Retry on connection refused
+                        "disconnected"  # Retry on disconnect
                     ])
                 )
                 
