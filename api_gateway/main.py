@@ -238,9 +238,14 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
             )
 
 # Add middleware to app
-# IMPORTANT: Add CORS middleware FIRST (before other middlewares)
-# Middlewares execute in REVERSE order of addition, so CORS must be added last
-# to execute first and handle OPTIONS preflight requests
+# IMPORTANT: Middleware execution order in Starlette/FastAPI is LIFO (Last In, First Out)
+# - Last middleware added = First to execute (closest to the request)
+# - First middleware added = Last to execute (closest to response)
+# We want: FirebaseAuth -> Other Middlewares -> CORS -> App
+# So add in reverse order: CORS first, then FirebaseAuth
+# This ensures CORS headers are added to all responses (including auth errors)
+app.add_middleware(FirebaseAuthMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -251,13 +256,11 @@ app.add_middleware(
         "*"
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
     allow_headers=["*"],
     expose_headers=["*"],
     max_age=600,
 )
-
-app.add_middleware(FirebaseAuthMiddleware)
 
 register_fastapi_exception_handlers(app, "api_gateway")
 
