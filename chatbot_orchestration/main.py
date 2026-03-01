@@ -79,7 +79,8 @@ app.add_middleware(
 )
 
 # Include Routers
-app.include_router(router, prefix="/api/v1/chatbot")  # Service name as root
+# Use /chatbot prefix for internal routing (no /api/v1 needed for internal services)
+app.include_router(router, prefix="/chatbot")
 
 @app.get("/")
 async def root_diagnostic(request: Request):

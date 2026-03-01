@@ -404,9 +404,10 @@ async def generic_proxy_handler(request: Request, path: str):
                 content={"error": f"Unknown path: {backend_path}"}
             )
 
-        # Construct full URL using service_path (with service prefixes stripped for service-specific paths)
-        # Backend services receive requests at /api/v1/{endpoint}
-        full_url = f"{service_url}/api/v1/{service_path}"
+        # Construct full URL for internal service communication
+        # Internal services are called directly without /api/v1 prefix (that's only for external/gateway endpoints)
+        # The service_path already includes the service prefix (e.g., "configuration/users/profile")
+        full_url = f"{service_url}/{service_path}"
         logger.info(f"🌐 Making {request.method} request to: {full_url}")
         logger.info(f"🔍 Service URL: {service_url}")
         logger.info(f"🔍 Original path: {path}")

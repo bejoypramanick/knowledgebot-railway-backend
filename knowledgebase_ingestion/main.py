@@ -125,9 +125,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 # Routers
 # Both file uploads and website scraping are under the same knowledgebase prefix
-# Frontend sends requests to /api/v1/gateway/knowledgebase/... for both
-app.include_router(fileupload_router, prefix="/api/v1/knowledgebase")
-app.include_router(webcrawl_router, prefix="/api/v1/knowledgebase")
+# Use /knowledgebase prefix for internal routing (no /api/v1 needed for internal services)
+app.include_router(fileupload_router, prefix="/knowledgebase")
+app.include_router(webcrawl_router, prefix="/knowledgebase")
 
 @app.get("/")
 async def root():
