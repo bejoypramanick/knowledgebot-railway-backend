@@ -30,8 +30,14 @@ class DatabaseManager:
         # DB_POOL_MIN_SIZE: Minimum connections per worker (default: 10)
         # DB_POOL_MAX_SIZE: Maximum connections per worker (default: 20)
         # Note: Configuration service can make 6+ parallel queries, so we need headroom
-        min_size = int(os.getenv('DB_POOL_MIN_SIZE', '10'))
-        max_size = int(os.getenv('DB_POOL_MAX_SIZE', '20'))
+        min_size_env = os.getenv('DB_POOL_MIN_SIZE')
+        max_size_env = os.getenv('DB_POOL_MAX_SIZE')
+
+        # Use environment variables if set, otherwise use defaults
+        min_size = int(min_size_env) if min_size_env else 10
+        max_size = int(max_size_env) if max_size_env else 20
+
+        logger.info(f"📊 [DB_POOL_ENV] DB_POOL_MIN_SIZE={min_size_env} (using: {min_size}), DB_POOL_MAX_SIZE={max_size_env} (using: {max_size})")
         
         # Optimized pool sizing for handling concurrent requests
         # With asyncio, we need enough connections to handle multiple concurrent operations
