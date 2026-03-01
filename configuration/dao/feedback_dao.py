@@ -16,7 +16,7 @@ class FeedbackDAO:
     async def create_feedback(self, message_id: str, session_id: str, feedback: str, user_email: Optional[str] = None):
         """Submit feedback for a chat message."""
         query = """
-            INSERT INTO feedback (message_id, session_id, feedback, user_email, created_at)
+            INSERT INTO chat_feedback (message_id, session_id, feedback, user_email, created_at)
             VALUES ($1, $2, $3, $4, NOW())
         """
         params = {"message_id": message_id, "session_id": session_id, "feedback": feedback, "user_email": user_email}
@@ -34,7 +34,7 @@ class FeedbackDAO:
         """Get all feedback."""
         query = """
             SELECT id, message_id, session_id, feedback, user_email, created_at
-            FROM feedback
+            FROM chat_feedback
             ORDER BY created_at DESC
         """
 
@@ -65,7 +65,7 @@ class FeedbackDAO:
                 session_id,
                 feedback,
                 COUNT(*) as count
-            FROM feedback
+            FROM chat_feedback
             WHERE session_id = ANY($1::text[])
             GROUP BY session_id, feedback
         """
