@@ -27,15 +27,15 @@ class DatabaseManager:
             self._connection_url += '&sslmode=require' if '?' in self._connection_url else '?sslmode=require'
         
         # Get pool size from environment variables with sensible defaults
-        # DB_POOL_MIN_SIZE: Minimum connections per worker (default: 2)
-        # DB_POOL_MAX_SIZE: Maximum connections per worker (default: 5)
-        min_size = int(os.getenv('DB_POOL_MIN_SIZE', '2'))
-        max_size = int(os.getenv('DB_POOL_MAX_SIZE', '5'))
+        # DB_POOL_MIN_SIZE: Minimum connections per worker (default: 5)
+        # DB_POOL_MAX_SIZE: Maximum connections per worker (default: 10)
+        min_size = int(os.getenv('DB_POOL_MIN_SIZE', '5'))
+        max_size = int(os.getenv('DB_POOL_MAX_SIZE', '10'))
         
-        # Optimized for gevent pool with 10 concurrent greenlets
-        # With gevent, we can handle more concurrent operations efficiently
-        # Setting max_size=5 allows multiple concurrent DB operations per worker
-        # Gevent uses greenlets (lightweight coroutines) instead of threads
+        # Optimized pool sizing for handling concurrent requests
+        # With asyncio, we need enough connections to handle multiple concurrent operations
+        # Setting max_size=10 allows handling multiple concurrent requests per worker
+        # This prevents connection exhaustion errors under typical load
         self._pool_config = {
             'min_size': min_size,
             'max_size': max_size,
@@ -151,14 +151,17 @@ class DatabaseManager:
             except Exception as e:
                 last_error = e
                 error_str = str(e)
-                logger.error(f"❌{cid_str} Failed to acquire DB connection (attempt {attempt + 1}/{max_retries}): {e}")
-                
+                exc_type = type(e).__name__
+                exc_args = str(e.args) if hasattr(e, 'args') else 'N/A'
+                logger.error(f"❌{cid_str} Failed to acquire DB connection (attempt {attempt + 1}/{max_retries}): {exc_type}: {error_str or exc_args}")
+
                 # Only retry on specific errors and if we have retries left
+                combined_error = f"{exc_type} {error_str}".lower()
                 should_retry = (
-                    attempt < max_retries - 1 and 
-                    any(err in error_str for err in [
-                        "Event loop is closed",
-                        "Bad file descriptor",
+                    attempt < max_retries - 1 and
+                    any(err in combined_error for err in [
+                        "event loop is closed",
+                        "bad file descriptor",
                         "pool is closed"
                     ])
                 )
