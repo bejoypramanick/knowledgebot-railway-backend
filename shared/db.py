@@ -34,27 +34,26 @@ class DatabaseManager:
                 logger.info(f"📊 DATABASE_URL already has sslmode configured")
         
         # Get pool size from environment variables with sensible defaults
-        # DB_POOL_MIN_SIZE: Minimum connections per worker (default: 10)
-        # DB_POOL_MAX_SIZE: Maximum connections per worker (default: 20)
-        # Note: Configuration service can make 6+ parallel queries, so we need headroom
+        # DB_POOL_MIN_SIZE: Minimum connections per worker (default: 5)
+        # DB_POOL_MAX_SIZE: Maximum connections per worker (default: 10)
+        # Railway has limited connection slots, so keep these conservative
         min_size_env = os.getenv('DB_POOL_MIN_SIZE')
         max_size_env = os.getenv('DB_POOL_MAX_SIZE')
 
         # Use environment variables if set, otherwise use defaults
-        # Note: If env vars are set to very small values (1, 2, 3), they're likely wrong
-        # Use sensible minimums to prevent connection pool exhaustion
-        min_size_raw = int(min_size_env) if min_size_env else 10
-        max_size_raw = int(max_size_env) if max_size_env else 20
+        min_size_raw = int(min_size_env) if min_size_env else 5
+        max_size_raw = int(max_size_env) if max_size_env else 10
 
-        # Enforce sensible minimums - never go below these
-        min_size = max(min_size_raw, 10)  # At least 10 minimum connections
-        max_size = max(max_size_raw, 20)  # At least 20 maximum connections
+        # Keep conservative to avoid exhausting Railway's connection limits
+        # Sequential queries (not parallel) means we don't need huge pools
+        min_size = max(min_size_raw, 5)   # At least 5 minimum connections
+        max_size = max(max_size_raw, 10)  # At least 10 maximum connections
 
-        # Warn if environment variables were too small
-        if min_size_env and int(min_size_env) < 10:
-            logger.warning(f"⚠️ [DB_POOL] DB_POOL_MIN_SIZE set to {min_size_env} but enforcing minimum of 10")
-        if max_size_env and int(max_size_env) < 20:
-            logger.warning(f"⚠️ [DB_POOL] DB_POOL_MAX_SIZE set to {max_size_env} but enforcing minimum of 20")
+        # Warn if environment variables were too large (Railway constraint)
+        if min_size_env and int(min_size_env) > 10:
+            logger.warning(f"⚠️ [DB_POOL] DB_POOL_MIN_SIZE set to {min_size_env} but Railway limits connections, capping at 10")
+        if max_size_env and int(max_size_env) > 20:
+            logger.warning(f"⚠️ [DB_POOL] DB_POOL_MAX_SIZE set to {max_size_env} but Railway limits connections, capping at 20")
 
         logger.info(f"📊 [DB_POOL_ENV] DB_POOL_MIN_SIZE={min_size_env} (using: {min_size}), DB_POOL_MAX_SIZE={max_size_env} (using: {max_size})")
 
@@ -67,23 +66,18 @@ class DatabaseManager:
         else:
             logger.warning("⚠️ [DATABASE_URL] Not set!")
         
-        # Optimized pool sizing for handling concurrent requests
-        # With asyncio, we need enough connections to handle multiple concurrent operations
-        # Configuration service makes up to 6 parallel queries per request
-        # Setting max_size=20 allows handling multiple concurrent requests per worker
-        # This prevents connection exhaustion errors when requests overlap
+        # Conservative pool configuration for Railway PostgreSQL
+        # Using sequential queries (not parallel) so we don't need large pools
+        # Railway has limited connection slots - keep pool conservative
         self._pool_config = {
             'min_size': min_size,
             'max_size': max_size,
-            'command_timeout': 30.0,  # Increased from 15s for slow database
-            'max_inactive_connection_lifetime': 30.0,  # Close idle connections faster (was 60s)
-            'max_queries': 50000,  # Increased from 10000
+            'command_timeout': 20.0,  # Reasonable timeout for queries
+            'max_inactive_connection_lifetime': 60.0,  # Don't close connections too aggressively
+            'max_queries': 50000,
             'server_settings': {
                 'timezone': 'UTC',
                 'application_name': 'knowledgebot_backend_shared',
-                'tcp_keepalives_idle': '10',  # More aggressive keepalive (was 30s)
-                'tcp_keepalives_interval': '5',  # (was 10s)
-                'tcp_keepalives_count': '5',  # (was 3)
                 'statement_timeout': '15000'
             }
         }
@@ -183,9 +177,9 @@ class DatabaseManager:
         
         for attempt in range(max_retries):
             try:
-                # Use longer timeout for database acquisition
-                # Railway might have slow connection times, especially on startup/restart
-                async with self._pool.acquire(timeout=20.0) as conn:
+                # Use reasonable timeout for database acquisition (10s)
+                # With sequential queries and conservative pool size, should be fast
+                async with self._pool.acquire(timeout=10.0) as conn:
                     yield conn
                 return
             except Exception as e:
