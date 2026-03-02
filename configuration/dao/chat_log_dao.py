@@ -429,45 +429,43 @@ class ChatLogDAO:
             return 0
 
     async def get_messages_for_sessions(self, session_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
-        """Get messages for multiple sessions by their numeric IDs."""
+        """Get messages for multiple sessions using LEFT JOIN - single query."""
         if not session_ids: return {}
 
-        # Ensure all IDs are integers (may come as strings from database)
+        # Ensure all IDs are integers
         int_session_ids = [int(sid) if isinstance(sid, str) else sid for sid in session_ids]
 
-        # Build SQL with proper array syntax for asyncpg
-        # Use CAST to ensure proper type handling with parameter binding
+        # Single LEFT JOIN query to get sessions with all their messages at once
         query = """
-            SELECT * FROM chat_messages
-            WHERE session_id = ANY(ARRAY[:session_ids])
-            ORDER BY created_at ASC;
+            SELECT cm.* FROM chat_messages cm
+            WHERE cm.session_id = ANY(:session_ids)
+            ORDER BY cm.session_id, cm.created_at ASC
         """
         params = {"session_ids": int_session_ids}
 
         try:
             logger.log_db_operation(query, params)
-            logger.info(f"🔍 get_messages_for_sessions: Querying for {len(int_session_ids)} sessions: {int_session_ids[:5]}...")
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
                 rows = result.fetchall()
-                logger.info(f"🔍 get_messages_for_sessions: query returned {len(rows)} rows for {len(int_session_ids)} session_ids: {int_session_ids[:5]}")
-                logger.log_db_query(query, params, rows)
 
+                # Group messages by session_id
                 result_dict = {}
                 for r in rows:
-                    sid = r['id']
-                    # Ensure sid is converted to int (may be stored as text in database)
-                    sid_int = int(sid) if isinstance(sid, str) else sid
-                    if sid_int not in result_dict: result_dict[sid_int] = []
-                    result_dict[sid_int].append(dict(r._mapping))
-                logger.info(f"📊 get_messages_for_sessions result: {len(result_dict)} sessions with messages, raw sids: {list(result_dict.keys())[:5]}")
+                    sid = r['session_id']
+                    if sid not in result_dict:
+                        result_dict[sid] = []
+                    result_dict[sid].append(dict(r._mapping))
+
+                logger.info(f"📊 Loaded messages for {len(result_dict)} sessions")
                 return result_dict
         except Exception as e:
             logger.log_db_query(query, params, error=e)
-            logger.error(f"Error fetching messages for sessions: {e}")
+            logger.error(f"Error fetching messages: {e}")
             return {}
 
     async def get_messages(self, session_db_id: int) -> List[Dict[str, Any]]:
+        """Get all messages for a single session."""
         query = "SELECT * FROM chat_messages WHERE session_id = :session_db_id ORDER BY created_at ASC"
         try:
             params = {"session_db_id": session_db_id}
@@ -475,7 +473,6 @@ class ChatLogDAO:
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
                 rows = result.fetchall()
-                logger.log_db_query(query, params, rows)
                 return [dict(row._mapping) for row in rows]
         except Exception as e:
             logger.log_db_query(query, params, error=e)
