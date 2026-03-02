@@ -126,11 +126,13 @@ class ChatLogService:
         if not sessions_data:
             return [], total_count
 
-        # Extract UUID session_ids (not numeric ids) for message lookup
-        # chat_messages.session_id stores the UUID, not the numeric id
-        session_uuids = [s['session_id'] for s in sessions_data]
-        logger.info(f"🔍 Loading messages for {len(session_uuids)} sessions: {session_uuids[:5]}...")
-        messages_by_session = await self.dao.get_messages_for_sessions(session_uuids)
+        session_db_ids = [int(s['id']) if isinstance(s['id'], str) else s['id'] for s in sessions_data]
+        logger.info(f"🔍 DEBUG: session_db_ids extracted: {session_db_ids[:5]}")
+        logger.info(f"🔍 DEBUG: session_db_ids types: {[type(x).__name__ for x in session_db_ids[:5]]}")
+        logger.info(f"🔍 Loading messages for {len(session_db_ids)} sessions: {session_db_ids[:5]}...")
+        messages_by_session = await self.dao.get_messages_for_sessions(session_db_ids)
+        logger.info(f"📨 DEBUG: messages_by_session keys: {list(messages_by_session.keys())[:5]}")
+        logger.info(f"📨 DEBUG: messages_by_session key types: {[type(k).__name__ for k in list(messages_by_session.keys())[:5]]}")
         logger.info(f"📨 Loaded messages for {len(messages_by_session)} sessions, total messages: {sum(len(msgs) for msgs in messages_by_session.values())}")
 
         # Get all session IDs for batch feedback query (uses session_id UUID)
@@ -157,8 +159,11 @@ class ChatLogService:
             else:
                 metadata = {}
 
-            # Messages are keyed by UUID session_id (chat_messages.session_id = chat_sessions.session_id)
-            session_messages = messages_by_session.get(session_id, [])
+            # Messages are keyed by numeric session_db_id (chat_messages.session_id = chat_sessions.id)
+            logger.debug(f"🔍 DEBUG: Looking up session_db_id={session_db_id} (type={type(session_db_id).__name__}) in messages_by_session with keys: {list(messages_by_session.keys())[:3]}")
+            session_messages = messages_by_session.get(session_db_id, [])
+            if not session_messages:
+                logger.warning(f"⚠️ WARNING: No messages found for session_db_id={session_db_id}, available keys: {list(messages_by_session.keys())}")
             from ..schemas.chat_log_schemas import ChatMessageResponse
             messages = [
                 ChatMessageResponse(
