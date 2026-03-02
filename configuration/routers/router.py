@@ -1239,25 +1239,29 @@ async def get_feedback():
         logger.error(f"Error getting feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/feedback/counts")
+@router.post("/feedback/counts")
 async def get_feedback_counts(request: Request):
     """Get feedback counts for multiple sessions
 
-    Query Parameters:
-        session_ids: Comma-separated list of session IDs (e.g., "269,268,267")
+    Request Body:
+        session_ids: List of session IDs (e.g., ["269", "268", "267"])
 
     Returns:
         Dictionary with session_id as key and {positive: count, negative: count} as value
     """
     try:
-        # Get session_ids from query parameters
-        session_ids_str = request.query_params.get("session_ids", "")
+        # Get session_ids from request body
+        body = await request.json()
+        session_ids = body.get("session_ids", [])
 
-        if not session_ids_str:
+        if not session_ids:
             return {"success": True, "data": {}}
 
-        # Parse comma-separated session IDs
-        session_ids = [sid.strip() for sid in session_ids_str.split(",") if sid.strip()]
+        # Ensure session_ids is a list
+        if isinstance(session_ids, str):
+            session_ids = [sid.strip() for sid in session_ids.split(",") if sid.strip()]
+        elif not isinstance(session_ids, list):
+            return {"success": False, "error": "session_ids must be a list or comma-separated string"}
 
         if not session_ids:
             return {"success": True, "data": {}}

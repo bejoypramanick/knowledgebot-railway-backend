@@ -77,17 +77,19 @@ class FeedbackDAO:
         if not session_ids:
             return {}
 
-        query = """
+        # Build dynamic IN clause for asyncpg compatibility
+        placeholders = ",".join([f":id_{i}" for i in range(len(session_ids))])
+        params = {f"id_{i}": sid for i, sid in enumerate(session_ids)}
+
+        query = f"""
             SELECT
                 session_id,
                 feedback_type,
                 COUNT(*) as count
             FROM chat_sessions
-            WHERE session_id = ANY(:session_ids::text[]) AND feedback_type IS NOT NULL
+            WHERE session_id IN ({placeholders}) AND feedback_type IS NOT NULL
             GROUP BY session_id, feedback_type
         """
-
-        params = {"session_ids": session_ids}
 
         try:
             logger.log_db_operation(query, params)
