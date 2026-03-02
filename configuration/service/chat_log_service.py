@@ -95,15 +95,16 @@ class ChatLogService:
         roles = await self.dao.check_user_role(user_email)
         if not roles["is_agent"] and not roles["is_admin"]:
             raise HTTPException(status_code=403, detail="User is not a human agent or admin")
-        
+
         heartbeat_session_id = f"heartbeat_{user_email}"
-        heartbeat_cs_id = await self.dao.get_session_db_id(heartbeat_session_id)
+        # Use UUID-based lookup for heartbeat sessions
+        heartbeat_cs_id = await self.dao.get_session_db_id_by_uuid(heartbeat_session_id)
         if not heartbeat_cs_id:
             heartbeat_cs_id = await self.dao.create_chat_session(heartbeat_session_id, {})
-        
+
         assignee_type = await self.dao.get_assignee_type(user_email)
         existing = await self.dao.get_session_assignment(heartbeat_cs_id)
-        
+
         if existing:
             await self.dao.update_session_assignment(heartbeat_cs_id, user_email, assignee_type, status='active')
         else:
@@ -186,9 +187,9 @@ class ChatLogService:
 
                 if not (session_row['is_active'] and assigned_agent and not is_expired):
                     status = 'closed'
-                
+
                 if is_expired and session_row['is_active']:
-                    await self.dao.archive_session(session_id, 'closed') # Effectively close in DB
+                    await self.dao.archive_session(session_db_id, 'closed') # Effectively close in DB
 
             # Use cached feedback counts
             feedback_counts = batch_feedback_counts.get(session_id, {'positive_count': 0, 'negative_count': 0})
@@ -216,83 +217,88 @@ class ChatLogService:
         
         return formatted_sessions, total_count
 
-    async def get_session_messages(self, session_id: str):
-        """Get all messages for a specific chat session."""
-        session_db_id = await self.dao.get_session_db_id(session_id)
-        if not session_db_id:
-            return []
+    async def get_session_messages(self, session_id: int | str):
+        """Get all messages for a specific chat session using numeric ID only."""
+        # Convert to int if string
+        session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+
         return await self.dao.get_messages(session_db_id)
 
-    async def send_agent_message(self, session_id: str, agent_email: str, text: str):
-        """Send a message from an agent to a customer."""
-        session_db_id = await self.dao.get_session_db_id(session_id)
-        if not session_db_id:
-            raise HTTPException(status_code=404, detail="Chat session not found")
-        
+    async def send_agent_message(self, session_id: int | str, agent_email: str, text: str):
+        """Send a message from an agent to a customer using numeric ID only."""
+        # Convert to int if string
+        session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+
         message_id = await self.dao.create_message(session_db_id, 'agent', text)
         await self.dao.increment_message_count(session_db_id)
-        
+
         if self.connection_manager:
             message_data = {
                 "type": "agent_message",
                 "message_id": message_id,
                 "text": text,
                 "sender": "agent",
-                "session_id": session_id,
+                "session_id": str(session_db_id),
                 "timestamp": datetime.utcnow().isoformat(),
                 "agent_email": agent_email
             }
-            await self.connection_manager.broadcast_to_session(message_data, session_id)
-        
+            await self.connection_manager.broadcast_to_session(message_data, str(session_db_id))
+
         return message_id
 
-    async def archive_chat_session(self, session_id: str, archive_status: str, user_email: str):
-        """Archive status of a chat session."""
+    async def archive_chat_session(self, session_id: int | str, archive_status: str, user_email: str):
+        """Archive status of a chat session using numeric ID only."""
         roles = await self.dao.check_user_role(user_email)
         if not roles["is_admin"] and not roles["is_agent"]:
             raise HTTPException(status_code=403, detail="Only admins and human agents can archive sessions")
 
-        success = await self.dao.archive_session(session_id, archive_status)
+        # Convert to int if string
+        session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+
+        success = await self.dao.archive_session(session_db_id, archive_status)
         if not success:
             raise HTTPException(status_code=404, detail="Session not found")
         return True
 
-    async def transfer_chat_session(self, session_id: str, user_email: str, target_agent_email: str):
-        """Transfer a chat session to another agent."""
+    async def transfer_chat_session(self, session_id: int | str, user_email: str, target_agent_email: str):
+        """Transfer a chat session to another agent using numeric ID only."""
         roles = await self.dao.check_user_role(user_email)
         if not roles["is_agent"] and not roles["is_admin"]:
             raise HTTPException(status_code=403, detail="Access denied")
-            
+
         target_roles = await self.dao.check_user_role(target_agent_email)
         if not target_roles["is_agent"] and not target_roles["is_admin"]:
             raise HTTPException(status_code=400, detail="Target user is not an agent or admin")
-            
-        await self.assign_chat_to_agent(session_id, target_agent_email)
-        
+
+        # Convert to int if string
+        session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+
+        await self.assign_chat_to_agent(str(session_db_id), target_agent_email)
+
         if self.connection_manager:
             transfer_message = {
                 "type": "chat_transferred",
-                "session_id": session_id,
+                "session_id": str(session_db_id),
                 "transferred_to": target_agent_email,
                 "transferred_by": user_email,
                 "timestamp": datetime.utcnow().isoformat(),
                 "text": "Chat has been transferred to another support agent"
             }
-            await self.connection_manager.broadcast_to_session(transfer_message, session_id)
-        
-        session_db_id = await self.dao.get_session_db_id(session_id)
-        if session_db_id:
-            await self.dao.create_message(session_db_id, 'system', "Chat transferred to another support agent")
+            await self.connection_manager.broadcast_to_session(transfer_message, str(session_db_id))
+
+        await self.dao.create_message(session_db_id, 'system', "Chat transferred to another support agent")
         return True
 
-    async def update_chat_session(self, session_id: str, user_email: str, status: Optional[str] = None,
+    async def update_chat_session(self, session_id: int | str, user_email: str, status: Optional[str] = None,
                                  assigned_agent: Optional[str] = None):
-        """Update a chat session's metadata and status."""
-        session_data = await self.dao.get_session_by_id_with_messages(session_id)
+        """Update a chat session's metadata and status using numeric ID only."""
+        # Convert to int if string
+        session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+
+        session_data = await self.dao.get_session_by_id_with_messages(session_db_id)
         if not session_data:
             raise HTTPException(status_code=404, detail="Chat session not found")
 
-        session_db_id = session_data['id']
         metadata = session_data['metadata'] or {}
         if isinstance(metadata, str):
             metadata = json.loads(metadata)
@@ -300,7 +306,7 @@ class ChatLogService:
         if status is not None:
             metadata['status'] = status
             if status == 'closed':
-                await self.dao.archive_session(session_id, 'closed')
+                await self.dao.archive_session(session_db_id, 'closed')
 
         if assigned_agent is not None:
             if assigned_agent == '' or assigned_agent is None:
@@ -310,108 +316,94 @@ class ChatLogService:
                 metadata['assigned_agent'] = assigned_agent
 
         await self.dao.update_chat_session_metadata(session_db_id, metadata)
-        
+
         if status == 'closed' and not assigned_agent:
             if self.connection_manager:
                 roles = await self.dao.check_user_role(user_email)
                 ended_by = 'human agent' if (roles["is_admin"] or roles["is_agent"]) else 'customer'
-                
+
                 session_ended_message = {
                     "type": "session_ended",
-                    "session_id": session_id,
+                    "session_id": str(session_db_id),
                     "text": f"Session has been ended by the {ended_by}.",
                     "ended_by": ended_by,
                     "timestamp": datetime.utcnow().isoformat()
                 }
-                await self.connection_manager.broadcast_to_session(session_ended_message, session_id)
+                await self.connection_manager.broadcast_to_session(session_ended_message, str(session_db_id))
         return True
 
-    async def end_customer_session(self, session_id: str, user_email: str):
+    async def end_customer_session(self, session_id: int | str, user_email: str):
         """End a chat session from the customer side."""
-        session_db_id = await self.dao.get_session_db_id(session_id)
-        if not session_db_id:
+        # Convert to int if string
+        session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+
+        # Verify session exists
+        session = await self.dao.get_session_by_id_with_messages(session_db_id)
+        if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        await self.dao.archive_session(session_id, 'closed')
+        await self.dao.archive_session(session_db_id, 'closed')
 
         if self.connection_manager:
             session_ended_message = {
                 "type": "session_ended",
-                "session_id": session_id,
+                "session_id": str(session_db_id),
                 "text": "Session has been ended by the customer.",
                 "ended_by": "customer",
                 "timestamp": datetime.utcnow().isoformat()
             }
-            await self.connection_manager.broadcast_to_session(session_ended_message, session_id)
+            await self.connection_manager.broadcast_to_session(session_ended_message, str(session_db_id))
         return True
 
-    async def request_human_agent(self, session_id: str):
-        """Request human agent connection."""
+    async def request_human_agent(self, session_id: int | str):
+        """Request human agent connection using numeric ID only."""
         hil_enabled = await self.dao.get_hil_enabled()
-        
+
         if not hil_enabled:
             raise HTTPException(status_code=503, detail="Human agent support is currently disabled")
-        
-        assigned_agent = await self.assign_chat_with_load_balancing(session_id)
+
+        # Convert to int if string
+        session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+
+        assigned_agent = await self.assign_chat_with_load_balancing(str(session_db_id))
         if not assigned_agent:
             raise HTTPException(status_code=503, detail="No available agents to assign chat")
         return assigned_agent
 
-    async def delete_session_messages(self, session_id: str) -> bool:
-        """Delete all messages for a chat session."""
+    async def delete_session_messages(self, session_id: int | str) -> bool:
+        """Delete all messages for a chat session using numeric ID only."""
         try:
-            session_db_id = await self.dao.get_session_db_id(session_id)
-            if not session_db_id:
-                logger.warning(f"Session {session_id} not found")
-                raise HTTPException(status_code=404, detail="Session not found")
+            # Convert to int if string
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
 
             await self.dao.delete_messages_for_session(session_db_id)
-            logger.info(f"Deleted all messages for session {session_id}")
+            logger.info(f"Deleted all messages for session {session_db_id}")
             return True
         except Exception as e:
             logger.error(f"Error deleting messages for session {session_id}: {e}")
             raise
 
-    async def delete_chat_session(self, session_id: str) -> bool:
-        """Delete a chat session and its metadata."""
+    async def delete_chat_session(self, session_id: int | str) -> bool:
+        """Delete a chat session and its metadata using numeric ID only."""
         try:
-            session_db_id = await self.dao.get_session_db_id(session_id)
-            if not session_db_id:
-                logger.warning(f"Session {session_id} not found")
-                raise HTTPException(status_code=404, detail="Session not found")
+            # Convert to int if string
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
 
             await self.dao.delete_chat_session_by_id(session_db_id)
-            logger.info(f"Deleted chat session {session_id}")
+            logger.info(f"Deleted chat session {session_db_id}")
             return True
         except Exception as e:
             logger.error(f"Error deleting chat session {session_id}: {e}")
             raise
 
-    async def mark_session_messages_as_read(self, session_id: str) -> bool:
-        """Mark all messages in a session as read."""
+    async def mark_session_messages_as_unread(self, session_id: int | str) -> bool:
+        """Mark all messages in a session as unread (delivered) using numeric ID only."""
         try:
-            session_db_id = await self.dao.get_session_db_id(session_id)
-            if not session_db_id:
-                logger.warning(f"Session {session_id} not found")
-                raise HTTPException(status_code=404, detail="Session not found")
-
-            await self.dao.update_messages_status_for_session(session_db_id, 'read')
-            logger.info(f"Marked all messages as read for session {session_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Error marking messages as read for session {session_id}: {e}")
-            raise
-
-    async def mark_session_messages_as_unread(self, session_id: str) -> bool:
-        """Mark all messages in a session as unread (delivered)."""
-        try:
-            session_db_id = await self.dao.get_session_db_id(session_id)
-            if not session_db_id:
-                logger.warning(f"Session {session_id} not found")
-                raise HTTPException(status_code=404, detail="Session not found")
+            # Convert to int if string
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
 
             await self.dao.update_messages_status_for_session(session_db_id, 'delivered')
-            logger.info(f"Marked all messages as unread for session {session_id}")
+            logger.info(f"Marked all messages as unread for session {session_db_id}")
             return True
         except Exception as e:
             logger.error(f"Error marking messages as unread for session {session_id}: {e}")
@@ -436,8 +428,8 @@ class ChatLogService:
             logger.error(f"Error marking message {message_id} as read: {e}")
             raise
 
-    async def mark_session_messages_as_read(self, session_id: str, user_email: str) -> bool:
-        """Mark all messages in a session as read by human agent or admin."""
+    async def mark_session_messages_as_read(self, session_id: int | str, user_email: str) -> bool:
+        """Mark all messages in a session as read by human agent or admin using numeric ID only."""
         try:
             # Verify user is agent or admin
             logger.info(f"🔍 mark_session_messages_as_read: Checking roles for user_email: {user_email}")
@@ -447,30 +439,27 @@ class ChatLogService:
                 logger.warning(f"🔍 User {user_email} is not a human agent or admin - roles: {roles}")
                 raise HTTPException(status_code=403, detail="Only human agents and admins can mark messages as read")
 
-            session_db_id = await self.dao.get_session_db_id(session_id)
-            if not session_db_id:
-                logger.warning(f"Session {session_id} not found")
-                raise HTTPException(status_code=404, detail="Session not found")
+            # Convert to int if string
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
 
             success = await self.dao.mark_session_messages_as_read(session_db_id)
             if success:
-                logger.info(f"User {user_email} marked all messages in session {session_id} as read")
+                logger.info(f"User {user_email} marked all messages in session {session_db_id} as read")
             else:
-                logger.warning(f"Failed to mark messages in session {session_id} as read")
+                logger.warning(f"Failed to mark messages in session {session_db_id} as read")
             return success
         except Exception as e:
             logger.error(f"Error marking session {session_id} messages as read: {e}")
             raise
 
-    async def get_unread_message_count(self, session_id: str) -> int:
-        """Get count of unread messages in a session."""
+    async def get_unread_message_count(self, session_id: int | str) -> int:
+        """Get count of unread messages in a session using numeric ID only."""
         try:
-            session_db_id = await self.dao.get_session_db_id(session_id)
-            if not session_db_id:
-                return 0
+            # Convert to int if string
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
 
             count = await self.dao.get_unread_messages_count(session_db_id)
-            logger.info(f"Session {session_id} has {count} unread messages")
+            logger.info(f"Session {session_db_id} has {count} unread messages")
             return count
         except Exception as e:
             logger.error(f"Error getting unread message count for session {session_id}: {e}")

@@ -146,17 +146,14 @@ class ChatLogDAO:
             logger.log_db_query(query, {"user_role_id": user_role_id}, error=e)
             return 0
 
-    async def get_session_db_id(self, session_id: str) -> Optional[int]:
-        """Get database ID for a session (by numeric ID or UUID string)."""
+    async def get_session_db_id(self, session_id: int | str) -> Optional[int]:
+        """Get database ID for a session (numeric ID only)."""
         try:
-            # If input is numeric, look up by id column
-            if session_id.isdigit():
-                query = "SELECT id FROM chat_sessions WHERE id = :id"
-                params = {"id": int(session_id)}
-            else:
-                # Otherwise, look up by session_id (UUID string)
-                query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
-                params = {"session_id": session_id}
+            # Convert to int if string
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+
+            query = "SELECT id FROM chat_sessions WHERE id = :id"
+            params = {"id": session_db_id}
 
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
@@ -166,6 +163,23 @@ class ChatLogDAO:
                 return row[0] if row else None
         except Exception as e:
             logger.log_db_query("get_session_db_id", {"session_id": session_id}, error=e)
+            return None
+
+    async def get_session_db_id_by_uuid(self, session_uuid: str) -> Optional[int]:
+        """Get database ID for a session by its session_id (UUID) column.
+        Used for special cases like heartbeat sessions that use string UUIDs."""
+        try:
+            query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
+            params = {"session_id": session_uuid}
+
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                logger.log_db_query(query, params, row)
+                return row[0] if row else None
+        except Exception as e:
+            logger.log_db_query("get_session_db_id_by_uuid", {"session_uuid": session_uuid}, error=e)
             return None
 
     async def create_chat_session(self, session_id: str, metadata: Dict[str, Any]) -> int:
@@ -483,13 +497,17 @@ class ChatLogDAO:
         # Optional: if you have a message_count column in chat_sessions
         pass 
 
-    async def archive_session(self, session_id: str, status: str) -> bool:
-        query = """
-            UPDATE chat_sessions SET archive_status = :status
-            WHERE session_id = :session_id
-        """
+    async def archive_session(self, session_id: int | str, status: str) -> bool:
+        """Archive a session using numeric ID only."""
         try:
-            params = {"session_id": session_id, "status": status}
+            # Convert to int if string
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+
+            query = """
+                UPDATE chat_sessions SET archive_status = :status
+                WHERE id = :id
+            """
+            params = {"id": session_db_id, "status": status}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
@@ -497,13 +515,17 @@ class ChatLogDAO:
                 logger.log_db_query(query, params, None)
                 return result.rowcount > 0 if hasattr(result, 'rowcount') else True
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(query, {"session_id": session_id, "status": status}, error=e)
             return False
 
-    async def get_session_by_id_with_messages(self, session_id: str) -> Optional[Dict[str, Any]]:
-        query = "SELECT * FROM chat_sessions WHERE session_id = :session_id"
+    async def get_session_by_id_with_messages(self, session_id: int | str) -> Optional[Dict[str, Any]]:
+        """Get session by numeric ID only."""
         try:
-            params = {"session_id": session_id}
+            # Convert to int if string
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+
+            query = "SELECT * FROM chat_sessions WHERE id = :id"
+            params = {"id": session_db_id}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
@@ -511,7 +533,7 @@ class ChatLogDAO:
                 logger.log_db_query(query, params, row)
                 return dict(row._mapping) if row else None
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(query, {"session_id": session_id}, error=e)
             return None
 
     async def update_chat_session_metadata(self, session_db_id: int, metadata: Dict[str, Any]):
