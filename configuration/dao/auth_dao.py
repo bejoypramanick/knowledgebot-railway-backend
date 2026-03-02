@@ -4,7 +4,8 @@ Handles database operations for user authentication and role management
 """
 from typing import Any, Dict, List, Optional
 
-from shared.db import get_db_connection
+from sqlalchemy import text
+from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("auth_dao", "configuration")
@@ -15,41 +16,43 @@ class AuthDAO:
 
     async def check_user_exists(self, email: str) -> Optional[Dict[str, Any]]:
         """Check if user exists for given email."""
-        query = """
+        query = text("""
             SELECT id, email, display_name, email_verified, created_at, updated_at
             FROM users
-            WHERE email = $1
-        """
+            WHERE email = :email
+        """)
         params = {"email": email}
         try:
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, email)
-                logger.log_db_query(query, params, result)
-                return result
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                row = result.fetchone()
+                logger.log_db_query(str(query), params, row)
+                return dict(row._mapping) if row else None
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), params, error=e)
             raise  # ← Raise exception instead of returning None
 
     async def check_user_has_role(self, email: str, role_name: str) -> Optional[Dict[str, Any]]:
         """Check if user has specific role and return user role mapping."""
-        query = """
+        query = text("""
             SELECT urm.user_role_id, urm.user_id, urm.role_id, urm.created_at,
                    u.email, u.display_name, r.role_name, r.role_description
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
-            WHERE u.email = $1 AND r.role_name = $2
-        """
+            WHERE u.email = :email AND r.role_name = :role_name
+        """)
         params = {"email": email, "role_name": role_name}
         try:
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, email, role_name)
-                logger.log_db_query(query, params, result)
-                return result
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                row = result.fetchone()
+                logger.log_db_query(str(query), params, row)
+                return dict(row._mapping) if row else None
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), params, error=e)
             raise  # ← Raise exception instead of returning None
 
     async def check_admin_exists(self, email: str) -> Optional[Dict[str, Any]]:
@@ -63,47 +66,49 @@ class AuthDAO:
 
     async def get_user_roles(self, email: str) -> List[Dict[str, Any]]:
         """Get all roles for a user."""
-        query = """
+        query = text("""
             SELECT urm.user_role_id, r.role_name, r.role_description, urm.created_at
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
-            WHERE u.email = $1
+            WHERE u.email = :email
             AND u.is_active = true
             AND urm.is_active = true
             ORDER BY r.role_name
-        """
+        """)
         params = {"email": email}
         try:
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                results = await conn.fetch(query, email)
-                logger.log_db_query(query, params, results)
-                return [dict(row) for row in results]
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                results = await session.execute(query, params)
+                rows = results.fetchall()
+                logger.log_db_query(str(query), params, rows)
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), params, error=e)
             raise  # ← Raise exception instead of returning []
 
     async def get_user_by_role_id(self, user_role_id: int) -> Optional[Dict[str, Any]]:
         """Get user and role information by user_role_id."""
-        query = """
+        query = text("""
             SELECT urm.user_role_id, urm.user_id, urm.role_id, urm.created_at,
                    u.email, u.display_name, u.email_verified, u.created_at as user_created_at,
                    r.role_name, r.role_description
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
-            WHERE urm.user_role_id = $1
-        """
+            WHERE urm.user_role_id = :user_role_id
+        """)
         params = {"user_role_id": user_role_id}
         try:
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, user_role_id)
-                logger.log_db_query(query, params, result)
-                return result
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                row = result.fetchone()
+                logger.log_db_query(str(query), params, row)
+                return dict(row._mapping) if row else None
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), params, error=e)
             return None
 
     async def add_user_role(self, email: str, role_name: str) -> Optional[Dict[str, Any]]:
@@ -112,117 +117,128 @@ class AuthDAO:
         user = await self.check_user_exists(email)
         if not user:
             # Create new user
-            create_user_query = """
+            create_user_query = text("""
                 INSERT INTO users (email, created_at, updated_at)
-                VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (:email, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 RETURNING id, email, created_at, updated_at
-            """
+            """)
             params = {"email": email}
             try:
-                logger.log_db_operation(create_user_query, params)
-                async with get_db_connection() as conn:
-                    user = await conn.fetchrow(create_user_query, email)
-                    logger.log_db_query(create_user_query, params, user)
+                logger.log_db_operation(str(create_user_query), params)
+                async with get_db_session() as session:
+                    result = await session.execute(create_user_query, params)
+                    user_row = result.fetchone()
+                    user = dict(user_row._mapping) if user_row else None
+                    logger.log_db_query(str(create_user_query), params, user_row)
+                    if user:
+                        await session.commit()
             except Exception as e:
-                logger.log_db_query(create_user_query, params, error=e)
+                logger.log_db_query(str(create_user_query), params, error=e)
                 return None
 
         # Get role_id
-        role_query = "SELECT id FROM roles WHERE role_name = $1"
+        role_query = text("SELECT id FROM roles WHERE role_name = :role_name")
         params = {"role_name": role_name}
         try:
-            logger.log_db_operation(role_query, params)
-            async with get_db_connection() as conn:
-                role = await conn.fetchrow(role_query, role_name)
-                logger.log_db_query(role_query, params, role)
-                if not role:
+            logger.log_db_operation(str(role_query), params)
+            async with get_db_session() as session:
+                result = await session.execute(role_query, params)
+                role_row = result.fetchone()
+                logger.log_db_query(str(role_query), params, role_row)
+                if not role_row:
                     logger.error(f"Role {role_name} not found")
                     return None
-                role_id = role['id']
+                role_id = role_row.id
         except Exception as e:
-            logger.log_db_query(role_query, params, error=e)
+            logger.log_db_query(str(role_query), params, error=e)
             return None
 
         # Add user role mapping
-        mapping_query = """
+        mapping_query = text("""
             INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
-            VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (:user_id, :role_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ON CONFLICT (user_id, role_id) DO NOTHING
             RETURNING user_role_id, user_id, role_id, created_at, updated_at
-        """
+        """)
         params = {"user_id": user['id'], "role_id": role_id}
         try:
-            logger.log_db_operation(mapping_query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(mapping_query, user['id'], role_id)
-                logger.log_db_query(mapping_query, params, result)
-                return result
+            logger.log_db_operation(str(mapping_query), params)
+            async with get_db_session() as session:
+                result = await session.execute(mapping_query, params)
+                mapping_row = result.fetchone()
+                logger.log_db_query(str(mapping_query), params, mapping_row)
+                if mapping_row:
+                    await session.commit()
+                return dict(mapping_row._mapping) if mapping_row else None
         except Exception as e:
-            logger.log_db_query(mapping_query, params, error=e)
+            logger.log_db_query(str(mapping_query), params, error=e)
             return None
 
     async def remove_user_role(self, email: str, role_name: str) -> bool:
         """Remove a role from a user."""
-        query = """
+        query = text("""
             DELETE FROM user_role_mapping
-            WHERE user_id = (SELECT id FROM users WHERE email = $1)
-            AND role_id = (SELECT id FROM roles WHERE role_name = $2)
-        """
+            WHERE user_id = (SELECT id FROM users WHERE email = :email)
+            AND role_id = (SELECT id FROM roles WHERE role_name = :role_name)
+        """)
         params = {"email": email, "role_name": role_name}
         try:
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, email, role_name)
-                logger.log_db_query(query, params, result)
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                logger.log_db_query(str(query), params, f"DELETE {result.rowcount}")
+                await session.commit()
                 return True
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), params, error=e)
             return False
 
     async def get_admins(self) -> List[Dict[str, Any]]:
         """Get all users with admin role."""
-        query = """
+        query = text("""
             SELECT urm.user_role_id, u.email, u.created_at as user_created_at,
                    urm.created_at as role_assigned_at
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
-            WHERE r.role_name = 'admin' 
-            AND u.is_active = true 
+            WHERE r.role_name = 'admin'
+            AND u.is_active = true
             AND urm.is_active = true
             ORDER BY u.email
-        """
+        """)
         try:
-            logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                results = await conn.fetch(query)
-                logger.log_db_query(query, None, results)
-                return [dict(row) for row in results]
+            logger.log_db_operation(str(query))
+            async with get_db_session() as session:
+                results = await session.execute(query)
+                rows = results.fetchall()
+                logger.log_db_query(str(query), None, rows)
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            logger.log_db_query(str(query), None, error=e)
             return []
 
     async def get_human_agents(self) -> List[Dict[str, Any]]:
         """Get all users with human_agent role."""
-        query = """
+        query = text("""
             SELECT urm.user_role_id, u.email, u.created_at as user_created_at,
                    urm.created_at as role_assigned_at
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'human_agent'
-            AND u.is_active = true 
+            AND u.is_active = true
             AND urm.is_active = true
             ORDER BY u.email
-        """
+        """)
         try:
-            logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                results = await conn.fetch(query)
-                logger.log_db_query(query, None, results)
-                return [dict(row) for row in results]
+            logger.log_db_operation(str(query))
+            async with get_db_session() as session:
+                results = await session.execute(query)
+                rows = results.fetchall()
+                logger.log_db_query(str(query), None, rows)
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            logger.log_db_query(str(query), None, error=e)
             return []
 
     async def get_available_agents(self) -> List[Dict[str, Any]]:
@@ -248,66 +264,72 @@ class AuthDAO:
 
     async def sync_admin_emails(self) -> List[str]:
         """Get all admin emails."""
-        query = """
+        query = text("""
             SELECT DISTINCT u.email
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'admin'
-        """
+        """)
         try:
-            logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                results = await conn.fetch(query)
-                emails = [row['email'] for row in results]
-                logger.log_db_query(query, None, emails)
+            logger.log_db_operation(str(query))
+            async with get_db_session() as session:
+                results = await session.execute(query)
+                rows = results.fetchall()
+                emails = [row.email for row in rows]
+                logger.log_db_query(str(query), None, emails)
                 return emails
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            logger.log_db_query(str(query), None, error=e)
             return []
 
     async def sync_human_agent_emails(self) -> List[str]:
         """Get all human agent emails."""
-        query = """
+        query = text("""
             SELECT DISTINCT u.email
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'human_agent'
-        """
+        """)
         try:
-            logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                results = await conn.fetch(query)
-                emails = [row['email'] for row in results]
-                logger.log_db_query(query, None, emails)
+            logger.log_db_operation(str(query))
+            async with get_db_session() as session:
+                results = await session.execute(query)
+                rows = results.fetchall()
+                emails = [row.email for row in rows]
+                logger.log_db_query(str(query), None, emails)
                 return emails
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            logger.log_db_query(str(query), None, error=e)
             return []
 
     async def get_or_create_unique_id(self, email: str, role: str) -> Dict[str, Any]:
         """Get or create a unique ID for a user."""
         try:
             # Check if user exists
-            user_query = "SELECT id FROM users WHERE email = $1"
-            logger.log_db_operation(user_query, {"email": email})
+            user_query = text("SELECT id FROM users WHERE email = :email")
+            logger.log_db_operation(str(user_query), {"email": email})
 
-            async with get_db_connection() as conn:
-                user = await conn.fetchrow(user_query, email)
+            async with get_db_session() as session:
+                result = await session.execute(user_query, {"email": email})
+                user_row = result.fetchone()
 
                 # If user doesn't exist, create them
-                if not user:
-                    create_user_query = """
+                if not user_row:
+                    create_user_query = text("""
                         INSERT INTO users (email, is_active, created_at, updated_at)
-                        VALUES ($1, true, NOW(), NOW())
+                        VALUES (:email, true, NOW(), NOW())
                         RETURNING id
-                    """
-                    logger.log_db_operation(create_user_query, {"email": email})
-                    user_id = await conn.fetchval(create_user_query, email)
-                    logger.log_db_query(create_user_query, {"email": email}, user_id)
+                    """)
+                    logger.log_db_operation(str(create_user_query), {"email": email})
+                    result = await session.execute(create_user_query, {"email": email})
+                    user_id_row = result.fetchone()
+                    user_id = user_id_row.id if user_id_row else None
+                    logger.log_db_query(str(create_user_query), {"email": email}, user_id)
+                    await session.commit()
                 else:
-                    user_id = user['id']
+                    user_id = user_row.id
 
                 # Generate unique_id based on user_id and role
                 unique_id = f"{role}_{user_id}"

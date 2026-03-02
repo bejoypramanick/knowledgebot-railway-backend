@@ -39,8 +39,7 @@ except Exception as e:
     sys.exit(1)
 
 # Import core utilities
-from configuration.core.database_initializer import database_initializer
-from shared.db import close_databases, railway_db
+from shared.sqlalchemy_db import init_database, validate_database, close_database, health_check as db_health_check
 from configuration.core.utils import (
     validate_environment,
     wait_for_railway_network,
@@ -98,17 +97,18 @@ async def lifespan(app: FastAPI):
         logger.info(f"🔍 LIFESPAN: Database URL configured: {'✅' if database_url else '❌'}")
 
         if database_url:
-            # Initialize database connection pool using centralized initializer
+            # Initialize SQLAlchemy database
             app.state.database_url = database_url
-            logger.info("🚀 LIFESPAN: About to initialize database")
+            logger.info("🚀 LIFESPAN: About to initialize SQLAlchemy database")
             try:
-                result = await database_initializer.initialize_and_validate(database_url)
-                if result:
-                    logger.info("✅ LIFESPAN: Database initialized and validated successfully")
+                await init_database(database_url)
+                logger.info("✅ LIFESPAN: SQLAlchemy engine initialized")
+
+                is_valid = await validate_database()
+                if is_valid:
+                    logger.info("✅ LIFESPAN: Database schema validated successfully")
                 else:
-                    logger.error("❌ LIFESPAN: Database initialization returned False")
-                    service_status.set_status("error")
-                    raise RuntimeError("Database initialization failed")
+                    logger.warning("⚠️ LIFESPAN: Database schema validation returned False")
             except Exception as e:
                 logger.error(f"❌ LIFESPAN: Failed to initialize database: {e}")
                 import traceback
@@ -130,7 +130,7 @@ async def lifespan(app: FastAPI):
         # Shutdown
         logger.info("🛑 LIFESPAN: Starting shutdown sequence")
         service_status.set_status("stopping")
-        await close_databases()
+        await close_database()
         logger.info("✅ LIFESPAN: Configuration service shutdown complete")
     except Exception as e:
         logger.error(f"❌ LIFESPAN: Error in lifespan handler: {e}")
@@ -179,30 +179,22 @@ async def add_security_headers(request: Request, call_next):
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    """Shallow health check endpoint optimized for serverless - avoids DB queries to prevent keeping instances awake"""
-    # Simple service health check without database queries
-    # This prevents frequent health checks from keeping serverless instances awake unnecessarily
-    
-    # Basic service status - no DB queries for shallow check
-    db_status = "not_checked"  # Shallow check doesn't query DB
-    
-    # Only check DB connection status without querying
-    if railway_db is not None and hasattr(railway_db, '_pool') and railway_db._pool is not None:
-        db_status = "connected"
-    else:
-        db_status = "disconnected"
+    """Health check endpoint with database connection verification"""
+    db_health = await db_health_check()
 
     # Get overall service status
     service_info = service_status.get_status()
     service_info.update({
-        "database": db_status,
+        "database": db_health["status"],
+        "database_latency_ms": db_health.get("latency_ms", 0),
         "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
     })
 
     return {
-        "status": "healthy" if db_status in ["connected", "not_checked"] else "unhealthy",
+        "status": "healthy" if db_health["status"] == "healthy" else "unhealthy",
         "service": "configuration_service",
-        "database": db_status,
+        "database": db_health["status"],
+        "database_latency_ms": db_health.get("latency_ms", 0),
         "timestamp": service_info.get("timestamp")
     }
 
