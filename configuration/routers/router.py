@@ -1087,6 +1087,7 @@ async def mark_session_as_read(session_id: str, user: dict = Depends(get_current
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
 
+        logger.info(f"🔍 Mark-read endpoint received session_id={session_id} (type={type(session_id).__name__}) from user {user_email}")
         await chat_log_service.mark_session_messages_as_read(session_id, user_email)
 
         logger.info(f"Marked session {session_id} as read by {user_email}")

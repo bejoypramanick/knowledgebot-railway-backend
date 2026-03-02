@@ -452,12 +452,13 @@ class ChatLogService:
 
             # Convert to int if string
             session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+            logger.info(f"🔍 Converting session_id={session_id} (type={type(session_id).__name__}) to session_db_id={session_db_id}")
 
             success = await self.dao.mark_session_messages_as_read(session_db_id)
             if success:
-                logger.info(f"User {user_email} marked all messages in session {session_db_id} as read")
+                logger.info(f"✅ User {user_email} marked all messages in session {session_db_id} as read")
             else:
-                logger.warning(f"Failed to mark messages in session {session_db_id} as read")
+                logger.warning(f"❌ Failed to mark messages in session {session_db_id} as read")
             return success
         except Exception as e:
             logger.error(f"Error marking session {session_id} messages as read: {e}")

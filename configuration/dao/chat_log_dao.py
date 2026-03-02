@@ -753,12 +753,15 @@ class ChatLogDAO:
             params = {"session_id": session_id}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
-                await session.execute(text(query), params)
+                result = await session.execute(text(query), params)
                 await session.commit()
-                logger.log_db_query(query, params, None)
+                rows_updated = result.rowcount
+                logger.info(f"✅ Marked {rows_updated} messages as read for session {session_id}")
+                logger.log_db_query(query, params, f"Updated {rows_updated} rows")
                 return True
         except Exception as e:
             logger.log_db_query(query, params, error=e)
+            logger.error(f"❌ Failed to mark messages as read for session {session_id}: {e}")
             return False
 
     async def get_unread_messages_count(self, session_id: int) -> int:
