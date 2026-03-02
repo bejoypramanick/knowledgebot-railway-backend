@@ -741,9 +741,14 @@ class ChatLogDAO:
                 result = await session.execute(text(query), params)
                 await session.commit()
                 rows_updated = result.rowcount
-                logger.info(f"✅ Marked session {session_id} as read (1 row updated)")
-                logger.log_db_query(query, params, f"Updated {rows_updated} rows")
-                return True
+                if rows_updated > 0:
+                    logger.info(f"✅ Marked session {session_id} as read ({rows_updated} rows updated)")
+                    logger.log_db_query(query, params, f"Updated {rows_updated} rows")
+                    return True
+                else:
+                    logger.warning(f"⚠️ No rows updated for session {session_id} - session may not exist")
+                    logger.log_db_query(query, params, f"Updated {rows_updated} rows")
+                    return False
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             logger.error(f"❌ Failed to mark session {session_id} as read: {e}")
@@ -759,9 +764,14 @@ class ChatLogDAO:
                 result = await session.execute(text(query), params)
                 await session.commit()
                 rows_updated = result.rowcount
-                logger.info(f"✅ Marked session {session_id} as unread (1 row updated)")
-                logger.log_db_query(query, params, f"Updated {rows_updated} rows")
-                return True
+                if rows_updated > 0:
+                    logger.info(f"✅ Marked session {session_id} as unread ({rows_updated} rows updated)")
+                    logger.log_db_query(query, params, f"Updated {rows_updated} rows")
+                    return True
+                else:
+                    logger.warning(f"⚠️ No rows updated for session {session_id} - session may not exist")
+                    logger.log_db_query(query, params, f"Updated {rows_updated} rows")
+                    return False
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             logger.error(f"❌ Failed to mark session {session_id} as unread: {e}")
