@@ -139,7 +139,8 @@ class ChatLogService:
         formatted_sessions = []
         for session_row in sessions_data:
             session_id = session_row['session_id']
-            session_db_id = session_row['id']
+            # Ensure session_db_id is an integer (may be string from database)
+            session_db_id = int(session_row['id']) if isinstance(session_row['id'], str) else session_row['id']
 
             raw_metadata = session_row['metadata']
             if raw_metadata is None:
