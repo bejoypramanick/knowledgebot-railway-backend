@@ -58,16 +58,18 @@ class ChatLogDAO:
 
     async def check_user_role(self, email: str) -> Dict[str, bool]:
         """Check if user is agent or admin."""
+        # Use CAST to ensure proper boolean type from PostgreSQL
+        # This forces SQLAlchemy to handle the type conversion correctly
         query = """
             SELECT
-                EXISTS(SELECT 1 FROM user_role_mapping urm
+                CAST(EXISTS(SELECT 1 FROM user_role_mapping urm
                       JOIN users u ON urm.user_id = u.id
                       JOIN roles r ON urm.role_id = r.id
-                      WHERE u.email = :email AND r.role_name = 'human_agent') as is_agent,
-                EXISTS(SELECT 1 FROM user_role_mapping urm
+                      WHERE u.email = :email AND r.role_name = 'human_agent') AS BOOLEAN) as is_agent,
+                CAST(EXISTS(SELECT 1 FROM user_role_mapping urm
                       JOIN users u ON urm.user_id = u.id
                       JOIN roles r ON urm.role_id = r.id
-                      WHERE u.email = :email AND r.role_name = 'admin') as is_admin
+                      WHERE u.email = :email AND r.role_name = 'admin') AS BOOLEAN) as is_admin
         """
         try:
             params = {"email": email}
@@ -83,8 +85,7 @@ class ChatLogDAO:
                     row_dict = dict(row._mapping) if hasattr(row, '_mapping') else {'is_agent': row[0], 'is_admin': row[1]}
                     logger.info(f"🔍 DEBUG check_user_role: Converted row_dict: {row_dict}")
 
-                    # CRITICAL FIX: Handle string boolean values from asyncpg
-                    # asyncpg may return 't'/'f' (PostgreSQL text booleans) instead of True/False
+                    # Helper to handle any boolean representation from database
                     def convert_bool(value):
                         if isinstance(value, bool):
                             return value
@@ -598,7 +599,8 @@ class ChatLogDAO:
 
     async def get_hil_enabled(self) -> bool:
         """Get HIL enabled status from configuration."""
-        query = "SELECT hil_enabled FROM widget_configuration WHERE id = 1"
+        # Use CAST to ensure proper boolean type from PostgreSQL
+        query = "SELECT CAST(hil_enabled AS BOOLEAN) FROM widget_configuration WHERE id = 1"
 
         try:
             logger.log_db_operation(query)
@@ -610,7 +612,7 @@ class ChatLogDAO:
                     # Convert tuple/Row to dict for consistent access
                     row_dict = dict(row._mapping) if hasattr(row, '_mapping') else {'hil_enabled': row[0]}
 
-                    # CRITICAL FIX: Handle string boolean values from asyncpg
+                    # Handle any boolean representation from database
                     hil_value = row_dict.get('hil_enabled', True)
                     if isinstance(hil_value, bool):
                         return hil_value
