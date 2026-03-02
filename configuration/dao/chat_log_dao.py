@@ -439,8 +439,8 @@ class ChatLogDAO:
         # Use CAST to ensure proper type handling with parameter binding
         query = """
             SELECT * FROM chat_messages
-            WHERE session_id = ANY(CAST(:session_ids AS INTEGER[]))
-            ORDER BY created_at ASC
+            WHERE session_id = ANY(ARRAY[:session_ids])
+            ORDER BY created_at ASC;
         """
         params = {"session_ids": int_session_ids}
 
