@@ -7,11 +7,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from health_monitoring.core.config import settings
-from shared.db import init_railway_db
+from shared.sqlalchemy_db import init_database, validate_database, close_database, health_check as db_health_check
 from shared.otel_logger import setup_otel_logging
 from health_monitoring.routers.router import router
 from health_monitoring.scheduler.health_checker import get_scheduler
-from health_monitoring.core.database_initializer import database_initializer
 
 # Setup logging
 setup_otel_logging("health-monitoring")
@@ -25,12 +24,21 @@ async def lifespan(app: FastAPI):
         logger.info("🚀 Health Monitoring Service starting...")
         logger.info(f"⚙️  Config: HEALTH_MONITOR_ENABLED={settings.health_monitor_enabled}, HEALTH_CHECK_ENABLED={settings.health_check_enabled}")
 
-        # Initialize database
-        if settings.railway_postgres_url or settings.database_url:
-            db_url = settings.railway_postgres_url or settings.database_url
-            await init_railway_db(db_url)
-            await database_initializer.initialize_and_validate(db_url)
-            logger.info("✅ Database initialized and schema validated")
+        # Initialize SQLAlchemy database
+        db_url = settings.railway_postgres_url or settings.database_url
+        if db_url:
+            try:
+                await init_database(db_url)
+                logger.info("✅ SQLAlchemy engine initialized")
+
+                is_valid = await validate_database()
+                if is_valid:
+                    logger.info("✅ Database schema validated successfully")
+                else:
+                    logger.warning("⚠️ Database schema validation returned False")
+            except Exception as e:
+                logger.error(f"❌ Error initializing database: {e}")
+                raise
         else:
             logger.warning("⚠️ Database URL not configured - health checks will not be persisted")
 
@@ -50,6 +58,12 @@ async def lifespan(app: FastAPI):
 
         # Shutdown
         logger.info("🛑 Health Monitoring Service shutting down...")
+        try:
+            await close_database()
+            logger.info("✅ Database closed")
+        except Exception as e:
+            logger.error(f"❌ Error closing database: {e}")
+
         if settings.health_monitor_enabled and settings.health_check_enabled:
             scheduler = get_scheduler()
             await scheduler.stop()

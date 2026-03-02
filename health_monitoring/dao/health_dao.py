@@ -4,7 +4,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
-from shared.db import get_db_connection
+from sqlalchemy import text
+from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("health_dao", "health_monitoring")
@@ -26,32 +27,35 @@ class HealthDAO:
         if timestamp is None:
             timestamp = datetime.utcnow()
 
-        # Convert metadata dict to JSON string for asyncpg JSONB handling
+        # Convert metadata dict to JSON string for SQLAlchemy JSONB handling
         metadata_json = json.dumps(metadata) if metadata else None
 
-        query = """
+        query = text("""
             INSERT INTO service_health_checks
             (service_name, status, response_time_ms, checked_at, error_message, metadata)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES (:service_name, :status, :response_time_ms, :checked_at, :error_message, :metadata)
             RETURNING id
-        """
+        """)
+
+        params = {
+            'service_name': service_name,
+            'status': status,
+            'response_time_ms': response_time_ms,
+            'checked_at': timestamp,
+            'error_message': error_message,
+            'metadata': metadata_json
+        }
 
         try:
-            logger.log_db_operation(query, (service_name, status, response_time_ms, timestamp, error_message, metadata_json))
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(
-                    query,
-                    service_name,
-                    status,
-                    response_time_ms,
-                    timestamp,
-                    error_message,
-                    metadata_json
-                )
-                logger.log_db_query(query, (service_name, status, response_time_ms, timestamp, error_message, metadata_json), result)
-                return result
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                record_id = result.scalar()
+                logger.log_db_query(str(query), params, record_id)
+                await session.commit()
+                return record_id
         except Exception as e:
-            logger.log_db_query(query, (service_name, status, response_time_ms, timestamp, error_message, metadata_json), error=e)
+            logger.log_db_query(str(query), params, error=e)
             raise
 
     @staticmethod
@@ -66,24 +70,25 @@ class HealthDAO:
         if end_date is None:
             end_date = datetime.utcnow()
 
-        query = """
+        query = text("""
             SELECT
                 COUNT(CASE WHEN status = 'healthy' THEN 1 END) * 100.0 / COUNT(*) as uptime_percentage
             FROM service_health_checks
-            WHERE service_name = $1
-            AND checked_at >= $2
-            AND checked_at <= $3
-        """
+            WHERE service_name = :service_name
+            AND checked_at >= :start_date
+            AND checked_at <= :end_date
+        """)
 
         try:
-            params = (service_name, start_date, end_date)
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query, service_name, start_date, end_date)
-                logger.log_db_query(query, params, result)
-                return float(result) if result else 0.0
+            params = {"service_name": service_name, "start_date": start_date, "end_date": end_date}
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                uptime = result.scalar()
+                logger.log_db_query(str(query), params, uptime)
+                return float(uptime) if uptime else 0.0
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), params, error=e)
             return 0.0
 
     @staticmethod
@@ -110,7 +115,7 @@ class HealthDAO:
         try:
             params = (start_date, end_date)
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 results = await conn.fetch(query, start_date, end_date)
                 logger.log_db_query(query, params, results)
                 return {row['service_name']: float(row['uptime_percentage']) for row in results}
@@ -136,7 +141,7 @@ class HealthDAO:
 
         try:
             logger.log_db_operation(query, (limit,))
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 results = await conn.fetch(query, limit)
                 logger.log_db_query(query, (limit,), results)
                 return [dict(row) for row in results]
@@ -177,7 +182,7 @@ class HealthDAO:
             try:
                 params = (service_name, days)
                 logger.log_db_operation(query, params)
-                async with get_db_connection() as conn:
+                async with get_db_session() as session:
                     results = await conn.fetch(query, service_name, days)
                     logger.log_db_query(query, params, results)
                     return [dict(row) for row in results]
@@ -197,7 +202,7 @@ class HealthDAO:
             try:
                 params = (days,)
                 logger.log_db_operation(query, params)
-                async with get_db_connection() as conn:
+                async with get_db_session() as session:
                     results = await conn.fetch(query, days)
                     logger.log_db_query(query, params, results)
                     return [dict(row) for row in results]
@@ -225,7 +230,7 @@ class HealthDAO:
         try:
             params = (service_name,)
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 result = await conn.fetchrow(query, service_name)
                 logger.log_db_query(query, params, result)
                 return dict(result) if result else None
@@ -256,7 +261,7 @@ class HealthDAO:
 
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 results = await conn.fetch(query)
                 logger.log_db_query(query, None, results)
                 return [dict(row) for row in results]

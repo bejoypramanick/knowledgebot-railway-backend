@@ -24,7 +24,7 @@ logger = logging.getLogger("knowledgebase_ingestion")
 from knowledgebase_ingestion.core.ai import get_genai_client
 from knowledgebase_ingestion.routers import fileupload_router, webcrawl_router
 from knowledgebase_ingestion.utils.middleware import log_requests_middleware
-from shared.db import close_databases
+from shared.sqlalchemy_db import init_database, validate_database, close_database
 from knowledgebase_ingestion.core.config import settings
 from knowledgebase_ingestion.core.utils import (log_endpoint_request,
                           register_fastapi_exception_handlers,
@@ -47,11 +47,20 @@ async def lifespan(app: FastAPI):
         # This web service only handles HTTP requests, no Celery initialization needed
         logger.info("✅ Web service started - Celery worker is separate service")
         
-        # Initialize database using centralized initializer
+        # Initialize SQLAlchemy database
         if settings.railway_postgres_url:
-            from knowledgebase_ingestion.core.database_initializer import database_initializer
-            await database_initializer.initialize_and_validate(settings.railway_postgres_url)
-            logger.info("✅ Railway PostgreSQL database initialized and validated")
+            try:
+                await init_database(settings.railway_postgres_url)
+                logger.info("✅ SQLAlchemy engine initialized")
+
+                is_valid = await validate_database()
+                if is_valid:
+                    logger.info("✅ Database schema validated successfully")
+                else:
+                    logger.warning("⚠️ Database schema validation returned False")
+            except Exception as e:
+                logger.error(f"❌ Error initializing database: {e}")
+                raise
 
         # Initialize Gemini Client (Check)
         if get_genai_client():
@@ -86,7 +95,12 @@ async def lifespan(app: FastAPI):
         logger.info("🚀 Knowledgebase ingestion service started successfully")
         yield
 
-        await close_databases()
+        try:
+            await close_database()
+            logger.info("✅ Database closed")
+        except Exception as e:
+            logger.error(f"❌ Error closing database: {e}")
+
         logger.info("🛑 Knowledgebase ingestion service shutdown complete")
         
     except Exception as e:

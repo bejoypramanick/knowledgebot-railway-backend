@@ -33,6 +33,7 @@ from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
 from api_gateway.core.utils import (register_fastapi_exception_handlers,
                           setup_global_exception_logging)
+from shared.sqlalchemy_db import init_database, validate_database, close_database, health_check as db_health_check
 
 setup_global_exception_logging("api_gateway")
 
@@ -46,26 +47,28 @@ async def lifespan(app: FastAPI):
         logger.info(f"🚀 API Gateway starting up...")
         logger.info(f"({settings.service_identity})")
 
-        # Initialize database connection pool
-        logger.info("💾 Initializing database connection pool...")
+        # Initialize SQLAlchemy database
+        database_url = os.getenv("DATABASE_URL")
+        logger.info("💾 Initializing SQLAlchemy database...")
         try:
-            from shared.db import DatabaseManager
-            db_manager = await DatabaseManager.get_instance()
-            await db_manager.initialize()
-            
-            # Verify pool is working with a test query
-            from shared.db import get_db_connection
-            async with get_db_connection() as conn:
-                await conn.execute("SELECT 1")
-            
-            logger.info("✅ Database connection pool initialized and verified")
+            if database_url:
+                await init_database(database_url)
+                logger.info("✅ SQLAlchemy engine initialized")
+
+                is_valid = await validate_database()
+                if is_valid:
+                    logger.info("✅ Database schema validated successfully")
+                else:
+                    logger.warning("⚠️ Database schema validation returned False")
+            else:
+                logger.warning("⚠️ DATABASE_URL not set - database will not be available")
         except Exception as e:
-            logger.error(f"❌ Error initializing database pool: {e}")
+            logger.error(f"❌ Error initializing database: {e}")
             logger.error(f"   Error type: {type(e).__name__}")
             import traceback
             logger.error(f"   Traceback: {traceback.format_exc()}")
             # Re-raise to prevent startup if DB is critical
-            raise RuntimeError(f"Failed to initialize database pool: {e}") from e
+            raise RuntimeError(f"Failed to initialize database: {e}") from e
 
         # Initialize Gemini FileSearch Store (create if doesn't exist)
         logger.info("📂 Initializing Gemini FileSearch store...")
@@ -139,15 +142,13 @@ async def lifespan(app: FastAPI):
         yield
         # Shutdown
         logger.info("🛑 API Gateway shutting down")
-        
-        # Close database pool
+
+        # Close database
         try:
-            from shared.db import DatabaseManager
-            db_manager = await DatabaseManager.get_instance()
-            await db_manager.close()
-            logger.info("✅ Database connection pool closed")
+            await close_database()
+            logger.info("✅ Database closed")
         except Exception as e:
-            logger.error(f"❌ Error closing database pool: {e}")
+            logger.error(f"❌ Error closing database: {e}")
             
     except Exception as e:
         logger.error(f"❌ Error in lifespan handler: {e}")
@@ -313,14 +314,28 @@ async def root():
 
 @app.get("/health")
 async def root_health_check():
-    """Root health check endpoint"""
-    return {"status": "healthy", "service": "api_gateway", "version": "1.0.0"}
+    """Root health check endpoint with database verification"""
+    db_health = await db_health_check()
+    return {
+        "status": "healthy" if db_health["status"] == "healthy" else "unhealthy",
+        "service": "api_gateway",
+        "version": "1.0.0",
+        "database": db_health["status"],
+        "database_latency_ms": db_health.get("latency_ms", 0)
+    }
 
 # Also keep /gateway/health for backward compatibility
 @app.get("/gateway/health")
 async def legacy_health_check():
-    """Legacy health check endpoint"""
-    return {"status": "healthy", "service": "api_gateway", "version": "1.0.0"}
+    """Legacy health check endpoint with database verification"""
+    db_health = await db_health_check()
+    return {
+        "status": "healthy" if db_health["status"] == "healthy" else "unhealthy",
+        "service": "api_gateway",
+        "version": "1.0.0",
+        "database": db_health["status"],
+        "database_latency_ms": db_health.get("latency_ms", 0)
+    }
 
 if __name__ == "__main__":
     import uvicorn

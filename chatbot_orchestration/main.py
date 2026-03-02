@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Configure Shared Telemetry
 import logging
 from shared.telemetry import setup_telemetry, instrument_fastapi
+from shared.sqlalchemy_db import init_database, validate_database, close_database, health_check as db_health_check
 
 # Initialize Telemetry
 # Use default behavior (span exporter disabled by default via env var)
@@ -29,24 +30,38 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger.info("🚀 Chatbot Orchestration Service starting up...")
-    
+
     # Initialize Pydantic AI Service (and DBs lazily)
     await pydantic_ai_service.initialize()
     logger.info("🤖 Pydantic AI Service initialized")
-    
-    # Initialize database using centralized initializer
+
+    # Initialize SQLAlchemy database
+    database_url = os.getenv("DATABASE_URL")
+    logger.info("💾 Initializing SQLAlchemy database...")
     try:
-        from chatbot_orchestration.core.database_initializer import database_initializer
-        await database_initializer.initialize_database()
-        logger.info("🗄️ Database connections initialized (singleton)")
+        if database_url:
+            await init_database(database_url)
+            logger.info("✅ SQLAlchemy engine initialized")
+
+            is_valid = await validate_database()
+            if is_valid:
+                logger.info("✅ Database schema validated successfully")
+            else:
+                logger.warning("⚠️ Database schema validation returned False")
+        else:
+            logger.warning("⚠️ DATABASE_URL not set - database will not be available")
     except Exception as e:
-        logger.warning(f"⚠️ Initial database connection check failed: {e}")
+        logger.warning(f"⚠️ Database initialization failed: {e}")
 
     logger.info("✅ Chatbot Orchestration Service fully ready")
     yield
-    
+
     logger.info("🛑 Chatbot Orchestration Service shutting down...")
-    # Add cleanup logic here if needed
+    try:
+        await close_database()
+        logger.info("✅ Database closed")
+    except Exception as e:
+        logger.error(f"❌ Error closing database: {e}")
 
 app = FastAPI(
     title="Chatbot Orchestration Service",
@@ -89,10 +104,16 @@ async def root_diagnostic(request: Request):
 
 @app.get("/health")
 async def health_check(request: Request):
-    """Health check endpoint."""
+    """Health check endpoint with database verification."""
     logger.info(f"Health check invoked: {request.url}")
     log_endpoint_request("chatbot_orchestration", "health", request)
-    return {"status": "healthy", "service": "chatbot_orchestration"}
+    db_health = await db_health_check()
+    return {
+        "status": "healthy" if db_health["status"] == "healthy" else "unhealthy",
+        "service": "chatbot_orchestration",
+        "database": db_health["status"],
+        "database_latency_ms": db_health.get("latency_ms", 0)
+    }
 
 if __name__ == "__main__":
     import uvicorn
