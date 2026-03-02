@@ -429,6 +429,7 @@ class ChatLogDAO:
             return 0
 
     async def get_messages_for_sessions(self, session_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
+        """Get messages for multiple sessions by their numeric IDs."""
         if not session_ids: return {}
 
         # Build dynamic IN clause for asyncpg compatibility (avoid PostgreSQL array syntax)

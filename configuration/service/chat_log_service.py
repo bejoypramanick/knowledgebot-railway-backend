@@ -131,7 +131,7 @@ class ChatLogService:
         messages_by_session = await self.dao.get_messages_for_sessions(session_db_ids)
         logger.info(f"📨 Loaded messages for {len(messages_by_session)} sessions, total messages: {sum(len(msgs) for msgs in messages_by_session.values())}")
 
-        # Get all session IDs for batch feedback query
+        # Get all session IDs for batch feedback query (uses session_id UUID)
         session_ids = [s['session_id'] for s in sessions_data]
         # OPTIMIZATION: Fetch feedback counts for all sessions in one query
         batch_feedback_counts = await self.dao.get_batch_feedback_counts(session_ids)
@@ -140,7 +140,7 @@ class ChatLogService:
         for session_row in sessions_data:
             session_id = session_row['session_id']
             session_db_id = session_row['id']
-            
+
             raw_metadata = session_row['metadata']
             if raw_metadata is None:
                 metadata = {}
@@ -154,6 +154,7 @@ class ChatLogService:
             else:
                 metadata = {}
 
+            # Messages are keyed by numeric session_db_id (chat_messages.session_id = chat_sessions.id)
             session_messages = messages_by_session.get(session_db_id, [])
             from ..schemas.chat_log_schemas import ChatMessageResponse
             messages = [
