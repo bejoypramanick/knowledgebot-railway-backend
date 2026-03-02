@@ -541,5 +541,22 @@ async def handle_auth_endpoints(request: Request, path: str):
         raise HTTPException(status_code=404, detail=f"Auth endpoint not found: {path}")
 
 # =================================
+# DEBUG ENDPOINTS
+# =================================
+
+@router.get("/debug/auth-headers")
+async def debug_auth_headers(request: Request):
+    """Debug endpoint to check what auth headers are being received"""
+    return {
+        "authorization_header": request.headers.get("authorization", "NOT PRESENT"),
+        "x_user_uid": request.headers.get("x-user-uid", "NOT PRESENT"),
+        "x_user_email": request.headers.get("x-user-email", "NOT PRESENT"),
+        "x_user_name": request.headers.get("x-user-name", "NOT PRESENT"),
+        "has_request_state_user": hasattr(request.state, 'user'),
+        "request_state_user": str(getattr(request.state, 'user', 'NOT PRESENT')),
+        "all_headers": dict(request.headers)
+    }
+
+# =================================
 # END OF ROUTER - Only generic proxy and auth handling
 # =================================
