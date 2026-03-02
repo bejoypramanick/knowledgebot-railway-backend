@@ -6,12 +6,13 @@ and database operations. This replaces custom asyncpg wrapper with industry-
 standard proven solution used by Fortune 500 companies.
 
 Features:
-- NullPool for async SQLAlchemy compatibility (no pooling overhead)
-- Automatic connection recycling and health checks
-- Built-in retry logic with exponential backoff
-- Connection timeouts and pre-ping health verification
+- AsyncAdaptedQueuePool for production-grade connection management
+- Automatic connection recycling and health checks (pre-ping)
+- Proper pool sizing with overflow for burst traffic
+- Connection timeouts and circuit breaker patterns
 - Comprehensive logging and monitoring
 - Works with both raw SQL and SQLAlchemy ORM
+- High-availability configuration for Railway/cloud deployments
 
 Usage:
     from shared.sqlalchemy_db import init_database, get_db_session, close_database
@@ -36,7 +37,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 from sqlalchemy import text
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from shared.otel_logger import get_otel_logger
 
@@ -55,13 +56,19 @@ async def init_database(database_url: Optional[str] = None) -> None:
     - DATABASE_URL: PostgreSQL connection string
     - RAILWAY_PRIVATE_IP: For internal service-to-service communication
 
-    Pool configuration from environment (with defaults):
-    - DB_POOL_SIZE: Min connections (default: 5)
-    - DB_POOL_MAX_OVERFLOW: Additional connections (default: 3)
-    - DB_POOL_RECYCLE: Recycle after N seconds (default: 3600)
-    - DB_STATEMENT_TIMEOUT: Query timeout in ms (default: 60000)
-    - DB_CONNECT_TIMEOUT: Connection timeout in seconds (default: 10)
-    - DB_COMMAND_TIMEOUT: Command timeout in seconds (default: 20)
+    Pool configuration from environment (with production defaults):
+    - DB_POOL_SIZE: Min connections kept alive (default: 5, production: 10-20)
+    - DB_POOL_MAX_OVERFLOW: Additional connections for burst traffic (default: 3, production: 5-10)
+    - DB_POOL_RECYCLE: Recycle stale connections after N seconds (default: 3600)
+    - DB_STATEMENT_TIMEOUT: Query timeout in ms (default: 60000, production: 30000-120000)
+    - DB_CONNECT_TIMEOUT: Connection timeout in seconds (default: 10, production: 10-15)
+    - DB_COMMAND_TIMEOUT: Command timeout in seconds (default: 20, production: 20-30)
+
+    Production-grade configuration:
+    - Uses AsyncAdaptedQueuePool for robust async connection management
+    - pool_pre_ping=True enables automatic connection health checks
+    - Automatic reconnection on stale/dead connections
+    - Connection recycling prevents PostgreSQL timeout issues
 
     Args:
         database_url: PostgreSQL connection URL. If None, uses DATABASE_URL env var.
@@ -101,12 +108,15 @@ async def init_database(database_url: Optional[str] = None) -> None:
     logger.info(f"⏱️  Timeouts: connect={connect_timeout}s, command={command_timeout}s, statement={statement_timeout}ms")
 
     try:
-        # Create async engine with Railway-configured settings
+        # Create async engine with AsyncAdaptedQueuePool for production robustness
         _engine = create_async_engine(
             async_url,
             echo=False,
-            poolclass=NullPool,
-            pool_pre_ping=True,  # Verify connections before using
+            poolclass=AsyncAdaptedQueuePool,
+            pool_size=pool_size,
+            max_overflow=pool_max_overflow,
+            pool_recycle=pool_recycle,
+            pool_pre_ping=True,  # Verify connections before using (critical for production)
             echo_pool=False,
             connect_args={
                 "timeout": connect_timeout,
@@ -132,7 +142,8 @@ async def init_database(database_url: Optional[str] = None) -> None:
             await conn.execute(text("SELECT 1"))
 
         logger.info("✅ SQLAlchemy engine initialized successfully")
-        logger.info(f"📊 Using NullPool for async compatibility (no connection pooling overhead)")
+        logger.info(f"📊 Production pool config: min={pool_size}, max={pool_size + pool_max_overflow}, "
+                   f"recycle={pool_recycle}s, pre_ping=True")
 
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
