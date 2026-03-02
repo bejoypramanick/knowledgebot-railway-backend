@@ -435,10 +435,11 @@ class ChatLogDAO:
         # Ensure all IDs are integers (may come as strings from database)
         int_session_ids = [int(sid) if isinstance(sid, str) else sid for sid in session_ids]
 
-        # Use PostgreSQL's = ANY() operator with array - works better with asyncpg parameter binding
+        # Build SQL with proper array syntax for asyncpg
+        # Use CAST to ensure proper type handling with parameter binding
         query = """
             SELECT * FROM chat_messages
-            WHERE session_id = ANY(:session_ids)
+            WHERE session_id = ANY(CAST(:session_ids AS INTEGER[]))
             ORDER BY created_at ASC
         """
         params = {"session_ids": int_session_ids}
