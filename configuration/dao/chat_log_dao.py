@@ -435,15 +435,14 @@ class ChatLogDAO:
         # Ensure all IDs are integers (may come as strings from database)
         int_session_ids = [int(sid) if isinstance(sid, str) else sid for sid in session_ids]
 
-        # Build dynamic IN clause for asyncpg compatibility (avoid PostgreSQL array syntax)
-        placeholders = ",".join([f":id_{i}" for i in range(len(int_session_ids))])
-        params = {f"id_{i}": sid for i, sid in enumerate(int_session_ids)}
-
-        query = f"""
+        # Use PostgreSQL's = ANY() operator with array - works better with asyncpg parameter binding
+        query = """
             SELECT * FROM chat_messages
-            WHERE session_id IN ({placeholders})
+            WHERE session_id = ANY(:session_ids)
             ORDER BY created_at ASC
         """
+        params = {"session_ids": int_session_ids}
+
         try:
             logger.log_db_operation(query, params)
             logger.info(f"🔍 get_messages_for_sessions: Querying for {len(int_session_ids)} sessions: {int_session_ids[:5]}...")
