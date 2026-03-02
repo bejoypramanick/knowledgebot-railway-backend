@@ -51,11 +51,17 @@ async def init_database(database_url: Optional[str] = None) -> None:
     """
     Initialize SQLAlchemy async engine with connection pooling.
 
-    Uses SQLAlchemy's proven QueuePool for robust connection management:
-    - Connection pooling with configurable size
-    - Automatic connection recycling
-    - Health checks
-    - Retry logic
+    Uses Railway environment configuration:
+    - DATABASE_URL: PostgreSQL connection string
+    - RAILWAY_PRIVATE_IP: For internal service-to-service communication
+
+    Pool configuration from environment (with defaults):
+    - DB_POOL_SIZE: Min connections (default: 5)
+    - DB_POOL_MAX_OVERFLOW: Additional connections (default: 3)
+    - DB_POOL_RECYCLE: Recycle after N seconds (default: 3600)
+    - DB_STATEMENT_TIMEOUT: Query timeout in ms (default: 60000)
+    - DB_CONNECT_TIMEOUT: Connection timeout in seconds (default: 10)
+    - DB_COMMAND_TIMEOUT: Command timeout in seconds (default: 20)
 
     Args:
         database_url: PostgreSQL connection URL. If None, uses DATABASE_URL env var.
@@ -77,28 +83,40 @@ async def init_database(database_url: Optional[str] = None) -> None:
     # Convert to async SQLAlchemy URL format
     if db_url.startswith("postgresql://"):
         async_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+    elif db_url.startswith("postgres://"):
+        async_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
     else:
         async_url = db_url
 
-    logger.info("🚀 Initializing SQLAlchemy async engine with connection pooling...")
+    # Read Railway environment configuration with defaults
+    pool_size = int(os.getenv("DB_POOL_SIZE", "5"))
+    pool_max_overflow = int(os.getenv("DB_POOL_MAX_OVERFLOW", "3"))
+    pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "3600"))
+    statement_timeout = os.getenv("DB_STATEMENT_TIMEOUT", "60000")
+    connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "10"))
+    command_timeout = int(os.getenv("DB_COMMAND_TIMEOUT", "20"))
+
+    logger.info("🚀 Initializing SQLAlchemy async engine with Railway configuration...")
+    logger.info(f"📊 Pool: size={pool_size}, overflow={pool_max_overflow}, recycle={pool_recycle}s")
+    logger.info(f"⏱️  Timeouts: connect={connect_timeout}s, command={command_timeout}s, statement={statement_timeout}ms")
 
     try:
-        # Create async engine with proven settings
+        # Create async engine with Railway-configured settings
         _engine = create_async_engine(
             async_url,
-            echo=False,  # Set to True for SQL logging
+            echo=False,
             poolclass=QueuePool,
-            pool_size=5,  # Min connections to keep
-            max_overflow=3,  # Additional connections allowed beyond pool_size
-            pool_recycle=3600,  # Recycle connections after 1 hour
-            pool_pre_ping=True,  # Verify connections before using (health check)
-            echo_pool=False,  # Log pool operations
+            pool_size=pool_size,
+            max_overflow=pool_max_overflow,
+            pool_recycle=pool_recycle,
+            pool_pre_ping=True,  # Verify connections before using
+            echo_pool=False,
             connect_args={
-                "timeout": 10,  # 10s timeout for acquiring connection
-                "command_timeout": 20,  # 20s timeout for queries
+                "timeout": connect_timeout,
+                "command_timeout": command_timeout,
                 "server_settings": {
                     "application_name": "knowledgebot_service",
-                    "statement_timeout": "60000",  # 60s statement timeout
+                    "statement_timeout": statement_timeout,
                 },
             },
         )
@@ -116,8 +134,9 @@ async def init_database(database_url: Optional[str] = None) -> None:
         async with _engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
 
-        logger.info("✅ SQLAlchemy engine initialized with connection pooling")
-        logger.info("📊 Pool config: size=5, max_overflow=3, recycle=3600s, pre_ping=True")
+        logger.info("✅ SQLAlchemy engine initialized successfully")
+        logger.info(f"📊 Pool config: min={pool_size}, max={pool_size + pool_max_overflow}, "
+                   f"recycle={pool_recycle}s, pre_ping=True")
 
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
