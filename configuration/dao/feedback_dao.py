@@ -87,11 +87,11 @@ class FeedbackDAO:
         query = f"""
             SELECT
                 session_id,
-                feedback_type,
-                COUNT(*) as count
-            FROM chat_sessions
-            WHERE session_id IN ({placeholders}) AND feedback_type IS NOT NULL
-            GROUP BY session_id, feedback_type
+                COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
+                COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
+            FROM chat_feedback
+            WHERE session_id IN ({placeholders})
+            GROUP BY session_id
         """
 
         try:
@@ -104,17 +104,15 @@ class FeedbackDAO:
                 # Transform results into expected format
                 for record in records:
                     session_id = str(record['session_id'])
-                    feedback_type = record['feedback_type']
-                    count = record['count']
+                    positive_count = record['positive_count'] or 0
+                    negative_count = record['negative_count'] or 0
 
                     if session_id not in result_dict:
                         result_dict[session_id] = {'positive': 0, 'negative': 0}
 
-                    # Map feedback types to positive/negative
-                    if feedback_type == 'positive':
-                        result_dict[session_id]['positive'] = count
-                    elif feedback_type == 'negative':
-                        result_dict[session_id]['negative'] = count
+                    # Update with actual counts
+                    result_dict[session_id]['positive'] = positive_count
+                    result_dict[session_id]['negative'] = negative_count
 
                 return result_dict
         except Exception as e:
