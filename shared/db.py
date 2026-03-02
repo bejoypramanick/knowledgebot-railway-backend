@@ -262,28 +262,23 @@ class DatabaseManager:
         async with self.connection() as conn:
             return await conn.fetchval(query, *args)
 
+@asynccontextmanager
 async def get_db_connection():
-    """Get a database connection from the pool.
+    """Get a database connection from the pool (async context manager).
 
-    IMPORTANT: Caller must use try/finally to ensure connection is released.
-
-    Example:
-        conn = await get_db_connection()
-        try:
+    Use with async with for automatic connection cleanup:
+        async with get_db_connection() as conn:
             result = await conn.fetch(query)
-        finally:
-            await conn.close()  # Returns to pool
     """
     manager = await DatabaseManager.get_instance()
-    return await manager.get_connection()
-
-@asynccontextmanager
-async def get_db_connection_context():
-    """Context manager for database connections (legacy, for backwards compatibility).
-    Prefer get_db_connection() with try/finally in new code."""
-    manager = await DatabaseManager.get_instance()
-    async with manager.connection() as conn:
+    conn = await manager.get_connection()
+    try:
         yield conn
+    finally:
+        try:
+            await conn.close()
+        except Exception as err:
+            logger.debug(f"Error closing connection: {err}")
 
 async def close_databases():
     manager = await DatabaseManager.get_instance()

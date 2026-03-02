@@ -76,14 +76,10 @@ class AuthDAO:
         params = {"email": email}
         try:
             logger.log_db_operation(query, params)
-            # Use simple try/finally with asyncpg's native pool management
-            conn = await get_db_connection()
-            try:
+            async with get_db_connection() as conn:
                 results = await conn.fetch(query, email)
                 logger.log_db_query(query, params, results)
                 return [dict(row) for row in results]
-            finally:
-                await conn.close()  # asyncpg returns connection to pool
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise  # ← Raise exception instead of returning []
