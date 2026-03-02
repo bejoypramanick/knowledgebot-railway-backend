@@ -82,8 +82,18 @@ class ChatLogDAO:
                     # Convert tuple/Row to dict for consistent access
                     row_dict = dict(row._mapping) if hasattr(row, '_mapping') else {'is_agent': row[0], 'is_admin': row[1]}
                     logger.info(f"🔍 DEBUG check_user_role: Converted row_dict: {row_dict}")
-                    is_agent = bool(row_dict.get('is_agent', False))
-                    is_admin = bool(row_dict.get('is_admin', False))
+
+                    # CRITICAL FIX: Handle string boolean values from asyncpg
+                    # asyncpg may return 't'/'f' (PostgreSQL text booleans) instead of True/False
+                    def convert_bool(value):
+                        if isinstance(value, bool):
+                            return value
+                        if isinstance(value, str):
+                            return value.lower() in ('true', 't', '1', 'yes')
+                        return bool(value)
+
+                    is_agent = convert_bool(row_dict.get('is_agent', False))
+                    is_admin = convert_bool(row_dict.get('is_admin', False))
                     logger.info(f"🔍 DEBUG check_user_role: Final result - is_agent={is_agent}, is_admin={is_admin}")
                     return {"is_agent": is_agent, "is_admin": is_admin}
                 logger.info(f"🔍 DEBUG check_user_role: No row returned, returning false roles")
@@ -599,7 +609,14 @@ class ChatLogDAO:
                 if row:
                     # Convert tuple/Row to dict for consistent access
                     row_dict = dict(row._mapping) if hasattr(row, '_mapping') else {'hil_enabled': row[0]}
-                    return bool(row_dict.get('hil_enabled', True))
+
+                    # CRITICAL FIX: Handle string boolean values from asyncpg
+                    hil_value = row_dict.get('hil_enabled', True)
+                    if isinstance(hil_value, bool):
+                        return hil_value
+                    if isinstance(hil_value, str):
+                        return hil_value.lower() in ('true', 't', '1', 'yes')
+                    return bool(hil_value)
                 return True  # Default to enabled if no row found
         except Exception as e:
             logger.log_db_query(query, None, error=e)
