@@ -4,7 +4,8 @@ Handles database operations for user feedback
 """
 from typing import Dict, List, Any, Optional
 
-from shared.db import get_db_connection
+from sqlalchemy import text
+from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("feedback_dao", "configuration")
@@ -26,17 +27,18 @@ class FeedbackDAO:
 
         query = """
             UPDATE chat_sessions
-            SET feedback_type = $1, feedback_provided_at = NOW()
-            WHERE session_id = $2
+            SET feedback_type = :feedback_type, feedback_provided_at = NOW()
+            WHERE session_id = :session_id
         """
         params = {"feedback_type": feedback_type, "session_id": session_id}
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, feedback_type, session_id)
-                logger.log_db_query(query, params, result)
-                if result == "UPDATE 0":
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, None)
+                if result.rowcount == 0:
                     raise ValueError(f"Session not found: {session_id}")
                 return True
         except Exception as e:
@@ -54,10 +56,11 @@ class FeedbackDAO:
 
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                records = await conn.fetch(query)
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                records = result.fetchall()
                 logger.log_db_query(query, None, records)
-                return records
+                return [dict(row._mapping) for row in records]
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             raise
@@ -80,7 +83,7 @@ class FeedbackDAO:
                 feedback_type,
                 COUNT(*) as count
             FROM chat_sessions
-            WHERE session_id = ANY($1::text[]) AND feedback_type IS NOT NULL
+            WHERE session_id = ANY(:session_ids::text[]) AND feedback_type IS NOT NULL
             GROUP BY session_id, feedback_type
         """
 
@@ -88,32 +91,33 @@ class FeedbackDAO:
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                records = await conn.fetch(query, session_ids)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                records = result.fetchall()
                 logger.log_db_query(query, params, records)
 
                 # Transform results into expected format
-                result = {}
+                result_dict = {}
                 for record in records:
                     session_id = str(record['session_id'])
                     feedback_type = record['feedback_type']
                     count = record['count']
 
-                    if session_id not in result:
-                        result[session_id] = {'positive': 0, 'negative': 0}
+                    if session_id not in result_dict:
+                        result_dict[session_id] = {'positive': 0, 'negative': 0}
 
                     # Map feedback types to positive/negative
                     if feedback_type == 'positive':
-                        result[session_id]['positive'] = count
+                        result_dict[session_id]['positive'] = count
                     elif feedback_type == 'negative':
-                        result[session_id]['negative'] = count
+                        result_dict[session_id]['negative'] = count
 
                 # Ensure all session IDs are in result with zero counts if no feedback
                 for session_id in session_ids:
-                    if session_id not in result:
-                        result[session_id] = {'positive': 0, 'negative': 0}
+                    if session_id not in result_dict:
+                        result_dict[session_id] = {'positive': 0, 'negative': 0}
 
-                return result
+                return result_dict
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise

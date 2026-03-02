@@ -4,7 +4,8 @@ Handles database operations for token management
 """
 from typing import Dict, List, Any, Optional
 
-from shared.db import get_db_connection
+from sqlalchemy import text
+from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("token_dao", "configuration")
@@ -17,38 +18,41 @@ class TokenDAO:
         """Update LLM token usage for a provider."""
         query = """
             INSERT INTO llm_providers (provider_name, token_used, token_limit, is_active)
-            VALUES ($1, $2, $3, true)
+            VALUES (:provider, :total_tokens, :default_limit, true)
             ON CONFLICT (provider_name) DO UPDATE SET
             token_used = llm_providers.token_used + EXCLUDED.token_used,
             updated_at = NOW()
         """
-        params = [provider, total_tokens, default_limit]
+        params = {"provider": provider, "total_tokens": total_tokens, "default_limit": default_limit}
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, *params)
-                logger.log_db_query(query, params, result)
+            async with get_db_session() as session:
+                await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, None)
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def log_token_usage(self, session_id: str, message_id: str, provider: str, model: str, 
-                             prompt_tokens: int, completion_tokens: int, total_tokens: int, 
+    async def log_token_usage(self, session_id: str, message_id: str, provider: str, model: str,
+                             prompt_tokens: int, completion_tokens: int, total_tokens: int,
                              api_call_type: str, request_metadata: Optional[dict] = None):
         """Log detailed token usage for a specific API call."""
         query = """
-            INSERT INTO token_usage_log 
-            (session_id, message_id, provider, model, prompt_tokens, completion_tokens, 
+            INSERT INTO token_usage_log
+            (session_id, message_id, provider, model, prompt_tokens, completion_tokens,
              total_tokens, api_call_type, request_metadata, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            VALUES (:session_id, :message_id, :provider, :model, :prompt_tokens,
+                    :completion_tokens, :total_tokens, :api_call_type, :request_metadata, NOW())
         """
-        params = [session_id, message_id, provider, model, prompt_tokens, 
-                  completion_tokens, total_tokens, api_call_type, request_metadata]
+        params = {"session_id": session_id, "message_id": message_id, "provider": provider, "model": model, "prompt_tokens": prompt_tokens,
+                  "completion_tokens": completion_tokens, "total_tokens": total_tokens, "api_call_type": api_call_type, "request_metadata": request_metadata}
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, *params)
-                logger.log_db_query(query, params, result)
+            async with get_db_session() as session:
+                await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, None)
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
@@ -56,22 +60,23 @@ class TokenDAO:
     async def get_gemini_usage(self) -> dict:
         """Get Gemini API token usage by calculating totals from token_usage_log table."""
         query = """
-            SELECT 
+            SELECT
                 SUM(prompt_tokens) as total_prompt_tokens,
                 SUM(completion_tokens) as total_completion_tokens,
                 SUM(total_tokens) as total_tokens,
                 COUNT(*) as total_requests
-            FROM token_usage_log 
+            FROM token_usage_log
             WHERE provider = 'gemini'
         """
         params = {"provider": "gemini"}
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query)
-                logger.log_db_query(query, params, result)
-                
-                if not result:
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                logger.log_db_query(query, params, row)
+
+                if not row:
                     return {
                         "provider": "gemini",
                         "total_prompt_tokens": 0,
@@ -79,50 +84,51 @@ class TokenDAO:
                         "total_tokens": 0,
                         "total_requests": 0
                     }
-                
+
                 return {
                     "provider": "gemini",
-                    "total_prompt_tokens": result["total_prompt_tokens"] or 0,
-                    "total_completion_tokens": result["total_completion_tokens"] or 0,
-                    "total_tokens": result["total_tokens"] or 0,
-                    "total_requests": result["total_requests"] or 0
+                    "total_prompt_tokens": row["total_prompt_tokens"] or 0,
+                    "total_completion_tokens": row["total_completion_tokens"] or 0,
+                    "total_tokens": row["total_tokens"] or 0,
+                    "total_requests": row["total_requests"] or 0
                 }
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def get_detailed_token_usage(self, limit: int = 100, provider: Optional[str] = None, 
+    async def get_detailed_token_usage(self, limit: int = 100, provider: Optional[str] = None,
                                      api_call_type: Optional[str] = None) -> List[Dict]:
         """Get detailed token usage log with correlations to specific requests."""
         try:
             # Build query with optional filters
             query = """
-                SELECT session_id, message_id, provider, model, prompt_tokens, 
-                       completion_tokens, total_tokens, api_call_type, 
+                SELECT session_id, message_id, provider, model, prompt_tokens,
+                       completion_tokens, total_tokens, api_call_type,
                        request_metadata, created_at
                 FROM token_usage_log
             """
-            params = []
+            params = {}
             conditions = []
-            
+
             if provider:
-                conditions.append("provider = $1")
-                params.append(provider)
+                conditions.append("provider = :provider")
+                params["provider"] = provider
             if api_call_type:
-                conditions.append("api_call_type = $2")
-                params.append(api_call_type)
-            
+                conditions.append("api_call_type = :api_call_type")
+                params["api_call_type"] = api_call_type
+
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
-            
-            query += " ORDER BY created_at DESC LIMIT $" + str(len(params) + 1)
-            params.append(limit)
-            
+
+            query += " ORDER BY created_at DESC LIMIT :limit"
+            params["limit"] = limit
+
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                records = await conn.fetch(query, *params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                records = result.fetchall()
                 logger.log_db_query(query, params, records)
-                return [dict(record) for record in records]
+                return [dict(row._mapping) for row in records]
         except Exception as e:
             logger.log_db_query("get_detailed_token_usage", {"provider": provider, "api_call_type": api_call_type, "limit": limit}, error=e)
             raise

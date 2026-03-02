@@ -5,7 +5,8 @@ Handles database operations for widget configuration
 from typing import Dict, List, Any, Optional, Tuple
 import json
 
-from shared.db import get_db_connection
+from sqlalchemy import text
+from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 from configuration.core.railway_storage import railway_storage
 
@@ -30,11 +31,12 @@ class WidgetConfigDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query)
-                logger.log_db_query(query, None, result)
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                row = result.fetchone()
+                logger.log_db_query(query, None, row)
                 # Convert database row to dictionary
-                return dict(result) if result else None
+                return dict(row._mapping) if row else None
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return None
@@ -49,8 +51,9 @@ class WidgetConfigDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                rows = await conn.fetch(query)
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                rows = result.fetchall()
                 logger.log_db_query(query, None, rows)
                 return [row["message_text"] for row in rows]
         except Exception as e:
@@ -61,53 +64,54 @@ class WidgetConfigDAO:
         """Update widget configuration."""
         query = """
             UPDATE widget_configuration
-            SET 
-                display_name = $1,
-                initial_message = $2,
-                auto_show_duration = $3,
-                keep_showing_suggested = $4,
-                theme = $5,
-                primary_color = $6,
-                use_primary_for_header = $7,
-                chat_bubble_color = $8,
-                align_bubble = $9,
-                display_chatbot = $10,
-                profile_picture_url = $11,
-                chat_icon_url = $12,
-                profile_picture_filename = $13,
-                chat_icon_filename = $14,
-                profile_zoom = $15,
-                chat_icon_zoom = $16,
-                profile_position = $17,
-                chat_icon_position = $18,
+            SET
+                display_name = :display_name,
+                initial_message = :initial_message,
+                auto_show_duration = :auto_show_duration,
+                keep_showing_suggested = :keep_showing_suggested,
+                theme = :theme,
+                primary_color = :primary_color,
+                use_primary_for_header = :use_primary_for_header,
+                chat_bubble_color = :chat_bubble_color,
+                align_bubble = :align_bubble,
+                display_chatbot = :display_chatbot,
+                profile_picture_url = :profile_picture_url,
+                chat_icon_url = :chat_icon_url,
+                profile_picture_filename = :profile_picture_filename,
+                chat_icon_filename = :chat_icon_filename,
+                profile_zoom = :profile_zoom,
+                chat_icon_zoom = :chat_icon_zoom,
+                profile_position = :profile_position,
+                chat_icon_position = :chat_icon_position,
                 updated_at = NOW()
             WHERE id = 1
         """
-        params = [
-            config_data["display_name"],
-            config_data["initial_message"],
-            config_data.get("auto_show_duration", 4),  # Default to 4 if None
-            config_data.get("keep_showing_suggested", True),  # Default to True if None
-            config_data.get("theme", "light"),  # Default to light if None
-            config_data.get("primary_color", "#3b82f6"),  # Default if None
-            config_data.get("use_primary_for_header", True),  # Default if None
-            config_data.get("chat_bubble_color", "#3b82f6"),  # Default if None
-            config_data.get("align_bubble", "right"),  # Default if None
-            config_data.get("display_chatbot", True),  # Default if None
-            config_data.get("profile_picture_url"),
-            config_data.get("chat_icon_url"),
-            config_data.get("profile_picture_filename"),
-            config_data.get("chat_icon_filename"),
-            config_data.get("profile_zoom", 1.0),
-            config_data.get("chat_icon_zoom", 1.0),
-            json.dumps(config_data.get("profile_position", {"x": 0, "y": 0})),
-            json.dumps(config_data.get("chat_icon_position", {"x": 0, "y": 0}))
-        ]
+        params = {
+            "display_name": config_data["display_name"],
+            "initial_message": config_data["initial_message"],
+            "auto_show_duration": config_data.get("auto_show_duration", 4),
+            "keep_showing_suggested": config_data.get("keep_showing_suggested", True),
+            "theme": config_data.get("theme", "light"),
+            "primary_color": config_data.get("primary_color", "#3b82f6"),
+            "use_primary_for_header": config_data.get("use_primary_for_header", True),
+            "chat_bubble_color": config_data.get("chat_bubble_color", "#3b82f6"),
+            "align_bubble": config_data.get("align_bubble", "right"),
+            "display_chatbot": config_data.get("display_chatbot", True),
+            "profile_picture_url": config_data.get("profile_picture_url"),
+            "chat_icon_url": config_data.get("chat_icon_url"),
+            "profile_picture_filename": config_data.get("profile_picture_filename"),
+            "chat_icon_filename": config_data.get("chat_icon_filename"),
+            "profile_zoom": config_data.get("profile_zoom", 1.0),
+            "chat_icon_zoom": config_data.get("chat_icon_zoom", 1.0),
+            "profile_position": json.dumps(config_data.get("profile_position", {"x": 0, "y": 0})),
+            "chat_icon_position": json.dumps(config_data.get("chat_icon_position", {"x": 0, "y": 0}))
+        }
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, *params)
-                logger.log_db_query(query, params, result)
+            async with get_db_session() as session:
+                await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, None)
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
@@ -115,36 +119,38 @@ class WidgetConfigDAO:
     async def update_suggested_messages(self, messages: List[str]):
         """Update suggested messages."""
         try:
-            async with get_db_connection() as conn:
-                async with conn.transaction():
-                    # Get the widget config ID (should be ID 1 for the main config)
-                    config_id_query = "SELECT id FROM widget_configuration LIMIT 1"
-                    logger.log_db_operation(config_id_query)
-                    config_id_row = await conn.fetchrow(config_id_query)
-                    logger.log_db_query(config_id_query, None, config_id_row)
-                    
-                    if not config_id_row:
-                        raise ValueError("No widget configuration found")
-                    
-                    widget_config_id = config_id_row["id"]
-                    
-                    # Clear existing messages for this widget config
-                    delete_query = "DELETE FROM widget_suggested_messages WHERE widget_config_id = $1"
-                    delete_params = {"widget_config_id": widget_config_id}
-                    logger.log_db_operation(delete_query, delete_params)
-                    delete_result = await conn.execute(delete_query, widget_config_id)
-                    logger.log_db_query(delete_query, delete_params, delete_result)
-                    
-                    # Insert new messages
-                    insert_query = """
-                        INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
-                        VALUES ($1, $2, $3, true, NOW(), NOW())
-                    """
-                    for i, message in enumerate(messages):
-                        insert_params = {"widget_config_id": widget_config_id, "message": message, "display_order": i}
-                        logger.log_db_operation(insert_query, insert_params)
-                        result = await conn.execute(insert_query, widget_config_id, message, i)
-                        logger.log_db_query(insert_query, insert_params, result)
+            async with get_db_session() as session:
+                # Get the widget config ID (should be ID 1 for the main config)
+                config_id_query = "SELECT id FROM widget_configuration LIMIT 1"
+                logger.log_db_operation(config_id_query)
+                config_id_result = await session.execute(text(config_id_query))
+                config_id_row = config_id_result.fetchone()
+                logger.log_db_query(config_id_query, None, config_id_row)
+
+                if not config_id_row:
+                    raise ValueError("No widget configuration found")
+
+                widget_config_id = config_id_row["id"]
+
+                # Clear existing messages for this widget config
+                delete_query = "DELETE FROM widget_suggested_messages WHERE widget_config_id = :widget_config_id"
+                delete_params = {"widget_config_id": widget_config_id}
+                logger.log_db_operation(delete_query, delete_params)
+                await session.execute(text(delete_query), delete_params)
+                logger.log_db_query(delete_query, delete_params, None)
+
+                # Insert new messages
+                insert_query = """
+                    INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
+                    VALUES (:widget_config_id, :message_text, :display_order, true, NOW(), NOW())
+                """
+                for i, message in enumerate(messages):
+                    insert_params = {"widget_config_id": widget_config_id, "message_text": message, "display_order": i}
+                    logger.log_db_operation(insert_query, insert_params)
+                    await session.execute(text(insert_query), insert_params)
+                    logger.log_db_query(insert_query, insert_params, None)
+
+                await session.commit()
         except Exception as e:
             logger.error(f"Error updating suggested messages: {e}")
             raise
@@ -160,37 +166,38 @@ class WidgetConfigDAO:
             elif filename.lower().endswith('.gif'): content_type = 'image/gif'
             elif filename.lower().endswith('.webp'): content_type = 'image/webp'
             elif filename.lower().endswith('.svg'): content_type = 'image/svg+xml'
-            
+
             # Upload to Railway storage with consistent naming
             storage_url, storage_filename = await railway_storage.upload_image(
                 image_data, filename, content_type, image_type
             )
-            
+
             column_mapping = {
                 "profile": ("profile_picture_url", "profile_picture_filename"),
                 "chatIcon": ("chat_icon_url", "chat_icon_filename"),
                 "headerIcon": ("profile_picture_url", "profile_picture_filename")
             }
-            
+
             if image_type not in column_mapping:
                 logger.error(f"Invalid image type: {image_type}")
                 return False, ""
-            
+
             url_column, filename_column = column_mapping[image_type]
-            
+
             query = f"""
                 UPDATE widget_configuration
-                SET {url_column} = $1, {filename_column} = $2, updated_at = NOW()
+                SET {url_column} = :storage_url, {filename_column} = :storage_filename, updated_at = NOW()
                 WHERE id = 1
             """
             params = {"storage_url": storage_url, "storage_filename": storage_filename}
-            
+
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, storage_url, storage_filename)
-                logger.log_db_query(query, params, result)
+            async with get_db_session() as session:
+                await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, None)
                 return storage_url, storage_filename
-                
+
         except Exception as e:
             logger.error(f"Error updating widget image '{image_type}': {e}")
             raise
@@ -200,9 +207,10 @@ class WidgetConfigDAO:
         query = "DELETE FROM widget_suggested_messages"
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query)
-                logger.log_db_query(query, None, result)
+            async with get_db_session() as session:
+                await session.execute(text(query))
+                await session.commit()
+                logger.log_db_query(query, None, None)
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             raise
@@ -211,14 +219,15 @@ class WidgetConfigDAO:
         """Add a suggested message."""
         query = """
             INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
-            VALUES (1, $1, $2, true, NOW(), NOW())
+            VALUES (1, :message_text, :display_order, true, NOW(), NOW())
         """
-        params = {"message": message, "index": index}
+        params = {"message_text": message, "display_order": index}
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, message, index)
-                logger.log_db_query(query, params, result)
+            async with get_db_session() as session:
+                await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, None)
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise

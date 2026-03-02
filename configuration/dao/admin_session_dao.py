@@ -6,7 +6,8 @@ Handles database operations for admin session tracking and management
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 
-from shared.db import get_db_connection
+from sqlalchemy import text
+from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("admin_session_dao", "configuration")
@@ -37,31 +38,33 @@ class AdminSessionDAO:
                 session_id, user_role_id, email, role_name,
                 ip_address, user_agent, browser, os, device_type,
                 expires_at, is_active, login_at, last_activity_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11, $11)
+            ) VALUES (:session_id, :user_role_id, :email, :role_name, :ip_address, :user_agent, :browser, :os, :device_type, :expires_at, true, :now, :now)
             RETURNING id, session_id, email, role_name, login_at, is_active
         """
 
         now = datetime.utcnow()
-        params = (
-            session_id,
-            user_role_id,
-            email,
-            role_name,
-            ip_address,
-            user_agent,
-            browser,
-            os,
-            device_type,
-            expires_at,
-            now,
-        )
+        params = {
+            "session_id": session_id,
+            "user_role_id": user_role_id,
+            "email": email,
+            "role_name": role_name,
+            "ip_address": ip_address,
+            "user_agent": user_agent,
+            "browser": browser,
+            "os": os,
+            "device_type": device_type,
+            "expires_at": expires_at,
+            "now": now,
+        }
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, *params)
-                logger.log_db_query(query, params, result)
-                return dict(result) if result else None
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                logger.log_db_query(query, params, row)
+                await session.commit()
+                return dict(row._mapping) if row else None
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return None
@@ -74,15 +77,16 @@ class AdminSessionDAO:
                    login_at, logout_at, last_activity_at, expires_at,
                    is_active, logout_reason, action_count, metadata
             FROM admin_sessions
-            WHERE session_id = $1
+            WHERE session_id = :session_id
         """
 
         try:
             logger.log_db_operation(query, session_id)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, session_id)
-                logger.log_db_query(query, session_id, result)
-                return dict(result) if result else None
+            async with get_db_session() as session:
+                result = await session.execute(text(query), {"session_id": session_id})
+                row = result.fetchone()
+                logger.log_db_query(query, session_id, row)
+                return dict(row._mapping) if row else None
         except Exception as e:
             logger.log_db_query(query, session_id, error=e)
             return None
@@ -94,10 +98,10 @@ class AdminSessionDAO:
                 SELECT id, session_id, email, role_name, ip_address, browser, os, device_type,
                        login_at, last_activity_at, expires_at, is_active, action_count
                 FROM admin_sessions
-                WHERE email = $1 AND is_active = true
+                WHERE email = :email AND is_active = true
                 ORDER BY login_at DESC
             """
-            params = email
+            params = {"email": email}
         else:
             query = """
                 SELECT id, session_id, email, role_name, ip_address, browser, os, device_type,
@@ -106,17 +110,15 @@ class AdminSessionDAO:
                 WHERE is_active = true
                 ORDER BY login_at DESC
             """
-            params = None
+            params = {}
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                if params:
-                    results = await conn.fetch(query, params)
-                else:
-                    results = await conn.fetch(query)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                results = result.fetchall()
                 logger.log_db_query(query, params, results)
-                return [dict(row) for row in results]
+                return [dict(row._mapping) for row in results]
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return []
@@ -125,18 +127,19 @@ class AdminSessionDAO:
         """Update last_activity_at for a session."""
         query = """
             UPDATE admin_sessions
-            SET last_activity_at = $1
-            WHERE session_id = $2
+            SET last_activity_at = :now
+            WHERE session_id = :session_id
         """
 
         now = datetime.utcnow()
-        params = (now, session_id)
+        params = {"now": now, "session_id": session_id}
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, *params)
-                logger.log_db_query(query, params, result)
+            async with get_db_session() as session:
+                await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, None)
                 return True
         except Exception as e:
             logger.log_db_query(query, params, error=e)
@@ -146,18 +149,19 @@ class AdminSessionDAO:
         """Logout a session by marking it inactive."""
         query = """
             UPDATE admin_sessions
-            SET is_active = false, logout_at = $1, logout_reason = $2
-            WHERE session_id = $3
+            SET is_active = false, logout_at = :now, logout_reason = :reason
+            WHERE session_id = :session_id
         """
 
         now = datetime.utcnow()
-        params = (now, reason, session_id)
+        params = {"now": now, "reason": reason, "session_id": session_id}
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, *params)
-                logger.log_db_query(query, params, result)
+            async with get_db_session() as session:
+                await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, None)
                 return True
         except Exception as e:
             logger.log_db_query(query, params, error=e)
@@ -173,17 +177,13 @@ class AdminSessionDAO:
 
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query)
-                logger.log_db_query(query, result=result)
-                # Parse the result string "UPDATE n" to get count
-                if isinstance(result, str) and result.startswith("UPDATE"):
-                    try:
-                        count = int(result.split()[-1])
-                        return count
-                    except (ValueError, IndexError):
-                        return 0
-                return 0
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                await session.commit()
+                logger.log_db_query(query, result=None)
+                # Get the count of rows affected
+                count = result.rowcount if hasattr(result, 'rowcount') else 0
+                return count
         except Exception as e:
             logger.log_db_query(query, error=e)
             return 0
@@ -197,17 +197,18 @@ class AdminSessionDAO:
                 COUNT(*) FILTER (WHERE is_active = true) as active_sessions,
                 AVG(EXTRACT(EPOCH FROM (COALESCE(logout_at, CURRENT_TIMESTAMP) - login_at))) as avg_duration_seconds
             FROM admin_sessions
-            WHERE login_at > NOW() - INTERVAL '1 day' * $1
+            WHERE login_at > NOW() - INTERVAL '1 day' * :days
         """
 
-        params = days
+        params = {"days": days}
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, params)
-                logger.log_db_query(query, params, result)
-                return dict(result) if result else {}
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                logger.log_db_query(query, params, row)
+                return dict(row._mapping) if row else {}
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return {}
@@ -216,24 +217,20 @@ class AdminSessionDAO:
         """Delete sessions older than N days. Returns count of deleted sessions."""
         query = """
             DELETE FROM admin_sessions
-            WHERE login_at < NOW() - INTERVAL '1 day' * $1
+            WHERE login_at < NOW() - INTERVAL '1 day' * :days
         """
 
-        params = days
+        params = {"days": days}
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, params)
-                logger.log_db_query(query, params, result)
-                # Parse the result string "DELETE n" to get count
-                if isinstance(result, str) and result.startswith("DELETE"):
-                    try:
-                        count = int(result.split()[-1])
-                        return count
-                    except (ValueError, IndexError):
-                        return 0
-                return 0
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, None)
+                # Get the count of rows affected
+                count = result.rowcount if hasattr(result, 'rowcount') else 0
+                return count
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return 0

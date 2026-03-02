@@ -6,7 +6,8 @@ Handles database operations for action audit trail and analytics
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timedelta
 
-from shared.db import get_db_connection
+from sqlalchemy import text
+from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("admin_action_dao", "configuration")
@@ -27,7 +28,25 @@ class AdminActionDAO:
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Get actions with optional filters."""
-        query = """
+        where_clauses = ["1=1"]
+        bind_params = {}
+
+        if email:
+            where_clauses.append("email = :email")
+            bind_params['email'] = email
+
+        if category:
+            where_clauses.append("action_category = :category")
+            bind_params['category'] = category
+
+        if success is not None:
+            where_clauses.append("success = :success")
+            bind_params['success'] = success
+
+        bind_params['limit'] = limit
+        bind_params['offset'] = offset
+
+        query_str = f"""
             SELECT
                 id, action_id, session_id, user_role_id, email, role_name,
                 action_type, action_category, http_method, endpoint,
@@ -35,43 +54,25 @@ class AdminActionDAO:
                 error_message, error_code, response_status,
                 ip_address, user_agent, created_at
             FROM admin_actions
-            WHERE 1=1
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY created_at DESC LIMIT :limit OFFSET :offset
         """
-
-        params = []
-        param_count = 0
-
-        if email:
-            param_count += 1
-            query += f" AND email = ${param_count}"
-            params.append(email)
-
-        if category:
-            param_count += 1
-            query += f" AND action_category = ${param_count}"
-            params.append(category)
-
-        if success is not None:
-            param_count += 1
-            query += f" AND success = ${param_count}"
-            params.append(success)
-
-        query += f" ORDER BY created_at DESC LIMIT ${param_count + 1} OFFSET ${param_count + 2}"
-        params.extend([limit, offset])
+        query = text(query_str)
 
         try:
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                results = await conn.fetch(query, *params)
-                logger.log_db_query(query, params, results)
-                return [dict(row) for row in results]
+            logger.log_db_operation(query_str, bind_params)
+            async with get_db_session() as session:
+                results = await session.execute(query, bind_params)
+                rows = results.fetchall()
+                logger.log_db_query(query_str, bind_params, rows)
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(query_str, bind_params, error=e)
             return []
 
     async def get_action_statistics(self, days: int = 7) -> Dict[str, Any]:
         """Get action statistics by category for the last N days."""
-        query = """
+        query = text("""
             SELECT
                 action_category,
                 COUNT(*) as total_actions,
@@ -82,25 +83,26 @@ class AdminActionDAO:
                 MAX(COALESCE(duration_ms, 0)) as max_duration_ms,
                 MIN(COALESCE(duration_ms, 0)) as min_duration_ms
             FROM admin_actions
-            WHERE created_at > NOW() - INTERVAL '1 day' * $1
+            WHERE created_at > NOW() - INTERVAL '1 day' * :days
             GROUP BY action_category
             ORDER BY total_actions DESC
-        """
+        """)
 
-        params = days
+        params = {"days": days}
 
         try:
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                results = await conn.fetch(query, params)
-                logger.log_db_query(query, params, results)
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                results = await session.execute(query, params)
+                rows = results.fetchall()
+                logger.log_db_query(str(query), params, rows)
                 return {
-                    "statistics": [dict(row) for row in results],
+                    "statistics": [dict(row._mapping) for row in rows],
                     "period_days": days,
                     "generated_at": datetime.utcnow().isoformat(),
                 }
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), params, error=e)
             return {"statistics": [], "period_days": days, "error": str(e)}
 
     async def get_failed_actions(
@@ -109,28 +111,29 @@ class AdminActionDAO:
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """Get failed actions for monitoring/debugging."""
-        query = """
+        query = text("""
             SELECT
                 action_id, email, role_name, action_type, action_category,
                 http_method, endpoint, error_message, error_code, duration_ms,
                 created_at
             FROM admin_actions
             WHERE success = false
-              AND created_at > NOW() - INTERVAL '1 day' * $1
+              AND created_at > NOW() - INTERVAL '1 day' * :days
             ORDER BY created_at DESC
-            LIMIT $2
-        """
+            LIMIT :limit
+        """)
 
-        params = (days, limit)
+        params = {"days": days, "limit": limit}
 
         try:
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                results = await conn.fetch(query, *params)
-                logger.log_db_query(query, params, results)
-                return [dict(row) for row in results]
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                results = await session.execute(query, params)
+                rows = results.fetchall()
+                logger.log_db_query(str(query), params, rows)
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), params, error=e)
             return []
 
     async def get_user_actions(
@@ -140,69 +143,65 @@ class AdminActionDAO:
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
         """Get all actions for a specific user."""
-        query = """
+        query = text("""
             SELECT
                 id, action_id, action_type, action_category, http_method,
                 endpoint, resource_type, resource_id, success, duration_ms,
                 created_at
             FROM admin_actions
-            WHERE email = $1
+            WHERE email = :email
             ORDER BY created_at DESC
-            LIMIT $2 OFFSET $3
-        """
+            LIMIT :limit OFFSET :offset
+        """)
 
-        params = (email, limit, offset)
+        params = {"email": email, "limit": limit, "offset": offset}
 
         try:
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                results = await conn.fetch(query, *params)
-                logger.log_db_query(query, params, results)
-                return [dict(row) for row in results]
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                results = await session.execute(query, params)
+                rows = results.fetchall()
+                logger.log_db_query(str(query), params, rows)
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), params, error=e)
             return []
 
     async def get_action_by_id(self, action_id: str) -> Optional[Dict[str, Any]]:
         """Get a specific action by action_id."""
-        query = """
+        query = text("""
             SELECT *
             FROM admin_actions
-            WHERE action_id = $1
-        """
+            WHERE action_id = :action_id
+        """)
 
         try:
-            logger.log_db_operation(query, action_id)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, action_id)
-                logger.log_db_query(query, action_id, result)
-                return dict(result) if result else None
+            logger.log_db_operation(str(query), {"action_id": action_id})
+            async with get_db_session() as session:
+                result = await session.execute(query, {"action_id": action_id})
+                row = result.fetchone()
+                logger.log_db_query(str(query), {"action_id": action_id}, row)
+                return dict(row._mapping) if row else None
         except Exception as e:
-            logger.log_db_query(query, action_id, error=e)
+            logger.log_db_query(str(query), {"action_id": action_id}, error=e)
             return None
 
     async def cleanup_old_actions(self, days: int = 365) -> int:
         """Delete actions older than N days. Returns count of deleted actions."""
-        query = """
+        query = text("""
             DELETE FROM admin_actions
-            WHERE created_at < NOW() - INTERVAL '1 day' * $1
-        """
+            WHERE created_at < NOW() - INTERVAL '1 day' * :days
+        """)
 
-        params = days
+        params = {"days": days}
 
         try:
-            logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, params)
-                logger.log_db_query(query, params, result)
-                # Parse the result string "DELETE n" to get count
-                if isinstance(result, str) and result.startswith("DELETE"):
-                    try:
-                        count = int(result.split()[-1])
-                        return count
-                    except (ValueError, IndexError):
-                        return 0
-                return 0
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                logger.log_db_query(str(query), params, f"DELETE {result.rowcount}")
+                await session.commit()
+                return result.rowcount
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), params, error=e)
             return 0

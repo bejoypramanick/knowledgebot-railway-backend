@@ -4,7 +4,8 @@ Handles database operations for performance metrics
 """
 from typing import Dict, List, Any, Optional
 
-from shared.db import get_db_connection
+from sqlalchemy import text
+from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("performance_dao", "configuration")
@@ -49,10 +50,11 @@ class PerformanceDAO:
         query = "SELECT COUNT(*) FROM chat_messages WHERE role = 'user'"
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return result
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                count = result.scalar()
+                logger.log_db_query(query, None, count)
+                return count or 0
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return 0
@@ -62,10 +64,11 @@ class PerformanceDAO:
         query = "SELECT COUNT(*) FROM chat_sessions"
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return result
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                count = result.scalar()
+                logger.log_db_query(query, None, count)
+                return count or 0
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return 0
@@ -78,10 +81,11 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return result
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                count = result.scalar()
+                logger.log_db_query(query, None, count)
+                return count or 0
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return 0
@@ -95,10 +99,11 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return result
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                value = result.scalar()
+                logger.log_db_query(query, None, value)
+                return value
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return None
@@ -116,10 +121,11 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return result
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                count = result.scalar()
+                logger.log_db_query(query, None, count)
+                return count or 0
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return 0
@@ -137,9 +143,10 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                return result or 0
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                count = result.scalar()
+                return count or 0
         except Exception as e:
             logger.error(f"Error getting AI handled chats: {e}")
             return 0
@@ -152,9 +159,10 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                return result or 0
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                count = result.scalar()
+                return count or 0
         except Exception as e:
             logger.error(f"Error getting human handoffs: {e}")
             return 0
@@ -190,10 +198,11 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetch(query)
-                logger.log_db_query(query, None, result)
-                return result
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                rows = result.fetchall()
+                logger.log_db_query(query, None, rows)
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return []
@@ -213,10 +222,11 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return float(result or 4.0)
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                value = result.scalar()
+                logger.log_db_query(query, None, value)
+                return float(value or 4.0)
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return 4.0
@@ -241,9 +251,10 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetch(query)
-                logger.log_db_query(query, None, result)
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                rows = result.fetchall()
+                logger.log_db_query(query, None, rows)
                 return [
                     {
                         "day": row["month"],
@@ -255,7 +266,7 @@ class PerformanceDAO:
                         "score": round(row["satisfaction_score"] or 4.0, 2),
                         "satisfaction_score": round(row["satisfaction_score"] or 4.0, 2)
                     }
-                    for row in result
+                    for row in rows
                 ]
         except Exception as e:
             logger.log_db_query(query, None, error=e)
@@ -374,14 +385,16 @@ class PerformanceDAO:
             ORDER BY month DESC, service_name
             """
 
-            async with get_db_connection() as conn:
-                results = await conn.fetch(query % days)
+            async with get_db_session() as session:
+                results = await session.execute(text(query % days))
+                results = results.fetchall()
                 logger.info(f"📊 Retrieved {len(results)} uptime records from database")
 
             # Organize data by month and service, including healthcheck metadata
             month_data_map = {}
             for row in results:
-                month = row['month']
+                month = dict(row._mapping) if hasattr(row, '_mapping') else row
+                month = month['month'] if isinstance(month, dict) else row['month']
                 service = row['service_name']
                 uptime = float(row['uptime_percentage']) if row['uptime_percentage'] else 0
                 healthcheck_count = row['total_checks']
@@ -588,10 +601,11 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetch(query)
-                logger.log_db_query(query, None, result)
-                return result
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                rows = result.fetchall()
+                logger.log_db_query(query, None, rows)
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return []
@@ -601,10 +615,11 @@ class PerformanceDAO:
         query = "SELECT COUNT(*) FROM chat_messages WHERE role = 'user' AND created_at >= NOW() - INTERVAL '30 days'"
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return result or 0
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                count = result.scalar()
+                logger.log_db_query(query, None, count)
+                return count or 0
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return 0
@@ -614,10 +629,11 @@ class PerformanceDAO:
         query = "SELECT COUNT(*) FROM chat_messages WHERE role = 'user' AND created_at >= NOW() - INTERVAL '60 days' AND created_at < NOW() - INTERVAL '30 days'"
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return result or 0
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                count = result.scalar()
+                logger.log_db_query(query, None, count)
+                return count or 0
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return 0
@@ -632,10 +648,11 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return result
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                value = result.scalar()
+                logger.log_db_query(query, None, value)
+                return value
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return None
@@ -651,10 +668,11 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query)
-                logger.log_db_query(query, None, result)
-                return result
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                value = result.scalar()
+                logger.log_db_query(query, None, value)
+                return value
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return None
@@ -662,7 +680,7 @@ class PerformanceDAO:
     async def get_uptime_metrics(self) -> List[Dict[str, Any]]:
         """Get uptime metrics over time."""
         query = """
-            SELECT 
+            SELECT
                 TO_CHAR(created_at, 'Mon') as month,
                 AVG(value) as uptime_percentage
             FROM metrics
@@ -673,10 +691,11 @@ class PerformanceDAO:
         """
         try:
             logger.log_db_operation(query)
-            async with get_db_connection() as conn:
-                result = await conn.fetch(query)
-                logger.log_db_query(query, None, result)
-                return result
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                rows = result.fetchall()
+                logger.log_db_query(query, None, rows)
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return []

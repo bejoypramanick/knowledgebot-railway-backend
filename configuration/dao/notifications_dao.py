@@ -4,7 +4,8 @@ Handles database operations for user notifications
 """
 from typing import Dict, List, Any, Optional
 
-from shared.db import get_db_connection
+from sqlalchemy import text
+from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("notifications_dao", "configuration")
@@ -34,16 +35,18 @@ class NotificationsDAO:
         """Create a new notification."""
         query = """
             INSERT INTO notifications (title, message, type, user_email, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, NOW(), NOW())
+            VALUES (:title, :message, :notification_type, :user_email, NOW(), NOW())
             RETURNING id
         """
-        params = [title, message, notification_type, user_email]
+        params = {"title": title, "message": message, "notification_type": notification_type, "user_email": user_email}
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query, *params)
-                logger.log_db_query(query, params, result)
-                return result
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                await session.commit()
+                logger.log_db_query(query, params, row)
+                return row[0] if row else None
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
@@ -51,28 +54,29 @@ class NotificationsDAO:
     async def get_notifications(self, user_email: str, limit: int = 50, offset: int = 0, unread_only: bool = False) -> List[Dict[str, Any]]:
         """Get notifications for a user with pagination."""
         try:
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 if unread_only:
                     query = """
                         SELECT id, title, message, type, user_email, created_at, read_at,
                                 CASE WHEN read_at IS NULL THEN false ELSE true END as read
                         FROM notifications
-                        WHERE user_email = $1 AND read_at IS NULL
+                        WHERE user_email = :user_email AND read_at IS NULL
                         ORDER BY created_at DESC
-                        LIMIT $2 OFFSET $3
+                        LIMIT :limit OFFSET :offset
                     """
                 else:
                     query = """
                         SELECT id, title, message, type, user_email, created_at, read_at,
                                 CASE WHEN read_at IS NULL THEN false ELSE true END as read
                         FROM notifications
-                        WHERE user_email = $1
+                        WHERE user_email = :user_email
                         ORDER BY created_at DESC
-                        LIMIT $2 OFFSET $3
+                        LIMIT :limit OFFSET :offset
                     """
-                params = [user_email, limit, offset]
+                params = {"user_email": user_email, "limit": limit, "offset": offset}
                 logger.log_db_operation(query, params)
-                rows = await conn.fetch(query, *params)
+                result = await session.execute(text(query), params)
+                rows = result.fetchall()
                 logger.log_db_query(query, params, rows)
 
                 notifications = []
@@ -95,17 +99,18 @@ class NotificationsDAO:
         try:
             if not notification_ids:
                 return 0
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 int_ids = [int(nid) if isinstance(nid, str) else nid for nid in notification_ids]
                 query = """
                     UPDATE notifications
                     SET read_at = NOW(), updated_at = NOW()
-                    WHERE id = ANY($1) AND read_at IS NULL
+                    WHERE id = ANY(:ids) AND read_at IS NULL
                 """
                 logger.log_db_operation(query, int_ids)
-                result = await conn.execute(query, int_ids)
-                count = int(result.split()[-1]) if result else 0
-                logger.log_db_query(query, {"ids": int_ids}, result)
+                result = await session.execute(text(query), {"ids": int_ids})
+                await session.commit()
+                count = result.rowcount if hasattr(result, 'rowcount') else 0
+                logger.log_db_query(query, {"ids": int_ids}, None)
                 return count
         except Exception as e:
             logger.log_db_query("mark_as_read", {"notification_ids": notification_ids}, error=e)
@@ -116,14 +121,15 @@ class NotificationsDAO:
         query = """
             UPDATE notifications
             SET read_at = NOW(), updated_at = NOW()
-            WHERE user_email = $1 AND read_at IS NULL
+            WHERE user_email = :user_email AND read_at IS NULL
         """
         try:
             logger.log_db_operation(query, user_email)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, user_email)
-                count = int(result.split()[-1]) if result else 0
-                logger.log_db_query(query, {"user_email": user_email}, result)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), {"user_email": user_email})
+                await session.commit()
+                count = result.rowcount if hasattr(result, 'rowcount') else 0
+                logger.log_db_query(query, {"user_email": user_email}, None)
                 return count
         except Exception as e:
             logger.log_db_query(query, {"user_email": user_email}, error=e)
