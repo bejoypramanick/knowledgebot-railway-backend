@@ -30,6 +30,7 @@ Usage:
 
 import os
 from typing import Optional, AsyncGenerator
+from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import (
     create_async_engine,
@@ -150,9 +151,10 @@ async def init_database(database_url: Optional[str] = None) -> None:
         raise
 
 
+@asynccontextmanager
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """
-    Get a database session for queries.
+    Get a database session for queries as an async context manager.
 
     Use as an async context manager:
         async with get_db_session() as session:
