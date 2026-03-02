@@ -432,9 +432,12 @@ class ChatLogDAO:
         """Get messages for multiple sessions by their numeric IDs."""
         if not session_ids: return {}
 
+        # Ensure all IDs are integers (may come as strings from database)
+        int_session_ids = [int(sid) if isinstance(sid, str) else sid for sid in session_ids]
+
         # Build dynamic IN clause for asyncpg compatibility (avoid PostgreSQL array syntax)
-        placeholders = ",".join([f":id_{i}" for i in range(len(session_ids))])
-        params = {f"id_{i}": sid for i, sid in enumerate(session_ids)}
+        placeholders = ",".join([f":id_{i}" for i in range(len(int_session_ids))])
+        params = {f"id_{i}": sid for i, sid in enumerate(int_session_ids)}
 
         query = f"""
             SELECT * FROM chat_messages
@@ -443,10 +446,11 @@ class ChatLogDAO:
         """
         try:
             logger.log_db_operation(query, params)
+            logger.info(f"🔍 get_messages_for_sessions: Querying for {len(int_session_ids)} sessions: {int_session_ids[:5]}...")
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
                 rows = result.fetchall()
-                logger.info(f"🔍 get_messages_for_sessions: query returned {len(rows)} rows for {len(session_ids)} session_ids")
+                logger.info(f"🔍 get_messages_for_sessions: query returned {len(rows)} rows for {len(int_session_ids)} session_ids: {int_session_ids[:5]}")
                 logger.log_db_query(query, params, rows)
 
                 result_dict = {}
