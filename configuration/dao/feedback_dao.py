@@ -81,6 +81,9 @@ class FeedbackDAO:
         placeholders = ",".join([f":id_{i}" for i in range(len(session_ids))])
         params = {f"id_{i}": sid for i, sid in enumerate(session_ids)}
 
+        # Initialize result with zero counts for all sessions
+        result_dict = {session_id: {'positive': 0, 'negative': 0} for session_id in session_ids}
+
         query = f"""
             SELECT
                 session_id,
@@ -99,7 +102,6 @@ class FeedbackDAO:
                 logger.log_db_query(query, params, records)
 
                 # Transform results into expected format
-                result_dict = {}
                 for record in records:
                     session_id = str(record['session_id'])
                     feedback_type = record['feedback_type']
@@ -114,12 +116,9 @@ class FeedbackDAO:
                     elif feedback_type == 'negative':
                         result_dict[session_id]['negative'] = count
 
-                # Ensure all session IDs are in result with zero counts if no feedback
-                for session_id in session_ids:
-                    if session_id not in result_dict:
-                        result_dict[session_id] = {'positive': 0, 'negative': 0}
-
                 return result_dict
         except Exception as e:
             logger.log_db_query(query, params, error=e)
-            raise
+            # Return zero counts for all sessions if query fails (feedback_type column may not exist)
+            logger.warning(f"Could not retrieve feedback counts (feedback_type column may not exist): {e}")
+            return result_dict
