@@ -986,14 +986,15 @@ async def end_customer_session(request: Request):
     """End a chat session from the customer side"""
     try:
         body = await request.json()
-        session_id = body.get("session_id")
+        session_id = body.get("session_id")  # Accept numeric ID from chat_sessions.id
 
         if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required in request body")
+            raise HTTPException(status_code=400, detail="session_id (numeric id from chat_sessions) is required in request body")
 
         user_email = request.headers.get("X-User-Email", "customer@example.com")
 
-        await chat_log_service.end_customer_session(session_id, user_email)
+        # Pass numeric ID directly to service
+        await chat_log_service.end_customer_session(str(session_id), user_email)
 
         return {
             "success": True,
@@ -1011,16 +1012,17 @@ async def transfer_session(request: Request):
     """Transfer a chat session to another agent"""
     try:
         body = await request.json()
-        session_id = body.get("session_id")
+        session_id = body.get("session_id")  # Accept numeric ID from chat_sessions.id
         target_agent_email = body.get("target_agent_email")
         user_email = request.headers.get("X-User-Email", "agent@example.com")
 
         if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required in request body")
+            raise HTTPException(status_code=400, detail="session_id (numeric id from chat_sessions) is required in request body")
         if not target_agent_email:
             raise HTTPException(status_code=400, detail="target_agent_email is required in request body")
 
-        await chat_log_service.transfer_chat_session(session_id, user_email, target_agent_email)
+        # Pass numeric ID directly to service
+        await chat_log_service.transfer_chat_session(str(session_id), user_email, target_agent_email)
 
         return {
             "success": True,
