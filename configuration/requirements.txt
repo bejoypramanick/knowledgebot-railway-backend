@@ -10,6 +10,7 @@ python-dotenv>=1.2.0
 # Database (common for most services)
 asyncpg>=0.29.0
 psycopg2-binary>=2.9.0
+sqlalchemy>=2.0.23  # Battle-tested ORM with robust connection pooling
 
 # Common utilities
 pydantic-settings>=2.5.0
