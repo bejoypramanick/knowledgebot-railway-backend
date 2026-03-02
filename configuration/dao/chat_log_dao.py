@@ -76,7 +76,11 @@ class ChatLogDAO:
                 result = await session.execute(text(query), params)
                 row = result.fetchone()
                 logger.log_db_query(query, params, row)
-                return {"is_agent": bool(row['is_agent']), "is_admin": bool(row['is_admin'])}
+                if row:
+                    # Convert tuple/Row to dict for consistent access
+                    row_dict = dict(row._mapping) if hasattr(row, '_mapping') else {'is_agent': row[0], 'is_admin': row[1]}
+                    return {"is_agent": bool(row_dict.get('is_agent', False)), "is_admin": bool(row_dict.get('is_admin', False))}
+                return {"is_agent": False, "is_admin": False}
         except Exception as e:
             logger.log_db_query(query, {"email": email}, error=e)
             return {"is_agent": False, "is_admin": False}
@@ -584,7 +588,11 @@ class ChatLogDAO:
                 result = await session.execute(text(query))
                 row = result.fetchone()
                 logger.log_db_query(query, None, row)
-                return row['hil_enabled'] if row and row['hil_enabled'] is not None else True
+                if row:
+                    # Convert tuple/Row to dict for consistent access
+                    row_dict = dict(row._mapping) if hasattr(row, '_mapping') else {'hil_enabled': row[0]}
+                    return bool(row_dict.get('hil_enabled', True))
+                return True  # Default to enabled if no row found
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return True  # Default to enabled if query fails
