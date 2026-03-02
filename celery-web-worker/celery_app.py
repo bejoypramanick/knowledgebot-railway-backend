@@ -143,18 +143,18 @@ def task_retry_handler(sender=None, task_id=None, args=None, reason=None, **kwar
 @worker_process_init.connect
 def init_worker_process(**kwargs):
     """
-    Initialize database pool after worker process fork.
-    
+    Initialize database and event loop after worker process fork.
+
     This is critical for Celery prefork pool workers. When the parent process forks,
     file descriptors (including database connections) are copied to child processes,
-    causing conflicts. We must close any inherited pools and create fresh ones.
+    causing conflicts. We must close any inherited connections and create fresh ones.
     """
     logger.info("🔄 [WORKER_INIT] Worker process initializing after fork")
-    
+
     try:
         import asyncio
         import gc
-        
+
         # Close any inherited event loop FIRST to prevent file descriptor conflicts
         try:
             loop = asyncio.get_event_loop()
@@ -170,45 +170,23 @@ def init_worker_process(**kwargs):
         except RuntimeError:
             # No event loop in current thread - this is fine
             pass
-        
+
         # Set a new event loop for this worker
         new_loop = asyncio.new_event_loop()
         asyncio.set_event_loop(new_loop)
         logger.info("✅ [WORKER_INIT] Created fresh event loop for worker process")
-        
-        # Now handle database pool
-        from shared.db import DatabaseManager
-        
-        # Reset the singleton instance to force recreation
-        if DatabaseManager._instance:
-            logger.warning("⚠️ [WORKER_INIT] Found inherited DatabaseManager instance from parent process")
-            
-            # Try to close the pool gracefully if it exists
-            if DatabaseManager._instance._pool:
-                try:
-                    # Don't use async close - just terminate the pool
-                    # The pool is from the parent process and shouldn't be used anyway
-                    DatabaseManager._instance._pool.terminate()
-                    logger.info("✅ [WORKER_INIT] Terminated inherited database pool")
-                except Exception as e:
-                    logger.warning(f"⚠️ [WORKER_INIT] Error terminating inherited pool: {e}")
-            
-            # Reset the singleton to None so it will be recreated
-            DatabaseManager._instance = None
-            logger.info("✅ [WORKER_INIT] Reset DatabaseManager singleton, will create fresh instance on first use")
-        else:
-            logger.info("✅ [WORKER_INIT] No inherited DatabaseManager found")
-        
+
+        # SQLAlchemy handles its own connection pool management
+        # The engine's pool is thread-safe and process-aware
+        # Just ensure no stale connections from parent process
+        logger.info("✅ [WORKER_INIT] SQLAlchemy will create fresh connection pool on first use")
+
         # Force garbage collection to clean up any lingering file descriptors
         gc.collect()
         logger.info("✅ [WORKER_INIT] Worker process initialization complete")
-            
+
     except Exception as e:
         logger.error(f"❌ [WORKER_INIT] Error during worker initialization: {e}")
-        import traceback
-        logger.error(f"   Traceback: {traceback.format_exc()}")
-    except Exception as e:
-        logger.error(f"❌ [WORKER_INIT] Error in worker process init: {e}")
         import traceback
         logger.error(f"   Traceback: {traceback.format_exc()}")
 

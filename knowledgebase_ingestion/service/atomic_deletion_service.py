@@ -18,7 +18,7 @@ import asyncpg
 from opentelemetry import trace
 
 from shared.otel_logger import get_otel_logger
-from shared.db import get_db_connection
+from shared.sqlalchemy_db import get_db_session
 
 logger = get_otel_logger("atomic_deletion_service", "knowledgebase-ingestion")
 
@@ -42,65 +42,67 @@ class AtomicDeletionService:
             span.set_attribute("file_id", str(file_id))
             
             logger.info(f"🗑️ [ATOMIC_DELETE] Starting atomic file deletion for ID: {file_id}")
-            
+
             try:
-                async with get_db_connection() as conn:
-                    # Start transaction
-                    async with conn.transaction():
-                        # Step 1: Get file details and lock the row
-                        file_record = await conn.fetchrow("""
-                            SELECT id, original_filename, gemini_file_name, gemini_file_uri, 
-                                   celery_task_id, processing_status, s3_key, sha256_hash
-                            FROM file_uploads 
-                            WHERE id = $1
-                            FOR UPDATE
-                        """, file_id)
-                        
-                        if not file_record:
-                            return {
-                                "success": False,
-                                "error": f"File {file_id} not found"
-                            }
-                        
-                        logger.info(f"📄 [FILE_DETAILS] Found: {file_record['original_filename']}")
-                        logger.info(f"   Status: {file_record['processing_status']}")
-                        logger.info(f"   Celery Task ID: {file_record['celery_task_id']}")
-                        logger.info(f"   Gemini File: {file_record['gemini_file_name']}")
-                        logger.info(f"   S3 Key: {file_record['s3_key']}")
-                        
-                        # Step 2: Cancel Celery task if processing
-                        celery_task_id = file_record['celery_task_id']
-                        if celery_task_id and file_record['processing_status'] in ('pending', 'processing'):
-                            await self._cancel_celery_task(celery_task_id, "file")
-                            span.set_attribute("celery_task_cancelled", "true")
-                        
-                        # Step 3: Delete from Gemini FileStore
-                        gemini_deleted = False
-                        if file_record['gemini_file_uri']:
-                            gemini_deleted = await self._delete_from_gemini_filestore(
-                                file_record['gemini_file_name'], 
-                                file_record['gemini_file_uri']
-                            )
-                            span.set_attribute("gemini_deleted", str(gemini_deleted))
-                        
-                        # Step 4: Delete from S3
-                        s3_deleted = False
-                        if file_record['s3_key']:
-                            s3_deleted = await self._delete_from_s3(file_record['s3_key'])
-                            span.set_attribute("s3_deleted", str(s3_deleted))
-                        
-                        # Step 5: Mark as deleted in database
-                        await conn.execute("""
-                            UPDATE file_uploads 
-                            SET processing_status = 'deleted',
-                                gemini_file_name = NULL,
-                                gemini_file_uri = NULL,
-                                gemini_state = 'deleted',
-                                s3_key = NULL,
-                                updated_at = NOW(),
-                                error_message = 'Atomically deleted at ' || NOW()::text
-                            WHERE id = $1
-                        """, file_id)
+                from sqlalchemy import text
+
+                async with get_db_session() as session:
+                    # Start transaction (implicit in SQLAlchemy async session)
+                    # Step 1: Get file details
+                    result = await session.execute(text("""
+                        SELECT id, original_filename, gemini_file_name, gemini_file_uri,
+                               celery_task_id, processing_status, s3_key, sha256_hash
+                        FROM file_uploads
+                        WHERE id = :id
+                    """), {"id": file_id})
+                    file_record = result.mappings().first()
+
+                    if not file_record:
+                        return {
+                            "success": False,
+                            "error": f"File {file_id} not found"
+                        }
+
+                    logger.info(f"📄 [FILE_DETAILS] Found: {file_record['original_filename']}")
+                    logger.info(f"   Status: {file_record['processing_status']}")
+                    logger.info(f"   Celery Task ID: {file_record['celery_task_id']}")
+                    logger.info(f"   Gemini File: {file_record['gemini_file_name']}")
+                    logger.info(f"   S3 Key: {file_record['s3_key']}")
+
+                    # Step 2: Cancel Celery task if processing
+                    celery_task_id = file_record['celery_task_id']
+                    if celery_task_id and file_record['processing_status'] in ('pending', 'processing'):
+                        await self._cancel_celery_task(celery_task_id, "file")
+                        span.set_attribute("celery_task_cancelled", "true")
+
+                    # Step 3: Delete from Gemini FileStore
+                    gemini_deleted = False
+                    if file_record['gemini_file_uri']:
+                        gemini_deleted = await self._delete_from_gemini_filestore(
+                            file_record['gemini_file_name'],
+                            file_record['gemini_file_uri']
+                        )
+                        span.set_attribute("gemini_deleted", str(gemini_deleted))
+
+                    # Step 4: Delete from S3
+                    s3_deleted = False
+                    if file_record['s3_key']:
+                        s3_deleted = await self._delete_from_s3(file_record['s3_key'])
+                        span.set_attribute("s3_deleted", str(s3_deleted))
+
+                    # Step 5: Mark as deleted in database
+                    await session.execute(text("""
+                        UPDATE file_uploads
+                        SET processing_status = 'deleted',
+                            gemini_file_name = NULL,
+                            gemini_file_uri = NULL,
+                            gemini_state = 'deleted',
+                            s3_key = NULL,
+                            updated_at = CURRENT_TIMESTAMP,
+                            error_message = 'Atomically deleted at ' || CURRENT_TIMESTAMP::text
+                        WHERE id = :id
+                    """), {"id": file_id})
+                    await session.commit()
                         
                         logger.info(f"✅ [ATOMIC_DELETE] File {file_id} deleted successfully")
                         logger.info(f"   Gemini deleted: {gemini_deleted}")

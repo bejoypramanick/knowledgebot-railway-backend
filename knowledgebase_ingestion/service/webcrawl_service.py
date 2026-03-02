@@ -116,34 +116,38 @@ async def queue_website_for_scraping(
 
     try:
         import uuid
-        from shared.db import get_db_connection
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text
 
         # Check for duplicate URL (only active crawls)
         logger.info(f"🔍 [DUPLICATE_CHECK] Checking for existing crawls of URL: {url}")
-        async with get_db_connection() as conn:
+        async with get_db_session() as session:
             # Get all websites with this URL
-            all_websites = await conn.fetch(
-                "SELECT id, original_url, processing_status FROM scraped_websites WHERE original_url = $1 ORDER BY id DESC",
-                url
+            result = await session.execute(
+                text("SELECT id, original_url, processing_status FROM scraped_websites WHERE original_url = :url ORDER BY id DESC"),
+                {"url": url}
             )
+            all_websites = result.mappings().all()
             logger.info(f"🔍 [DUPLICATE_CHECK_ALL] Found {len(all_websites)} total websites with URL '{url}':")
             for w in all_websites:
                 logger.info(f"   - ID={w['id']}, status={w['processing_status']}")
-            
+
             # Check for active crawls (exclude failed, deleted, cancelled)
-            existing_active = await conn.fetchrow(
-                "SELECT id, original_url, processing_status FROM scraped_websites WHERE original_url = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
-                url
+            result = await session.execute(
+                text("SELECT id, original_url, processing_status FROM scraped_websites WHERE original_url = :url AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1"),
+                {"url": url}
             )
-            
+            existing_active = result.mappings().first()
+
             if existing_active:
                 if replace_existing:
                     # Mark existing website as deleted
                     logger.info(f"🔄 [REPLACE] Marking existing website as deleted: ID={existing_active['id']}")
-                    await conn.execute(
-                        "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
-                        existing_active['id']
+                    await session.execute(
+                        text("UPDATE scraped_websites SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
+                        {"id": existing_active['id']}
                     )
+                    await session.commit()
                     logger.info(f"✅ [REPLACE] Existing website marked as deleted, allowing new crawl")
                 else:
                     logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE crawl: ID={existing_active['id']}, url={existing_active['original_url']}, status={existing_active['processing_status']}")

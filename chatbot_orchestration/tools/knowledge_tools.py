@@ -67,16 +67,19 @@ async def get_citation_hierarchy(urls: List[str]) -> Dict[str, Any]:
     Falls back to tree building if database relationships not available.
     """
     try:
-        from shared.db import get_db_connection
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text
 
-        async with get_db_connection() as conn:
+        async with get_db_session() as session:
             # Get all records matching URLs with hierarchy info
-            records = await conn.fetch("""
+            query = """
                 SELECT id, original_url, parent_id, depth, crawl_session_id
                 FROM scraped_websites
-                WHERE original_url = ANY($1::text[]) AND processing_status != 'deleted'
+                WHERE original_url = ANY(CAST(:urls AS text[])) AND processing_status != 'deleted'
                 ORDER BY depth, original_url
-            """, urls)
+            """
+            result = await session.execute(text(query), {"urls": urls})
+            records = result.mappings().all()
 
             if not records:
                 # Fall back to building tree from flat list
@@ -87,23 +90,25 @@ async def get_citation_hierarchy(urls: List[str]) -> Dict[str, Any]:
             tree = {}
             id_to_node = {}
 
-            for record in records:
+            for record_proxy in records:
+                # Convert SQLAlchemy Row to dict-like access
+                record = dict(record_proxy._mapping) if hasattr(record_proxy, '_mapping') else dict(record_proxy)
                 node = {
-                    "id": record["id"],
-                    "url": record["original_url"],
-                    "depth": record["depth"],
+                    "id": record.get("id"),
+                    "url": record.get("original_url"),
+                    "depth": record.get("depth"),
                     "children": {}
                 }
-                id_to_node[record["id"]] = node
+                id_to_node[record.get("id")] = node
 
-                if record["parent_id"] is None:
+                if record.get("parent_id") is None:
                     # Root node
-                    tree[record["original_url"]] = node
+                    tree[record.get("original_url")] = node
                 else:
                     # Add to parent's children
-                    parent_node = id_to_node.get(record["parent_id"])
+                    parent_node = id_to_node.get(record.get("parent_id"))
                     if parent_node:
-                        parent_node["children"][record["original_url"]] = node
+                        parent_node["children"][record.get("original_url")] = node
 
             return tree
 
@@ -507,21 +512,24 @@ async def query_railway_postgres(query: str) -> str:
     logger.info(f"🗄️ Tool called: query_railway_postgres with query: {query[:100]}...")
     try:
         # Direct database query using shared db connection
-        from shared.db import get_db_connection
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text
 
         # Parse the query and construct appropriate response
         query_lower = query.lower()
 
-        async with get_db_connection() as conn:
+        async with get_db_session() as session:
             # File count queries
             if any(word in query_lower for word in ['count', 'total', 'number', 'how many']):
                 if any(word in query_lower for word in ['file', 'document', 'upload']):
-                    count = await conn.fetchval("SELECT COUNT(*) FROM uploaded_files WHERE is_active = true")
+                    result = await session.execute(text("SELECT COUNT(*) FROM uploaded_files WHERE is_active = true"))
+                    count = result.scalar()
                     result = f"Total active files in system: {count}"
                     logger.info(f"✅ Tool completed: query_railway_postgres (file count: {count})")
                     return result
                 elif any(word in query_lower for word in ['session', 'chat', 'conversation']):
-                    count = await conn.fetchval("SELECT COUNT(*) FROM chat_sessions WHERE is_active = true")
+                    result = await session.execute(text("SELECT COUNT(*) FROM chat_sessions WHERE is_active = true"))
+                    count = result.scalar()
                     result = f"Total active chat sessions: {count}"
                     logger.info(f"✅ Tool completed: query_railway_postgres (session count: {count})")
                     return result
@@ -529,20 +537,23 @@ async def query_railway_postgres(query: str) -> str:
             # Recent files query
             elif any(word in query_lower for word in ['recent', 'latest', 'last']):
                 if any(word in query_lower for word in ['file', 'document', 'upload']):
-                    rows = await conn.fetch(
-                        "SELECT display_name, mime_type, size_bytes, uploaded_at FROM uploaded_files WHERE is_active = true ORDER BY uploaded_at DESC LIMIT 5"
+                    result = await session.execute(
+                        text("SELECT display_name, mime_type, size_bytes, uploaded_at FROM uploaded_files WHERE is_active = true ORDER BY uploaded_at DESC LIMIT 5")
                     )
+                    rows = result.mappings().all()
                     if rows:
-                        result = "Recent uploaded files:\n"
+                        result_str = "Recent uploaded files:\n"
                         for row in rows:
-                            result += f"- {row['display_name']} ({row['mime_type']}, {row['size_bytes']} bytes)\n"
+                            result_str += f"- {row['display_name']} ({row['mime_type']}, {row['size_bytes']} bytes)\n"
                         logger.info(f"✅ Tool completed: query_railway_postgres (recent files: {len(rows)})")
-                        return result
+                        return result_str
                     return "No recent files found."
 
             # Default: provide general info
-            file_count = await conn.fetchval("SELECT COUNT(*) FROM uploaded_files WHERE is_active = true")
-            session_count = await conn.fetchval("SELECT COUNT(*) FROM chat_sessions WHERE is_active = true")
+            file_result = await session.execute(text("SELECT COUNT(*) FROM uploaded_files WHERE is_active = true"))
+            file_count = file_result.scalar()
+            session_result = await session.execute(text("SELECT COUNT(*) FROM chat_sessions WHERE is_active = true"))
+            session_count = session_result.scalar()
             result = f"Database Summary:\n- Active files: {file_count}\n- Active sessions: {session_count}\n\nPlease ask a more specific question about the data you need."
             logger.info(f"✅ Tool completed: query_railway_postgres (summary)")
             return result

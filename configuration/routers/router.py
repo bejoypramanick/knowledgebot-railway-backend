@@ -135,14 +135,16 @@ async def broadcast_event_for_session(session_id: str, event_data: Dict[str, Any
     """
     try:
         # Get session details to find assigned agent
-        from shared.db import get_db_connection
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text
         query = """
             SELECT assigned_agent, user_role_id
             FROM chat_sessions
-            WHERE id = $1
+            WHERE id = :session_id
         """
-        async with get_db_connection() as conn:
-            session_data = await conn.fetchrow(query, session_id)
+        async with get_db_session() as session:
+            result = await session.execute(text(query), {"session_id": session_id})
+            session_data = result.mappings().first()
 
         if not session_data:
             logger.warning(f"Session {session_id} not found for broadcasting")

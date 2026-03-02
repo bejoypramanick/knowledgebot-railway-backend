@@ -98,32 +98,42 @@ class SessionStateManager:
     async def save_message(self, session_id: str, role: str, content: str, metadata: Dict[str, Any] = None):
         """Save message to database."""
         try:
-            from shared.db import get_db_connection
-            async with get_db_connection() as conn:
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
+
+            async with get_db_session() as session:
                 # First, get or create the session integer ID
                 session_query = """
-                    SELECT id FROM chat_sessions WHERE session_id = $1
+                    SELECT id FROM chat_sessions WHERE session_id = :session_id
                 """
-                session_record = await conn.fetchrow(session_query, session_id)
+                result = await session.execute(text(session_query), {"session_id": session_id})
+                session_record = result.mappings().first()
 
                 if not session_record:
                     # Create session if it doesn't exist
                     create_session_query = """
                         INSERT INTO chat_sessions (session_id, started_at, last_activity_at, is_active, message_count)
-                        VALUES ($1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
+                        VALUES (:session_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
                         RETURNING id
                     """
-                    session_record = await conn.fetchrow(create_session_query, session_id)
+                    result = await session.execute(text(create_session_query), {"session_id": session_id})
+                    session_record = result.mappings().first()
+                    await session.commit()
 
                 integer_session_id = session_record["id"]
 
                 # Insert message with integer session_id
                 insert_query = """
                     INSERT INTO chat_messages (session_id, role, content, created_at)
-                    VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+                    VALUES (:session_id, :role, :content, CURRENT_TIMESTAMP)
                     RETURNING id, session_id, role, content, created_at
                 """
-                record = await conn.fetchrow(insert_query, integer_session_id, role, content)
+                result = await session.execute(
+                    text(insert_query),
+                    {"session_id": integer_session_id, "role": role, "content": content}
+                )
+                record = result.mappings().first()
+                await session.commit()
 
                 return {
                     "id": record["id"],

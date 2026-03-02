@@ -233,32 +233,36 @@ async def validate_file_upload(file: UploadFile, file_size: int, replace_existin
 
         # Check for duplicate filename (only active files)
         logger.info(f"🔍 [DUPLICATE_CHECK] Checking for existing files with name: {original_filename}")
-        from shared.db import get_db_connection
-        
-        async with get_db_connection() as conn:
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text
+
+        async with get_db_session() as session:
             # Get all files with this name
-            all_files = await conn.fetch(
-                "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 ORDER BY id DESC",
-                original_filename
+            result = await session.execute(
+                text("SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = :filename ORDER BY id DESC"),
+                {"filename": original_filename}
             )
+            all_files = result.mappings().all()
             logger.info(f"🔍 [DUPLICATE_CHECK_ALL] Found {len(all_files)} total files with name '{original_filename}':")
             for f in all_files:
                 logger.info(f"   - ID={f['id']}, status={f['processing_status']}")
-            
+
             # Check for active files (exclude failed, deleted, cancelled)
-            existing_active = await conn.fetchrow(
-                "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1",
-                original_filename
+            result = await session.execute(
+                text("SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = :filename AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1"),
+                {"filename": original_filename}
             )
-            
+            existing_active = result.mappings().first()
+
             if existing_active:
                 if replace_existing:
                     # Mark existing file as deleted
                     logger.info(f"🔄 [REPLACE] Marking existing file as deleted: ID={existing_active['id']}")
-                    await conn.execute(
-                        "UPDATE file_uploads SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
-                        existing_active['id']
+                    await session.execute(
+                        text("UPDATE file_uploads SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
+                        {"id": existing_active['id']}
                     )
+                    await session.commit()
                     logger.info(f"✅ [REPLACE] Existing file marked as deleted, allowing new upload")
                 else:
                     logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE file: ID={existing_active['id']}, filename={existing_active['original_filename']}, status={existing_active['processing_status']}")
@@ -336,7 +340,8 @@ async def delete_all_knowledge() -> Dict[str, Any]:
     errors = []
 
     try:
-        from shared.db import get_db_connection
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text
         from knowledgebase_ingestion.core.ai import get_genai_client
         from shared.file_search_store_manager import FileSearchStoreManager
 
@@ -418,22 +423,23 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         s3_files_deleted = 0
         try:
             from shared.s3_file_storage import S3FileStorage
-            
-            async with get_db_connection() as conn:
+
+            async with get_db_session() as session:
                 # Get all files with S3 keys
-                files_with_s3 = await conn.fetch(
-                    "SELECT id, original_filename, s3_key FROM file_uploads WHERE s3_key IS NOT NULL"
+                result = await session.execute(
+                    text("SELECT id, original_filename, s3_key FROM file_uploads WHERE s3_key IS NOT NULL")
                 )
+                files_with_s3 = result.mappings().all()
                 logger.info(f"   Found {len(files_with_s3)} files to delete from S3")
 
                 if files_with_s3:
                     s3_storage = S3FileStorage()
                     s3_keys = [file_record['s3_key'] for file_record in files_with_s3]
-                    
+
                     # Use batch delete for efficiency
                     deleted_count, failed_count = await s3_storage.delete_files_batch(s3_keys)
                     s3_files_deleted = deleted_count
-                    
+
                     logger.info(f"   ✅ Deleted {deleted_count} files from S3")
                     if failed_count > 0:
                         logger.warning(f"   ⚠️  Failed to delete {failed_count} files from S3")
@@ -445,10 +451,11 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         # Step 4: Mark all files as deleted in database (soft delete - don't remove records)
         logger.info("💾 [DB_UPDATE_FILES] Marking all files as deleted in database...")
         try:
-            async with get_db_connection() as conn:
-                result = await conn.execute(
-                    "UPDATE file_uploads SET processing_status = 'deleted', updated_at = NOW()"
+            async with get_db_session() as session:
+                await session.execute(
+                    text("UPDATE file_uploads SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP")
                 )
+                await session.commit()
                 logger.info(f"   ✅ All file records marked as deleted (status updated, records retained)")
         except Exception as e:
             logger.error(f"❌ [DB_UPDATE_FILES_ERROR] Error marking files as deleted: {e}")
@@ -457,13 +464,15 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         # Step 5: Mark all websites as deleted in database (soft delete - don't remove records)
         logger.info("💾 [DB_UPDATE_WEBSITES] Marking all websites as deleted in database...")
         try:
-            async with get_db_connection() as conn:
-                websites = await conn.fetch("SELECT id, original_url FROM scraped_websites")
+            async with get_db_session() as session:
+                result = await session.execute(text("SELECT id, original_url FROM scraped_websites"))
+                websites = result.mappings().all()
                 logger.info(f"   Found {len(websites)} websites to mark as deleted")
 
-                result = await conn.execute(
-                    "UPDATE scraped_websites SET processing_status = 'deleted', updated_at = NOW()"
+                await session.execute(
+                    text("UPDATE scraped_websites SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP")
                 )
+                await session.commit()
                 deleted_websites = len(websites)
                 logger.info(f"   ✅ All {deleted_websites} website records marked as deleted (status updated, records retained)")
         except Exception as e:

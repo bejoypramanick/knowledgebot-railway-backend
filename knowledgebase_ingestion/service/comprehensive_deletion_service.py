@@ -19,7 +19,7 @@ from datetime import datetime
 from enum import Enum
 
 from shared.otel_logger import get_otel_logger
-from shared.db import get_db_connection
+from shared.sqlalchemy_db import get_db_session
 from shared.celery_dispatcher import file_celery, web_celery
 from shared.redis_message_queue import RedisMessageQueue
 from shared.s3_file_storage import s3_file_storage

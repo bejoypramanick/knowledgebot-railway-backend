@@ -35,21 +35,23 @@ class FileService:
     async def check_duplicate_file(self, original_filename: str, sha256_hash: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Check if a file already exists by filename or hash (only active files)."""
         try:
-            from shared.db import get_db_connection
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
 
             logger.info(f"🔍 [CHECK_DUPLICATE] Checking for duplicate: filename='{original_filename}', hash='{sha256_hash}'")
             logger.info(f"🔍 [CHECK_DUPLICATE] Hash is None: {sha256_hash is None}, Hash is empty: {not sha256_hash}")
 
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 logger.info(f"✅ [DB_CONNECTION] Got database connection")
 
                 # Check by filename first - only consider actively processed files
                 logger.info(f"🔍 [FILENAME_CHECK] Searching for filename match: {original_filename}")
                 try:
-                    existing_by_name = await conn.fetchrow(
-                        "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = $1 AND processing_status != 'deleted'",
-                        original_filename
+                    result = await session.execute(
+                        text("SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE original_filename = :filename AND processing_status != 'deleted'"),
+                        {"filename": original_filename}
                     )
+                    existing_by_name = result.mappings().first()
                     logger.info(f"🔍 [FILENAME_CHECK_RESULT] Query returned: {existing_by_name}")
                 except Exception as e:
                     logger.error(f"❌ [FILENAME_CHECK_ERROR] Database error: {e}", exc_info=True)
@@ -75,20 +77,22 @@ class FileService:
                     try:
                         # Debug: Check all files with this exact hash (regardless of status)
                         logger.info(f"🔍 [HASH_CHECK] Running debug query for all files with this hash...")
-                        all_with_hash = await conn.fetch(
-                            "SELECT id, original_filename, sha256_hash, processing_status FROM file_uploads WHERE sha256_hash = $1 ORDER BY created_at DESC",
-                            sha256_hash
+                        result = await session.execute(
+                            text("SELECT id, original_filename, sha256_hash, processing_status FROM file_uploads WHERE sha256_hash = :hash ORDER BY created_at DESC"),
+                            {"hash": sha256_hash}
                         )
+                        all_with_hash = result.mappings().all()
                         logger.info(f"📊 [HASH_DEBUG] Files with this hash (ALL statuses): {len(all_with_hash)}")
                         for record in all_with_hash:
                             logger.info(f"   ID={record['id']}, filename={record['original_filename']}, status={record['processing_status']}")
 
                         # Now check only active files
                         logger.info(f"🔍 [HASH_CHECK] Running query for active files only...")
-                        existing_by_hash = await conn.fetchrow(
-                            "SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = $1 AND processing_status != 'deleted'",
-                            sha256_hash
+                        result = await session.execute(
+                            text("SELECT id, original_filename, display_name, sha256_hash, file_size, gemini_file_name, version FROM file_uploads WHERE sha256_hash = :hash AND processing_status != 'deleted'"),
+                            {"hash": sha256_hash}
                         )
+                        existing_by_hash = result.mappings().first()
                         logger.info(f"📊 [HASH_CHECK_RESULT] Active file query returned: {existing_by_hash}")
                     except Exception as hash_err:
                         logger.error(f"❌ [HASH_CHECK_ERROR] Database error during hash check: {hash_err}", exc_info=True)
@@ -124,7 +128,8 @@ class FileService:
             bool: True if deletion succeeded, False otherwise
         """
         try:
-            from shared.db import get_db_connection
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
             from knowledgebase_ingestion.core.ai import get_genai_client
 
             # Convert db_id to integer if it's a numeric string
@@ -133,12 +138,13 @@ class FileService:
             except ValueError:
                 numeric_id = db_id
 
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 # First, get the gemini_file_name before deleting
-                record = await conn.fetchrow(
-                    "SELECT gemini_file_name, original_filename FROM file_uploads WHERE id = $1",
-                    numeric_id
+                result = await session.execute(
+                    text("SELECT gemini_file_name, original_filename FROM file_uploads WHERE id = :id"),
+                    {"id": numeric_id}
                 )
+                record = result.mappings().first()
 
                 if record and record['gemini_file_name']:
                     # Delete from Gemini first
@@ -152,10 +158,11 @@ class FileService:
 
                 # Then mark as deleted in database (soft delete instead of hard delete)
                 # This preserves audit trail and prevents orphaned references
-                await conn.execute(
-                    "UPDATE file_uploads SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
-                    numeric_id
+                await session.execute(
+                    text("UPDATE file_uploads SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
+                    {"id": numeric_id}
                 )
+                await session.commit()
                 logger.info(f"✅ Marked old file record as deleted in database: {db_id}")
                 return True
         except Exception as e:
@@ -172,14 +179,16 @@ class FileService:
             user_role_id if the user has admin privileges, None otherwise
         """
         try:
-            from shared.db import get_db_connection
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
 
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 # First, look up the user by email to get their user_id
-                user = await conn.fetchrow(
-                    "SELECT id, email FROM users WHERE email = $1",
-                    user_email
+                result = await session.execute(
+                    text("SELECT id, email FROM users WHERE email = :email"),
+                    {"email": user_email}
                 )
+                user = result.mappings().first()
 
                 if not user:
                     logger.error(f"User not found: {user_email}")
@@ -188,9 +197,10 @@ class FileService:
                 user_id = user['id']
 
                 # Get the admin role ID
-                admin_role = await conn.fetchrow(
-                    "SELECT id FROM roles WHERE role_name = 'admin'"
+                result = await session.execute(
+                    text("SELECT id FROM roles WHERE role_name = 'admin'")
                 )
+                admin_role = result.mappings().first()
 
                 if not admin_role:
                     logger.error("Admin role not found in roles table")
@@ -199,12 +209,13 @@ class FileService:
                 admin_role_id = admin_role['id']
 
                 # Check if user has admin role mapping
-                admin_mapping = await conn.fetchrow(
-                    """SELECT user_role_id, user_id as mapped_user_id, is_active
-                       FROM user_role_mapping
-                       WHERE user_id = $1 AND role_id = $2 AND is_active = true""",
-                    user_id, admin_role_id
+                result = await session.execute(
+                    text("""SELECT user_role_id, user_id as mapped_user_id, is_active
+                             FROM user_role_mapping
+                             WHERE user_id = :user_id AND role_id = :role_id AND is_active = true"""),
+                    {"user_id": user_id, "role_id": admin_role_id}
                 )
+                admin_mapping = result.mappings().first()
 
                 logger.info(f"🔍 Admin check for user {user_email} (user_id={user_id}):")
                 logger.info(f"  - Looking for role_id {admin_role_id}")
@@ -218,13 +229,14 @@ class FileService:
                     logger.warning(f"  - Available mappings for user {user_email}:")
 
                     # Debug: Show all mappings for this user
-                    all_mappings = await conn.fetch(
-                        "SELECT urm.user_id, urm.role_id, r.role_name, urm.is_active "
-                        "FROM user_role_mapping urm "
-                        "JOIN roles r ON urm.role_id = r.id "
-                        "WHERE urm.user_id = $1",
-                        user_id
+                    result = await session.execute(
+                        text("""SELECT urm.user_id, urm.role_id, r.role_name, urm.is_active
+                                 FROM user_role_mapping urm
+                                 JOIN roles r ON urm.role_id = r.id
+                                 WHERE urm.user_id = :user_id"""),
+                        {"user_id": user_id}
                     )
+                    all_mappings = result.mappings().all()
 
                     for mapping in all_mappings:
                         logger.info(f"    - Mapping: user_id={mapping['user_id']}, role_id={mapping['role_id']}, role={mapping['role_name']}, active={mapping['is_active']}")
@@ -238,7 +250,8 @@ class FileService:
     async def find_file_record(self, file_id: str):
         """Find file record by ID across multiple tables"""
         try:
-            from shared.db import get_db_connection
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
 
             logger.info(f"🔍 Looking for file record with ID: {file_id}")
 
@@ -249,12 +262,13 @@ class FileService:
                 # If not a number, use as-is (might be a Gemini file name)
                 numeric_id = file_id
 
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 # Look up in file_uploads table
-                record = await conn.fetchrow(
-                    "SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = $1",
-                    numeric_id
+                result = await session.execute(
+                    text("SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = :id"),
+                    {"id": numeric_id}
                 )
+                record = result.mappings().first()
                 if record:
                     logger.info(f"✅ Found file record in file_uploads: {record}")
                     return {
@@ -265,10 +279,11 @@ class FileService:
                     }
 
                 # Look up in scraped_websites table
-                record = await conn.fetchrow(
-                    "SELECT gemini_file_name, original_url, metadata FROM scraped_websites WHERE id = $1",
-                    numeric_id
+                result = await session.execute(
+                    text("SELECT gemini_file_name, original_url, metadata FROM scraped_websites WHERE id = :id"),
+                    {"id": numeric_id}
                 )
+                record = result.mappings().first()
                 if record:
                     logger.info(f"✅ Found file record in scraped_websites: {record}")
                     return {
@@ -287,7 +302,8 @@ class FileService:
     async def delete_file_record(self, file_id: str, table_name: str):
         """Delete file record from specified table"""
         try:
-            from shared.db import get_db_connection
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
 
             # Convert file_id to integer if it's a numeric string
             try:
@@ -296,8 +312,9 @@ class FileService:
                 # If not a number, use as-is
                 numeric_id = file_id
 
-            async with get_db_connection() as conn:
-                await conn.execute(f"DELETE FROM {table_name} WHERE id = $1", numeric_id)
+            async with get_db_session() as session:
+                await session.execute(text(f"DELETE FROM {table_name} WHERE id = :id"), {"id": numeric_id})
+                await session.commit()
         except Exception as e:
             logger.error(f"Error deleting file record: {e}")
             raise
@@ -305,21 +322,23 @@ class FileService:
     async def get_all_files(self) -> list:
         """Get all uploaded files from the database."""
         try:
-            from shared.db import get_db_connection
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
 
-            async with get_db_connection() as conn:
-                files = await conn.fetch(
-                    """SELECT id, original_filename, display_name, file_extension, mime_type,
-                       file_size, sha256_hash, gemini_state, created_at, version,
-                       celery_task_id, processing_status, error_message
-                       FROM file_uploads
-                       ORDER BY created_at DESC"""
+            async with get_db_session() as session:
+                result = await session.execute(
+                    text("""SELECT id, original_filename, display_name, file_extension, mime_type,
+                             file_size, sha256_hash, gemini_state, created_at, version,
+                             celery_task_id, processing_status, error_message
+                             FROM file_uploads
+                             ORDER BY created_at DESC""")
                 )
+                files = result.mappings().all()
 
                 # Convert to list of dicts
-                result = []
+                formatted_result = []
                 for file in files:
-                    result.append({
+                    formatted_result.append({
                         "id": str(file['id']),
                         "original_filename": file['original_filename'],
                         "display_name": file['display_name'],
@@ -338,8 +357,8 @@ class FileService:
                         "error_message": self._normalize_error_message(file['error_message'])  # Failure reason if failed
                     })
 
-                logger.info(f"Retrieved {len(result)} files from database")
-                return result
+                logger.info(f"Retrieved {len(formatted_result)} files from database")
+                return formatted_result
 
         except Exception as e:
             logger.error(f"Error getting all files: {e}")
@@ -351,17 +370,19 @@ class FileService:
         Each session's websites are returned as separate hierarchical tree structures.
         """
         try:
-            from shared.db import get_db_connection
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
 
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 # Get all websites with hierarchy info, ordered by session and depth
-                websites = await conn.fetch(
-                    """SELECT id, original_url, domain, title, description, pages_scraped,
-                              file_size, parent_id, depth, crawl_session_id, created_at,
-                              celery_task_id, processing_status, error_message, metadata
-                       FROM scraped_websites
-                       ORDER BY crawl_session_id DESC NULLS LAST, depth, created_at DESC"""
+                result = await session.execute(
+                    text("""SELECT id, original_url, domain, title, description, pages_scraped,
+                             file_size, parent_id, depth, crawl_session_id, created_at,
+                             celery_task_id, processing_status, error_message, metadata
+                             FROM scraped_websites
+                             ORDER BY crawl_session_id DESC NULLS LAST, depth, created_at DESC""")
                 )
+                websites = result.mappings().all()
 
                 # Group websites by crawl_session_id
                 sessions = {}
@@ -493,20 +514,22 @@ class FileService:
     async def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
         """Get file record by ID"""
         try:
-            from shared.db import get_db_connection
-            
-            async with get_db_connection() as conn:
-                file_record = await conn.fetchrow(
-                    """SELECT id, original_filename, display_name, file_extension, mime_type, 
-                       file_size, sha256_hash, gemini_state, created_at, version
-                       FROM file_uploads 
-                       WHERE id = $1""",
-                    int(file_id)  # Convert string to integer for database query
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
+
+            async with get_db_session() as session:
+                result = await session.execute(
+                    text("""SELECT id, original_filename, display_name, file_extension, mime_type,
+                             file_size, sha256_hash, gemini_state, created_at, version
+                             FROM file_uploads
+                             WHERE id = :id"""),
+                    {"id": int(file_id)}  # Convert string to integer for database query
                 )
-                
+                file_record = result.mappings().first()
+
                 if not file_record:
                     return None
-                    
+
                 return {
                     "id": str(file_record['id']),
                     "original_filename": file_record['original_filename'],
@@ -522,7 +545,7 @@ class FileService:
                     "version": file_record.get('version', 1),
                     "source": "upload"  # Add source field for frontend
                 }
-                
+
         except Exception as e:
             logger.error(f"Error getting file by ID: {e}")
             return None
@@ -530,9 +553,10 @@ class FileService:
     async def delete_file(self, file_id: str) -> bool:
         """Delete file by ID"""
         try:
-            from shared.db import get_db_connection
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
 
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 # First get the file record
                 file_record = await self.get_file_by_id(file_id)
                 if not file_record:
@@ -540,7 +564,8 @@ class FileService:
                     return False
 
                 # Delete from database
-                await conn.execute("DELETE FROM file_uploads WHERE id = $1", int(file_id))
+                await session.execute(text("DELETE FROM file_uploads WHERE id = :id"), {"id": int(file_id)})
+                await session.commit()
 
                 logger.info(f"File deleted from database: {file_id}")
                 return True
@@ -568,7 +593,8 @@ class FileService:
         logger.info("=" * 80)
 
         try:
-            from shared.db import get_db_connection
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
             from knowledgebase_ingestion.core.ai import get_genai_client
             from shared.celery_dispatcher import file_celery
             from shared.redis_message_queue import RedisMessageQueue
@@ -576,11 +602,12 @@ class FileService:
 
             # Step 1: Get file record with celery_task_id
             logger.info(f"🔍 [LOOKUP] Fetching file record...")
-            async with get_db_connection() as conn:
-                file_record = await conn.fetchrow(
-                    "SELECT id, original_filename, gemini_file_name, metadata, celery_task_id FROM file_uploads WHERE id = $1",
-                    int(file_id)
+            async with get_db_session() as session:
+                result = await session.execute(
+                    text("SELECT id, original_filename, gemini_file_name, metadata, celery_task_id FROM file_uploads WHERE id = :id"),
+                    {"id": int(file_id)}
                 )
+                file_record = result.mappings().first()
 
             if not file_record:
                 logger.error(f"❌ File not found: {file_id}")
@@ -702,11 +729,12 @@ class FileService:
             # Step 4: Mark as deleted in database (soft delete)
             logger.info(f"💾 [DB_UPDATE] Marking file as deleted in database...")
             try:
-                async with get_db_connection() as conn:
-                    await conn.execute(
-                        "UPDATE file_uploads SET processing_status = 'deleted', updated_at = NOW() WHERE id = $1",
-                        int(file_id)
+                async with get_db_session() as session:
+                    await session.execute(
+                        text("UPDATE file_uploads SET processing_status = 'deleted', updated_at = CURRENT_TIMESTAMP WHERE id = :id"),
+                        {"id": int(file_id)}
                     )
+                    await session.commit()
                 logger.info(f"✅ File marked as deleted in database (record retained for audit trail)")
             except Exception as e:
                 logger.error(f"❌ Error marking file as deleted: {e}")
@@ -772,17 +800,19 @@ class FileService:
         logger.info("=" * 80)
 
         try:
-            from shared.db import get_db_connection
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
             from knowledgebase_ingestion.core.ai import get_genai_client
             import json
 
             # Step 1: Get website record and all child pages
             logger.info(f"🔍 [LOOKUP] Fetching website and child pages...")
-            async with get_db_connection() as conn:
-                website_record = await conn.fetchrow(
-                    "SELECT id, original_url, metadata, celery_task_id, parent_id FROM scraped_websites WHERE id = $1",
-                    int(website_id)
+            async with get_db_session() as session:
+                result = await session.execute(
+                    text("SELECT id, original_url, metadata, celery_task_id, parent_id FROM scraped_websites WHERE id = :id"),
+                    {"id": int(website_id)}
                 )
+                website_record = result.mappings().first()
 
                 if not website_record:
                     logger.error(f"❌ Website not found: {website_id}")
@@ -795,10 +825,11 @@ class FileService:
                 # Get all child pages (only if this is a parent)
                 child_pages = []
                 if website_record['parent_id'] is None:
-                    child_pages = await conn.fetch(
-                        "SELECT id, original_url, metadata, celery_task_id FROM scraped_websites WHERE parent_id = $1",
-                        int(website_id)
+                    result = await session.execute(
+                        text("SELECT id, original_url, metadata, celery_task_id FROM scraped_websites WHERE parent_id = :parent_id"),
+                        {"parent_id": int(website_id)}
                     )
+                    child_pages = result.mappings().all()
 
             is_child = website_record['parent_id'] is not None
             logger.info(f"✅ Website found: {website_record['original_url']}")

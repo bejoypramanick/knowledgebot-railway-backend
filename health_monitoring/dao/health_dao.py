@@ -102,31 +102,32 @@ class HealthDAO:
         if end_date is None:
             end_date = datetime.utcnow()
 
-        query = """
+        query = text("""
             SELECT
                 service_name,
                 COUNT(CASE WHEN status = 'healthy' THEN 1 END) * 100.0 / COUNT(*) as uptime_percentage
             FROM service_health_checks
-            WHERE checked_at >= $1
-            AND checked_at <= $2
+            WHERE checked_at >= :start_date
+            AND checked_at <= :end_date
             GROUP BY service_name
-        """
+        """)
 
         try:
-            params = (start_date, end_date)
-            logger.log_db_operation(query, params)
+            params = {"start_date": start_date, "end_date": end_date}
+            logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
-                results = await conn.fetch(query, start_date, end_date)
-                logger.log_db_query(query, params, results)
-                return {row['service_name']: float(row['uptime_percentage']) for row in results}
+                results = await session.execute(query, params)
+                rows = results.fetchall()
+                logger.log_db_query(str(query), params, rows)
+                return {row.service_name: float(row.uptime_percentage) for row in rows}
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), params, error=e)
             return {}
 
     @staticmethod
     async def get_recent_failures(limit: int = 10) -> List[Dict[str, Any]]:
         """Get recent service failures."""
-        query = """
+        query = text("""
             SELECT
                 service_name,
                 status,
@@ -136,17 +137,19 @@ class HealthDAO:
             FROM service_health_checks
             WHERE status != 'healthy'
             ORDER BY checked_at DESC
-            LIMIT $1
-        """
+            LIMIT :limit
+        """)
 
         try:
-            logger.log_db_operation(query, (limit,))
+            params = {"limit": limit}
+            logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
-                results = await conn.fetch(query, limit)
-                logger.log_db_query(query, (limit,), results)
-                return [dict(row) for row in results]
+                results = await session.execute(query, params)
+                rows = results.fetchall()
+                logger.log_db_query(str(query), params, rows)
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
-            logger.log_db_query(query, (limit,), error=e)
+            logger.log_db_query(str(query), {"limit": limit}, error=e)
             return []
 
     @staticmethod
@@ -169,51 +172,53 @@ class HealthDAO:
         time_bucket = interval_map[interval]
 
         if service_name:
-            query = f"""
+            query = text(f"""
                 SELECT
                     {time_bucket} as time_period,
                     COUNT(CASE WHEN status = 'healthy' THEN 1 END) * 100.0 / COUNT(*) as uptime_percentage
                 FROM service_health_checks
-                WHERE service_name = $1
-                AND checked_at >= NOW() - ($2 * INTERVAL '1 day')
+                WHERE service_name = :service_name
+                AND checked_at >= NOW() - (:days * INTERVAL '1 day')
                 GROUP BY {time_bucket}
                 ORDER BY {time_bucket}
-            """
+            """)
             try:
-                params = (service_name, days)
-                logger.log_db_operation(query, params)
+                params = {"service_name": service_name, "days": days}
+                logger.log_db_operation(str(query), params)
                 async with get_db_session() as session:
-                    results = await conn.fetch(query, service_name, days)
-                    logger.log_db_query(query, params, results)
-                    return [dict(row) for row in results]
+                    results = await session.execute(query, params)
+                    rows = results.fetchall()
+                    logger.log_db_query(str(query), params, rows)
+                    return [dict(row._mapping) for row in rows]
             except Exception as e:
-                logger.log_db_query(query, params, error=e)
+                logger.log_db_query(str(query), {"service_name": service_name, "days": days}, error=e)
                 return []
         else:
-            query = f"""
+            query = text(f"""
                 SELECT
                     {time_bucket} as time_period,
                     COUNT(CASE WHEN status = 'healthy' THEN 1 END) * 100.0 / COUNT(*) as uptime_percentage
                 FROM service_health_checks
-                WHERE checked_at >= NOW() - ($1 * INTERVAL '1 day')
+                WHERE checked_at >= NOW() - (:days * INTERVAL '1 day')
                 GROUP BY {time_bucket}
                 ORDER BY {time_bucket}
-            """
+            """)
             try:
-                params = (days,)
-                logger.log_db_operation(query, params)
+                params = {"days": days}
+                logger.log_db_operation(str(query), params)
                 async with get_db_session() as session:
-                    results = await conn.fetch(query, days)
-                    logger.log_db_query(query, params, results)
-                    return [dict(row) for row in results]
+                    results = await session.execute(query, params)
+                    rows = results.fetchall()
+                    logger.log_db_query(str(query), params, rows)
+                    return [dict(row._mapping) for row in rows]
             except Exception as e:
-                logger.log_db_query(query, params, error=e)
+                logger.log_db_query(str(query), {"days": days}, error=e)
                 return []
 
     @staticmethod
     async def get_latest_check(service_name: str) -> Optional[Dict[str, Any]]:
         """Get the latest health check for a service."""
-        query = """
+        query = text("""
             SELECT
                 service_name,
                 status,
@@ -222,26 +227,27 @@ class HealthDAO:
                 error_message,
                 metadata
             FROM service_health_checks
-            WHERE service_name = $1
+            WHERE service_name = :service_name
             ORDER BY checked_at DESC
             LIMIT 1
-        """
+        """)
 
         try:
-            params = (service_name,)
-            logger.log_db_operation(query, params)
+            params = {"service_name": service_name}
+            logger.log_db_operation(str(query), params)
             async with get_db_session() as session:
-                result = await conn.fetchrow(query, service_name)
-                logger.log_db_query(query, params, result)
-                return dict(result) if result else None
+                result = await session.execute(query, params)
+                row = result.fetchone()
+                logger.log_db_query(str(query), params, row)
+                return dict(row._mapping) if row else None
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(str(query), {"service_name": service_name}, error=e)
             return None
 
     @staticmethod
     async def get_all_latest_checks() -> List[Dict[str, Any]]:
         """Get the latest health check for all services."""
-        query = """
+        query = text("""
             SELECT
                 service_name,
                 status,
@@ -257,14 +263,15 @@ class HealthDAO:
             ) AS subquery
             WHERE rn = 1
             ORDER BY service_name
-        """
+        """)
 
         try:
-            logger.log_db_operation(query)
+            logger.log_db_operation(str(query))
             async with get_db_session() as session:
-                results = await conn.fetch(query)
-                logger.log_db_query(query, None, results)
-                return [dict(row) for row in results]
+                results = await session.execute(query)
+                rows = results.fetchall()
+                logger.log_db_query(str(query), None, rows)
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            logger.log_db_query(str(query), None, error=e)
             return []

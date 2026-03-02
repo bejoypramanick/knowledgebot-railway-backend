@@ -176,28 +176,27 @@ def init_worker_process(**kwargs):
         asyncio.set_event_loop(new_loop)
         logger.info("✅ [WORKER_INIT] Created fresh event loop for worker process")
         
-        # Now handle database pool
-        from shared.db import DatabaseManager
-        
+        # Now handle database engine pool
+        from shared.sqlalchemy_db import SQLAlchemyDB
+
         # Reset the singleton instance to force recreation
-        if DatabaseManager._instance:
-            logger.warning("⚠️ [WORKER_INIT] Found inherited DatabaseManager instance from parent process")
-            
-            # Try to close the pool gracefully if it exists
-            if DatabaseManager._instance._pool:
-                try:
-                    # Don't use async close - just terminate the pool
-                    # The pool is from the parent process and shouldn't be used anyway
-                    DatabaseManager._instance._pool.terminate()
-                    logger.info("✅ [WORKER_INIT] Terminated inherited database pool")
-                except Exception as e:
-                    logger.warning(f"⚠️ [WORKER_INIT] Error terminating inherited pool: {e}")
-            
+        if SQLAlchemyDB._instance:
+            logger.warning("⚠️ [WORKER_INIT] Found inherited SQLAlchemyDB instance from parent process")
+
+            # Try to dispose of the engine pool gracefully if it exists
+            try:
+                if hasattr(SQLAlchemyDB._instance, '_engine') and SQLAlchemyDB._instance._engine:
+                    # Dispose of all connections in the pool
+                    SQLAlchemyDB._instance._engine.dispose()
+                    logger.info("✅ [WORKER_INIT] Disposed of inherited database engine pool")
+            except Exception as e:
+                logger.warning(f"⚠️ [WORKER_INIT] Error disposing inherited pool: {e}")
+
             # Reset the singleton to None so it will be recreated
-            DatabaseManager._instance = None
-            logger.info("✅ [WORKER_INIT] Reset DatabaseManager singleton, will create fresh instance on first use")
+            SQLAlchemyDB._instance = None
+            logger.info("✅ [WORKER_INIT] Reset SQLAlchemyDB singleton, will create fresh instance on first use")
         else:
-            logger.info("✅ [WORKER_INIT] No inherited DatabaseManager found")
+            logger.info("✅ [WORKER_INIT] No inherited SQLAlchemyDB found")
         
         # Force garbage collection to clean up any lingering file descriptors
         gc.collect()

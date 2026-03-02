@@ -112,16 +112,18 @@ class ActionAudit:
                 return
 
             # Get DB connection and log action
-            from shared.db import get_db_connection
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
 
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 # First, get the admin session ID from DB to link records
                 session_query = """
                     SELECT id FROM admin_sessions
-                    WHERE session_id = $1
+                    WHERE session_id = :session_id
                     LIMIT 1
                 """
-                session_record = await conn.fetchrow(session_query, admin_session_id)
+                result = await session.execute(text(session_query), {"session_id": admin_session_id})
+                session_record = result.mappings().first()
 
                 if not session_record:
                     logger.warning(f"⚠️ Admin session not found in DB: {admin_session_id}")
@@ -137,43 +139,52 @@ class ActionAudit:
                         resource_type, resource_id, duration_ms, success,
                         error_message, error_code, response_status,
                         ip_address, user_agent, created_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                    ) VALUES (:action_id, :session_id, :user_role_id, :email, :role_name,
+                             :action_type, :action_category, :http_method, :endpoint,
+                             :resource_type, :resource_id, :duration_ms, :success,
+                             :error_message, :error_code, :response_status,
+                             :ip_address, :user_agent, :created_at)
                 """
 
-                action_values = (
-                    self.action_id,
-                    session_db_id,
-                    0,  # user_role_id placeholder (will be fetched from session if needed)
-                    admin_email,
-                    admin_role,
-                    self.action_type,
-                    self.action_category,
-                    self.http_method,
-                    self.endpoint,
-                    self.resource_type,
-                    self.resource_id,
-                    self.duration_ms,
-                    self.success,
-                    self.error_message,
-                    self.error_code,
-                    self.response_status,
-                    self.ip_address,
-                    self.user_agent,
-                    datetime.utcnow().isoformat(),
-                )
+                action_values = {
+                    "action_id": self.action_id,
+                    "session_id": session_db_id,
+                    "user_role_id": 0,  # user_role_id placeholder (will be fetched from session if needed)
+                    "email": admin_email,
+                    "role_name": admin_role,
+                    "action_type": self.action_type,
+                    "action_category": self.action_category,
+                    "http_method": self.http_method,
+                    "endpoint": self.endpoint,
+                    "resource_type": self.resource_type,
+                    "resource_id": self.resource_id,
+                    "duration_ms": self.duration_ms,
+                    "success": self.success,
+                    "error_message": self.error_message,
+                    "error_code": self.error_code,
+                    "response_status": self.response_status,
+                    "ip_address": self.ip_address,
+                    "user_agent": self.user_agent,
+                    "created_at": datetime.utcnow().isoformat(),
+                }
 
                 try:
-                    await conn.execute(action_query, *action_values)
+                    await session.execute(text(action_query), action_values)
+                    await session.commit()
                     logger.info(f"✅ Action logged to DB: {self.action_id}")
 
                     # Increment session action count
                     update_query = """
                         UPDATE admin_sessions
                         SET action_count = action_count + 1,
-                            last_activity_at = $1
-                        WHERE id = $2
+                            last_activity_at = :last_activity_at
+                        WHERE id = :session_id
                     """
-                    await conn.execute(update_query, datetime.utcnow().isoformat(), session_db_id)
+                    await session.execute(
+                        text(update_query),
+                        {"last_activity_at": datetime.utcnow().isoformat(), "session_id": session_db_id}
+                    )
+                    await session.commit()
 
                 except Exception as db_error:
                     logger.error(f"❌ Failed to log action to DB: {db_error}")

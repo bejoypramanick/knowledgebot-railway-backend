@@ -23,7 +23,7 @@ from shared.docling_integration import (
 from shared.docling_content_converter import convert_docling_to_markdown
 from shared.file_search import get_file_search_store_by_display_name
 from shared.html_processor import extract_content_from_html
-from shared.db import get_db_connection
+from shared.sqlalchemy_db import get_db_session
 from shared.file_metrics import calculate_metrics
 
 from utils.validation import (
@@ -990,11 +990,11 @@ async def delete_file_logic(file_id: str) -> Dict[str, Any]:
     # Delete from database
     if table_name != "gemini_only":
         try:
-            async with get_db_connection() as conn:
-                async with conn.transaction():
-                    await file_service.delete_file_record(file_id, table_name)
-                    deletion_results["postgres"]["success"] = True
-                    logger.info(f"✅ Deleted from {table_name}: ID={file_id}")
+            async with get_db_session() as session:
+                await file_service.delete_file_record(file_id, table_name)
+                await session.commit()
+                deletion_results["postgres"]["success"] = True
+                logger.info(f"✅ Deleted from {table_name}: ID={file_id}")
         except Exception as e:
             deletion_results["postgres"]["error"] = str(e)
             logger.error(f"❌ Error deleting from database: {e}")

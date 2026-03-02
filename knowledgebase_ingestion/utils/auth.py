@@ -4,7 +4,7 @@ Authentication utilities for knowledgebase ingestion
 from typing import Tuple, Optional
 from fastapi import Request, HTTPException
 from shared.otel_logger import get_otel_logger
-from shared.db import get_db_connection
+from shared.sqlalchemy_db import get_db_session
 
 logger = get_otel_logger("auth", "knowledgebase-ingestion")
 
@@ -39,32 +39,35 @@ async def get_user_role_id_from_email(user_email: str) -> Optional[int]:
     """
     Look up user_role_id from user_role_mapping table using email.
     Joins with users table to match email to user_id.
-    
+
     Args:
         user_email: User's email address
-        
+
     Returns:
         user_role_id if found, None otherwise
     """
     try:
+        from sqlalchemy import text
+
         query = """
-            SELECT urm.user_role_id 
+            SELECT urm.user_role_id
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
-            WHERE u.email = $1 
+            WHERE u.email = :email
             LIMIT 1
         """
-        
-        async with get_db_connection() as conn:
-            user_role_id = await conn.fetchval(query, user_email)
-            
+
+        async with get_db_session() as session:
+            result = await session.execute(text(query), {"email": user_email})
+            user_role_id = result.scalar()
+
             if user_role_id:
                 logger.info(f"✅ Found user_role_id {user_role_id} for email {user_email}")
             else:
                 logger.warning(f"⚠️ No user_role_id found for email {user_email}")
-            
+
             return user_role_id
-            
+
     except Exception as e:
         logger.error(f"❌ Error looking up user_role_id for {user_email}: {e}")
         return None

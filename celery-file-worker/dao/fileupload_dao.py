@@ -5,7 +5,8 @@ Handles database operations for file uploads - mirrors web worker pattern
 from typing import Any, Dict, Optional
 import json
 
-from shared.db import get_db_connection
+from sqlalchemy import text
+from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("fileupload_dao", "celery-file-worker")
@@ -21,18 +22,19 @@ class FileUploadDAO:
 
         query = """
             UPDATE file_uploads
-            SET processing_status = $2, error_message = $3, updated_at = NOW()
-            WHERE id = $1
+            SET processing_status = :status, error_message = :error_message, updated_at = NOW()
+            WHERE id = :file_id
         """
-        params = [file_id, status, error_message]
+        params = {"file_id": file_id, "status": status, "error_message": error_message}
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, *params)
-                logger.log_db_query(query, params, result)
-                
-                if result != "UPDATE 0":
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, "UPDATE 1")
+
+                if result.rowcount > 0:
                     logger.info(f"✅ [FILE_UPDATE_STATUS_SUCCESS] Status updated to: {status}")
                     return True
                 else:
@@ -75,47 +77,48 @@ class FileUploadDAO:
 
         query = """
             UPDATE file_uploads
-            SET gemini_file_name = $1,
-                gemini_file_uri = $2,
-                gemini_state = $3,
-                file_size = $4,
-                char_count = $5,
-                sha256_hash = $6,
-                metadata = $7::jsonb,
-                processed_by_docling = $8,
-                docling_processing_time_ms = $9,
-                docling_images_extracted = $10,
-                docling_images_with_ocr = $11,
-                original_file_extension = $12,
-                original_mime_type = $13,
-                processed_content_s3_key = $14,
+            SET gemini_file_name = :gemini_file_name,
+                gemini_file_uri = :gemini_file_uri,
+                gemini_state = :gemini_state,
+                file_size = :file_size,
+                char_count = :char_count,
+                sha256_hash = :sha256_hash,
+                metadata = :metadata::jsonb,
+                processed_by_docling = :processed_by_docling,
+                docling_processing_time_ms = :docling_processing_time_ms,
+                docling_images_extracted = :docling_images_extracted,
+                docling_images_with_ocr = :docling_images_with_ocr,
+                original_file_extension = :original_file_extension,
+                original_mime_type = :original_mime_type,
+                processed_content_s3_key = :processed_content_s3_key,
                 processing_status = 'completed',
                 updated_at = NOW()
-            WHERE id = $15
+            WHERE id = :file_id
         """
 
-        params = [
-            gemini_file_name,
-            gemini_file_uri,
-            gemini_state,
-            file_size,
-            char_count,
-            sha256_hash,
-            json.dumps(metadata),
-            processed_by_docling,
-            docling_processing_time_ms,
-            docling_images_extracted,
-            docling_images_with_ocr,
-            original_file_extension,
-            original_mime_type,
-            processed_content_s3_key,
-            file_id
-        ]
+        params = {
+            "gemini_file_name": gemini_file_name,
+            "gemini_file_uri": gemini_file_uri,
+            "gemini_state": gemini_state,
+            "file_size": file_size,
+            "char_count": char_count,
+            "sha256_hash": sha256_hash,
+            "metadata": json.dumps(metadata),
+            "processed_by_docling": processed_by_docling,
+            "docling_processing_time_ms": docling_processing_time_ms,
+            "docling_images_extracted": docling_images_extracted,
+            "docling_images_with_ocr": docling_images_with_ocr,
+            "original_file_extension": original_file_extension,
+            "original_mime_type": original_mime_type,
+            "processed_content_s3_key": processed_content_s3_key,
+            "file_id": file_id
+        }
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                await conn.execute(query, *params)
+            async with get_db_session() as session:
+                await session.execute(text(query), params)
+                await session.commit()
                 logger.info(f"✅ [UPDATE_FILE_DATA_SUCCESS] File record updated and marked as completed")
                 logger.log_db_query(query, params, "UPDATE succeeded")
                 return True
@@ -134,17 +137,18 @@ class FileUploadDAO:
                    s3_key, file_size, mime_type, sha256_hash, processing_status,
                    celery_task_id, created_at, updated_at
             FROM file_uploads
-            WHERE celery_task_id = $1
+            WHERE celery_task_id = :celery_task_id
         """
 
         try:
-            logger.log_db_operation(query, {"celery_task_id": celery_task_id})
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, celery_task_id)
-                logger.log_db_query(query, {"celery_task_id": celery_task_id}, result)
+            params = {"celery_task_id": celery_task_id}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = (await session.execute(text(query), params)).fetchone()
+                logger.log_db_query(query, params, result)
 
                 if result:
-                    return dict(result)
+                    return dict(result._mapping)
                 return None
         except Exception as e:
             logger.error(f"❌ Error getting file by task_id: {e}")
@@ -157,18 +161,19 @@ class FileUploadDAO:
             SELECT id, user_role_id, original_filename, display_name,
                    s3_key, file_size, mime_type, processing_status, sha256_hash
             FROM file_uploads
-            WHERE id = $1
+            WHERE id = :file_id
         """
 
         try:
-            logger.log_db_operation(query, {"file_id": file_id})
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, file_id)
-                logger.log_db_query(query, {"file_id": file_id}, result)
+            params = {"file_id": file_id}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = (await session.execute(text(query), params)).fetchone()
+                logger.log_db_query(query, params, result)
 
                 if result:
-                    logger.info(f"✅ [DB_QUERY] File found: {result['original_filename']}")
-                    return dict(result)
+                    logger.info(f"✅ [DB_QUERY] File found: {result.original_filename}")
+                    return dict(result._mapping)
                 else:
                     logger.error(f"❌ [DB_QUERY] No file found for file_id: {file_id}")
                     return None
@@ -180,30 +185,31 @@ class FileUploadDAO:
     async def check_duplicate_file(self, original_filename: str, exclude_file_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
         """Check if file with same name exists in database (only active files)."""
         try:
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 # First, log ALL files with this name to debug
-                all_query = "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 ORDER BY id DESC"
-                all_files = await conn.fetch(all_query, original_filename)
+                all_query = "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = :original_filename ORDER BY id DESC"
+                all_files_result = await session.execute(text(all_query), {"original_filename": original_filename})
+                all_files = all_files_result.fetchall()
                 logger.info(f"🔍 [DUPLICATE_CHECK_ALL] Found {len(all_files)} total files with name '{original_filename}':")
                 for f in all_files:
-                    logger.info(f"   - ID={f['id']}, status={f['processing_status']}")
+                    logger.info(f"   - ID={f.id}, status={f.processing_status}")
 
                 # Only check active files (exclude failed, deleted, cancelled)
                 # Also exclude the current file being processed
                 if exclude_file_id:
-                    query = "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 AND id != $2 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1"
-                    record = await conn.fetchrow(query, original_filename, exclude_file_id)
+                    query = "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = :original_filename AND id != :exclude_file_id AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1"
+                    record = (await session.execute(text(query), {"original_filename": original_filename, "exclude_file_id": exclude_file_id})).fetchone()
                     logger.info(f"🔍 [DUPLICATE_CHECK] Excluding current file ID={exclude_file_id} from check")
                 else:
-                    query = "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = $1 AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1"
-                    record = await conn.fetchrow(query, original_filename)
+                    query = "SELECT id, original_filename, processing_status FROM file_uploads WHERE original_filename = :original_filename AND processing_status IN ('pending', 'processing', 'queued', 'completed') LIMIT 1"
+                    record = (await session.execute(text(query), {"original_filename": original_filename})).fetchone()
 
                 if record:
-                    logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE duplicate: ID={record['id']}, filename={record['original_filename']}, status={record['processing_status']}")
+                    logger.warning(f"🔍 [DUPLICATE_CHECK] Found ACTIVE duplicate: ID={record.id}, filename={record.original_filename}, status={record.processing_status}")
                 else:
                     logger.info(f"🔍 [DUPLICATE_CHECK] No active duplicate found for: {original_filename}")
 
-                return record if record else None
+                return dict(record._mapping) if record else None
         except Exception as e:
             logger.error(f"❌ Error checking duplicate: {e}")
             return None
@@ -211,21 +217,17 @@ class FileUploadDAO:
     async def get_admin_user_role_id(self, user_email: Optional[str] = None) -> Optional[str]:
         """Get admin user role ID from database."""
         try:
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 # Get admin role first
-                admin_role = await conn.fetchval(
-                    "SELECT id FROM roles WHERE role_name = 'admin' LIMIT 1"
-                )
+                admin_role = (await session.execute(text("SELECT id FROM roles WHERE role_name = 'admin' LIMIT 1"))).scalar()
 
                 if not admin_role:
                     logger.warning("⚠️ Admin role not found in database")
                     return None
 
                 # Get user role mapping for this email
-                user_role = await conn.fetchval(
-                    "SELECT user_role_id FROM user_role_mapping WHERE email = $1 AND role_id = $2 LIMIT 1",
-                    user_email or 'admin', admin_role
-                )
+                user_role = (await session.execute(text("SELECT user_role_id FROM user_role_mapping WHERE email = :email AND role_id = :role_id LIMIT 1"),
+                    {"email": user_email or 'admin', "role_id": admin_role})).scalar()
 
                 return user_role
         except Exception as e:
@@ -258,26 +260,29 @@ class FileUploadDAO:
                        (user_role_id, original_filename, display_name, file_extension,
                         mime_type, file_size, sha256_hash, gemini_file_name, processing_status,
                         gemini_processed_at, metadata, char_count, created_at)
-                       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+                       VALUES (:user_role_id, :original_filename, :display_name, :file_extension,
+                        :mime_type, :file_size, :sha256_hash, :gemini_file_name, :processing_status,
+                        :gemini_processed_at, :metadata, :char_count, NOW())
                        RETURNING id"""
 
-            params = [
-                user_role_id,
-                original_filename,
-                file_display_name,
-                file_ext,
-                mime_type,
-                file_size,
-                sha256_hash,
-                gemini_file_name,
-                final_state,
-                gemini_processed_at,
-                json.dumps(file_search_metadata) if file_search_metadata else None,
-                char_count
-            ]
+            params = {
+                "user_role_id": user_role_id,
+                "original_filename": original_filename,
+                "display_name": file_display_name,
+                "file_extension": file_ext,
+                "mime_type": mime_type,
+                "file_size": file_size,
+                "sha256_hash": sha256_hash,
+                "gemini_file_name": gemini_file_name,
+                "processing_status": final_state,
+                "gemini_processed_at": gemini_processed_at,
+                "metadata": json.dumps(file_search_metadata) if file_search_metadata else None,
+                "char_count": char_count
+            }
 
-            async with get_db_connection() as conn:
-                file_id = await conn.fetchval(query, *params)
+            async with get_db_session() as session:
+                file_id = (await session.execute(text(query), params)).scalar()
+                await session.commit()
                 logger.info(f"✅ Recorded metadata for {original_filename}, DB ID: {file_id}")
                 return file_id
         except Exception as e:
@@ -286,11 +291,11 @@ class FileUploadDAO:
 
     async def get_file_metadata_for_deletion(self, file_id: int) -> Optional[Dict[str, Any]]:
         """Get file metadata for deletion operations (from file_uploads table)."""
-        query = "SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = $1"
+        query = "SELECT gemini_file_name, original_filename, metadata FROM file_uploads WHERE id = :file_id"
         try:
-            async with get_db_connection() as conn:
-                record = await conn.fetchrow(query, file_id)
-                return dict(record) if record else None
+            async with get_db_session() as session:
+                record = (await session.execute(text(query), {"file_id": file_id})).fetchone()
+                return dict(record._mapping) if record else None
         except Exception as e:
             logger.error(f"❌ Error getting file metadata for deletion: {e}")
             return None

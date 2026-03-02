@@ -4,7 +4,8 @@ Handles database operations for website management
 """
 from typing import Dict, List, Any, Optional
 import json
-from shared.db import get_db_connection
+from sqlalchemy import text
+from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("scraping_dao", "celery-web-worker")
@@ -15,14 +16,14 @@ class ScrapingDAO:
 
     async def get_website_by_id(self, website_id: int) -> Optional[Dict[str, Any]]:
         """Get website record by ID."""
-        query = "SELECT * FROM scraped_websites WHERE id = $1::int"
+        query = "SELECT * FROM scraped_websites WHERE id = :website_id"
         params = {"website_id": website_id}
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, website_id)
+            async with get_db_session() as session:
+                result = (await session.execute(text(query), params)).fetchone()
                 logger.log_db_query(query, params, result)
-                return dict(result) if result else None
+                return dict(result._mapping) if result else None
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return None
@@ -36,23 +37,24 @@ class ScrapingDAO:
 
         query = """
             UPDATE scraped_websites
-            SET processing_status = $1::text, error_message = $2::text, updated_at = NOW()
-            WHERE id = $3::int
+            SET processing_status = :status, error_message = :error_message, updated_at = NOW()
+            WHERE id = :website_id
         """
-        params = [status, error_message, website_id]
+        params = {"status": status, "error_message": error_message, "website_id": website_id}
 
         logger.info(f"📝 [WEB_UPDATE_SQL] SQL Query:")
         logger.info(f"    {query}")
         logger.info(f"📊 [WEB_UPDATE_PARAMS] Parameters:")
-        logger.info(f"    $1 (processing_status): {params[0]}")
-        logger.info(f"    $2 (error_message): {params[1]}")
-        logger.info(f"    $3 (id): {params[2]}")
+        logger.info(f"    :status: {params['status']}")
+        logger.info(f"    :error_message: {params['error_message']}")
+        logger.info(f"    :website_id: {params['website_id']}")
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, status, error_message, website_id)
-                logger.log_db_query(query, params, result)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, "UPDATE 1")
 
                 logger.info(f"✅ [WEB_UPDATE_SUCCESS] Website status updated")
                 logger.info(f"   New Status: {status}")
@@ -68,10 +70,11 @@ class ScrapingDAO:
         query = "SELECT * FROM scraped_websites ORDER BY created_at DESC"
         try:
             logger.log_db_operation(query, {})
-            async with get_db_connection() as conn:
-                result = await conn.fetch(query)
-                logger.log_db_query(query, {}, result)
-                return [dict(row) for row in result] if result else []
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                rows = result.fetchall()
+                logger.log_db_query(query, {}, rows)
+                return [dict(row._mapping) for row in rows] if rows else []
         except Exception as e:
             logger.log_db_query(query, {}, error=e)
             return []
@@ -128,31 +131,32 @@ class ScrapingDAO:
                 user_role_id, original_url, processing_status, metadata,
                 created_at, updated_at
             ) VALUES (
-                $1, $2, $3, $4::jsonb,
+                :user_role_id, :original_url, :processing_status, :metadata::jsonb,
                 NOW(), NOW()
             ) RETURNING id
         """
-        params = [
-            record_data.get('user_role_id'),
-            record_data.get('original_url'),
-            record_data.get('processing_status', 'pending'),
-            json.dumps(metadata)
-        ]
+        params = {
+            "user_role_id": record_data.get('user_role_id'),
+            "original_url": record_data.get('original_url'),
+            "processing_status": record_data.get('processing_status', 'pending'),
+            "metadata": json.dumps(metadata)
+        }
 
         logger.info(f"📝 [WEB_INSERT_QUERY] SQL Query:")
         logger.info(f"    {query}")
         logger.info(f"📊 [WEB_INSERT_PARAMS] Parameters:")
-        logger.info(f"    $1 (user_role_id): {params[0]}")
-        logger.info(f"    $2 (original_url): {params[1]}")
-        logger.info(f"    $3 (processing_status): {params[2]}")
-        logger.info(f"    $4 (metadata): {params[3]}")
+        logger.info(f"    :user_role_id: {params['user_role_id']}")
+        logger.info(f"    :original_url: {params['original_url']}")
+        logger.info(f"    :processing_status: {params['processing_status']}")
+        logger.info(f"    :metadata: {params['metadata']}")
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(query, *params)
+            async with get_db_session() as session:
+                result = (await session.execute(text(query), params)).scalar()
                 logger.info(f"✅ [WEB_INSERT_SUCCESS] Website record created with ID: {result}")
                 logger.log_db_query(query, params, result)
+                await session.commit()
                 return int(result) if result else None
         except Exception as e:
             logger.error(f"❌ [WEB_INSERT_ERROR] Failed to record website metadata: {e}")
@@ -166,20 +170,21 @@ class ScrapingDAO:
         logger.info(f"🗑️  [WEB_DELETE_START] Deleting website record")
         logger.info(f"   URL: {url}")
 
-        query = "DELETE FROM scraped_websites WHERE original_url = $1::text"
+        query = "DELETE FROM scraped_websites WHERE original_url = :url"
         params = {"url": url}
 
         logger.info(f"📝 [WEB_DELETE_QUERY] SQL Query:")
         logger.info(f"    {query}")
         logger.info(f"📊 [WEB_DELETE_PARAMS] Parameters:")
-        logger.info(f"    $1 (original_url): {url}")
+        logger.info(f"    :url: {url}")
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.execute(query, url)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                await session.commit()
                 logger.info(f"✅ [WEB_DELETE_SUCCESS] Website record deleted. Result: {result}")
-                logger.log_db_query(query, params, result)
+                logger.log_db_query(query, params, "DELETE 1")
                 return result
         except Exception as e:
             logger.error(f"❌ [WEB_DELETE_ERROR] Failed to delete website record: {e}")
@@ -199,23 +204,23 @@ class ScrapingDAO:
         query = """
             SELECT id, original_url, processing_status, created_at
             FROM scraped_websites
-            WHERE original_url = $1::text AND processing_status != 'deleted'
+            WHERE original_url = :url AND processing_status != 'deleted'
         """
         params = {"url": original_url}
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                result = await conn.fetchrow(query, original_url)
+            async with get_db_session() as session:
+                result = (await session.execute(text(query), params)).fetchone()
 
                 if result:
-                    logger.info(f"⚠️  [WEB_DUPLICATE_FOUND] Website already exists (ID: {result['id']}, Status: {result['processing_status']})")
+                    logger.info(f"⚠️  [WEB_DUPLICATE_FOUND] Website already exists (ID: {result.id}, Status: {result.processing_status})")
                     logger.log_db_query(query, params, result)
                     return {
-                        "id": result['id'],
-                        "original_url": result['original_url'],
-                        "processing_status": result['processing_status'],
-                        "created_at": result['created_at']
+                        "id": result.id,
+                        "original_url": result.original_url,
+                        "processing_status": result.processing_status,
+                        "created_at": result.created_at
                     }
                 else:
                     logger.info(f"✅ [WEB_DUPLICATE_NOT_FOUND] No active website found for URL: {original_url}")
@@ -230,11 +235,9 @@ class ScrapingDAO:
     async def get_admin_user_role_id(self, user_email: str = None) -> Optional[int]:
         """Get admin user role ID from database."""
         try:
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 # Get admin role first
-                admin_role = await conn.fetchval(
-                    "SELECT id FROM roles WHERE role_name = 'admin' LIMIT 1"
-                )
+                admin_role = (await session.execute(text("SELECT id FROM roles WHERE role_name = 'admin' LIMIT 1"))).scalar()
 
                 if not admin_role:
                     logger.warning("⚠️ Admin role not found in database")
@@ -242,13 +245,11 @@ class ScrapingDAO:
 
                 # Get user role mapping for the admin email (join with users table)
                 email_to_search = user_email or 'globistaan@gmail.com'
-                user_role = await conn.fetchval(
-                    """SELECT urm.user_role_id
+                user_role = (await session.execute(text("""SELECT urm.user_role_id
                        FROM user_role_mapping urm
                        JOIN users u ON urm.user_id = u.id
-                       WHERE u.email = $1 AND urm.role_id = $2 LIMIT 1""",
-                    email_to_search, admin_role
-                )
+                       WHERE u.email = :email AND urm.role_id = :role_id LIMIT 1"""),
+                       {"email": email_to_search, "role_id": admin_role})).scalar()
 
                 if not user_role:
                     logger.warning(f"⚠️ No admin user role found for {email_to_search}")
@@ -314,47 +315,48 @@ class ScrapingDAO:
                 pages_scraped, processed_content_s3_key,
                 created_at, updated_at
             ) VALUES (
-                $1, $2, $3,
-                $4, $5, $6::jsonb, $7, $8,
-                $9, $10, $11, $12, $13,
-                $14, $15,
+                :parent_id, :page_url, :processing_status,
+                :gemini_file_name, :gemini_file_uri, :metadata::jsonb, :depth, :user_role_id,
+                :file_size, :char_count, :title, :description, :crawl_session_id,
+                :pages_scraped, :processed_content_s3_key,
                 NOW(), NOW()
             ) RETURNING id
         """
 
-        params = [
-            parent_id,
-            page_url,
-            'completed' if gemini_file_name else 'processing',
-            gemini_file_name,
-            gemini_file_uri,
-            json.dumps(child_metadata),
-            1,  # depth = 1 (child of root)
-            user_role_id,
-            file_size,
-            char_count,
-            title,
-            description,
-            crawl_session_id,
-            1,  # pages_scraped = 1 for individual pages
-            processed_content_s3_key
-        ]
+        params = {
+            "parent_id": parent_id,
+            "page_url": page_url,
+            "processing_status": 'completed' if gemini_file_name else 'processing',
+            "gemini_file_name": gemini_file_name,
+            "gemini_file_uri": gemini_file_uri,
+            "metadata": json.dumps(child_metadata),
+            "depth": 1,
+            "user_role_id": user_role_id,
+            "file_size": file_size,
+            "char_count": char_count,
+            "title": title,
+            "description": description,
+            "crawl_session_id": crawl_session_id,
+            "pages_scraped": 1,
+            "processed_content_s3_key": processed_content_s3_key
+        }
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 # First, check if parent exists
-                parent_check_query = "SELECT id FROM scraped_websites WHERE id = $1"
-                parent_exists = await conn.fetchval(parent_check_query, parent_id)
-                
+                parent_check_query = "SELECT id FROM scraped_websites WHERE id = :parent_id"
+                parent_exists = (await session.execute(text(parent_check_query), {"parent_id": parent_id})).scalar()
+
                 if not parent_exists:
                     logger.warning(f"⚠️  [CHILD_PAGE_SKIP] Parent ID {parent_id} not found, skipping child page")
                     logger.warning(f"   URL: {page_url}")
                     logger.warning(f"   Parent may have been deleted or failed to create")
                     return None
-                
+
                 # Parent exists, proceed with insert
-                result = await conn.fetchval(query, *params)
+                result = (await session.execute(text(query), params)).scalar()
+                await session.commit()
                 logger.info(f"✅ [CHILD_PAGE_SUCCESS] Recorded child page with ID: {result}")
                 logger.log_db_query(query, params, result)
                 return int(result) if result else None
@@ -366,7 +368,7 @@ class ScrapingDAO:
                 logger.warning(f"   Parent ID: {parent_id}")
                 logger.warning(f"   This can happen if parent was deleted while children were being scraped")
                 return None
-            
+
             logger.error(f"❌ [CHILD_PAGE_ERROR] Failed to record child page: {e}")
             logger.error(f"   URL: {page_url}")
             logger.error(f"   Parent ID: {parent_id}")
@@ -396,27 +398,28 @@ class ScrapingDAO:
 
         query = """
             UPDATE scraped_websites
-            SET pages_scraped = $1,
-                metadata = $2,
-                file_size = $3,
-                char_count = $4,
+            SET pages_scraped = :page_count,
+                metadata = :metadata,
+                file_size = :file_size,
+                char_count = :char_count,
                 processing_status = 'completed',
                 updated_at = NOW()
-            WHERE id = $5
+            WHERE id = :website_id
         """
 
-        params = [
-            page_count,
-            json.dumps(file_search_metadata),
-            total_size_bytes,
-            total_char_count,
-            website_id
-        ]
+        params = {
+            "page_count": page_count,
+            "metadata": json.dumps(file_search_metadata),
+            "file_size": total_size_bytes,
+            "char_count": total_char_count,
+            "website_id": website_id
+        }
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                await conn.execute(query, *params)
+            async with get_db_session() as session:
+                await session.execute(text(query), params)
+                await session.commit()
                 logger.info(f"✅ [FINALIZE_SUCCESS] Website record updated")
                 logger.log_db_query(query, params, "UPDATE succeeded")
                 return True
@@ -458,12 +461,12 @@ class ScrapingDAO:
         logger.info(f"   Mark as completed: {mark_completed}")
 
         # First, get the existing metadata to preserve scraping_config
-        get_query = "SELECT metadata FROM scraped_websites WHERE id = $1"
+        get_query = "SELECT metadata FROM scraped_websites WHERE id = :website_id"
         existing_metadata = {}
-        
+
         try:
-            async with get_db_connection() as conn:
-                result = await conn.fetchval(get_query, website_id)
+            async with get_db_session() as session:
+                result = (await session.execute(text(get_query), {"website_id": website_id})).scalar()
                 if result:
                     if isinstance(result, dict):
                         existing_metadata = result
@@ -474,67 +477,68 @@ class ScrapingDAO:
                             existing_metadata = {}
         except Exception as e:
             logger.warning(f"⚠️ Could not fetch existing metadata: {e}")
-        
+
         # Merge existing metadata with file_search_metadata
         # Preserve scraping_config from existing metadata
         merged_metadata = {**existing_metadata, **file_search_metadata}
-        
+
         logger.info(f"   Merged metadata: {merged_metadata}")
 
         # Build query based on mark_completed flag
         if mark_completed:
             query = """
                 UPDATE scraped_websites
-                SET gemini_file_name = $1,
-                    gemini_file_uri = $2,
-                    file_size = $3,
-                    char_count = $4,
-                    title = $5,
-                    description = $6,
-                    crawl_session_id = $7,
-                    pages_scraped = $8,
-                    metadata = $9::jsonb,
-                    processed_content_s3_key = $10,
+                SET gemini_file_name = :gemini_file_name,
+                    gemini_file_uri = :gemini_file_uri,
+                    file_size = :file_size,
+                    char_count = :char_count,
+                    title = :title,
+                    description = :description,
+                    crawl_session_id = :crawl_session_id,
+                    pages_scraped = :pages_scraped,
+                    metadata = :metadata::jsonb,
+                    processed_content_s3_key = :processed_content_s3_key,
                     processing_status = 'completed',
                     updated_at = NOW()
-                WHERE id = $11
+                WHERE id = :website_id
             """
         else:
             # Don't update processing_status - keep it as 'processing' for multi-page crawls
             query = """
                 UPDATE scraped_websites
-                SET gemini_file_name = $1,
-                    gemini_file_uri = $2,
-                    file_size = $3,
-                    char_count = $4,
-                    title = $5,
-                    description = $6,
-                    crawl_session_id = $7,
-                    pages_scraped = $8,
-                    metadata = $9::jsonb,
-                    processed_content_s3_key = $10,
+                SET gemini_file_name = :gemini_file_name,
+                    gemini_file_uri = :gemini_file_uri,
+                    file_size = :file_size,
+                    char_count = :char_count,
+                    title = :title,
+                    description = :description,
+                    crawl_session_id = :crawl_session_id,
+                    pages_scraped = :pages_scraped,
+                    metadata = :metadata::jsonb,
+                    processed_content_s3_key = :processed_content_s3_key,
                     updated_at = NOW()
-                WHERE id = $11
+                WHERE id = :website_id
             """
 
-        params = [
-            gemini_file_name,
-            gemini_file_uri,
-            file_size,
-            char_count,
-            title,
-            description,
-            crawl_session_id,
-            1,  # pages_scraped = 1 for single page
-            json.dumps(merged_metadata),
-            processed_content_s3_key,
-            website_id
-        ]
+        params = {
+            "gemini_file_name": gemini_file_name,
+            "gemini_file_uri": gemini_file_uri,
+            "file_size": file_size,
+            "char_count": char_count,
+            "title": title,
+            "description": description,
+            "crawl_session_id": crawl_session_id,
+            "pages_scraped": 1,
+            "metadata": json.dumps(merged_metadata),
+            "processed_content_s3_key": processed_content_s3_key,
+            "website_id": website_id
+        }
 
         try:
             logger.log_db_operation(query, params)
-            async with get_db_connection() as conn:
-                await conn.execute(query, *params)
+            async with get_db_session() as session:
+                await session.execute(text(query), params)
+                await session.commit()
                 if mark_completed:
                     logger.info(f"✅ [UPDATE_WEBSITE_PAGE_SUCCESS] Website record updated and marked as completed")
                 else:
@@ -553,90 +557,90 @@ class ScrapingDAO:
         """
         Check if all child pages of a parent website/sitemap are completed.
         If all children are completed, update parent status to 'completed'.
-        
+
         This is called after each child page is recorded to ensure parent
         status is updated as soon as all children finish processing.
-        
+
         Returns: True if parent was updated to completed, False otherwise
         """
         logger.info(f"🔍 [PARENT_CHECK] Checking completion status for parent {parent_id}")
-        
+
         try:
-            async with get_db_connection() as conn:
+            async with get_db_session() as session:
                 # Get parent record
-                parent = await conn.fetchrow(
-                    "SELECT id, processing_status FROM scraped_websites WHERE id = $1",
-                    parent_id
-                )
-                
+                parent = (await session.execute(text("SELECT id, processing_status FROM scraped_websites WHERE id = :parent_id"),
+                    {"parent_id": parent_id})).fetchone()
+
                 if not parent:
                     logger.warning(f"⚠️ [PARENT_CHECK] Parent {parent_id} not found")
                     return False
-                
+
                 # Skip if parent is already completed or failed
-                if parent['processing_status'] in ('completed', 'failed', 'cancelled', 'deleted'):
-                    logger.info(f"ℹ️ [PARENT_CHECK] Parent {parent_id} already in terminal state: {parent['processing_status']}")
+                if parent.processing_status in ('completed', 'failed', 'cancelled', 'deleted'):
+                    logger.info(f"ℹ️ [PARENT_CHECK] Parent {parent_id} already in terminal state: {parent.processing_status}")
                     return False
-                
+
                 # Count total children and completed children
-                stats = await conn.fetchrow("""
-                    SELECT 
+                stats = (await session.execute(text("""
+                    SELECT
                         COUNT(*) as total_children,
                         COUNT(*) FILTER (WHERE processing_status = 'completed') as completed_children,
                         COUNT(*) FILTER (WHERE processing_status IN ('failed', 'cancelled')) as failed_children
                     FROM scraped_websites
-                    WHERE parent_id = $1
-                """, parent_id)
-                
-                total = stats['total_children']
-                completed = stats['completed_children']
-                failed = stats['failed_children']
-                
+                    WHERE parent_id = :parent_id
+                """), {"parent_id": parent_id})).fetchone()
+
+                total = stats.total_children
+                completed = stats.completed_children
+                failed = stats.failed_children
+
                 logger.info(f"📊 [PARENT_CHECK] Parent {parent_id} children status:")
                 logger.info(f"   Total: {total}")
                 logger.info(f"   Completed: {completed}")
                 logger.info(f"   Failed: {failed}")
                 logger.info(f"   In Progress: {total - completed - failed}")
-                
+
                 # If no children yet, parent is still being processed
                 if total == 0:
                     logger.info(f"ℹ️ [PARENT_CHECK] Parent {parent_id} has no children yet")
                     return False
-                
+
                 # If all children are completed, mark parent as completed
                 if completed == total:
                     logger.info(f"✅ [PARENT_COMPLETE] All {total} children completed for parent {parent_id}")
-                    
+
                     # Update parent status to completed
-                    await conn.execute("""
+                    await session.execute(text("""
                         UPDATE scraped_websites
                         SET processing_status = 'completed',
                             updated_at = NOW()
-                        WHERE id = $1
-                    """, parent_id)
-                    
+                        WHERE id = :parent_id
+                    """), {"parent_id": parent_id})
+                    await session.commit()
+
                     logger.info(f"✅ [PARENT_UPDATE] Parent {parent_id} marked as completed")
                     return True
-                
+
                 # If all children are in terminal state (completed or failed), mark parent as completed
                 elif completed + failed == total:
                     logger.info(f"⚠️ [PARENT_PARTIAL] Parent {parent_id}: {completed} completed, {failed} failed out of {total}")
-                    
+
                     # Update parent status to completed (even with some failures)
-                    await conn.execute("""
+                    await session.execute(text("""
                         UPDATE scraped_websites
                         SET processing_status = 'completed',
                             updated_at = NOW()
-                        WHERE id = $1
-                    """, parent_id)
-                    
+                        WHERE id = :parent_id
+                    """), {"parent_id": parent_id})
+                    await session.commit()
+
                     logger.info(f"✅ [PARENT_UPDATE] Parent {parent_id} marked as completed (with {failed} failures)")
                     return True
-                
+
                 else:
                     logger.info(f"⏳ [PARENT_PENDING] Parent {parent_id} still has children in progress")
                     return False
-                    
+
         except Exception as e:
             logger.error(f"❌ [PARENT_CHECK_ERROR] Failed to check parent completion: {e}")
             import traceback

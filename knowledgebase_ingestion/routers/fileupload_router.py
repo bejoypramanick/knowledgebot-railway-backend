@@ -467,24 +467,27 @@ async def download_processed_content(file_id: str, request: Request = None):
         # Extract authenticated user information
         user_email, user_id = extract_user_from_request(request)
 
-        from shared.db import get_db_connection
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text
         from shared.s3_file_storage import s3_file_storage
 
-        async with get_db_connection() as conn:
+        async with get_db_session() as session:
             # Try file_uploads table first
             file_query = """
                 SELECT original_filename as name, processed_content_s3_key
-                FROM file_uploads WHERE id = $1
+                FROM file_uploads WHERE id = :id
             """
-            record = await conn.fetchrow(file_query, int(file_id))
+            result = await session.execute(text(file_query), {"id": int(file_id)})
+            record = result.mappings().first()
 
             # If not found, try scraped_websites table
             if not record:
                 website_query = """
                     SELECT original_url as name, processed_content_s3_key
-                    FROM scraped_websites WHERE id = $1
+                    FROM scraped_websites WHERE id = :id
                 """
-                record = await conn.fetchrow(website_query, int(file_id))
+                result = await session.execute(text(website_query), {"id": int(file_id)})
+                record = result.mappings().first()
 
             if not record:
                 raise HTTPException(status_code=404, detail="File or website not found")
