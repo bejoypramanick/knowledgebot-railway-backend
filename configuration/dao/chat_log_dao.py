@@ -455,7 +455,7 @@ class ChatLogDAO:
 
                 result_dict = {}
                 for r in rows:
-                    sid = r['session_id']
+                    sid = r['id']
                     # Ensure sid is converted to int (may be stored as text in database)
                     sid_int = int(sid) if isinstance(sid, str) else sid
                     if sid_int not in result_dict: result_dict[sid_int] = []
