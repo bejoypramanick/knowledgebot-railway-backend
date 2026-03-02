@@ -416,13 +416,17 @@ class ChatLogDAO:
 
     async def get_messages_for_sessions(self, session_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
         if not session_ids: return {}
-        query = """
+
+        # Build dynamic IN clause for asyncpg compatibility (avoid PostgreSQL array syntax)
+        placeholders = ",".join([f":id_{i}" for i in range(len(session_ids))])
+        params = {f"id_{i}": sid for i, sid in enumerate(session_ids)}
+
+        query = f"""
             SELECT * FROM chat_messages
-            WHERE session_id = ANY(:session_ids::int[])
+            WHERE session_id IN ({placeholders})
             ORDER BY created_at ASC
         """
         try:
-            params = {"session_ids": session_ids}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
@@ -439,6 +443,7 @@ class ChatLogDAO:
                 return result_dict
         except Exception as e:
             logger.log_db_query(query, params, error=e)
+            logger.error(f"Error fetching messages for sessions: {e}")
             return {}
 
     async def get_messages(self, session_db_id: int) -> List[Dict[str, Any]]:
@@ -560,16 +565,19 @@ class ChatLogDAO:
         if not session_ids:
             return {}
 
-        query = """
+        # Build dynamic IN clause for asyncpg compatibility
+        placeholders = ",".join([f":id_{i}" for i in range(len(session_ids))])
+        params = {f"id_{i}": sid for i, sid in enumerate(session_ids)}
+
+        query = f"""
             SELECT
                 session_id,
                 COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
                 COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
             FROM chat_feedback
-            WHERE session_id = ANY(:session_ids::text[])
+            WHERE session_id IN ({placeholders})
             GROUP BY session_id
         """
-        params = {"session_ids": session_ids}
 
         try:
             logger.log_db_operation(query, params)

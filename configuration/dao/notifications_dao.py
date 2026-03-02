@@ -101,16 +101,21 @@ class NotificationsDAO:
                 return 0
             async with get_db_session() as session:
                 int_ids = [int(nid) if isinstance(nid, str) else nid for nid in notification_ids]
-                query = """
+
+                # Build dynamic IN clause for asyncpg compatibility
+                placeholders = ",".join([f":id_{i}" for i in range(len(int_ids))])
+                params = {f"id_{i}": nid for i, nid in enumerate(int_ids)}
+
+                query = f"""
                     UPDATE notifications
                     SET read_at = NOW(), updated_at = NOW()
-                    WHERE id = ANY(:ids) AND read_at IS NULL
+                    WHERE id IN ({placeholders}) AND read_at IS NULL
                 """
-                logger.log_db_operation(query, int_ids)
-                result = await session.execute(text(query), {"ids": int_ids})
+                logger.log_db_operation(query, params)
+                result = await session.execute(text(query), params)
                 await session.commit()
                 count = result.rowcount if hasattr(result, 'rowcount') else 0
-                logger.log_db_query(query, {"ids": int_ids}, None)
+                logger.log_db_query(query, params, None)
                 return count
         except Exception as e:
             logger.log_db_query("mark_as_read", {"notification_ids": notification_ids}, error=e)
