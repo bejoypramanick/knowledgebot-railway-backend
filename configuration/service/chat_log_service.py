@@ -440,9 +440,11 @@ class ChatLogService:
         """Mark all messages in a session as read by human agent or admin."""
         try:
             # Verify user is agent or admin
+            logger.info(f"🔍 mark_session_messages_as_read: Checking roles for user_email: {user_email}")
             roles = await self.dao.check_user_role(user_email)
+            logger.info(f"🔍 mark_session_messages_as_read: Roles returned: {roles}")
             if not roles["is_agent"] and not roles["is_admin"]:
-                logger.warning(f"User {user_email} is not a human agent or admin")
+                logger.warning(f"🔍 User {user_email} is not a human agent or admin - roles: {roles}")
                 raise HTTPException(status_code=403, detail="Only human agents and admins can mark messages as read")
 
             session_db_id = await self.dao.get_session_db_id(session_id)

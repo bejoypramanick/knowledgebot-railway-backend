@@ -71,17 +71,25 @@ class ChatLogDAO:
         """
         try:
             params = {"email": email}
+            logger.info(f"🔍 DEBUG check_user_role: Checking email: {email}")
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
                 row = result.fetchone()
+                logger.info(f"🔍 DEBUG check_user_role: Query result row: {row}")
                 logger.log_db_query(query, params, row)
                 if row:
                     # Convert tuple/Row to dict for consistent access
                     row_dict = dict(row._mapping) if hasattr(row, '_mapping') else {'is_agent': row[0], 'is_admin': row[1]}
-                    return {"is_agent": bool(row_dict.get('is_agent', False)), "is_admin": bool(row_dict.get('is_admin', False))}
+                    logger.info(f"🔍 DEBUG check_user_role: Converted row_dict: {row_dict}")
+                    is_agent = bool(row_dict.get('is_agent', False))
+                    is_admin = bool(row_dict.get('is_admin', False))
+                    logger.info(f"🔍 DEBUG check_user_role: Final result - is_agent={is_agent}, is_admin={is_admin}")
+                    return {"is_agent": is_agent, "is_admin": is_admin}
+                logger.info(f"🔍 DEBUG check_user_role: No row returned, returning false roles")
                 return {"is_agent": False, "is_admin": False}
         except Exception as e:
+            logger.error(f"🔍 DEBUG check_user_role: Exception occurred: {type(e).__name__}: {e}")
             logger.log_db_query(query, {"email": email}, error=e)
             return {"is_agent": False, "is_admin": False}
 
