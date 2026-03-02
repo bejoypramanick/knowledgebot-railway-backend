@@ -456,9 +456,11 @@ class ChatLogDAO:
                 result_dict = {}
                 for r in rows:
                     sid = r['session_id']
-                    if sid not in result_dict: result_dict[sid] = []
-                    result_dict[sid].append(dict(r._mapping))
-                logger.info(f"📊 get_messages_for_sessions result: {len(result_dict)} sessions with messages")
+                    # Ensure sid is converted to int (may be stored as text in database)
+                    sid_int = int(sid) if isinstance(sid, str) else sid
+                    if sid_int not in result_dict: result_dict[sid_int] = []
+                    result_dict[sid_int].append(dict(r._mapping))
+                logger.info(f"📊 get_messages_for_sessions result: {len(result_dict)} sessions with messages, raw sids: {list(result_dict.keys())[:5]}")
                 return result_dict
         except Exception as e:
             logger.log_db_query(query, params, error=e)
