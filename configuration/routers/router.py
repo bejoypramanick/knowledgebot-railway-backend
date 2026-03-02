@@ -981,10 +981,16 @@ async def end_agent_session(session_id: str, request: Request):
         logger.error(f"Error ending agent session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/admin/chat-sessions/{session_id}/end-customer")
-async def end_customer_session(session_id: str, request: Request):
+@router.post("/admin/chat-sessions/end-customer")
+async def end_customer_session(request: Request):
     """End a chat session from the customer side"""
     try:
+        body = await request.json()
+        session_id = body.get("session_id")
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required in request body")
+
         user_email = request.headers.get("X-User-Email", "customer@example.com")
 
         await chat_log_service.end_customer_session(session_id, user_email)
@@ -1000,16 +1006,19 @@ async def end_customer_session(session_id: str, request: Request):
         logger.error(f"Error ending customer session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/admin/chat-sessions/{session_id}/transfer")
-async def transfer_session(session_id: str, request: Request):
+@router.post("/admin/chat-sessions/transfer")
+async def transfer_session(request: Request):
     """Transfer a chat session to another agent"""
     try:
         body = await request.json()
+        session_id = body.get("session_id")
         target_agent_email = body.get("target_agent_email")
         user_email = request.headers.get("X-User-Email", "agent@example.com")
 
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required in request body")
         if not target_agent_email:
-            raise HTTPException(status_code=400, detail="Target agent email is required")
+            raise HTTPException(status_code=400, detail="target_agent_email is required in request body")
 
         await chat_log_service.transfer_chat_session(session_id, user_email, target_agent_email)
 
