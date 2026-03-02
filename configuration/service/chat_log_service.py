@@ -127,13 +127,16 @@ class ChatLogService:
             return [], total_count
 
         session_db_ids = [int(s['id']) if isinstance(s['id'], str) else s['id'] for s in sessions_data]
-        logger.info(f"🔍 DEBUG: session_db_ids extracted: {session_db_ids[:5]}")
-        logger.info(f"🔍 DEBUG: session_db_ids types: {[type(x).__name__ for x in session_db_ids[:5]]}")
-        logger.info(f"🔍 Loading messages for {len(session_db_ids)} sessions: {session_db_ids[:5]}...")
-        messages_by_session = await self.dao.get_messages_for_sessions(session_db_ids)
-        logger.info(f"📨 DEBUG: messages_by_session keys: {list(messages_by_session.keys())[:5]}")
-        logger.info(f"📨 DEBUG: messages_by_session key types: {[type(k).__name__ for k in list(messages_by_session.keys())[:5]]}")
-        logger.info(f"📨 Loaded messages for {len(messages_by_session)} sessions, total messages: {sum(len(msgs) for msgs in messages_by_session.values())}")
+        logger.info(f"⚡ Fetching latest messages for {len(session_db_ids)} sessions (optimized)")
+
+        # Fetch only LATEST message per session (optimized for list view)
+        latest_messages = {}
+        for session_id in session_db_ids:
+            latest_msg = await self.dao.get_latest_message_for_session(session_id)
+            if latest_msg:
+                latest_messages[session_id] = latest_msg
+
+        logger.info(f"📨 Loaded latest messages for {len(latest_messages)} sessions")
 
         # Get all session IDs for batch feedback query (uses session_id UUID)
         session_ids = [s['session_id'] for s in sessions_data]
@@ -159,21 +162,20 @@ class ChatLogService:
             else:
                 metadata = {}
 
-            # Messages are keyed by numeric session_db_id (chat_messages.session_id = chat_sessions.id)
-            logger.debug(f"🔍 DEBUG: Looking up session_db_id={session_db_id} (type={type(session_db_id).__name__}) in messages_by_session with keys: {list(messages_by_session.keys())[:3]}")
-            session_messages = messages_by_session.get(session_db_id, [])
-            if not session_messages:
-                logger.warning(f"⚠️ WARNING: No messages found for session_db_id={session_db_id}, available keys: {list(messages_by_session.keys())}")
+            # Only include latest message in list view (full conversation loaded on click)
             from ..schemas.chat_log_schemas import ChatMessageResponse
-            messages = [
-                ChatMessageResponse(
-                    id=str(msg['id']),
-                    text=msg['content'],
-                    sender=msg['role'],
-                    timestamp=msg['created_at'].isoformat() if msg['created_at'] else datetime.utcnow().isoformat(),
-                    session_id=session_id
-                ) for msg in session_messages
-            ]
+            latest_msg = latest_messages.get(session_db_id)
+            messages = []
+            if latest_msg:
+                messages = [
+                    ChatMessageResponse(
+                        id=str(latest_msg['id']),
+                        text=latest_msg['content'],
+                        sender=latest_msg['role'],
+                        timestamp=latest_msg['created_at'].isoformat() if latest_msg['created_at'] else datetime.utcnow().isoformat(),
+                        session_id=session_id
+                    )
+                ]
 
             assigned_agent = metadata.get('assigned_agent')
             if not assigned_agent and 'agent_email' in session_row and session_row['agent_email']:
@@ -227,11 +229,11 @@ class ChatLogService:
         return formatted_sessions, total_count
 
     async def get_session_messages(self, session_id: int | str):
-        """Get all messages for a specific chat session using numeric ID only."""
+        """Get all messages for a specific chat session (full conversation on click)."""
         # Convert to int if string
         session_db_id = int(session_id) if isinstance(session_id, str) else session_id
 
-        return await self.dao.get_messages(session_db_id)
+        return await self.dao.get_session_messages(session_db_id)
 
     async def send_agent_message(self, session_id: int | str, agent_email: str, text: str):
         """Send a message from an agent to a customer using numeric ID only."""

@@ -469,6 +469,43 @@ class ChatLogDAO:
             logger.error(f"Error fetching messages: {e}")
             return {}
 
+    async def get_latest_message_for_session(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """Get the latest message for a single session."""
+        query = """
+            SELECT * FROM chat_messages
+            WHERE session_id = :session_id
+            ORDER BY created_at DESC
+            LIMIT 1
+        """
+        try:
+            params = {"session_id": session_id}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                return dict(row._mapping) if row else None
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return None
+
+    async def get_session_messages(self, session_id: int) -> List[Dict[str, Any]]:
+        """Get all messages for a single session (full conversation)."""
+        query = """
+            SELECT * FROM chat_messages
+            WHERE session_id = :session_id
+            ORDER BY created_at ASC
+        """
+        try:
+            params = {"session_id": session_id}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                rows = result.fetchall()
+                return [dict(row._mapping) for row in rows]
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return []
+
     async def create_message(self, session_db_id: int, role: str, content: str) -> int:
         query = """
             INSERT INTO chat_messages (session_id, role, content, created_at, updated_at)
