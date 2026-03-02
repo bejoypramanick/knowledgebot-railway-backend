@@ -223,6 +223,7 @@ class ChatLogService:
                 customer_feedback=session_feedback,
                 agent_feedback=session_feedback,
                 chat_type='human-handoff' if assigned_agent else 'ai-chat',
+                is_session_read=session_row.get('is_session_read', False),
                 messages=messages
             ))
         

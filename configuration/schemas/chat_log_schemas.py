@@ -27,6 +27,7 @@ class ChatSessionResponse(BaseModel):
     customer_feedback: Optional[str] = None
     agent_feedback: Optional[str] = None
     chat_type: str
+    is_session_read: Optional[bool] = False
     messages: List[ChatMessageResponse] = []
 
 class ChatSessionsResponse(BaseModel):
