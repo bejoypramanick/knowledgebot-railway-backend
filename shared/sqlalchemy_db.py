@@ -6,10 +6,10 @@ and database operations. This replaces custom asyncpg wrapper with industry-
 standard proven solution used by Fortune 500 companies.
 
 Features:
-- Robust connection pooling (QueuePool) with configurable limits
+- NullPool for async SQLAlchemy compatibility (no pooling overhead)
 - Automatic connection recycling and health checks
 - Built-in retry logic with exponential backoff
-- Connection timeouts and pool size management
+- Connection timeouts and pre-ping health verification
 - Comprehensive logging and monitoring
 - Works with both raw SQL and SQLAlchemy ORM
 
@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 from sqlalchemy import text
-from sqlalchemy.pool import QueuePool
+from sqlalchemy.pool import NullPool
 
 from shared.otel_logger import get_otel_logger
 
@@ -105,10 +105,7 @@ async def init_database(database_url: Optional[str] = None) -> None:
         _engine = create_async_engine(
             async_url,
             echo=False,
-            poolclass=QueuePool,
-            pool_size=pool_size,
-            max_overflow=pool_max_overflow,
-            pool_recycle=pool_recycle,
+            poolclass=NullPool,
             pool_pre_ping=True,  # Verify connections before using
             echo_pool=False,
             connect_args={
@@ -135,8 +132,7 @@ async def init_database(database_url: Optional[str] = None) -> None:
             await conn.execute(text("SELECT 1"))
 
         logger.info("✅ SQLAlchemy engine initialized successfully")
-        logger.info(f"📊 Pool config: min={pool_size}, max={pool_size + pool_max_overflow}, "
-                   f"recycle={pool_recycle}s, pre_ping=True")
+        logger.info(f"📊 Using NullPool for async compatibility (no connection pooling overhead)")
 
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
