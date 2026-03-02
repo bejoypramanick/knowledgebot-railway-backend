@@ -7,6 +7,7 @@ tenacity>=8.2.2
 # Database (common for most services)
 asyncpg>=0.29.0
 psycopg2-binary>=2.9.0
+sqlalchemy>=2.0.23
 # Additional requirements for file processing
 aiofiles>=24.1.0
 python-multipart>=0.0.9
