@@ -731,24 +731,9 @@ class ChatLogDAO:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def mark_message_as_read(self, message_id: int) -> bool:
-        """Mark a single message as read by human agent or admin."""
-        query = "UPDATE chat_messages SET is_message_read = true, updated_at = NOW() WHERE id = :message_id"
-        try:
-            params = {"message_id": message_id}
-            logger.log_db_operation(query, params)
-            async with get_db_session() as session:
-                await session.execute(text(query), params)
-                await session.commit()
-                logger.log_db_query(query, params, None)
-                return True
-        except Exception as e:
-            logger.log_db_query(query, params, error=e)
-            return False
-
-    async def mark_session_messages_as_read(self, session_id: int) -> bool:
-        """Mark all messages in a session as read by human agent or admin."""
-        query = "UPDATE chat_messages SET is_message_read = true, updated_at = NOW() WHERE session_id = :session_id"
+    async def mark_session_as_read(self, session_id: int) -> bool:
+        """Mark entire session as read (session-level, not per-message)."""
+        query = "UPDATE chat_sessions SET is_session_read = true, updated_at = NOW() WHERE id = :session_id"
         try:
             params = {"session_id": session_id}
             logger.log_db_operation(query, params)
@@ -756,25 +741,50 @@ class ChatLogDAO:
                 result = await session.execute(text(query), params)
                 await session.commit()
                 rows_updated = result.rowcount
-                logger.info(f"✅ Marked {rows_updated} messages as read for session {session_id}")
+                logger.info(f"✅ Marked session {session_id} as read (1 row updated)")
                 logger.log_db_query(query, params, f"Updated {rows_updated} rows")
                 return True
         except Exception as e:
             logger.log_db_query(query, params, error=e)
-            logger.error(f"❌ Failed to mark messages as read for session {session_id}: {e}")
+            logger.error(f"❌ Failed to mark session {session_id} as read: {e}")
             return False
 
-    async def get_unread_messages_count(self, session_id: int) -> int:
-        """Get count of unread messages in a session."""
-        query = "SELECT COUNT(*) as count FROM chat_messages WHERE session_id = :session_id AND is_message_read = false"
+    async def mark_session_as_unread(self, session_id: int) -> bool:
+        """Mark entire session as unread (session-level)."""
+        query = "UPDATE chat_sessions SET is_session_read = false, updated_at = NOW() WHERE id = :session_id"
         try:
             params = {"session_id": session_id}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
-                count = result.scalar()
-                logger.log_db_query(query, params, count)
-                return count or 0
+                await session.commit()
+                rows_updated = result.rowcount
+                logger.info(f"✅ Marked session {session_id} as unread (1 row updated)")
+                logger.log_db_query(query, params, f"Updated {rows_updated} rows")
+                return True
         except Exception as e:
             logger.log_db_query(query, params, error=e)
-            return 0
+            logger.error(f"❌ Failed to mark session {session_id} as unread: {e}")
+            return False
+
+    async def is_session_read(self, session_id: int) -> bool:
+        """Check if session is read."""
+        query = "SELECT is_session_read FROM chat_sessions WHERE id = :session_id"
+        try:
+            params = {"session_id": session_id}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                if row:
+                    is_read = row[0]
+                    # Handle both Python bool and PostgreSQL text bool representation
+                    if isinstance(is_read, bool):
+                        return is_read
+                    if isinstance(is_read, str):
+                        return is_read.lower() in ('true', 't', '1', 'yes')
+                    return bool(is_read)
+                return False
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return False

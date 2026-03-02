@@ -1081,16 +1081,14 @@ async def delete_chat_session(session_id: str, request: Request):
 
 @router.post("/admin/chat-sessions/{session_id}/mark-read")
 async def mark_session_as_read(session_id: str, user: dict = Depends(get_current_user)):
-    """Mark all messages in a session as read"""
+    """Mark entire session as read (session-level)"""
     try:
         user_email = user.get("email")
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
 
-        logger.info(f"🔍 Mark-read endpoint received session_id={session_id} (type={type(session_id).__name__}) from user {user_email}")
-        await chat_log_service.mark_session_messages_as_read(session_id, user_email)
-
-        logger.info(f"Marked session {session_id} as read by {user_email}")
+        logger.info(f"🔍 Mark-read endpoint: session_id={session_id}, user={user_email}")
+        await chat_log_service.mark_session_as_read(session_id, user_email)
 
         return {
             "success": True,
@@ -1105,15 +1103,14 @@ async def mark_session_as_read(session_id: str, user: dict = Depends(get_current
 
 @router.post("/admin/chat-sessions/{session_id}/mark-unread")
 async def mark_session_as_unread(session_id: str, user: dict = Depends(get_current_user)):
-    """Mark all messages in a session as unread"""
+    """Mark entire session as unread (session-level)"""
     try:
         user_email = user.get("email")
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
 
-        await chat_log_service.mark_session_messages_as_unread(session_id)
-
-        logger.info(f"Marked session {session_id} as unread by {user_email}")
+        logger.info(f"🔍 Mark-unread endpoint: session_id={session_id}, user={user_email}")
+        await chat_log_service.mark_session_as_unread(session_id, user_email)
 
         return {
             "success": True,
