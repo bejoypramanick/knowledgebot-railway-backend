@@ -124,28 +124,17 @@ class ChatLogDAO:
             return 0
 
     async def get_session_db_id(self, session_id: str) -> Optional[int]:
-        """Get database ID for a session (by UUID string or numeric ID)."""
+        """Get database ID for a session (by numeric ID or UUID string)."""
         try:
-            # Try parsing as numeric ID first
-            try:
-                numeric_id = int(session_id)
-                # If it's numeric, try looking up by id column
+            # If input is numeric, look up by id column
+            if session_id.isdigit():
                 query = "SELECT id FROM chat_sessions WHERE id = :id"
-                params = {"id": numeric_id}
-                logger.log_db_operation(query, params)
-                async with get_db_session() as session:
-                    result = await session.execute(text(query), params)
-                    row = result.fetchone()
-                    logger.log_db_query(query, params, row)
-                    if row:
-                        return row[0]
-            except ValueError:
-                # Not a number, continue to UUID lookup
-                pass
+                params = {"id": int(session_id)}
+            else:
+                # Otherwise, look up by session_id (UUID string)
+                query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
+                params = {"session_id": session_id}
 
-            # Try looking up by session_id (UUID string)
-            query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
-            params = {"session_id": session_id}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
