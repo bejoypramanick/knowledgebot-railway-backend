@@ -98,6 +98,9 @@ token_usage_service = TokenUsageService()
 admin_session_dao = AdminSessionDAO()
 admin_action_dao = AdminActionDAO()
 
+# Initialize SSE broadcast function in chat_log_service
+from ..service.chat_log_service import broadcast_event_to_agent as chat_broadcast_event_to_agent
+
 # =================================
 # SSE EVENT BROADCASTING SYSTEM
 # =================================
@@ -115,6 +118,10 @@ async def broadcast_event_to_agent(agent_email: str, event_data: Dict[str, Any])
                 logger.info(f"📤 Broadcasted event to agent {agent_email}: {event_data.get('type')}")
             except Exception as e:
                 logger.error(f"Error broadcasting event to {agent_email}: {e}")
+
+# Set the broadcast function reference in chat_log_service
+from ..service.chat_log_service import broadcast_event_to_agent as chat_broadcast_event_ref
+chat_broadcast_event_ref = broadcast_event_to_agent
 
 async def broadcast_event_to_all_agents(event_data: Dict[str, Any]):
     """Broadcast an event to all connected agents"""
