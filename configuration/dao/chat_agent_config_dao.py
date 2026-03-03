@@ -15,14 +15,13 @@ class ChatAgentConfigDAO:
         pass  # No connection parameter - DAO manages its own connection
 
     async def get_widget_config(self) -> Optional[Dict[str, Any]]:
-        """Get complete widget configuration including metadata and all icon/position fields."""
+        """Get complete widget configuration including metadata."""
         query = text("""
             SELECT
                 display_name, initial_message, auto_show_duration, keep_showing_suggested,
-                suggested_messages, theme, primary_color, use_primary_for_header, chat_bubble_color, align_bubble,
-                display_chatbot, profile_picture_url, chat_icon_url, header_icon_url,
-                profile_picture_filename, chat_icon_filename, profile_zoom, chat_icon_zoom, header_icon_zoom,
-                profile_position, chat_icon_position, header_icon_position,
+                theme, primary_color, use_primary_for_header, chat_bubble_color, align_bubble,
+                display_chatbot, profile_picture_url, chat_icon_url, profile_picture_filename,
+                chat_icon_filename, profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
                 hil_enabled, response_policy, hil_disabled_message, created_at, updated_at
             FROM widget_configuration
             WHERE id = 1
@@ -97,10 +96,9 @@ class ChatAgentConfigDAO:
                     # Update existing row with provided fields
                     valid_fields = {
                         'display_name', 'initial_message', 'auto_show_duration', 'keep_showing_suggested',
-                        'suggested_messages', 'theme', 'primary_color', 'use_primary_for_header', 'chat_bubble_color', 'align_bubble',
-                        'display_chatbot', 'profile_picture_url', 'chat_icon_url', 'header_icon_url',
-                        'profile_picture_filename', 'chat_icon_filename', 'profile_zoom', 'chat_icon_zoom', 'header_icon_zoom',
-                        'profile_position', 'chat_icon_position', 'header_icon_position',
+                        'theme', 'primary_color', 'use_primary_for_header', 'chat_bubble_color', 'align_bubble',
+                        'display_chatbot', 'profile_picture_url', 'chat_icon_url', 'profile_picture_filename',
+                        'chat_icon_filename', 'profile_zoom', 'chat_icon_zoom', 'profile_position', 'chat_icon_position',
                         'hil_enabled', 'response_policy', 'hil_disabled_message'
                     }
 
@@ -111,14 +109,13 @@ class ChatAgentConfigDAO:
                         # Add updated_at timestamp
                         update_data['updated_at'] = text('NOW()')
 
-                        # Build simple UPDATE query with all widget config fields
+                        # Build simple UPDATE query
                         query = text("""
                             UPDATE widget_configuration
                             SET display_name = :display_name,
                                 initial_message = :initial_message,
                                 auto_show_duration = :auto_show_duration,
                                 keep_showing_suggested = :keep_showing_suggested,
-                                suggested_messages = :suggested_messages,
                                 theme = :theme,
                                 primary_color = :primary_color,
                                 use_primary_for_header = :use_primary_for_header,
@@ -127,15 +124,12 @@ class ChatAgentConfigDAO:
                                 display_chatbot = :display_chatbot,
                                 profile_picture_url = :profile_picture_url,
                                 chat_icon_url = :chat_icon_url,
-                                header_icon_url = :header_icon_url,
                                 profile_picture_filename = :profile_picture_filename,
                                 chat_icon_filename = :chat_icon_filename,
                                 profile_zoom = :profile_zoom,
                                 chat_icon_zoom = :chat_icon_zoom,
-                                header_icon_zoom = :header_icon_zoom,
                                 profile_position = :profile_position,
                                 chat_icon_position = :chat_icon_position,
-                                header_icon_position = :header_icon_position,
                                 hil_enabled = :hil_enabled,
                                 response_policy = :response_policy,
                                 hil_disabled_message = :hil_disabled_message,
