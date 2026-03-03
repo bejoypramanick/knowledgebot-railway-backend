@@ -32,7 +32,7 @@ class ChatAgentConfigDAO:
             logger.log_db_query(str(query), None, error=e)
             raise  # ← Raise exception instead of silently returning []
 
-    async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'text'):
+    async def upsert_security_setting(self, name: str, value: str, setting_type: str = 'string'):
         """Upsert security setting."""
         query = text("""
             INSERT INTO security_settings (setting_name, setting_value, setting_type)
@@ -472,7 +472,7 @@ class ChatAgentConfigDAO:
             await self.upsert_security_setting(
                 'hil_disabled_message',
                 hil_disabled_message,
-                'text'
+                'string'
             )
 
             # 7. Update active persona
