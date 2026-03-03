@@ -370,18 +370,18 @@ class ChatLogService:
         return True
 
     async def request_human_agent(self, session_id: int | str):
-        """Request human agent connection using numeric ID only."""
+        """Request human agent connection - route to available human agent, fallback to admin."""
         hil_enabled = await self.dao.get_hil_enabled()
 
         if not hil_enabled:
             raise HTTPException(status_code=503, detail="Human agent support is currently disabled")
 
-        # Convert to int if string
+        # Convert to int if string (numeric ID from chat_sessions.id)
         session_db_id = int(session_id) if isinstance(session_id, str) else session_id
 
         assigned_agent = await self.assign_chat_with_load_balancing(str(session_db_id))
         if not assigned_agent:
-            raise HTTPException(status_code=503, detail="No available agents to assign chat")
+            raise HTTPException(status_code=503, detail="No available agents or admins to assign chat")
         return assigned_agent
 
     async def delete_session_messages(self, session_id: int | str) -> bool:
