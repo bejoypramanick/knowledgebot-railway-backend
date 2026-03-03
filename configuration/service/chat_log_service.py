@@ -376,8 +376,20 @@ class ChatLogService:
         if not hil_enabled:
             raise HTTPException(status_code=503, detail="Human agent support is currently disabled")
 
-        # Convert to int if string (numeric ID from chat_sessions.id)
-        session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+        # Get numeric session ID from chat_sessions table
+        session_db_id = None
+
+        if isinstance(session_id, str):
+            # Try to parse as integer first (numeric ID from chat_sessions.id)
+            try:
+                session_db_id = int(session_id)
+            except ValueError:
+                # If not numeric, it's a UUID session_id, look it up in database
+                session_db_id = await self.dao.get_session_db_id_by_uuid(session_id)
+                if not session_db_id:
+                    raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        else:
+            session_db_id = session_id
 
         assigned_agent = await self.assign_chat_with_load_balancing(str(session_db_id))
         if not assigned_agent:
