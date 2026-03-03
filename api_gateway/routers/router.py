@@ -136,7 +136,7 @@ async def login_user(request: Request):
 
 @router.post("/users/switch-role")
 async def switch_user_role(request: Request):
-    """Switch the user's current role for UI navigation"""
+    """Switch the user's role - remove old role and add new role (user can only have ONE role)"""
     try:
         # Get uid from query parameter
         uid = request.query_params.get("uid")
@@ -145,56 +145,109 @@ async def switch_user_role(request: Request):
 
         # Get role from request body
         body = await request.json()
-        role = body.get("role")
-        if not role:
+        new_role = body.get("role")
+        if not new_role:
             raise HTTPException(status_code=400, detail="Missing role in request body")
 
         # Validate role is one of the allowed values
         valid_roles = ["admin", "agent", "customer"]  # Backend API expects these
-        if role not in valid_roles:
+        if new_role not in valid_roles:
             raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {valid_roles}")
 
-        logger.info(f"🔄 Switching user {uid} to role: {role}")
+        logger.info(f"🔄 Switching user {uid} to role: {new_role}")
 
         try:
-            # Import database session
+            # Import database session and text
             from sqlalchemy import text
             from shared.sqlalchemy_db import get_db_session
 
-            # Update user's selected_role in database
-            query = text("""
-                UPDATE users
-                SET selected_role = :role, updated_at = NOW()
-                WHERE id = :user_id
-            """)
-
-            params = {
-                "user_id": int(uid),  # Convert uid to integer for database
-                "role": role
-            }
+            user_id = int(uid)
 
             async with get_db_session() as session:
-                result = await session.execute(query, params)
+                # Step 1: Get user's current roles
+                get_roles_query = text("""
+                    SELECT r.role_name, r.id as role_id
+                    FROM user_role_mapping urm
+                    JOIN roles r ON urm.role_id = r.id
+                    WHERE urm.user_id = :user_id AND urm.is_active = true
+                """)
+                result = await session.execute(get_roles_query, {"user_id": user_id})
+                current_roles = result.fetchall()
+
+                if not current_roles:
+                    logger.warning(f"⚠️ User {uid} has no current roles")
+                    raise HTTPException(status_code=404, detail="User has no current roles")
+
+                logger.info(f"📋 User {uid} current roles: {[r['role_name'] for r in current_roles]}")
+
+                # Step 2: Remove all current roles
+                for current_role in current_roles:
+                    remove_query = text("""
+                        UPDATE user_role_mapping
+                        SET is_active = false, updated_at = NOW()
+                        WHERE user_id = :user_id AND role_id = :role_id
+                    """)
+                    await session.execute(remove_query, {
+                        "user_id": user_id,
+                        "role_id": current_role['role_id']
+                    })
+                    logger.info(f"✂️ Removed role: {current_role['role_name']}")
+
+                # Step 3: Get the ID of the new role
+                get_new_role_id = text("""
+                    SELECT id FROM roles WHERE role_name = :role_name
+                """)
+                result = await session.execute(get_new_role_id, {"role_name": new_role})
+                new_role_row = result.fetchone()
+
+                if not new_role_row:
+                    logger.error(f"❌ Role '{new_role}' not found in database")
+                    raise HTTPException(status_code=400, detail=f"Role '{new_role}' not found")
+
+                new_role_id = new_role_row['id']
+
+                # Step 4: Add new role
+                add_query = text("""
+                    INSERT INTO user_role_mapping (user_id, role_id, is_active, created_at, updated_at)
+                    VALUES (:user_id, :role_id, true, NOW(), NOW())
+                    ON CONFLICT (user_id, role_id) DO UPDATE
+                    SET is_active = true, updated_at = NOW()
+                """)
+                await session.execute(add_query, {
+                    "user_id": user_id,
+                    "role_id": new_role_id
+                })
+                logger.info(f"➕ Added new role: {new_role}")
+
+                # Step 5: Update user's selected_role
+                update_user_query = text("""
+                    UPDATE users
+                    SET selected_role = :role, updated_at = NOW()
+                    WHERE id = :user_id
+                """)
+                await session.execute(update_user_query, {
+                    "user_id": user_id,
+                    "role": new_role
+                })
+                logger.info(f"👤 Updated user selected_role to: {new_role}")
+
+                # Commit all changes
                 await session.commit()
 
-                if result.rowcount == 0:
-                    logger.warning(f"⚠️ User {uid} not found in database")
-                    raise HTTPException(status_code=404, detail=f"User not found")
-
-            logger.info(f"✅ Successfully switched user {uid} to role: {role}")
+            logger.info(f"✅ Successfully switched user {uid} to role: {new_role}")
 
             return {
                 "success": True,
-                "message": f"Role switched to {role}",
+                "message": f"Role switched to {new_role}",
                 "uid": uid,
-                "role": role
+                "role": new_role
             }
 
         except HTTPException:
             raise
         except Exception as db_error:
             logger.error(f"❌ Error updating database: {db_error}")
-            raise HTTPException(status_code=500, detail=f"Error updating user role: {str(db_error)}")
+            raise HTTPException(status_code=500, detail=f"Error switching role: {str(db_error)}")
 
     except HTTPException:
         raise
