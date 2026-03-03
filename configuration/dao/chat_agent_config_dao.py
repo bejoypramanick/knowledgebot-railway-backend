@@ -93,7 +93,7 @@ class ChatAgentConfigDAO:
                     logger.log_db_query(str(insert_query), insert_params, "INSERT 1")
                     await session.commit()
                 else:
-                    # Update existing row with all provided fields
+                    # Update existing row with provided fields
                     valid_fields = {
                         'display_name', 'initial_message', 'auto_show_duration', 'keep_showing_suggested',
                         'theme', 'primary_color', 'use_primary_for_header', 'chat_bubble_color', 'align_bubble',
@@ -102,16 +102,41 @@ class ChatAgentConfigDAO:
                         'hil_enabled', 'response_policy', 'hil_disabled_message'
                     }
 
+                    # Filter to only valid fields
                     update_data = {k: v for k, v in kwargs.items() if k in valid_fields}
 
                     if update_data:
-                        set_clauses = ", ".join([f"{k} = :{k}" for k in update_data.keys()])
+                        # Add updated_at timestamp
                         update_data['updated_at'] = text('NOW()')
-                        query = text(f"""
+
+                        # Build simple UPDATE query
+                        query = text("""
                             UPDATE widget_configuration
-                            SET {set_clauses}, updated_at = NOW()
+                            SET display_name = :display_name,
+                                initial_message = :initial_message,
+                                auto_show_duration = :auto_show_duration,
+                                keep_showing_suggested = :keep_showing_suggested,
+                                theme = :theme,
+                                primary_color = :primary_color,
+                                use_primary_for_header = :use_primary_for_header,
+                                chat_bubble_color = :chat_bubble_color,
+                                align_bubble = :align_bubble,
+                                display_chatbot = :display_chatbot,
+                                profile_picture_url = :profile_picture_url,
+                                chat_icon_url = :chat_icon_url,
+                                profile_picture_filename = :profile_picture_filename,
+                                chat_icon_filename = :chat_icon_filename,
+                                profile_zoom = :profile_zoom,
+                                chat_icon_zoom = :chat_icon_zoom,
+                                profile_position = :profile_position,
+                                chat_icon_position = :chat_icon_position,
+                                hil_enabled = :hil_enabled,
+                                response_policy = :response_policy,
+                                hil_disabled_message = :hil_disabled_message,
+                                updated_at = NOW()
                             WHERE id = 1
                         """)
+
                         logger.log_db_operation(str(query), update_data)
                         await session.execute(query, update_data)
                         logger.log_db_query(str(query), update_data, "UPDATE 1")
