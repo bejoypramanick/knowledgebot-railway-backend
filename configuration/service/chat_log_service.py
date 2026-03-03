@@ -348,25 +348,13 @@ class ChatLogService:
 
     async def end_customer_session(self, session_id: int | str, user_email: str):
         """End a chat session from the customer side."""
-        # Get numeric session ID from chat_sessions table
-        session_db_id = None
-
-        if isinstance(session_id, str):
-            # Try to parse as integer first (numeric ID from chat_sessions.id)
-            try:
-                session_db_id = int(session_id)
-            except ValueError:
-                # If not numeric, it's a UUID session_id, look it up in database
-                session_db_id = await self.dao.get_session_db_id_by_uuid(session_id)
-                if not session_db_id:
-                    raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-        else:
-            session_db_id = session_id
+        # Convert to int if string
+        session_db_id = int(session_id) if isinstance(session_id, str) else session_id
 
         # Verify session exists
         session = await self.dao.get_session_by_id_with_messages(session_db_id)
         if not session:
-            raise HTTPException(status_code=404, detail=f"Session not found: {session_db_id}")
+            raise HTTPException(status_code=404, detail="Session not found")
 
         await self.dao.archive_session(session_db_id, 'closed')
 
