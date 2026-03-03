@@ -387,17 +387,24 @@ class PerformanceDAO:
 
             async with get_db_session() as session:
                 results = await session.execute(text(query % days))
+                # Get column names from the query result
+                column_names = results.keys()
                 results = results.fetchall()
                 logger.info(f"📊 Retrieved {len(results)} uptime records from database")
 
             # Organize data by month and service, including healthcheck metadata
             month_data_map = {}
             for row in results:
-                month = dict(row._mapping) if hasattr(row, '_mapping') else row
-                month = month['month'] if isinstance(month, dict) else row['month']
-                service = row['service_name']
-                uptime = float(row['uptime_percentage']) if row['uptime_percentage'] else 0
-                healthcheck_count = row['total_checks']
+                # Convert tuple to dict using column names
+                if hasattr(row, '_mapping'):
+                    row_dict = dict(row._mapping)
+                else:
+                    row_dict = dict(zip(column_names, row))
+
+                month = row_dict['month']
+                service = row_dict['service_name']
+                uptime = float(row_dict['uptime_percentage']) if row_dict['uptime_percentage'] else 0
+                healthcheck_count = row_dict['total_checks']
 
                 # Normalize month to start of month for consistent key matching
                 if month:
