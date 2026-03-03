@@ -184,3 +184,35 @@ class ConfigurationService:
         except Exception as e:
             logger.error(f"Error getting admin emails: {e}")
             raise
+
+    async def add_human_agent(self, email: str) -> bool:
+        """Add a human agent"""
+        try:
+            return await self._chat_agent_dao.add_human_agent(email)
+        except Exception as e:
+            logger.error(f"Error adding human agent: {e}")
+            raise
+
+    async def remove_human_agent(self, email: str) -> bool:
+        """Remove a human agent"""
+        try:
+            return await self._chat_agent_dao.remove_human_agent(email)
+        except Exception as e:
+            logger.error(f"Error removing human agent: {e}")
+            raise
+
+    async def add_admin(self, email: str) -> bool:
+        """Add an admin"""
+        try:
+            return await self._chat_agent_dao.add_admin(email)
+        except Exception as e:
+            logger.error(f"Error adding admin: {e}")
+            raise
+
+    async def remove_admin(self, email: str) -> bool:
+        """Remove an admin"""
+        try:
+            return await self._chat_agent_dao.remove_admin(email)
+        except Exception as e:
+            logger.error(f"Error removing admin: {e}")
+            raise

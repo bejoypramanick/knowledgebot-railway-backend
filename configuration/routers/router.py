@@ -563,7 +563,7 @@ async def get_admin_users():
 async def add_admin_user(request_data: AdminManagementRequest, request: Request):
     """Add a new admin user"""
     try:
-        result = await auth_service.add_admin(request_data.email)
+        result = await config_service.add_admin(request_data.email)
         return {"success": True, "message": "Admin user added successfully"}
     except Exception as e:
         logger.error(f"Error adding admin user: {e}")
@@ -573,7 +573,7 @@ async def add_admin_user(request_data: AdminManagementRequest, request: Request)
 async def remove_admin_user(email: str, request: Request):
     """Remove an admin user"""
     try:
-        result = await auth_service.remove_admin(email, "admin@example.com")
+        result = await config_service.remove_admin(email)
         return {"success": True, "message": "Admin user removed successfully"}
     except Exception as e:
         logger.error(f"Error removing admin user: {e}")
@@ -583,7 +583,7 @@ async def remove_admin_user(email: str, request: Request):
 async def get_human_agents():
     """Get all human agents"""
     try:
-        agents = await auth_service.get_human_agents()
+        agents = await config_service.get_human_agents()
         return {"success": True, "data": agents}
     except Exception as e:
         logger.error(f"Error getting human agents: {e}")
@@ -598,7 +598,7 @@ async def get_human_agents_admin():
 async def add_human_agent(request_data: AdminManagementRequest, request: Request):
     """Add a new human agent"""
     try:
-        result = await auth_service.add_human_agent(request_data.email)
+        result = await config_service.add_human_agent(request_data.email)
         return {"success": True, "message": "Human agent added successfully"}
     except Exception as e:
         logger.error(f"Error adding human agent: {e}")
@@ -608,7 +608,7 @@ async def add_human_agent(request_data: AdminManagementRequest, request: Request
 async def remove_human_agent(email: str, request: Request):
     """Remove a human agent"""
     try:
-        result = await auth_service.remove_human_agent(email, "admin@example.com")
+        result = await config_service.remove_human_agent(email)
         return {"success": True, "message": "Human agent removed successfully"}
     except Exception as e:
         logger.error(f"Error removing human agent: {e}")

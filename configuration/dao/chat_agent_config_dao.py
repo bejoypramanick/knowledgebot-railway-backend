@@ -184,3 +184,149 @@ class ChatAgentConfigDAO:
         except Exception as e:
             logger.log_db_query("update_persona", {"persona_name": persona_name, "system_prompt": system_prompt, "is_active": is_active}, error=e)
             raise
+
+    async def add_human_agent(self, email: str) -> bool:
+        """Add a human agent by email. Creates user if doesn't exist."""
+        try:
+            # First ensure user exists
+            check_query = text("SELECT id FROM users WHERE email = :email")
+            async with get_db_session() as session:
+                result = await session.execute(check_query, {"email": email})
+                user_row = result.fetchone()
+                user_id = user_row.id if user_row else None
+
+                # Create user if doesn't exist
+                if not user_id:
+                    create_query = text("""
+                        INSERT INTO users (email, created_at, updated_at)
+                        VALUES (:email, NOW(), NOW())
+                        RETURNING id
+                    """)
+                    logger.log_db_operation(str(create_query), {"email": email})
+                    result = await session.execute(create_query, {"email": email})
+                    user_row = result.fetchone()
+                    user_id = user_row.id if user_row else None
+                    logger.log_db_query(str(create_query), {"email": email}, user_row)
+
+                # Get role_id for human_agent
+                role_query = text("SELECT id FROM roles WHERE role_name = 'human_agent'")
+                logger.log_db_operation(str(role_query))
+                result = await session.execute(role_query)
+                role_row = result.fetchone()
+
+                if not role_row:
+                    raise ValueError("human_agent role not found in database")
+
+                role_id = role_row.id
+                logger.log_db_query(str(role_query), None, role_row)
+
+                # Add user role mapping
+                mapping_query = text("""
+                    INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
+                    VALUES (:user_id, :role_id, NOW(), NOW())
+                    ON CONFLICT (user_id, role_id) DO NOTHING
+                    RETURNING user_role_id
+                """)
+                params = {"user_id": user_id, "role_id": role_id}
+                logger.log_db_operation(str(mapping_query), params)
+                result = await session.execute(mapping_query, params)
+                mapping_row = result.fetchone()
+                logger.log_db_query(str(mapping_query), params, mapping_row)
+
+                await session.commit()
+                return mapping_row is not None
+        except Exception as e:
+            logger.log_db_query("add_human_agent", {"email": email}, error=e)
+            raise
+
+    async def remove_human_agent(self, email: str) -> bool:
+        """Remove human_agent role from a user."""
+        try:
+            query = text("""
+                DELETE FROM user_role_mapping
+                WHERE user_id = (SELECT id FROM users WHERE email = :email)
+                AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')
+            """)
+            params = {"email": email}
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                logger.log_db_query(str(query), params, f"DELETE {result.rowcount}")
+                await session.commit()
+                return result.rowcount > 0
+        except Exception as e:
+            logger.log_db_query("remove_human_agent", {"email": email}, error=e)
+            raise
+
+    async def add_admin(self, email: str) -> bool:
+        """Add an admin by email. Creates user if doesn't exist."""
+        try:
+            # First ensure user exists
+            check_query = text("SELECT id FROM users WHERE email = :email")
+            async with get_db_session() as session:
+                result = await session.execute(check_query, {"email": email})
+                user_row = result.fetchone()
+                user_id = user_row.id if user_row else None
+
+                # Create user if doesn't exist
+                if not user_id:
+                    create_query = text("""
+                        INSERT INTO users (email, created_at, updated_at)
+                        VALUES (:email, NOW(), NOW())
+                        RETURNING id
+                    """)
+                    logger.log_db_operation(str(create_query), {"email": email})
+                    result = await session.execute(create_query, {"email": email})
+                    user_row = result.fetchone()
+                    user_id = user_row.id if user_row else None
+                    logger.log_db_query(str(create_query), {"email": email}, user_row)
+
+                # Get role_id for admin
+                role_query = text("SELECT id FROM roles WHERE role_name = 'admin'")
+                logger.log_db_operation(str(role_query))
+                result = await session.execute(role_query)
+                role_row = result.fetchone()
+
+                if not role_row:
+                    raise ValueError("admin role not found in database")
+
+                role_id = role_row.id
+                logger.log_db_query(str(role_query), None, role_row)
+
+                # Add user role mapping
+                mapping_query = text("""
+                    INSERT INTO user_role_mapping (user_id, role_id, created_at, updated_at)
+                    VALUES (:user_id, :role_id, NOW(), NOW())
+                    ON CONFLICT (user_id, role_id) DO NOTHING
+                    RETURNING user_role_id
+                """)
+                params = {"user_id": user_id, "role_id": role_id}
+                logger.log_db_operation(str(mapping_query), params)
+                result = await session.execute(mapping_query, params)
+                mapping_row = result.fetchone()
+                logger.log_db_query(str(mapping_query), params, mapping_row)
+
+                await session.commit()
+                return mapping_row is not None
+        except Exception as e:
+            logger.log_db_query("add_admin", {"email": email}, error=e)
+            raise
+
+    async def remove_admin(self, email: str) -> bool:
+        """Remove admin role from a user."""
+        try:
+            query = text("""
+                DELETE FROM user_role_mapping
+                WHERE user_id = (SELECT id FROM users WHERE email = :email)
+                AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')
+            """)
+            params = {"email": email}
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                logger.log_db_query(str(query), params, f"DELETE {result.rowcount}")
+                await session.commit()
+                return result.rowcount > 0
+        except Exception as e:
+            logger.log_db_query("remove_admin", {"email": email}, error=e)
+            raise
