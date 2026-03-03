@@ -247,23 +247,25 @@ class WidgetConfigDAO:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def save_widget_config(self, hil_enabled: bool, response_policy: int,
+    async def save_widget_config(self, hil_enabled: bool,
                                  hil_disabled_message: str, config_data: Optional[Dict[str, Any]] = None) -> bool:
         """
-        DAO method that persists complete widget configuration.
+        DAO method that persists widget configuration.
 
         This is the master DAO method for widget configuration persistence.
         It handles:
-        1. Updating HIL metadata (hil_enabled, response_policy, hil_disabled_message)
+        1. Updating HIL metadata (hil_enabled, hil_disabled_message)
         2. Optionally updating other widget config fields if provided
+
+        Note: response_policy (15-300) is handled by ChatAgentConfigDAO.save_chat_agent_config()
+              since it's a chat agent behavior setting, not a widget appearance setting.
         """
         try:
             logger.info(f"💾 [DAO] Persisting widget config")
 
-            # Build base config with HIL fields
+            # Build base config with HIL fields (response_policy is now in chat agent config)
             hil_config = {
                 "hil_enabled": hil_enabled,
-                "response_policy": response_policy,
                 "hil_disabled_message": hil_disabled_message
             }
 

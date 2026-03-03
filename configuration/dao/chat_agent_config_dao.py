@@ -413,7 +413,8 @@ class ChatAgentConfigDAO:
             raise
 
     async def save_chat_agent_config(self, admin_emails: List[str], human_agents: List[str],
-                                     response_timeout: int, persona_name: str, system_prompt: str,
+                                     response_timeout: int, response_policy: int,
+                                     persona_name: str, system_prompt: str,
                                      llm_tokens: Dict[str, Dict[str, int]]) -> bool:
         """
         DAO method that persists complete chat agent configuration.
@@ -423,9 +424,10 @@ class ChatAgentConfigDAO:
         It handles:
         1. Syncing admin emails
         2. Syncing human agent emails
-        3. Updating response timeout
-        4. Updating active persona
-        5. Updating LLM provider tokens
+        3. Updating response timeout (security setting)
+        4. Updating response policy (HIL setting - 15-300 seconds)
+        5. Updating active persona
+        6. Updating LLM provider tokens
         """
         try:
             logger.info(f"💾 [DAO] Persisting chat agent config")
@@ -438,7 +440,7 @@ class ChatAgentConfigDAO:
             logger.info(f"🤖 [DAO] Syncing {len(human_agents)} human agent emails")
             await self.sync_human_agent_emails(human_agents)
 
-            # 3. Update response timeout
+            # 3. Update response timeout (security setting)
             logger.info(f"⏱️ [DAO] Updating response_timeout to {response_timeout}")
             await self.upsert_security_setting(
                 'response_timeout',
@@ -446,11 +448,19 @@ class ChatAgentConfigDAO:
                 'integer'
             )
 
-            # 4. Update active persona
+            # 4. Update response policy (HIL policy - 15-300 seconds)
+            logger.info(f"📋 [DAO] Updating response_policy to {response_policy}")
+            await self.upsert_security_setting(
+                'response_policy',
+                str(response_policy),
+                'integer'
+            )
+
+            # 5. Update active persona
             logger.info(f"🎭 [DAO] Updating persona: {persona_name}")
             await self.update_persona(persona_name, system_prompt, is_active=True)
 
-            # 5. Update LLM provider tokens
+            # 6. Update LLM provider tokens
             logger.info(f"🔑 [DAO] Updating {len(llm_tokens)} LLM providers")
             for provider, tokens_data in llm_tokens.items():
                 limit = tokens_data.get('limit', 20000)
