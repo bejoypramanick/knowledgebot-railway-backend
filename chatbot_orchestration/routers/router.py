@@ -140,9 +140,6 @@ async def get_or_create_session_numeric_id(uuid_session_id: str):
         Only returns numeric ID. UUID is NOT used after session creation.
     """
     try:
-        if not uuid_session_id or not uuid_session_id.strip():
-            raise HTTPException(status_code=400, detail="uuid_session_id is required")
-
         # Use SessionPersistenceDAO to get or create the session
         session_dao = SessionPersistenceDAO()
         numeric_id = await session_dao.get_or_create_session(uuid_session_id)
