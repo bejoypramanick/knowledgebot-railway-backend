@@ -136,7 +136,7 @@ async def login_user(request: Request):
 
 @router.post("/users/switch-role")
 async def switch_user_role(request: Request):
-    """Switch the user's role - remove old role and add new role (user can only have ONE role)"""
+    """Switch the user's role by removing old roles and adding new role (users can have only ONE active role)"""
     try:
         # Get uid from query parameter
         uid = request.query_params.get("uid")
@@ -218,18 +218,6 @@ async def switch_user_role(request: Request):
                     "role_id": new_role_id
                 })
                 logger.info(f"➕ Added new role: {new_role}")
-
-                # Step 5: Update user's selected_role
-                update_user_query = text("""
-                    UPDATE users
-                    SET selected_role = :role, updated_at = NOW()
-                    WHERE id = :user_id
-                """)
-                await session.execute(update_user_query, {
-                    "user_id": user_id,
-                    "role": new_role
-                })
-                logger.info(f"👤 Updated user selected_role to: {new_role}")
 
                 # Commit all changes
                 await session.commit()
