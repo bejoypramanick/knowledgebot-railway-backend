@@ -79,21 +79,16 @@ class ConfigurationService:
                 logger.warning("⚠️ Empty configuration received")
                 return False
 
-            # Extract widget config (HIL metadata)
-            hil_enabled = False
-            hil_disabled_message = ""
+            # Extract widget config (appearance only - HIL moved to chat agent config)
             additional_widget_config = {}
-
-            if 'metadata' in config:
-                metadata = config['metadata']
-                hil_enabled = metadata.get('hil_enabled', False)
-                hil_disabled_message = metadata.get('hil_disabled_message', '')
 
             # Extract chat agent config
             admin_emails = config.get('admin_emails', [])
             human_agents = config.get('human_agents', [])
             response_timeout = 30
             response_policy = 30  # HIL response policy (15-300)
+            hil_enabled = False
+            hil_disabled_message = ""
             persona_name = 'KnowledgeBot'
             system_prompt = ''
             llm_tokens = {}
@@ -104,6 +99,8 @@ class ConfigurationService:
             if 'metadata' in config:
                 metadata = config['metadata']
                 response_policy = metadata.get('response_policy', 30)  # HIL response policy (15-300)
+                hil_enabled = metadata.get('hil_enabled', False)  # HIL enabled (chat agent setting)
+                hil_disabled_message = metadata.get('hil_disabled_message', '')  # HIL message (chat agent setting)
 
             if 'persona' in config:
                 persona = config['persona']
@@ -116,21 +113,21 @@ class ConfigurationService:
             # Delegate to DAO methods (all persistence happens in DAOs)
             logger.info(f"[SERVICE] Delegating to DAO layer for persistence")
 
-            # Persist widget config via DAO (without response_policy - now in chat agent)
-            if hil_enabled or hil_disabled_message or additional_widget_config:
+            # Persist widget config via DAO (appearance settings only)
+            if additional_widget_config:
                 await self._widget_dao.save_widget_config(
-                    hil_enabled=hil_enabled,
-                    hil_disabled_message=hil_disabled_message,
                     config_data=additional_widget_config if additional_widget_config else None
                 )
 
-            # Persist chat agent config via DAO (includes response_policy)
-            if admin_emails or human_agents or response_timeout or response_policy or persona_name or llm_tokens:
+            # Persist chat agent config via DAO (includes HIL settings and response_policy)
+            if admin_emails or human_agents or response_timeout or response_policy or hil_enabled or hil_disabled_message or persona_name or llm_tokens:
                 await self._chat_agent_dao.save_chat_agent_config(
                     admin_emails=admin_emails,
                     human_agents=human_agents,
                     response_timeout=response_timeout,
                     response_policy=response_policy,
+                    hil_enabled=hil_enabled,
+                    hil_disabled_message=hil_disabled_message,
                     persona_name=persona_name,
                     system_prompt=system_prompt,
                     llm_tokens=llm_tokens

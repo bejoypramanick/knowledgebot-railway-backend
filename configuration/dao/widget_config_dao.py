@@ -247,34 +247,28 @@ class WidgetConfigDAO:
             logger.log_db_query(query, params, error=e)
             raise
 
-    async def save_widget_config(self, hil_enabled: bool,
-                                 hil_disabled_message: str, config_data: Optional[Dict[str, Any]] = None) -> bool:
+    async def save_widget_config(self, config_data: Optional[Dict[str, Any]] = None) -> bool:
         """
         DAO method that persists widget configuration.
 
         This is the master DAO method for widget configuration persistence.
         It handles:
-        1. Updating HIL metadata (hil_enabled, hil_disabled_message)
-        2. Optionally updating other widget config fields if provided
+        1. Updating widget appearance fields (display name, colors, themes, etc.)
 
-        Note: response_policy (15-300) is handled by ChatAgentConfigDAO.save_chat_agent_config()
-              since it's a chat agent behavior setting, not a widget appearance setting.
+        Note: HIL settings (hil_enabled, hil_disabled_message, response_policy) are handled by
+              ChatAgentConfigDAO.save_chat_agent_config() since they are chat agent behavior settings,
+              not widget appearance settings.
         """
         try:
             logger.info(f"💾 [DAO] Persisting widget config")
 
-            # Build base config with HIL fields (response_policy is now in chat agent config)
-            hil_config = {
-                "hil_enabled": hil_enabled,
-                "hil_disabled_message": hil_disabled_message
-            }
+            # Build config with widget appearance fields only
+            widget_config = config_data if config_data else {}
 
-            # Merge with any additional config data provided
-            if config_data:
-                hil_config.update(config_data)
-
-            logger.info(f"📝 [DAO] Updating widget config with {len(hil_config)} fields")
-            await self.update_widget_config(hil_config)
+            # If there are config fields to update, call update method
+            if widget_config:
+                logger.info(f"📝 [DAO] Updating widget config with {len(widget_config)} fields")
+                await self.update_widget_config(widget_config)
 
             logger.info(f"✅ [DAO] Widget config persisted successfully")
             return True

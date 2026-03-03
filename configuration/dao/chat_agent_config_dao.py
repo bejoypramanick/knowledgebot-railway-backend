@@ -414,6 +414,7 @@ class ChatAgentConfigDAO:
 
     async def save_chat_agent_config(self, admin_emails: List[str], human_agents: List[str],
                                      response_timeout: int, response_policy: int,
+                                     hil_enabled: bool, hil_disabled_message: str,
                                      persona_name: str, system_prompt: str,
                                      llm_tokens: Dict[str, Dict[str, int]]) -> bool:
         """
@@ -425,9 +426,11 @@ class ChatAgentConfigDAO:
         1. Syncing admin emails
         2. Syncing human agent emails
         3. Updating response timeout (security setting)
-        4. Updating response policy (HIL setting - 15-300 seconds)
-        5. Updating active persona
-        6. Updating LLM provider tokens
+        4. Updating response policy (HIL policy - 15-300 seconds)
+        5. Updating HIL enabled/disabled status
+        6. Updating HIL disabled message
+        7. Updating active persona
+        8. Updating LLM provider tokens
         """
         try:
             logger.info(f"💾 [DAO] Persisting chat agent config")
@@ -456,11 +459,27 @@ class ChatAgentConfigDAO:
                 'integer'
             )
 
-            # 5. Update active persona
+            # 5. Update HIL enabled status
+            logger.info(f"🎛️ [DAO] Updating hil_enabled to {hil_enabled}")
+            await self.upsert_security_setting(
+                'hil_enabled',
+                str(hil_enabled),
+                'boolean'
+            )
+
+            # 6. Update HIL disabled message
+            logger.info(f"💬 [DAO] Updating hil_disabled_message")
+            await self.upsert_security_setting(
+                'hil_disabled_message',
+                hil_disabled_message,
+                'text'
+            )
+
+            # 7. Update active persona
             logger.info(f"🎭 [DAO] Updating persona: {persona_name}")
             await self.update_persona(persona_name, system_prompt, is_active=True)
 
-            # 6. Update LLM provider tokens
+            # 8. Update LLM provider tokens
             logger.info(f"🔑 [DAO] Updating {len(llm_tokens)} LLM providers")
             for provider, tokens_data in llm_tokens.items():
                 limit = tokens_data.get('limit', 20000)
