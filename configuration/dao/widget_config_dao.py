@@ -246,3 +246,37 @@ class WidgetConfigDAO:
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
+
+    async def save_widget_config(self, hil_enabled: bool, response_policy: int,
+                                 hil_disabled_message: str, config_data: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        DAO method that persists complete widget configuration.
+
+        This is the master DAO method for widget configuration persistence.
+        It handles:
+        1. Updating HIL metadata (hil_enabled, response_policy, hil_disabled_message)
+        2. Optionally updating other widget config fields if provided
+        """
+        try:
+            logger.info(f"💾 [DAO] Persisting widget config")
+
+            # Build base config with HIL fields
+            hil_config = {
+                "hil_enabled": hil_enabled,
+                "response_policy": response_policy,
+                "hil_disabled_message": hil_disabled_message
+            }
+
+            # Merge with any additional config data provided
+            if config_data:
+                hil_config.update(config_data)
+
+            logger.info(f"📝 [DAO] Updating widget config with {len(hil_config)} fields")
+            await self.update_widget_config(hil_config)
+
+            logger.info(f"✅ [DAO] Widget config persisted successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ [DAO] Error persisting widget config: {e}")
+            raise

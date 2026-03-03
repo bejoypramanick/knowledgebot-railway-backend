@@ -411,3 +411,55 @@ class ChatAgentConfigDAO:
         except Exception as e:
             logger.log_db_query("update_llm_provider_tokens", {"provider": provider, "limit": limit, "used": used}, error=e)
             raise
+
+    async def save_chat_agent_config(self, admin_emails: List[str], human_agents: List[str],
+                                     response_timeout: int, persona_name: str, system_prompt: str,
+                                     llm_tokens: Dict[str, Dict[str, int]]) -> bool:
+        """
+        DAO method that persists complete chat agent configuration.
+        Orchestrates all chat agent related updates in one operation.
+
+        This is the master DAO method for chat agent configuration persistence.
+        It handles:
+        1. Syncing admin emails
+        2. Syncing human agent emails
+        3. Updating response timeout
+        4. Updating active persona
+        5. Updating LLM provider tokens
+        """
+        try:
+            logger.info(f"💾 [DAO] Persisting chat agent config")
+
+            # 1. Sync admin emails
+            logger.info(f"👥 [DAO] Syncing {len(admin_emails)} admin emails")
+            await self.sync_admin_emails(admin_emails)
+
+            # 2. Sync human agent emails
+            logger.info(f"🤖 [DAO] Syncing {len(human_agents)} human agent emails")
+            await self.sync_human_agent_emails(human_agents)
+
+            # 3. Update response timeout
+            logger.info(f"⏱️ [DAO] Updating response_timeout to {response_timeout}")
+            await self.upsert_security_setting(
+                'response_timeout',
+                str(response_timeout),
+                'integer'
+            )
+
+            # 4. Update active persona
+            logger.info(f"🎭 [DAO] Updating persona: {persona_name}")
+            await self.update_persona(persona_name, system_prompt, is_active=True)
+
+            # 5. Update LLM provider tokens
+            logger.info(f"🔑 [DAO] Updating {len(llm_tokens)} LLM providers")
+            for provider, tokens_data in llm_tokens.items():
+                limit = tokens_data.get('limit', 20000)
+                used = tokens_data.get('used', 0)
+                await self.update_llm_provider_tokens(provider, limit, used)
+
+            logger.info(f"✅ [DAO] Chat agent config persisted successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ [DAO] Error persisting chat agent config: {e}")
+            raise
