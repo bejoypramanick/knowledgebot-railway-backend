@@ -157,16 +157,29 @@ async def switch_user_role(request: Request):
         logger.info(f"🔄 Switching user {uid} to role: {role}")
 
         try:
-            # Import Firebase admin to update user document
-            from firebase_admin import firestore
+            # Import database session
+            from sqlalchemy import text
+            from shared.sqlalchemy_db import get_db_session
 
-            db = firestore.client()
+            # Update user's selected_role in database
+            query = text("""
+                UPDATE users
+                SET selected_role = :role, updated_at = NOW()
+                WHERE id = :user_id
+            """)
 
-            # Update user's selectedRole in Firestore
-            db.collection('users').document(uid).update({
-                'selectedRole': role,
-                'lastRoleSwitch': firestore.SERVER_TIMESTAMP
-            })
+            params = {
+                "user_id": int(uid),  # Convert uid to integer for database
+                "role": role
+            }
+
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                await session.commit()
+
+                if result.rowcount == 0:
+                    logger.warning(f"⚠️ User {uid} not found in database")
+                    raise HTTPException(status_code=404, detail=f"User not found")
 
             logger.info(f"✅ Successfully switched user {uid} to role: {role}")
 
@@ -177,8 +190,10 @@ async def switch_user_role(request: Request):
                 "role": role
             }
 
+        except HTTPException:
+            raise
         except Exception as db_error:
-            logger.error(f"❌ Error updating Firestore: {db_error}")
+            logger.error(f"❌ Error updating database: {db_error}")
             raise HTTPException(status_code=500, detail=f"Error updating user role: {str(db_error)}")
 
     except HTTPException:
