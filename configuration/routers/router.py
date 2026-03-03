@@ -1043,11 +1043,17 @@ async def transfer_session(request: Request):
         logger.error(f"Error transferring session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/admin/chat-sessions/{session_id}/request-agent")
-async def request_human_agent(session_id: str):
+@router.post("/admin/chat-sessions/request-agent")
+async def request_human_agent(request: Request):
     """Request a human agent for a chat session"""
     try:
-        assigned_agent = await chat_log_service.request_human_agent(session_id)
+        body = await request.json()
+        session_id = body.get("session_id")  # Accept numeric ID from chat_sessions.id
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id (numeric id from chat_sessions) is required in request body")
+
+        assigned_agent = await chat_log_service.request_human_agent(str(session_id))
 
         return {
             "success": True,
