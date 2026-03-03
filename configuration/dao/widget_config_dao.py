@@ -25,7 +25,8 @@ class WidgetConfigDAO:
                 use_primary_for_header, chat_bubble_color, align_bubble,
                 display_chatbot, profile_picture_url, chat_icon_url,
                 profile_picture_filename, chat_icon_filename,
-                profile_zoom, chat_icon_zoom, profile_position, chat_icon_position
+                profile_zoom, chat_icon_zoom, profile_position, chat_icon_position,
+                hil_enabled, response_policy, hil_disabled_message
             FROM widget_configuration
             WHERE id = 1
         """
@@ -39,7 +40,7 @@ class WidgetConfigDAO:
                 return dict(row._mapping) if row else None
         except Exception as e:
             logger.log_db_query(query, None, error=e)
-            return None
+            raise  # Raise exception instead of silently returning None
 
     async def get_suggested_messages(self) -> List[str]:
         """Get suggested messages for the widget."""

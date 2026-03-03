@@ -21,8 +21,8 @@ class ConfigurationService:
     async def get_chatAgent_config(self) -> Dict[str, Any]:
         """Get complete chat agent configuration"""
         try:
-            # Get all data via unified widget configuration call
-            widget_config = await self._chat_agent_dao.get_widget_config()
+            # Get all data from appropriate DAOs
+            widget_config = await self._widget_dao.get_widget_config()
             security_rows = await self._chat_agent_dao.get_security_settings()
             llm_rows = await self._chat_agent_dao.get_llm_providers()
             persona = await self._chat_agent_dao.get_active_persona()
@@ -35,7 +35,7 @@ class ConfigurationService:
                 if row['setting_name'] == 'response_timeout':
                     security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
 
-            # Build metadata from widget config (HIL settings)
+            # Build metadata from widget config (HIL settings stored there)
             metadata = {}
             if widget_config:
                 metadata = {
