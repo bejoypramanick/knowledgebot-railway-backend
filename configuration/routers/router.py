@@ -1045,14 +1045,22 @@ async def transfer_session(request: Request):
 
 @router.post("/admin/chat-sessions/request-agent")
 async def request_human_agent(request: Request):
-    """Request a human agent for a chat session"""
+    """Request a human agent for a chat session
+
+    Accepts session_id in request body. MUST be numeric ID from chat_sessions.id table.
+    No UUID fallback allowed.
+
+    Request Body:
+        session_id: Numeric ID from chat_sessions.id (e.g., "269")
+    """
     try:
         body = await request.json()
-        session_id = body.get("session_id")  # Accept numeric ID from chat_sessions.id
+        session_id = body.get("session_id")
 
         if not session_id:
-            raise HTTPException(status_code=400, detail="session_id (numeric id from chat_sessions) is required in request body")
+            raise HTTPException(status_code=400, detail="session_id (numeric id from chat_sessions.id) is required in request body")
 
+        # Pass to service - only accepts numeric ID
         assigned_agent = await chat_log_service.request_human_agent(str(session_id))
 
         return {

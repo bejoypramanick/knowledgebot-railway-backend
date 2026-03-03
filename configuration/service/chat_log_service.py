@@ -382,7 +382,7 @@ class ChatLogService:
         return True
 
     async def request_human_agent(self, session_id: int | str):
-        """Request human agent connection - route to available human agent, fallback to admin."""
+        """Request human agent connection - only accepts numeric ID from chat_sessions.id"""
         hil_enabled = await self.dao.get_hil_enabled()
 
         if not hil_enabled:
@@ -392,14 +392,11 @@ class ChatLogService:
         session_db_id = None
 
         if isinstance(session_id, str):
-            # Try to parse as integer first (numeric ID from chat_sessions.id)
+            # Must be numeric ID from chat_sessions.id - no UUID fallback
             try:
                 session_db_id = int(session_id)
             except ValueError:
-                # If not numeric, it's a UUID session_id, look it up in database
-                session_db_id = await self.dao.get_session_db_id_by_uuid(session_id)
-                if not session_db_id:
-                    raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+                raise HTTPException(status_code=400, detail=f"Invalid session_id format. Must be numeric ID from chat_sessions table, got: {session_id}")
         else:
             session_db_id = session_id
 
