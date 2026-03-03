@@ -31,7 +31,7 @@ class ChatLogDAO:
                 result = await session.execute(text(query))
                 rows = result.fetchall()
                 logger.log_db_query(query, None, rows)
-                return [r['email'] for r in rows]
+                return [dict(r._mapping)['email'] for r in rows] if rows else []  # Use mapping for dictionary access
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return []
@@ -51,7 +51,7 @@ class ChatLogDAO:
                 result = await session.execute(text(query))
                 rows = result.fetchall()
                 logger.log_db_query(query, None, rows)
-                return [r['email'] for r in rows]
+                return [dict(r._mapping)['email'] for r in rows] if rows else []  # Use mapping for dictionary access
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             return []
