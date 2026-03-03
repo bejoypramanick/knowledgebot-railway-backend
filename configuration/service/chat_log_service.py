@@ -37,13 +37,15 @@ class ChatLogService:
     async def assign_chat_to_agent(self, session_id: str, agent_email: str):
         """Assign chat to specific agent"""
         try:
-            logger.info(f"Chat session {session_id} assigned to agent {agent_email}")
+            # Convert session_id to integer for DAO operations
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+            logger.info(f"Chat session {session_db_id} assigned to agent {agent_email}")
             assignee_type = "agent"
-            existing = await self.dao.get_session_assignment(session_id)
+            existing = await self.dao.get_session_assignment(session_db_id)
             if existing:
-                await self.dao.update_session_assignment(session_id, agent_email, assignee_type, status='active')
+                await self.dao.update_session_assignment(session_db_id, agent_email, assignee_type, status='active')
             else:
-                await self.dao.create_session_assignment(session_id, agent_email, assignee_type, status='active')
+                await self.dao.create_session_assignment(session_db_id, agent_email, assignee_type, status='active')
         except Exception as e:
             logger.error(f"Error assigning chat to agent: {e}", exc_info=True)
             raise
