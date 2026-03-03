@@ -134,6 +134,59 @@ async def login_user(request: Request):
         logger.error(f"Error during login: {e}")
         raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
 
+@router.post("/users/switch-role")
+async def switch_user_role(request: Request):
+    """Switch the user's current role for UI navigation"""
+    try:
+        # Get uid from query parameter
+        uid = request.query_params.get("uid")
+        if not uid:
+            raise HTTPException(status_code=400, detail="Missing uid parameter")
+
+        # Get role from request body
+        body = await request.json()
+        role = body.get("role")
+        if not role:
+            raise HTTPException(status_code=400, detail="Missing role in request body")
+
+        # Validate role is one of the allowed values
+        valid_roles = ["admin", "agent", "customer"]  # Backend API expects these
+        if role not in valid_roles:
+            raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {valid_roles}")
+
+        logger.info(f"🔄 Switching user {uid} to role: {role}")
+
+        try:
+            # Import Firebase admin to update user document
+            from firebase_admin import firestore
+
+            db = firestore.client()
+
+            # Update user's selectedRole in Firestore
+            db.collection('users').document(uid).update({
+                'selectedRole': role,
+                'lastRoleSwitch': firestore.SERVER_TIMESTAMP
+            })
+
+            logger.info(f"✅ Successfully switched user {uid} to role: {role}")
+
+            return {
+                "success": True,
+                "message": f"Role switched to {role}",
+                "uid": uid,
+                "role": role
+            }
+
+        except Exception as db_error:
+            logger.error(f"❌ Error updating Firestore: {db_error}")
+            raise HTTPException(status_code=500, detail=f"Error updating user role: {str(db_error)}")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error switching user role: {e}")
+        raise HTTPException(status_code=500, detail=f"Error switching role: {str(e)}")
+
 # =================================
 # PUBLIC CHAT ENDPOINTS (No Authentication Required)
 # =================================
