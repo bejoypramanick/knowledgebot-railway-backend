@@ -330,3 +330,84 @@ class ChatAgentConfigDAO:
         except Exception as e:
             logger.log_db_query("remove_admin", {"email": email}, error=e)
             raise
+
+    async def sync_admin_emails(self, desired_emails: List[str]) -> None:
+        """
+        Sync admin emails: add missing, remove extra.
+        Compares desired state with current state and makes only necessary changes.
+        """
+        try:
+            # Get current admins from database
+            current_admins = await self.get_admins()
+
+            # Calculate diffs
+            desired_set = set(desired_emails)
+            current_set = set(current_admins)
+            to_add = desired_set - current_set
+            to_remove = current_set - desired_set
+
+            logger.info(f"📊 Admin sync: current={len(current_set)}, desired={len(desired_set)}, to_add={len(to_add)}, to_remove={len(to_remove)}")
+
+            # Apply changes
+            for email in to_add:
+                logger.info(f"➕ Adding admin: {email}")
+                await self.add_admin(email)
+
+            for email in to_remove:
+                logger.info(f"➖ Removing admin: {email}")
+                await self.remove_admin(email)
+
+            logger.info(f"✅ Admin sync completed: added {len(to_add)}, removed {len(to_remove)}")
+        except Exception as e:
+            logger.error(f"Error syncing admin emails: {e}")
+            raise
+
+    async def sync_human_agent_emails(self, desired_emails: List[str]) -> None:
+        """
+        Sync human agent emails: add missing, remove extra.
+        Compares desired state with current state and makes only necessary changes.
+        """
+        try:
+            # Get current human agents from database
+            current_agents = await self.get_human_agents()
+
+            # Calculate diffs
+            desired_set = set(desired_emails)
+            current_set = set(current_agents)
+            to_add = desired_set - current_set
+            to_remove = current_set - desired_set
+
+            logger.info(f"📊 Human agent sync: current={len(current_set)}, desired={len(desired_set)}, to_add={len(to_add)}, to_remove={len(to_remove)}")
+
+            # Apply changes
+            for email in to_add:
+                logger.info(f"➕ Adding human agent: {email}")
+                await self.add_human_agent(email)
+
+            for email in to_remove:
+                logger.info(f"➖ Removing human agent: {email}")
+                await self.remove_human_agent(email)
+
+            logger.info(f"✅ Human agent sync completed: added {len(to_add)}, removed {len(to_remove)}")
+        except Exception as e:
+            logger.error(f"Error syncing human agent emails: {e}")
+            raise
+
+    async def update_llm_provider_tokens(self, provider: str, limit: int, used: int) -> bool:
+        """Update token limits and usage for an LLM provider"""
+        try:
+            query = text("""
+                UPDATE llm_providers
+                SET token_limit = :limit, token_used = :used, updated_at = NOW()
+                WHERE provider_name = :provider
+            """)
+            params = {"provider": provider, "limit": limit, "used": used}
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                logger.log_db_query(str(query), params, f"UPDATE {result.rowcount}")
+                await session.commit()
+                return result.rowcount > 0
+        except Exception as e:
+            logger.log_db_query("update_llm_provider_tokens", {"provider": provider, "limit": limit, "used": used}, error=e)
+            raise

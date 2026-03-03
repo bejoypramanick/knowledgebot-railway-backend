@@ -65,22 +65,76 @@ class ConfigurationService:
             raise
 
     async def save_chatbot_config(self, config: Dict[str, Any]) -> bool:
-        """Save complete chatbot configuration by delegating to appropriate services"""
+        """
+        Save complete chatbot configuration with batch persistence.
+        Updates all configuration components atomically where possible.
+        """
         try:
             logger.info(f"💾 Saving chatbot config with fields: {list(config.keys())}")
-
-            # Note: Individual config updates are handled by their respective services:
-            # - metadata updates via ChatAgentConfigService
-            # - widget config via WidgetConfigService
-            # - persona updates via ChatAgentConfigService
-            # - security settings via ChatAgentConfigService
-            # This endpoint validates that all required config was received successfully.
 
             if not config:
                 logger.warning("⚠️ Empty configuration received")
                 return False
 
-            logger.info(f"✅ Configuration validated successfully")
+            # 1. Update HIL metadata in widget_configuration table
+            if 'metadata' in config:
+                metadata = config['metadata']
+                hil_config = {}
+                if 'hil_enabled' in metadata:
+                    hil_config['hil_enabled'] = metadata.get('hil_enabled')
+                if 'response_policy' in metadata:
+                    hil_config['response_policy'] = metadata.get('response_policy')
+                if 'hil_disabled_message' in metadata:
+                    hil_config['hil_disabled_message'] = metadata.get('hil_disabled_message')
+
+                if hil_config:
+                    logger.info(f"📝 Updating HIL metadata: {hil_config}")
+                    await self._widget_dao.update_widget_config(hil_config)
+
+            # 2. Sync admin emails (batch operation)
+            if 'admin_emails' in config and isinstance(config['admin_emails'], list):
+                logger.info(f"👥 Syncing {len(config['admin_emails'])} admin emails")
+                await self._chat_agent_dao.sync_admin_emails(config['admin_emails'])
+
+            # 3. Sync human agent emails (batch operation)
+            if 'human_agents' in config and isinstance(config['human_agents'], list):
+                logger.info(f"🤖 Syncing {len(config['human_agents'])} human agent emails")
+                await self._chat_agent_dao.sync_human_agent_emails(config['human_agents'])
+
+            # 4. Update security settings
+            if 'security' in config:
+                security = config['security']
+                if 'response_timeout' in security:
+                    logger.info(f"⏱️ Updating response_timeout to {security['response_timeout']}")
+                    await self._chat_agent_dao.upsert_security_setting(
+                        'response_timeout',
+                        str(security['response_timeout']),
+                        'integer'
+                    )
+
+            # 5. Update persona configuration
+            if 'persona' in config:
+                persona = config['persona']
+                persona_name = persona.get('selected_persona', 'KnowledgeBot')
+                system_prompt = persona.get('system_prompt', '')
+                logger.info(f"🎭 Updating persona: {persona_name}")
+                await self._chat_agent_dao.update_persona(
+                    persona_name,
+                    system_prompt,
+                    is_active=True
+                )
+
+            # 6. Update LLM token limits (if provided)
+            if 'llm_tokens' in config and isinstance(config['llm_tokens'], dict):
+                llm_tokens = config['llm_tokens']
+                for provider, tokens_data in llm_tokens.items():
+                    if isinstance(tokens_data, dict):
+                        limit = tokens_data.get('limit', 20000)
+                        used = tokens_data.get('used', 0)
+                        logger.info(f"🔑 Updating {provider} tokens: limit={limit}, used={used}")
+                        await self._chat_agent_dao.update_llm_provider_tokens(provider, limit, used)
+
+            logger.info(f"✅ Chatbot configuration saved successfully")
             return True
 
         except Exception as e:

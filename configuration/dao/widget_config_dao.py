@@ -62,59 +62,73 @@ class WidgetConfigDAO:
             return []
 
     async def update_widget_config(self, config_data: Dict[str, Any]):
-        """Update widget configuration."""
-        query = """
-            UPDATE widget_configuration
-            SET
-                display_name = :display_name,
-                initial_message = :initial_message,
-                auto_show_duration = :auto_show_duration,
-                keep_showing_suggested = :keep_showing_suggested,
-                theme = :theme,
-                primary_color = :primary_color,
-                use_primary_for_header = :use_primary_for_header,
-                chat_bubble_color = :chat_bubble_color,
-                align_bubble = :align_bubble,
-                display_chatbot = :display_chatbot,
-                profile_picture_url = :profile_picture_url,
-                chat_icon_url = :chat_icon_url,
-                profile_picture_filename = :profile_picture_filename,
-                chat_icon_filename = :chat_icon_filename,
-                profile_zoom = :profile_zoom,
-                chat_icon_zoom = :chat_icon_zoom,
-                profile_position = :profile_position,
-                chat_icon_position = :chat_icon_position,
-                updated_at = NOW()
-            WHERE id = 1
         """
-        params = {
-            "display_name": config_data["display_name"],
-            "initial_message": config_data["initial_message"],
-            "auto_show_duration": config_data.get("auto_show_duration", 4),
-            "keep_showing_suggested": config_data.get("keep_showing_suggested", True),
-            "theme": config_data.get("theme", "light"),
-            "primary_color": config_data.get("primary_color", "#3b82f6"),
-            "use_primary_for_header": config_data.get("use_primary_for_header", True),
-            "chat_bubble_color": config_data.get("chat_bubble_color", "#3b82f6"),
-            "align_bubble": config_data.get("align_bubble", "right"),
-            "display_chatbot": config_data.get("display_chatbot", True),
-            "profile_picture_url": config_data.get("profile_picture_url"),
-            "chat_icon_url": config_data.get("chat_icon_url"),
-            "profile_picture_filename": config_data.get("profile_picture_filename"),
-            "chat_icon_filename": config_data.get("chat_icon_filename"),
-            "profile_zoom": config_data.get("profile_zoom", 1.0),
-            "chat_icon_zoom": config_data.get("chat_icon_zoom", 1.0),
-            "profile_position": json.dumps(config_data.get("profile_position", {"x": 0, "y": 0})),
-            "chat_icon_position": json.dumps(config_data.get("chat_icon_position", {"x": 0, "y": 0}))
-        }
+        Update widget configuration with support for partial updates.
+        Only updates fields that are provided in config_data.
+        """
         try:
+            # Build SET clause dynamically - only include provided fields
+            set_clauses = []
+            params = {}
+
+            # Standard widget config fields
+            standard_fields = {
+                "display_name": str,
+                "initial_message": str,
+                "auto_show_duration": int,
+                "keep_showing_suggested": bool,
+                "theme": str,
+                "primary_color": str,
+                "use_primary_for_header": bool,
+                "chat_bubble_color": str,
+                "align_bubble": str,
+                "display_chatbot": bool,
+                "profile_picture_url": str,
+                "chat_icon_url": str,
+                "profile_picture_filename": str,
+                "chat_icon_filename": str,
+                "profile_zoom": float,
+                "chat_icon_zoom": float,
+                "profile_position": dict,
+                "chat_icon_position": dict,
+                "hil_enabled": bool,
+                "response_policy": int,
+                "hil_disabled_message": str
+            }
+
+            # Add provided fields to params
+            for field_name, field_type in standard_fields.items():
+                if field_name in config_data:
+                    value = config_data[field_name]
+                    if field_name in ("profile_position", "chat_icon_position"):
+                        # JSON fields
+                        params[field_name] = json.dumps(value)
+                        set_clauses.append(f"{field_name} = :{field_name}")
+                    else:
+                        params[field_name] = value
+                        set_clauses.append(f"{field_name} = :{field_name}")
+
+            if not set_clauses:
+                logger.info("⚠️ No fields provided to update in widget config")
+                return
+
+            # Always update timestamp
+            set_clauses.append("updated_at = NOW()")
+
+            query = f"""
+                UPDATE widget_configuration
+                SET {', '.join(set_clauses)}
+                WHERE id = 1
+            """
+
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 await session.execute(text(query), params)
                 await session.commit()
                 logger.log_db_query(query, params, None)
+                logger.info(f"✅ Widget config updated: {len(set_clauses)-1} field(s)")
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query("update_widget_config", config_data, error=e)
             raise
 
     async def update_suggested_messages(self, messages: List[str]):
