@@ -660,9 +660,9 @@ class ChatLogDAO:
             return {sid: {"positive_count": 0, "negative_count": 0} for sid in session_ids}
 
     async def get_hil_enabled(self) -> bool:
-        """Get HIL enabled status from configuration."""
-        # Use CAST to ensure proper boolean type from PostgreSQL
-        query = "SELECT CAST(hil_enabled AS BOOLEAN) FROM widget_configuration WHERE id = 1"
+        """Get HIL enabled status from security_settings."""
+        # Read from security_settings where HIL is now persisted
+        query = "SELECT setting_value FROM security_settings WHERE setting_name = 'hil_enabled' LIMIT 1"
 
         try:
             logger.log_db_operation(query)
@@ -672,10 +672,10 @@ class ChatLogDAO:
                 logger.log_db_query(query, None, row)
                 if row:
                     # Convert tuple/Row to dict for consistent access
-                    row_dict = dict(row._mapping) if hasattr(row, '_mapping') else {'hil_enabled': row[0]}
+                    row_dict = dict(row._mapping) if hasattr(row, '_mapping') else {'setting_value': row[0]}
 
                     # Handle any boolean representation from database
-                    hil_value = row_dict.get('hil_enabled', True)
+                    hil_value = row_dict.get('setting_value', 'true')
                     if isinstance(hil_value, bool):
                         return hil_value
                     if isinstance(hil_value, str):
