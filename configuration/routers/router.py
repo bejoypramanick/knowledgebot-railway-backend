@@ -882,7 +882,7 @@ async def get_admin_chat_sessions(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/admin/chat-sessions/{session_id}/messages")
-async def get_session_messages(session_id: str):
+async def get_session_messages(session_id: int):
     """Get all messages for a specific chat session"""
     try:
         messages = await chat_log_service.get_session_messages(session_id)
