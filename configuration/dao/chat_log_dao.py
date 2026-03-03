@@ -253,8 +253,8 @@ class ChatLogDAO:
             raise ValueError(f"User role not found for email: {email}")
 
         query = """
-            INSERT INTO session_assignments (session_id, user_role_id, status, assigned_at, created_at, updated_at)
-            VALUES (:session_id, :user_role_id, :status, NOW(), NOW(), NOW())
+            INSERT INTO session_assignments (session_id, user_role_id, status, assigned_at, updated_at)
+            VALUES (:session_id, :user_role_id, :status, NOW(), NOW())
         """
         try:
             params = {"session_id": session_db_id, "user_role_id": user_role_id, "status": status}
