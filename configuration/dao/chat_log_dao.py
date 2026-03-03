@@ -469,7 +469,7 @@ class ChatLogDAO:
             logger.error(f"Error fetching messages: {e}")
             return {}
 
-    async def get_latest_message_for_session(self, session_id: int) -> Optional[Dict[str, Any]]:
+    async def get_latest_message_for_session(self, session_id: int | str) -> Optional[Dict[str, Any]]:
         """Get the latest message for a single session."""
         query = """
             SELECT * FROM chat_messages
@@ -478,7 +478,9 @@ class ChatLogDAO:
             LIMIT 1
         """
         try:
-            params = {"session_id": session_id}
+            # Convert session_id to integer if it's a string
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+            params = {"session_id": session_db_id}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
@@ -488,7 +490,7 @@ class ChatLogDAO:
             logger.log_db_query(query, params, error=e)
             return None
 
-    async def get_session_messages(self, session_id: int) -> List[Dict[str, Any]]:
+    async def get_session_messages(self, session_id: int | str) -> List[Dict[str, Any]]:
         """Get all messages for a single session (full conversation)."""
         query = """
             SELECT * FROM chat_messages
@@ -496,7 +498,9 @@ class ChatLogDAO:
             ORDER BY created_at ASC
         """
         try:
-            params = {"session_id": session_id}
+            # Convert session_id to integer if it's a string
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+            params = {"session_id": session_db_id}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
