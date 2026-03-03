@@ -231,20 +231,14 @@ class ChatLogService:
         
         return formatted_sessions, total_count
 
-    async def get_session_messages(self, session_id: int | str):
+    async def get_session_messages(self, session_id: int):
         """Get all messages for a specific chat session (full conversation on click)."""
-        # Convert to int if string
-        session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+        return await self.dao.get_session_messages(session_id)
 
-        return await self.dao.get_session_messages(session_db_id)
-
-    async def send_agent_message(self, session_id: int | str, agent_email: str, text: str):
+    async def send_agent_message(self, session_id: int, agent_email: str, text: str):
         """Send a message from an agent to a customer using numeric ID only."""
-        # Convert to int if string
-        session_db_id = int(session_id) if isinstance(session_id, str) else session_id
-
-        message_id = await self.dao.create_message(session_db_id, 'agent', text)
-        await self.dao.increment_message_count(session_db_id)
+        message_id = await self.dao.create_message(session_id, 'agent', text)
+        await self.dao.increment_message_count(session_id)
 
         if self.connection_manager:
             message_data = {
