@@ -68,7 +68,7 @@ class ChatAgentConfigDAO:
                 results = await session.execute(query)
                 rows = results.fetchall()
                 logger.log_db_query(str(query), None, rows)
-                return [row.email for row in rows] if rows else []
+                return [dict(row._mapping)['email'] for row in rows] if rows else []  # Use mapping for dictionary access
         except Exception as e:
             logger.error(f"Error fetching human agents: {type(e).__name__}")
             raise  # ← Raise exception instead of silently returning []
@@ -90,7 +90,7 @@ class ChatAgentConfigDAO:
                 results = await session.execute(query)
                 rows = results.fetchall()
                 logger.log_db_query(str(query), None, rows)
-                return [row.email for row in rows] if rows else []
+                return [dict(row._mapping)['email'] for row in rows] if rows else []  # Use mapping for dictionary access
         except Exception as e:
             logger.error(f"Error fetching admin emails: {type(e).__name__}")
             raise  # ← Raise exception instead of silently returning []

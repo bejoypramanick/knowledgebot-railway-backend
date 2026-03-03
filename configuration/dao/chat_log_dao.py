@@ -607,8 +607,8 @@ class ChatLogDAO:
                 row = result.fetchone()
                 logger.log_db_query(query, params, row)
                 return {
-                    "positive_count": row["positive_count"] if row else 0,
-                    "negative_count": row["negative_count"] if row else 0
+                    "positive_count": dict(row._mapping)['positive_count'] if row else 0,
+                    "negative_count": dict(row._mapping)['negative_count'] if row else 0
                 }
         except Exception as e:
             logger.log_db_query(query, params, error=e)
@@ -643,9 +643,10 @@ class ChatLogDAO:
                 # Build result dictionary
                 result_dict = {}
                 for row in rows:
-                    result_dict[row["session_id"]] = {
-                        "positive_count": row["positive_count"] or 0,
-                        "negative_count": row["negative_count"] or 0
+                    row_dict = dict(row._mapping)  # Convert to dictionary for easier access
+                    result_dict[row_dict['session_id']] = {
+                        "positive_count": row_dict['positive_count'] or 0,
+                        "negative_count": row_dict['negative_count'] or 0
                     }
 
                 # Fill in missing sessions with zero counts
