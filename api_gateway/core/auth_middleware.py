@@ -46,6 +46,11 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/gateway/widget",  # Widget HTML page for iframe embedding
         ]
         
+        # Path prefixes that don't require authentication
+        self.exclude_prefixes = [
+            "/api/v1/gateway/chatbot/sessions/",  # Anonymous chat session creation
+        ]
+        
         # Also exclude any path ending with /health
         self.exclude_suffixes = ["/health"]
     
@@ -54,6 +59,11 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         # Exact match
         if path in self.exclude_paths:
             return True
+        
+        # Prefix match
+        for prefix in self.exclude_prefixes:
+            if path.startswith(prefix):
+                return True
         
         # Suffix match
         for suffix in self.exclude_suffixes:
