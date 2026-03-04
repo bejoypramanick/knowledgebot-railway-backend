@@ -138,6 +138,17 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ Error initializing FileSearch store: {e}")
             logger.warning("⚠️ Services will continue but file uploads may fail")
 
+        # Initialize Firebase Admin SDK
+        logger.info("🔐 Initializing Firebase Admin SDK...")
+        try:
+            from api_gateway.core.firebase_auth import init_firebase_auth
+            init_firebase_auth()
+            logger.info("✅ Firebase Admin SDK initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Firebase Admin SDK: {e}")
+            logger.error("   Authentication will not work!")
+            raise RuntimeError(f"Firebase initialization failed: {e}") from e
+
         logger.info(f"🚀 API Gateway ({settings.service_identity}) started successfully")
         yield
         # Shutdown
