@@ -61,18 +61,32 @@ def get_session(session_id: str, ip_address: str = None, user_agent: str = None,
     
     # Security validation (detect session hijacking)
     if validate_security:
-        # Check IP address match (with flexibility for mobile networks)
+        # Check IP address match (with flexibility for mobile networks and Railway internal IPs)
         if ip_address and session_data.get("ip_address"):
             if ip_address != session_data["ip_address"]:
-                logger.warning(
-                    f"🚨 IP address mismatch for {session_data.get('email')}: "
-                    f"expected {session_data['ip_address']}, got {ip_address}"
+                # Check if both IPs are Railway internal IPs (100.64.0.0/10)
+                is_railway_internal = (
+                    ip_address.startswith("100.64.") and 
+                    session_data["ip_address"].startswith("100.64.")
                 )
-                # For now, just log warning (don't invalidate)
-                # In production, you might want to invalidate or require re-auth
-                # Uncomment below to enforce strict IP binding:
-                # store.delete(session_id)
-                # return None
+                
+                if is_railway_internal:
+                    # Railway internal IPs can change due to load balancing - just log, don't block
+                    logger.debug(
+                        f"ℹ️ Railway internal IP change for {session_data.get('email')}: "
+                        f"{session_data['ip_address']} → {ip_address} (allowed)"
+                    )
+                else:
+                    # External IP mismatch - potential hijacking
+                    logger.warning(
+                        f"🚨 IP address mismatch for {session_data.get('email')}: "
+                        f"expected {session_data['ip_address']}, got {ip_address}"
+                    )
+                    # For now, just log warning (don't invalidate)
+                    # In production, you might want to invalidate or require re-auth
+                    # Uncomment below to enforce strict IP binding:
+                    # store.delete(session_id)
+                    # return None
         
         # Check User-Agent match (detect browser/device change)
         if user_agent and session_data.get("user_agent"):
