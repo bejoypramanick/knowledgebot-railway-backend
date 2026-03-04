@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     
     # Service URLs for routing - read from Railway environment variables
     # Railway internal services all run on port 8080
-    configuration_service_url: str = os.getenv("CONFIGURATION_SERVICE_URL", "http://localhost:8000")
+    configuration_service_url: str = os.getenv("CONFIGURATION_SERVICE_URL", "http://configuration.railway.internal:8080")
     chatbot_orchestration_url: str = os.getenv("CHATBOT_ORCHESTRATION_URL", "http://chatbot-orchestration.railway.internal:8080")
     knowledgebase_ingestion_url: str = os.getenv("KNOWLEDGEBASE_INGESTION_URL", "http://knowledge-base.railway.internal:8080")
     admin_service_url: str = os.getenv("ADMIN_SERVICE_URL", "http://localhost:8000")
