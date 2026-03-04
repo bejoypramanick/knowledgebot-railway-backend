@@ -25,6 +25,8 @@ def init_redis() -> redis.Redis:
     REDIS_URL can specify database in two ways:
     1. In URL: redis://...@host:6379/3
     2. Via db parameter (if not in URL)
+    
+    Raises RuntimeError if Redis is not configured or connection fails.
     """
     global _redis_client
     
@@ -32,14 +34,19 @@ def init_redis() -> redis.Redis:
         logger.info("Redis client already initialized")
         return _redis_client
     
+    # REDIS_URL is required - no fallback
+    redis_url = os.getenv('REDIS_URL')
+    
+    if not redis_url:
+        error_msg = (
+            "REDIS_URL environment variable not set. "
+            "Session storage requires Redis. "
+            "Please configure REDIS_URL in Railway API Gateway service."
+        )
+        logger.error(f"❌ {error_msg}")
+        raise RuntimeError(error_msg)
+    
     try:
-        redis_url = os.getenv('REDIS_URL')
-        
-        if not redis_url:
-            logger.warning("⚠️ REDIS_URL not set - falling back to in-memory sessions")
-            logger.warning("⚠️ Sessions will be lost on server restart!")
-            return None
-        
         # Check if database is specified in URL
         # If URL ends with /3, use that; otherwise default to database 3
         if redis_url.endswith('/3'):
@@ -72,13 +79,13 @@ def init_redis() -> redis.Redis:
         return _redis_client
         
     except redis.ConnectionError as e:
-        logger.error(f"❌ Failed to connect to Redis: {e}")
-        logger.warning("⚠️ Falling back to in-memory sessions")
-        return None
+        error_msg = f"Failed to connect to Redis: {e}. Check REDIS_URL and ensure Redis service is running."
+        logger.error(f"❌ {error_msg}")
+        raise RuntimeError(error_msg)
     except Exception as e:
-        logger.error(f"❌ Error initializing Redis: {e}")
-        logger.warning("⚠️ Falling back to in-memory sessions")
-        return None
+        error_msg = f"Error initializing Redis: {e}"
+        logger.error(f"❌ {error_msg}")
+        raise RuntimeError(error_msg)
 
 
 def get_redis_client() -> Optional[redis.Redis]:
@@ -90,25 +97,30 @@ def get_redis_client() -> Optional[redis.Redis]:
 
 class SessionStore:
     """
-    Session storage abstraction
-    Uses Redis database 3 if available, falls back to in-memory dict
+    Session storage using Redis database 3
     
     Redis databases in use:
     - Database 0: (your existing data)
     - Database 1: (your existing data)
     - Database 2: (your existing data)
     - Database 3: Sessions (isolated namespace)
+    
+    Requires REDIS_URL environment variable to be set.
+    No fallback - fails fast if Redis is not configured.
     """
     
     def __init__(self):
+        # Initialize Redis - will raise RuntimeError if not configured
         self.redis_client = get_redis_client()
-        # Fallback in-memory storage if Redis unavailable
-        self._memory_store: Dict[str, Dict[str, Any]] = {}
         
-        if self.redis_client:
-            logger.info("✅ Using Redis for session storage")
-        else:
-            logger.warning("⚠️ Using in-memory session storage (not recommended for production)")
+        if not self.redis_client:
+            raise RuntimeError(
+                "Redis client initialization failed. "
+                "REDIS_URL must be configured for session storage. "
+                "No fallback available."
+            )
+        
+        logger.info("✅ SessionStore initialized with Redis")
     
     def _get_key(self, session_id: str) -> str:
         """Get Redis key for session"""
@@ -127,18 +139,12 @@ class SessionStore:
             True if successful, False otherwise
         """
         try:
-            if self.redis_client:
-                # Store in Redis with expiration
-                key = self._get_key(session_id)
-                value = json.dumps(session_data)
-                self.redis_client.setex(key, ttl, value)
-                logger.debug(f"✅ Session {session_id[:8]}... stored in Redis (TTL: {ttl}s)")
-                return True
-            else:
-                # Fallback to in-memory
-                self._memory_store[session_id] = session_data
-                logger.debug(f"✅ Session {session_id[:8]}... stored in memory")
-                return True
+            # Store in Redis with expiration
+            key = self._get_key(session_id)
+            value = json.dumps(session_data)
+            self.redis_client.setex(key, ttl, value)
+            logger.debug(f"✅ Session {session_id[:8]}... stored in Redis (TTL: {ttl}s)")
+            return True
                 
         except Exception as e:
             logger.error(f"❌ Error creating session: {e}")
@@ -155,26 +161,17 @@ class SessionStore:
             Session data if found, None otherwise
         """
         try:
-            if self.redis_client:
-                # Get from Redis
-                key = self._get_key(session_id)
-                value = self.redis_client.get(key)
-                
-                if value:
-                    session_data = json.loads(value)
-                    logger.debug(f"✅ Session {session_id[:8]}... retrieved from Redis")
-                    return session_data
-                else:
-                    logger.debug(f"⚠️ Session {session_id[:8]}... not found in Redis")
-                    return None
-            else:
-                # Fallback to in-memory
-                session_data = self._memory_store.get(session_id)
-                if session_data:
-                    logger.debug(f"✅ Session {session_id[:8]}... retrieved from memory")
-                else:
-                    logger.debug(f"⚠️ Session {session_id[:8]}... not found in memory")
+            # Get from Redis
+            key = self._get_key(session_id)
+            value = self.redis_client.get(key)
+            
+            if value:
+                session_data = json.loads(value)
+                logger.debug(f"✅ Session {session_id[:8]}... retrieved from Redis")
                 return session_data
+            else:
+                logger.debug(f"⚠️ Session {session_id[:8]}... not found in Redis")
+                return None
                 
         except Exception as e:
             logger.error(f"❌ Error getting session: {e}")
@@ -191,25 +188,15 @@ class SessionStore:
             True if deleted, False otherwise
         """
         try:
-            if self.redis_client:
-                # Delete from Redis
-                key = self._get_key(session_id)
-                result = self.redis_client.delete(key)
-                if result:
-                    logger.info(f"✅ Session {session_id[:8]}... deleted from Redis")
-                    return True
-                else:
-                    logger.debug(f"⚠️ Session {session_id[:8]}... not found in Redis")
-                    return False
+            # Delete from Redis
+            key = self._get_key(session_id)
+            result = self.redis_client.delete(key)
+            if result:
+                logger.info(f"✅ Session {session_id[:8]}... deleted from Redis")
+                return True
             else:
-                # Fallback to in-memory
-                if session_id in self._memory_store:
-                    del self._memory_store[session_id]
-                    logger.info(f"✅ Session {session_id[:8]}... deleted from memory")
-                    return True
-                else:
-                    logger.debug(f"⚠️ Session {session_id[:8]}... not found in memory")
-                    return False
+                logger.debug(f"⚠️ Session {session_id[:8]}... not found in Redis")
+                return False
                     
         except Exception as e:
             logger.error(f"❌ Error deleting session: {e}")
@@ -227,19 +214,14 @@ class SessionStore:
             True if successful, False otherwise
         """
         try:
-            if self.redis_client:
-                # Update TTL in Redis
-                key = self._get_key(session_id)
-                result = self.redis_client.expire(key, ttl)
-                if result:
-                    logger.debug(f"✅ Session {session_id[:8]}... TTL updated to {ttl}s")
-                    return True
-                else:
-                    logger.debug(f"⚠️ Session {session_id[:8]}... not found for TTL update")
-                    return False
+            # Update TTL in Redis
+            key = self._get_key(session_id)
+            result = self.redis_client.expire(key, ttl)
+            if result:
+                logger.debug(f"✅ Session {session_id[:8]}... TTL updated to {ttl}s")
+                return True
             else:
-                # In-memory doesn't support TTL
-                logger.debug(f"⚠️ TTL update not supported for in-memory sessions")
+                logger.debug(f"⚠️ Session {session_id[:8]}... not found for TTL update")
                 return False
                 
         except Exception as e:
@@ -259,20 +241,14 @@ class SessionStore:
         try:
             session_ids = []
             
-            if self.redis_client:
-                # Scan Redis for all session keys
-                for key in self.redis_client.scan_iter(match="session:*"):
-                    value = self.redis_client.get(key)
-                    if value:
-                        session_data = json.loads(value)
-                        if session_data.get("uid") == uid:
-                            # Extract session_id from key (remove "session:" prefix)
-                            session_id = key.replace("session:", "")
-                            session_ids.append(session_id)
-            else:
-                # Fallback to in-memory
-                for session_id, session_data in self._memory_store.items():
+            # Scan Redis for all session keys
+            for key in self.redis_client.scan_iter(match="session:*"):
+                value = self.redis_client.get(key)
+                if value:
+                    session_data = json.loads(value)
                     if session_data.get("uid") == uid:
+                        # Extract session_id from key (remove "session:" prefix)
+                        session_id = key.replace("session:", "")
                         session_ids.append(session_id)
             
             logger.info(f"✅ Found {len(session_ids)} sessions for user {uid}")
@@ -315,12 +291,8 @@ class SessionStore:
             True if healthy, False otherwise
         """
         try:
-            if self.redis_client:
-                self.redis_client.ping()
-                return True
-            else:
-                # In-memory is always "healthy"
-                return True
+            self.redis_client.ping()
+            return True
         except Exception as e:
             logger.error(f"❌ Session store health check failed: {e}")
             return False
