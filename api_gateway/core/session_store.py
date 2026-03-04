@@ -21,6 +21,10 @@ def init_redis() -> redis.Redis:
     
     Uses existing Railway Redis instance via REDIS_URL environment variable
     Uses database 3 to isolate sessions from other data (0, 1, 2 already in use)
+    
+    REDIS_URL can specify database in two ways:
+    1. In URL: redis://...@host:6379/3
+    2. Via db parameter (if not in URL)
     """
     global _redis_client
     
@@ -36,21 +40,35 @@ def init_redis() -> redis.Redis:
             logger.warning("⚠️ Sessions will be lost on server restart!")
             return None
         
-        # Connect to Redis database 3 (0, 1, 2 already in use)
-        _redis_client = redis.from_url(
-            redis_url,
-            db=3,  # Use database 3 for sessions
-            decode_responses=True,  # Automatically decode bytes to strings
-            socket_connect_timeout=5,
-            socket_timeout=5,
-            retry_on_timeout=True,
-            health_check_interval=30
-        )
+        # Check if database is specified in URL
+        # If URL ends with /3, use that; otherwise default to database 3
+        if redis_url.endswith('/3'):
+            # Database already specified in URL
+            _redis_client = redis.from_url(
+                redis_url,
+                decode_responses=True,
+                socket_connect_timeout=5,
+                socket_timeout=5,
+                retry_on_timeout=True,
+                health_check_interval=30
+            )
+            logger.info(f"✅ Redis connected successfully for session storage (database 3 from URL)")
+        else:
+            # Database not in URL, specify db=3
+            _redis_client = redis.from_url(
+                redis_url,
+                db=3,  # Use database 3 for sessions
+                decode_responses=True,
+                socket_connect_timeout=5,
+                socket_timeout=5,
+                retry_on_timeout=True,
+                health_check_interval=30
+            )
+            logger.info(f"✅ Redis connected successfully for session storage (database 3 via parameter)")
         
         # Test connection
         _redis_client.ping()
         
-        logger.info(f"✅ Redis connected successfully for session storage (database 3)")
         return _redis_client
         
     except redis.ConnectionError as e:
