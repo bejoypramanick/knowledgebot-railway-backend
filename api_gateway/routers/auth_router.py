@@ -192,6 +192,11 @@ async def create_session_endpoint(
         User data (uid, email, name, picture)
     """
     try:
+        logger.info(f"🔐 [SESSION_CREATE] Received session creation request")
+        logger.info(f"🔐 [SESSION_CREATE] Context: {request.context}")
+        logger.info(f"🔐 [SESSION_CREATE] Origin: {req.headers.get('origin')}")
+        logger.info(f"🔐 [SESSION_CREATE] Referer: {req.headers.get('referer')}")
+        
         # Verify Firebase ID token
         user_data = verify_firebase_token(request.idToken)
         
@@ -202,12 +207,15 @@ async def create_session_endpoint(
                 detail="Invalid Firebase ID token"
             )
         
+        logger.info(f"✅ [SESSION_CREATE] Firebase token verified for user: {user_data.get('email')}")
+        
         # Get client IP and User-Agent for session binding
         ip_address = req.client.host if req.client else None
         user_agent = req.headers.get("user-agent")
         
         # Create session with security metadata
         session_id = create_session(user_data, ip_address, user_agent)
+        logger.info(f"✅ [SESSION_CREATE] Session created with ID: {session_id[:16]}...")
         
         # Determine SameSite policy based on context
         context = request.context or "admin"
@@ -235,8 +243,8 @@ async def create_session_endpoint(
         )
         
         logger.info(
-            f"✅ Session cookie set for user {user_data.get('email')} "
-            f"from IP {ip_address} (context={context}, samesite={samesite_policy})"
+            f"✅ [SESSION_CREATE] Session cookie set for user {user_data.get('email')} "
+            f"from IP {ip_address} (context={context}, samesite={samesite_policy}, domain={SESSION_DOMAIN})"
         )
         
         return {
@@ -252,7 +260,9 @@ async def create_session_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Error creating session: {e}")
+        logger.error(f"❌ [SESSION_CREATE] Error creating session: {e}")
+        import traceback
+        logger.error(f"❌ [SESSION_CREATE] Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
             detail="Failed to create session"
