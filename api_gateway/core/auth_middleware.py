@@ -1,7 +1,8 @@
 """
 Session-Based Authentication Middleware
 Verifies session cookies (httpOnly, secure, SameSite) on all requests
-Falls back to Firebase ID token verification for API clients
+ONLY accepts session cookies - no Authorization header fallback for security
+API Gateway forwards user info to internal services via headers
 """
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -17,11 +18,13 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
     """
     Session-Based Authentication Middleware
     
-    Priority:
-    1. Check session cookie (httpOnly, secure, SameSite)
-    2. Fallback to Authorization header (for API clients)
+    Security Model:
+    - ONLY accepts httpOnly session cookies from external requests
+    - NO Authorization header fallback (prevents token theft attacks)
+    - API Gateway extracts user info from session
+    - API Gateway forwards user info to internal services via headers
     
-    Adds user data to request.state for downstream use.
+    Internal services trust headers from API Gateway (private network).
     """
     
     def __init__(self, app, exclude_paths=None):
@@ -67,82 +70,42 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
         
-        # Try session cookie first (preferred method)
+        # ONLY accept session cookies (no Authorization header fallback)
         session_id = request.cookies.get("session")
         
-        if session_id:
-            # Import here to avoid circular dependency
-            from api_gateway.routers.auth_router import get_session
-            
-            session_data = get_session(session_id)
-            
-            if session_data:
-                # Valid session found
-                request.state.user = session_data
-                request.state.user_uid = session_data["uid"]
-                request.state.user_email = session_data["email"]
-                request.state.user_name = session_data["name"]
-                
-                logger.debug(f"✅ Authenticated via session cookie: {session_data['email']} for {path}")
-                
-                # Continue to next middleware/endpoint
-                response = await call_next(request)
-                return response
-            else:
-                # Session invalid or expired
-                logger.warning(f"⚠️ Invalid or expired session cookie for {path}")
-                # Don't return error yet, try Authorization header fallback
-        
-        # Fallback to Authorization header (for API clients, mobile apps, etc.)
-        auth_header = request.headers.get("Authorization")
-        
-        if not auth_header:
-            logger.warning(f"❌ No session cookie or Authorization header for {path}")
+        if not session_id:
+            logger.warning(f"❌ No session cookie for {path}")
             return JSONResponse(
                 status_code=401,
                 content={
                     "detail": "Authentication required. Please sign in.",
                     "error": "unauthorized"
-                },
-                headers={"WWW-Authenticate": "Bearer"}
+                }
             )
         
-        # Check Bearer token format
-        if not auth_header.startswith("Bearer "):
-            logger.warning(f"❌ Invalid Authorization header format for {path}")
+        # Import here to avoid circular dependency
+        from api_gateway.routers.auth_router import get_session
+        
+        session_data = get_session(session_id)
+        
+        if not session_data:
+            # Session invalid or expired
+            logger.warning(f"⚠️ Invalid or expired session cookie for {path}")
             return JSONResponse(
                 status_code=401,
                 content={
-                    "detail": "Invalid Authorization header format. Expected: Bearer <token>",
-                    "error": "unauthorized"
-                },
-                headers={"WWW-Authenticate": "Bearer"}
+                    "detail": "Session expired. Please sign in again.",
+                    "error": "session_expired"
+                }
             )
         
-        # Extract token
-        token = auth_header.split(" ", 1)[1]
+        # Valid session found - add user data to request state
+        request.state.user = session_data
+        request.state.user_uid = session_data["uid"]
+        request.state.user_email = session_data["email"]
+        request.state.user_name = session_data["name"]
         
-        # Verify Firebase token
-        user_data = verify_firebase_token(token)
-        
-        if not user_data:
-            logger.warning(f"❌ Invalid or expired Firebase token for {path}")
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "detail": "Invalid or expired authentication token",
-                    "error": "unauthorized"
-                },
-                headers={"WWW-Authenticate": "Bearer"}
-            )
-        
-        # Add user data to request state
-        request.state.user = user_data
-        request.state.user_uid = user_data.get('uid')
-        request.state.user_email = user_data.get('email')
-        request.state.user_name = user_data.get('name', user_data.get('email'))
-        
-        logger.debug(f"✅ Authenticated via Firebase token: {user_data.get('email')} for {path}")
+        logger.debug(f"✅ Authenticated via session cookie: {session_data['email']} for {path}")
         
         # Continue to next middleware/endpoint
         response = await call_next(request)
