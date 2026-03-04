@@ -27,6 +27,7 @@ SESSION_DOMAIN = ".globistaan.com"  # Works for all *.globistaan.com subdomains
 class CreateSessionRequest(BaseModel):
     """Request body for creating a session from Firebase ID token"""
     idToken: str
+    context: Optional[str] = "admin"  # "admin" or "widget" - determines cookie SameSite policy
 
 
 def get_session(session_id: str, ip_address: str = None, user_agent: str = None, 
@@ -170,14 +171,22 @@ async def create_session_endpoint(
     
     Flow:
     1. Frontend gets Firebase ID token after Google sign-in
-    2. Frontend calls this endpoint with the token
+    2. Frontend calls this endpoint with the token and context
     3. Backend verifies token with Firebase Admin SDK
-    4. Backend creates session and sets httpOnly, secure, SameSite cookie
+    4. Backend creates session and sets httpOnly, secure cookie
     5. Frontend uses cookie for all subsequent requests (automatic)
+    
+    Context-aware cookie configuration:
+    - Admin/Agent screens: SameSite=Lax (same-site only, more secure)
+    - Chat widget (iframe): SameSite=None (cross-site, required for iframes)
     
     Security:
     - Binds session to IP address and User-Agent
     - Detects session hijacking attempts
+    
+    Args:
+        request.idToken: Firebase ID token
+        request.context: "admin" (default) or "widget"
     
     Returns:
         User data (uid, email, name, picture)
@@ -200,19 +209,35 @@ async def create_session_endpoint(
         # Create session with security metadata
         session_id = create_session(user_data, ip_address, user_agent)
         
-        # Set httpOnly, secure, SameSite cookie
+        # Determine SameSite policy based on context
+        context = request.context or "admin"
+        if context == "widget":
+            # Widget embedded in iframe on different domains
+            # MUST use SameSite=None for cross-site cookies
+            samesite_policy = "none"
+            logger.info(f"🔧 Using SameSite=None for widget context (cross-site iframe)")
+        else:
+            # Admin/Agent screens on same domain
+            # Use SameSite=Lax for better security
+            samesite_policy = "lax"
+            logger.info(f"🔧 Using SameSite=Lax for admin context (same-site)")
+        
+        # Set httpOnly, secure cookie with context-appropriate SameSite policy
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
             value=session_id,
             max_age=SESSION_MAX_AGE,
             httponly=True,   # JavaScript cannot access (XSS protection)
-            secure=True,     # Only sent over HTTPS (MITM protection)
-            samesite="lax",  # CSRF protection (sent on top-level navigation)
+            secure=True,     # Only sent over HTTPS (MITM protection) - REQUIRED for SameSite=None
+            samesite=samesite_policy,  # Context-aware: "lax" for admin, "none" for widget
             domain=SESSION_DOMAIN,  # Works for all *.globistaan.com subdomains
             path="/"         # Cookie sent for all paths
         )
         
-        logger.info(f"✅ Session cookie set for user {user_data.get('email')} from IP {ip_address}")
+        logger.info(
+            f"✅ Session cookie set for user {user_data.get('email')} "
+            f"from IP {ip_address} (context={context}, samesite={samesite_policy})"
+        )
         
         return {
             "success": True,
