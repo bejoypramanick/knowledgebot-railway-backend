@@ -11,7 +11,7 @@ from typing import Dict, Any
 from httpx import AsyncClient
 import httpx
 
-from ..core.firebase_auth import verify_firebase_token, get_user_from_firestore
+from ..core.firebase_auth import verify_firebase_token, get_user_by_uid as get_user_from_firebase
 from ..core.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -99,11 +99,15 @@ async def verify_auth_token(request: Request):
 async def get_user_by_uid(uid: str):
     """Get user information by Firebase UID."""
     try:
-        user_data = get_user_from_firestore(uid)
+        user_data = get_user_from_firebase(uid)
+        if not user_data:
+            raise HTTPException(status_code=404, detail=f"User not found: {uid}")
         return {
             "success": True,
             "user": user_data
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting user by UID {uid}: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting user: {str(e)}")
@@ -638,11 +642,15 @@ async def handle_auth_endpoints(request: Request, path: str):
     elif path.startswith("auth/user/") and request.method == "GET":
         uid = path.split("/")[-1]
         try:
-            user_data = get_user_from_firestore(uid)
+            user_data = get_user_from_firebase(uid)
+            if not user_data:
+                raise HTTPException(status_code=404, detail=f"User not found: {uid}")
             return {
                 "success": True,
                 "user": user_data
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error getting user by UID {uid}: {e}")
             raise HTTPException(status_code=500, detail=f"Error getting user: {str(e)}")
