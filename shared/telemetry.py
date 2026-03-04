@@ -47,6 +47,10 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # We want a standardized format.
     # Note: LoggingInstrumentor sets otelTraceID and otelSpanID to "0" if no span is active.
     
+    # Instrument standard logging FIRST before setting up formatters
+    # This ensures otelTraceID and otelSpanID are available in log records
+    LoggingInstrumentor().instrument(set_logging_format=False)
+    
     # Format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] - Message
     log_format = f"%(asctime)s [%(levelname)s] [{service_name}] [%(otelTraceID)s] [%(otelSpanID)s] - %(message)s"
     formatter = logging.Formatter(log_format)
@@ -72,10 +76,6 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
             stream_handler.stream.flush()
     stream_handler.emit = emit_with_flush
     root_logger.addHandler(stream_handler)
-    
-    # Instrument standard logging
-    # set_logging_format=False because we manually set the formatter above
-    LoggingInstrumentor().instrument(set_logging_format=False)
     
     # Instrument HTTPX Clients (The Glue for Outgoing Requests)
     # This automatically injects the 'traceparent' header into outgoing httpx calls
