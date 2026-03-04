@@ -39,6 +39,9 @@ bleach>=6.0.0
 google-genai>=1.60.0
 google-auth>=2.38.0
 
+# Redis for session storage
+redis>=5.0.0
+
 # OpenTelemetry
 opentelemetry-api>=1.20.0
 opentelemetry-sdk>=1.20.0

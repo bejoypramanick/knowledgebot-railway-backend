@@ -1,6 +1,8 @@
 """
 Authentication Router
 Handles session creation, logout, and user info with httpOnly cookies
+Sessions stored in Redis (or in-memory fallback)
+User data remains in Postgres database
 """
 from fastapi import APIRouter, HTTPException, Response, Request
 from pydantic import BaseModel
@@ -11,14 +13,10 @@ import os
 
 from api_gateway.core.firebase_auth import verify_firebase_token
 from api_gateway.core.logging_config import get_railway_logger
+from api_gateway.core.session_store import get_session_store
 
 logger = get_railway_logger(__name__)
 router = APIRouter()
-
-# Session storage (use Redis in production - see below)
-# For now, using in-memory dict for simplicity
-# Format: {session_id: {uid, email, name, picture, created_at, expires_at}}
-_sessions: Dict[str, Dict[str, Any]] = {}
 
 # Session configuration
 SESSION_COOKIE_NAME = "session"
@@ -45,15 +43,19 @@ def get_session(session_id: str, ip_address: str = None, user_agent: str = None,
     Returns:
         Session data if valid, None if invalid/expired/hijacked
     """
-    session_data = _sessions.get(session_id)
+    # Get session store
+    store = get_session_store()
+    
+    # Get session data from Redis/memory
+    session_data = store.get(session_id)
     
     if not session_data:
         return None
     
-    # Check if session expired
-    if session_data["expires_at"] < int(time.time()):
+    # Check if session expired (Redis handles this automatically, but check for in-memory)
+    if session_data.get("expires_at") and session_data["expires_at"] < int(time.time()):
         # Session expired, delete it
-        del _sessions[session_id]
+        store.delete(session_id)
         logger.info(f"⏰ Session expired for {session_data.get('email')}")
         return None
     
@@ -69,7 +71,7 @@ def get_session(session_id: str, ip_address: str = None, user_agent: str = None,
                 # For now, just log warning (don't invalidate)
                 # In production, you might want to invalidate or require re-auth
                 # Uncomment below to enforce strict IP binding:
-                # del _sessions[session_id]
+                # store.delete(session_id)
                 # return None
         
         # Check User-Agent match (detect browser/device change)
@@ -81,12 +83,15 @@ def get_session(session_id: str, ip_address: str = None, user_agent: str = None,
                 )
                 # For now, just log warning
                 # Uncomment below to enforce strict User-Agent binding:
-                # del _sessions[session_id]
+                # store.delete(session_id)
                 # return None
     
     # Update request tracking
     session_data["request_count"] = session_data.get("request_count", 0) + 1
     session_data["last_request_time"] = int(time.time())
+    
+    # Update session in store (for request tracking)
+    store.create(session_id, session_data, SESSION_MAX_AGE)
     
     # Detect unusual activity (too many requests)
     if session_data["request_count"] > 10000:  # Adjust threshold as needed
@@ -103,8 +108,11 @@ def create_session(user_data: Dict[str, Any], ip_address: str = None, user_agent
     # Generate secure random session ID
     session_id = secrets.token_urlsafe(32)
     
-    # Store session data with security metadata
-    _sessions[session_id] = {
+    # Get session store
+    store = get_session_store()
+    
+    # Prepare session data with security metadata
+    session_data = {
         "uid": user_data.get("uid"),
         "email": user_data.get("email"),
         "name": user_data.get("name", user_data.get("email")),
@@ -118,6 +126,9 @@ def create_session(user_data: Dict[str, Any], ip_address: str = None, user_agent
         "last_request_time": int(time.time())
     }
     
+    # Store session in Redis/memory with TTL
+    store.create(session_id, session_data, SESSION_MAX_AGE)
+    
     logger.info(f"✅ Session created for user {user_data.get('email')} from IP {ip_address} (expires in {SESSION_MAX_AGE}s)")
     
     return session_id
@@ -125,11 +136,13 @@ def create_session(user_data: Dict[str, Any], ip_address: str = None, user_agent
 
 def delete_session(session_id: str) -> bool:
     """Delete a session"""
-    if session_id in _sessions:
-        del _sessions[session_id]
+    store = get_session_store()
+    result = store.delete(session_id)
+    
+    if result:
         logger.info(f"✅ Session {session_id[:8]}... deleted")
-        return True
-    return False
+    
+    return result
 
 
 @router.post("/auth/session")
@@ -321,8 +334,12 @@ async def refresh_session(request: Request, response: Response):
                 detail="Invalid or expired session"
             )
         
+        # Get session store
+        store = get_session_store()
+        
         # Extend session expiration
-        _sessions[session_id]["expires_at"] = int(time.time()) + SESSION_MAX_AGE
+        session_data["expires_at"] = int(time.time()) + SESSION_MAX_AGE
+        store.update_ttl(session_id, SESSION_MAX_AGE)
         
         # Reset cookie with new expiration
         response.set_cookie(
