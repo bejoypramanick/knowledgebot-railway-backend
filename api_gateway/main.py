@@ -186,7 +186,26 @@ instrument_fastapi(app, "api-gateway")
 # We want: SessionAuth -> Other Middlewares -> CORS -> App
 # So add in reverse order: CORS first, then SessionAuth
 # This ensures CORS headers are added to all responses (including auth errors)
-app.add_middleware(SessionAuthMiddleware)
+
+# Configure SessionAuthMiddleware with public endpoints excluded
+app.add_middleware(
+    SessionAuthMiddleware,
+    exclude_paths=[
+        "/",
+        "/health",
+        "/gateway/health",
+        "/gateway-check",
+        "/docs",
+        "/redoc",
+        "/openapi.json",
+        "/favicon.ico",
+        "/auth/session",  # Session creation endpoint
+        "/auth/logout",   # Logout endpoint
+        "/api/v1/gateway/chatbot/chat/stream",  # Public chat widget endpoint
+        "/api/v1/gateway/widget",  # Public widget HTML endpoint
+        "/chat",  # Confusion detector endpoint
+    ]
+)
 
 app.add_middleware(
     CORSMiddleware,

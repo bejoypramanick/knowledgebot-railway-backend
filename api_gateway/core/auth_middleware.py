@@ -31,6 +31,7 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         
         # Paths that don't require authentication
+        # These are public endpoints accessible without session cookies
         self.exclude_paths = exclude_paths or [
             "/",
             "/health",
@@ -38,8 +39,11 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
             "/redoc",
             "/openapi.json",
             "/favicon.ico",
-            "/auth/session",  # Session creation endpoint
+            "/auth/session",  # Session creation endpoint (receives Firebase token)
             "/auth/logout",   # Logout endpoint
+            # Public chat widget endpoints (no authentication required)
+            "/api/v1/gateway/chatbot/chat/stream",  # Anonymous chat for website visitors
+            "/api/v1/gateway/widget",  # Widget HTML page for iframe embedding
         ]
         
         # Also exclude any path ending with /health
