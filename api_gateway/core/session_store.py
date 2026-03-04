@@ -20,6 +20,7 @@ def init_redis() -> redis.Redis:
     Initialize Redis connection for session storage
     
     Uses existing Railway Redis instance via REDIS_URL environment variable
+    Uses database 3 to isolate sessions from other data (0, 1, 2 already in use)
     """
     global _redis_client
     
@@ -35,9 +36,10 @@ def init_redis() -> redis.Redis:
             logger.warning("⚠️ Sessions will be lost on server restart!")
             return None
         
-        # Connect to Redis
+        # Connect to Redis database 3 (0, 1, 2 already in use)
         _redis_client = redis.from_url(
             redis_url,
+            db=3,  # Use database 3 for sessions
             decode_responses=True,  # Automatically decode bytes to strings
             socket_connect_timeout=5,
             socket_timeout=5,
@@ -48,7 +50,7 @@ def init_redis() -> redis.Redis:
         # Test connection
         _redis_client.ping()
         
-        logger.info(f"✅ Redis connected successfully for session storage")
+        logger.info(f"✅ Redis connected successfully for session storage (database 3)")
         return _redis_client
         
     except redis.ConnectionError as e:
@@ -71,7 +73,13 @@ def get_redis_client() -> Optional[redis.Redis]:
 class SessionStore:
     """
     Session storage abstraction
-    Uses Redis if available, falls back to in-memory dict
+    Uses Redis database 3 if available, falls back to in-memory dict
+    
+    Redis databases in use:
+    - Database 0: (your existing data)
+    - Database 1: (your existing data)
+    - Database 2: (your existing data)
+    - Database 3: Sessions (isolated namespace)
     """
     
     def __init__(self):
