@@ -1321,7 +1321,7 @@ async def get_feedback_counts(request: Request):
 async def get_user_profile(user: dict = Depends(get_current_user)):
     """Get user profile information"""
     logger.info("🔍 GET /users/profile called")
-    logger.info(f"🔍 User data: {user}")
+    logger.info(f"🔍 User data from session: {user}")
     
     try:
         # Get user's actual role from database
@@ -1351,6 +1351,11 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
         user_roles = role_result.get("roles", ["user"])
         logger.info(f"🔍 User roles: {user_roles}")
         
+        # If user has no roles, they might not be in user_role_mapping table
+        # This is OK - they're a regular user
+        if not user_roles or user_roles == ["user"]:
+            logger.info(f"ℹ️ User {user_email} has no special roles, defaulting to 'user' role")
+        
         # Determine primary role (admin > human_agent > user)
         primary_role = "admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user")
         logger.info(f"🔍 Primary role: {primary_role}")
@@ -1368,7 +1373,7 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
                 "notifications": True
             }
         }
-        logger.info("🔍 User profile created successfully")
+        logger.info(f"✅ User profile created successfully for {user_email} with role {primary_role}")
         
         # Check if profile is serializable
         try:
@@ -1395,6 +1400,38 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
             status_code=status_code,
             detail="Database service temporarily unavailable" if status_code == 503 else "Internal server error"
         )
+
+
+@router.get("/debug/session")
+async def debug_session(request: Request):
+    """Debug endpoint to check session status"""
+    logger.info("🔍 DEBUG /debug/session called")
+    
+    # Check if session cookie exists
+    session_cookie = request.cookies.get("session")
+    logger.info(f"🔍 Session cookie: {session_cookie[:20] if session_cookie else 'None'}...")
+    
+    # Check if user is in request state (set by middleware)
+    has_user_state = hasattr(request.state, 'user')
+    logger.info(f"🔍 Has user state: {has_user_state}")
+    
+    if has_user_state:
+        user_data = request.state.user
+        logger.info(f"🔍 User data: {user_data}")
+        return {
+            "success": True,
+            "session_cookie_present": bool(session_cookie),
+            "user_authenticated": True,
+            "user_email": user_data.get("email"),
+            "user_uid": user_data.get("uid")
+        }
+    else:
+        return {
+            "success": False,
+            "session_cookie_present": bool(session_cookie),
+            "user_authenticated": False,
+            "message": "No user in request state"
+        }
 
 def _is_database_error(e: Exception) -> bool:
     """Check if exception is a database-related error"""
