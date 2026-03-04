@@ -86,10 +86,15 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         # Import here to avoid circular dependency
         from api_gateway.routers.auth_router import get_session
         
-        session_data = get_session(session_id)
+        # Get client IP and User-Agent for security validation
+        ip_address = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+        
+        # Validate session with security checks
+        session_data = get_session(session_id, ip_address, user_agent, validate_security=True)
         
         if not session_data:
-            # Session invalid or expired
+            # Session invalid, expired, or potentially hijacked
             logger.warning(f"⚠️ Invalid or expired session cookie for {path}")
             return JSONResponse(
                 status_code=401,

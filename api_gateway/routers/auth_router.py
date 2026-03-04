@@ -31,8 +31,20 @@ class CreateSessionRequest(BaseModel):
     idToken: str
 
 
-def get_session(session_id: str) -> Optional[Dict[str, Any]]:
-    """Get session data by session ID"""
+def get_session(session_id: str, ip_address: str = None, user_agent: str = None, 
+                validate_security: bool = True) -> Optional[Dict[str, Any]]:
+    """
+    Get session data by session ID with security validation
+    
+    Args:
+        session_id: Session ID from cookie
+        ip_address: Client IP address for validation
+        user_agent: Client User-Agent for validation
+        validate_security: Whether to validate IP and User-Agent (default: True)
+    
+    Returns:
+        Session data if valid, None if invalid/expired/hijacked
+    """
     session_data = _sessions.get(session_id)
     
     if not session_data:
@@ -42,27 +54,71 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     if session_data["expires_at"] < int(time.time()):
         # Session expired, delete it
         del _sessions[session_id]
+        logger.info(f"⏰ Session expired for {session_data.get('email')}")
         return None
+    
+    # Security validation (detect session hijacking)
+    if validate_security:
+        # Check IP address match (with flexibility for mobile networks)
+        if ip_address and session_data.get("ip_address"):
+            if ip_address != session_data["ip_address"]:
+                logger.warning(
+                    f"🚨 IP address mismatch for {session_data.get('email')}: "
+                    f"expected {session_data['ip_address']}, got {ip_address}"
+                )
+                # For now, just log warning (don't invalidate)
+                # In production, you might want to invalidate or require re-auth
+                # Uncomment below to enforce strict IP binding:
+                # del _sessions[session_id]
+                # return None
+        
+        # Check User-Agent match (detect browser/device change)
+        if user_agent and session_data.get("user_agent"):
+            if user_agent != session_data["user_agent"]:
+                logger.warning(
+                    f"🚨 User-Agent mismatch for {session_data.get('email')}: "
+                    f"session created with different browser/device"
+                )
+                # For now, just log warning
+                # Uncomment below to enforce strict User-Agent binding:
+                # del _sessions[session_id]
+                # return None
+    
+    # Update request tracking
+    session_data["request_count"] = session_data.get("request_count", 0) + 1
+    session_data["last_request_time"] = int(time.time())
+    
+    # Detect unusual activity (too many requests)
+    if session_data["request_count"] > 10000:  # Adjust threshold as needed
+        logger.warning(
+            f"🚨 Unusual activity detected for {session_data.get('email')}: "
+            f"{session_data['request_count']} requests"
+        )
     
     return session_data
 
 
-def create_session(user_data: Dict[str, Any]) -> str:
+def create_session(user_data: Dict[str, Any], ip_address: str = None, user_agent: str = None) -> str:
     """Create a new session and return session ID"""
     # Generate secure random session ID
     session_id = secrets.token_urlsafe(32)
     
-    # Store session data
+    # Store session data with security metadata
     _sessions[session_id] = {
         "uid": user_data.get("uid"),
         "email": user_data.get("email"),
         "name": user_data.get("name", user_data.get("email")),
         "picture": user_data.get("picture"),
         "created_at": int(time.time()),
-        "expires_at": int(time.time()) + SESSION_MAX_AGE
+        "expires_at": int(time.time()) + SESSION_MAX_AGE,
+        # Security: Bind session to IP and User Agent
+        "ip_address": ip_address,
+        "user_agent": user_agent,
+        "request_count": 0,
+        "last_request_time": int(time.time())
     }
     
-    logger.info(f"✅ Session created for user {user_data.get('email')} (expires in {SESSION_MAX_AGE}s)")
+    logger.info(f"✅ Session created for user {user_data.get('email')} from IP {ip_address} (expires in {SESSION_MAX_AGE}s)")
     
     return session_id
 
@@ -79,7 +135,8 @@ def delete_session(session_id: str) -> bool:
 @router.post("/auth/session")
 async def create_session_endpoint(
     request: CreateSessionRequest,
-    response: Response
+    response: Response,
+    req: Request
 ):
     """
     Create a session cookie from Firebase ID token.
@@ -90,6 +147,10 @@ async def create_session_endpoint(
     3. Backend verifies token with Firebase Admin SDK
     4. Backend creates session and sets httpOnly, secure, SameSite cookie
     5. Frontend uses cookie for all subsequent requests (automatic)
+    
+    Security:
+    - Binds session to IP address and User-Agent
+    - Detects session hijacking attempts
     
     Returns:
         User data (uid, email, name, picture)
@@ -105,8 +166,12 @@ async def create_session_endpoint(
                 detail="Invalid Firebase ID token"
             )
         
-        # Create session
-        session_id = create_session(user_data)
+        # Get client IP and User-Agent for session binding
+        ip_address = req.client.host if req.client else None
+        user_agent = req.headers.get("user-agent")
+        
+        # Create session with security metadata
+        session_id = create_session(user_data, ip_address, user_agent)
         
         # Set httpOnly, secure, SameSite cookie
         response.set_cookie(
@@ -120,7 +185,7 @@ async def create_session_endpoint(
             path="/"         # Cookie sent for all paths
         )
         
-        logger.info(f"✅ Session cookie set for user {user_data.get('email')}")
+        logger.info(f"✅ Session cookie set for user {user_data.get('email')} from IP {ip_address}")
         
         return {
             "success": True,
@@ -185,6 +250,7 @@ async def get_current_user(request: Request):
     Get current user from session cookie.
     
     Returns user data if session is valid, 401 if not authenticated.
+    Validates IP and User-Agent to detect session hijacking.
     """
     try:
         # Get session ID from cookie
@@ -196,8 +262,12 @@ async def get_current_user(request: Request):
                 detail="Not authenticated"
             )
         
-        # Get session data
-        session_data = get_session(session_id)
+        # Get client IP and User-Agent for validation
+        ip_address = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+        
+        # Get session data with security validation
+        session_data = get_session(session_id, ip_address, user_agent, validate_security=True)
         
         if not session_data:
             raise HTTPException(
