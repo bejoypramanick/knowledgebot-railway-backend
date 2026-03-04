@@ -418,8 +418,8 @@ async def delete_all_knowledge() -> Dict[str, Any]:
         # No need to delete individual raw files
         logger.info("ℹ️  [GEMINI_RAW_DELETE] Skipping raw file deletion - already deleted with FileSearch store")
 
-        # Step 3: Delete all files from S3
-        logger.info("🪣 [S3_DELETE] Deleting all files from S3...")
+        # Step 3: Delete all files from S3 (EXCEPT widget configuration images)
+        logger.info("🪣 [S3_DELETE] Deleting all knowledge base files from S3 (excluding widget images)...")
         s3_files_deleted = 0
         try:
             from shared.s3_file_storage import S3FileStorage
@@ -434,13 +434,27 @@ async def delete_all_knowledge() -> Dict[str, Any]:
 
                 if files_with_s3:
                     s3_storage = S3FileStorage()
-                    s3_keys = [file_record['s3_key'] for file_record in files_with_s3]
+                    
+                    # Filter out widget configuration images (agent-icon/ and bubble-icon/ prefixes)
+                    # These are stored in the same S3 bucket but should NOT be deleted
+                    knowledge_base_keys = [
+                        file_record['s3_key'] 
+                        for file_record in files_with_s3 
+                        if not file_record['s3_key'].startswith('agent-icon/') 
+                        and not file_record['s3_key'].startswith('bubble-icon/')
+                    ]
+                    
+                    excluded_count = len(files_with_s3) - len(knowledge_base_keys)
+                    if excluded_count > 0:
+                        logger.info(f"   ℹ️  Excluding {excluded_count} widget configuration images from deletion")
 
                     # Use batch delete for efficiency
-                    deleted_count, failed_count = await s3_storage.delete_files_batch(s3_keys)
+                    deleted_count, failed_count = await s3_storage.delete_files_batch(knowledge_base_keys)
                     s3_files_deleted = deleted_count
 
-                    logger.info(f"   ✅ Deleted {deleted_count} files from S3")
+                    logger.info(f"   ✅ Deleted {deleted_count} knowledge base files from S3")
+                    if excluded_count > 0:
+                        logger.info(f"   ✅ Preserved {excluded_count} widget configuration images")
                     if failed_count > 0:
                         logger.warning(f"   ⚠️  Failed to delete {failed_count} files from S3")
                         errors.append(f"Failed to delete {failed_count} files from S3")
