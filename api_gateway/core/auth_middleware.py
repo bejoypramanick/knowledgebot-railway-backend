@@ -1,8 +1,9 @@
 """
-Firebase Authentication Middleware
-Verifies Firebase ID tokens on all requests (except excluded paths)
+Session-Based Authentication Middleware
+Verifies session cookies (httpOnly, secure, SameSite) on all requests
+Falls back to Firebase ID token verification for API clients
 """
-from fastapi import Request
+from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -12,11 +13,14 @@ from api_gateway.core.logging_config import get_railway_logger
 logger = get_railway_logger(__name__)
 
 
-class FirebaseAuthMiddleware(BaseHTTPMiddleware):
+class SessionAuthMiddleware(BaseHTTPMiddleware):
     """
-    Firebase Authentication Middleware
+    Session-Based Authentication Middleware
     
-    Verifies Firebase ID tokens from Authorization header.
+    Priority:
+    1. Check session cookie (httpOnly, secure, SameSite)
+    2. Fallback to Authorization header (for API clients)
+    
     Adds user data to request.state for downstream use.
     """
     
@@ -31,6 +35,8 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
             "/redoc",
             "/openapi.json",
             "/favicon.ico",
+            "/auth/session",  # Session creation endpoint
+            "/auth/logout",   # Logout endpoint
         ]
         
         # Also exclude any path ending with /health
@@ -61,15 +67,41 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
         
-        # Get Authorization header
+        # Try session cookie first (preferred method)
+        session_id = request.cookies.get("session")
+        
+        if session_id:
+            # Import here to avoid circular dependency
+            from api_gateway.routers.auth_router import get_session
+            
+            session_data = get_session(session_id)
+            
+            if session_data:
+                # Valid session found
+                request.state.user = session_data
+                request.state.user_uid = session_data["uid"]
+                request.state.user_email = session_data["email"]
+                request.state.user_name = session_data["name"]
+                
+                logger.debug(f"✅ Authenticated via session cookie: {session_data['email']} for {path}")
+                
+                # Continue to next middleware/endpoint
+                response = await call_next(request)
+                return response
+            else:
+                # Session invalid or expired
+                logger.warning(f"⚠️ Invalid or expired session cookie for {path}")
+                # Don't return error yet, try Authorization header fallback
+        
+        # Fallback to Authorization header (for API clients, mobile apps, etc.)
         auth_header = request.headers.get("Authorization")
         
         if not auth_header:
-            logger.warning(f"❌ Missing Authorization header for {path}")
+            logger.warning(f"❌ No session cookie or Authorization header for {path}")
             return JSONResponse(
                 status_code=401,
                 content={
-                    "detail": "Missing Authorization header",
+                    "detail": "Authentication required. Please sign in.",
                     "error": "unauthorized"
                 },
                 headers={"WWW-Authenticate": "Bearer"}
@@ -98,7 +130,7 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 status_code=401,
                 content={
-                    "detail": "Invalid or expired Firebase token",
+                    "detail": "Invalid or expired authentication token",
                     "error": "unauthorized"
                 },
                 headers={"WWW-Authenticate": "Bearer"}
@@ -106,13 +138,11 @@ class FirebaseAuthMiddleware(BaseHTTPMiddleware):
         
         # Add user data to request state
         request.state.user = user_data
-        
-        # Add user info to headers for downstream services
         request.state.user_uid = user_data.get('uid')
         request.state.user_email = user_data.get('email')
         request.state.user_name = user_data.get('name', user_data.get('email'))
         
-        logger.debug(f"✅ Authenticated user {user_data.get('email')} for {path}")
+        logger.debug(f"✅ Authenticated via Firebase token: {user_data.get('email')} for {path}")
         
         # Continue to next middleware/endpoint
         response = await call_next(request)

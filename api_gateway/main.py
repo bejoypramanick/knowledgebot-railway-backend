@@ -24,9 +24,10 @@ setup_telemetry("api-gateway")
 logger = get_otel_logger("api_gateway", "api-gateway")
 
 from api_gateway.core.config import get_settings
-from api_gateway.core.auth_middleware import get_current_user
+from api_gateway.core.auth_middleware import get_current_user, SessionAuthMiddleware
 # Import routers and config
 from api_gateway.routers import router as api_router
+from api_gateway.routers.auth_router import router as auth_router
 # Note: Service routers run in separate containers on Railway, so we can't import them directly
 # We'll use HTTP proxy calls to communicate with other services
 from api_gateway.utils.middleware import (add_security_headers_middleware,
@@ -177,86 +178,15 @@ app = FastAPI(
 # Instrument FastAPI for OpenTelemetry immediately after app creation
 instrument_fastapi(app, "api-gateway")
 
-# Add Firebase authentication middleware
-class FirebaseAuthMiddleware(BaseHTTPMiddleware):
-    """Firebase Authentication Middleware"""
-    def __init__(self, app, exclude_paths=None):
-        super().__init__(app)
-        self.exclude_paths = exclude_paths or [
-            "/",  # Root endpoint
-            "/health",  # General health check
-            "/gateway/health",  # Gateway health check
-            "/api/v1/gateway/configuration/health",  # Configuration service health
-            "/api/v1/gateway/configuration/test",  # Configuration service test endpoint
-            "/api/v1/gateway/configuration/version",  # Configuration service version endpoint
-            "/docs",  # API documentation
-            "/redoc",  # ReDoc documentation
-            "/openapi.json",  # OpenAPI schema
-            "/favicon.ico",  # Favicon
-            "/auth/login",  # Login endpoint
-            "/auth/verify",  # Token verification endpoint
-            "/gateway-check",  # Gateway diagnostic endpoint
-            "/api/v1/gateway/chatbot/chat/stream",  # Public chat streaming endpoint
-            "/api/v1/gateway/widget",  # Public widget endpoint
-            "/widget"  # Alternative widget endpoint
-        ]
-    
-    async def dispatch(self, request, call_next):
-        # Skip auth for excluded paths and any health endpoint
-        # ALL OTHER PATHS REQUIRE AUTHENTICATION
-        path = request.url.path
-        if (path in self.exclude_paths or 
-            path.endswith("/health") or 
-            request.method == "OPTIONS"):
-            return await call_next(request)
-        
-        # Get token from Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            from fastapi.responses import JSONResponse
-            return JSONResponse(
-                status_code=401,
-                content={"detail": "Missing or invalid authorization header"},
-                headers={"WWW-Authenticate": "Bearer"}
-            )
-        
-        # Verify token and add user to request state
-        token = auth_header.split(" ")[1]
-        try:
-            from api_gateway.core.firebase_auth import verify_firebase_token
-            user_data = verify_firebase_token(token)
-            if not user_data:
-                from fastapi.responses import JSONResponse
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "Invalid token"}
-                )
-            request.state.user = user_data
-        except Exception as e:
-            from fastapi.responses import JSONResponse
-            return JSONResponse(
-                status_code=401,
-                content={"detail": f"Authentication failed: {str(e)}"}
-            )
-        
-        try:
-            return await call_next(request)
-        except Exception as e:
-            # Catch any other exceptions that might occur during request processing
-            from fastapi.responses import JSONResponse
-            return JSONResponse(
-                status_code=500,
-                content={"detail": "Internal server error"}
-            )
 
 # Add middleware to app
 # IMPORTANT: Middleware execution order in Starlette/FastAPI is LIFO (Last In, First Out)
 # - Last middleware added = First to execute (closest to the request)
 # - First middleware added = Last to execute (closest to response)
-# We want: FirebaseAuth -> Other Middlewares -> CORS -> App
-# So add in reverse order: CORS first, then FirebaseAuth
+# We want: SessionAuth -> Other Middlewares -> CORS -> App
+# So add in reverse order: CORS first, then SessionAuth
 # This ensures CORS headers are added to all responses (including auth errors)
-app.add_middleware(FirebaseAuthMiddleware)
+app.add_middleware(SessionAuthMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -313,7 +243,9 @@ async def chat_confusion_detector(request: Request):
     )
 
 # Include Routers
+app.include_router(auth_router)  # Auth endpoints at root level (/auth/session, /auth/logout, etc.)
 app.include_router(api_router, prefix="/api/v1/gateway")  
+logger.info(f"🔧 Auth router included (session management)")
 logger.info(f"🔧 API Gateway router included with /api/v1/gateway prefix")
 logger.info("📋 Note: Service endpoints will be proxied via HTTP calls to separate containers") 
 
