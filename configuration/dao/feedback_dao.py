@@ -66,13 +66,14 @@ class FeedbackDAO:
             raise
 
     async def get_feedback_counts_by_sessions(self, session_ids: List[str]) -> Dict[str, Dict[str, int]]:
-        """Get feedback counts (positive and negative) for multiple sessions.
+        """Get feedback for multiple sessions.
 
         Args:
-            session_ids: List of session IDs (UUID strings, not numeric IDs) to get feedback counts for
+            session_ids: List of session IDs (UUID strings) to get feedback for
 
         Returns:
             Dictionary with session_id as key and {positive: count, negative: count} as value
+            (count is 1 or 0 since each session has only one feedback)
         """
         if not session_ids:
             return {}
@@ -87,11 +88,9 @@ class FeedbackDAO:
         query = f"""
             SELECT
                 session_id,
-                COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
-                COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
-            FROM chat_feedback
+                feedback_type
+            FROM chat_sessions
             WHERE session_id IN ({placeholders})
-            GROUP BY session_id
         """
 
         try:
@@ -104,19 +103,16 @@ class FeedbackDAO:
                 # Transform results into expected format
                 for record in records:
                     session_id = str(record['session_id'])
-                    positive_count = record['positive_count'] or 0
-                    negative_count = record['negative_count'] or 0
+                    feedback_type = record.get('feedback_type')
 
-                    if session_id not in result_dict:
-                        result_dict[session_id] = {'positive': 0, 'negative': 0}
-
-                    # Update with actual counts
-                    result_dict[session_id]['positive'] = positive_count
-                    result_dict[session_id]['negative'] = negative_count
+                    if session_id in result_dict:
+                        # Update with actual feedback (1 or 0 for each type)
+                        result_dict[session_id]['positive'] = 1 if feedback_type == 'positive' else 0
+                        result_dict[session_id]['negative'] = 1 if feedback_type == 'negative' else 0
 
                 return result_dict
         except Exception as e:
             logger.log_db_query(query, params, error=e)
-            # Return zero counts for all sessions if query fails (feedback_type column may not exist)
+            # Return zero counts for all sessions if query fails
             logger.warning(f"Could not retrieve feedback counts (feedback_type column may not exist): {e}")
             return result_dict

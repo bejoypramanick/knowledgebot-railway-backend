@@ -660,12 +660,11 @@ class ChatLogDAO:
         return {"success": True}
 
     async def get_session_feedback_counts(self, session_id: str) -> Dict[str, int]:
-        """Get feedback counts for a session."""
+        """Get feedback counts for a session (returns 1 or 0 for each type since each session has only one feedback)."""
         query = """
             SELECT
-                COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
-                COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
-            FROM chat_feedback
+                feedback_type
+            FROM chat_sessions
             WHERE session_id = :session_id
         """
         params = {"session_id": session_id}
@@ -676,16 +675,20 @@ class ChatLogDAO:
                 result = await session.execute(text(query), params)
                 row = result.fetchone()
                 logger.log_db_query(query, params, row)
-                return {
-                    "positive_count": dict(row._mapping)['positive_count'] if row else 0,
-                    "negative_count": dict(row._mapping)['negative_count'] if row else 0
-                }
+                
+                if row and row['feedback_type']:
+                    feedback_type = row['feedback_type']
+                    return {
+                        "positive_count": 1 if feedback_type == 'positive' else 0,
+                        "negative_count": 1 if feedback_type == 'negative' else 0
+                    }
+                return {"positive_count": 0, "negative_count": 0}
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return {"positive_count": 0, "negative_count": 0}
 
     async def get_batch_feedback_counts(self, session_ids: List[str]) -> Dict[str, Dict[str, int]]:
-        """Get feedback counts for multiple sessions in a single query (fixes N+1 problem)."""
+        """Get feedback for multiple sessions in a single query."""
         if not session_ids:
             return {}
 
@@ -696,11 +699,9 @@ class ChatLogDAO:
         query = f"""
             SELECT
                 session_id,
-                COUNT(*) FILTER (WHERE feedback_type = 'positive') as positive_count,
-                COUNT(*) FILTER (WHERE feedback_type = 'negative') as negative_count
-            FROM chat_feedback
+                feedback_type
+            FROM chat_sessions
             WHERE session_id IN ({placeholders})
-            GROUP BY session_id
         """
 
         try:
@@ -713,10 +714,13 @@ class ChatLogDAO:
                 # Build result dictionary
                 result_dict = {}
                 for row in rows:
-                    row_dict = dict(row._mapping)  # Convert to dictionary for easier access
-                    result_dict[row_dict['session_id']] = {
-                        "positive_count": row_dict['positive_count'] or 0,
-                        "negative_count": row_dict['negative_count'] or 0
+                    row_dict = dict(row._mapping)
+                    session_id = row_dict['session_id']
+                    feedback_type = row_dict.get('feedback_type')
+                    
+                    result_dict[session_id] = {
+                        "positive_count": 1 if feedback_type == 'positive' else 0,
+                        "negative_count": 1 if feedback_type == 'negative' else 0
                     }
 
                 # Fill in missing sessions with zero counts
