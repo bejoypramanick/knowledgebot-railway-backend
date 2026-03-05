@@ -48,9 +48,10 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Web service started - Celery worker is separate service")
         
         # Initialize SQLAlchemy database
-        if settings.railway_postgres_url:
+        database_url = settings.railway_postgres_url or settings.database_url or os.getenv("DATABASE_URL")
+        if database_url:
             try:
-                await init_database(settings.railway_postgres_url)
+                await init_database(database_url)
                 logger.info("✅ SQLAlchemy engine initialized")
                 app.state.database_ready = True
 
