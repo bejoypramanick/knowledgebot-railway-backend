@@ -867,7 +867,9 @@ async def get_admin_chat_sessions(
 async def get_session_messages(session_id: int):
     """Get all messages for a specific chat session"""
     try:
+        logger.info(f"🔍 GET /admin/chat-sessions/{session_id}/messages called")
         messages = await chat_log_service.get_session_messages(session_id)
+        logger.info(f"✅ Retrieved {len(messages)} messages for session {session_id}")
 
         # Format messages for response
         formatted_messages = []
