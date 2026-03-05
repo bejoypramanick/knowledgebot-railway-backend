@@ -892,6 +892,7 @@ async def get_session_messages(session_id: int):
         logger.error(f"Error getting session messages: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/admin/chat-sessions/progressive")
 async def get_chat_sessions_progressive(
     request: Request,
     user: dict = Depends(get_current_user),
