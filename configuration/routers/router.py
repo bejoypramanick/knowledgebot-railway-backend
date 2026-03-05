@@ -880,29 +880,55 @@ async def get_session_messages(session_id: int):
 
 @router.post("/admin/chat-sessions/{session_id}/messages")
 async def send_agent_message(session_id: str, request: Request):
-    """Send a message from an agent to a customer in a chat session"""
+    """Send a message from an agent or customer in a chat session"""
     try:
         body = await request.json()
         text = body.get("text", "")
-        agent_id = body.get("agent_id", request.headers.get("X-User-Email", "agent@example.com"))
+        sender_id = body.get("agent_id", request.headers.get("X-User-Email", "customer@example.com"))
+        sender_type = body.get("sender", "agent")  # "agent" or "user" (customer)
 
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
 
-        message_id = await chat_log_service.send_agent_message(session_id, agent_id, text)
+        # Save message to database
+        message_id = await chat_log_service.send_agent_message(session_id, sender_id, text)
 
-        # Broadcast event to admins + assigned agent only
+        # Prepare event data
         import datetime
         event_data = {
             "type": "agent_message",
             "session_id": session_id,
             "message_id": str(message_id),
             "text": text,
-            "sender": "agent",
-            "agent_email": agent_id,
+            "sender": sender_type,
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
-        await broadcast_event_for_session(session_id, event_data)
+        
+        if sender_type == "agent":
+            event_data["agent_email"] = sender_id
+
+        # Smart broadcasting based on sender
+        from shared.redis_pubsub_manager import broadcast_event_to_session
+        
+        if sender_type == "user":
+            # Customer sent message → Only notify assigned agent
+            # Get assigned agent from database
+            session = await chat_log_service.dao.get_session_by_id(int(session_id))
+            assigned_agent = session.get('assigned_agent') if session else None
+            
+            if assigned_agent:
+                # Notify assigned agent only
+                await broadcast_event_to_agent(assigned_agent, event_data)
+                logger.info(f"📤 Customer message sent to agent {assigned_agent}")
+            else:
+                # No agent assigned - notify all admins (for assignment)
+                await broadcast_event_to_all_agents(event_data)
+                logger.info(f"📤 Customer message sent to admins (no agent assigned)")
+        
+        else:
+            # Agent sent message → Only notify customer
+            await broadcast_event_to_session(session_id, event_data)
+            logger.info(f"📤 Agent message sent to customer (session {session_id})")
 
         return {
             "success": True,
@@ -912,7 +938,7 @@ async def send_agent_message(session_id: str, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error sending agent message: {e}")
+        logger.error(f"Error sending message: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.put("/admin/chat-sessions/{session_id}/archive")

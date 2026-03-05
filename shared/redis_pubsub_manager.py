@@ -189,7 +189,12 @@ class AgentEventBroadcaster:
         """
         Publish event to all relevant channels for a session.
         
-        Publishes to:
+        DEPRECATED: Use specific broadcast functions instead for better control:
+        - broadcast_event_to_session() for customer messages
+        - broadcast_event_to_agent() for agent-specific messages
+        - broadcast_event_to_all_agents() for admin broadcasts
+        
+        This method publishes to ALL channels (wasteful):
         1. Session channel (customer + agent)
         2. Agent-specific channel (agent only)
         3. Broadcast channel (admins)
