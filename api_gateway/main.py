@@ -199,8 +199,10 @@ app.add_middleware(
         "/redoc",
         "/openapi.json",
         "/favicon.ico",
-        "/auth/session",  # Session creation endpoint
-        "/auth/logout",   # Logout endpoint
+        "/auth/session",  # Session creation endpoint (legacy path)
+        "/api/v1/gateway/auth/session",  # Session creation endpoint (API Gateway path)
+        "/auth/logout",   # Logout endpoint (legacy path)
+        "/api/v1/gateway/auth/logout",   # Logout endpoint (API Gateway path)
         "/api/v1/gateway/chatbot/chat/stream",  # Public chat widget endpoint
         "/api/v1/gateway/widget",  # Public widget HTML endpoint
         "/chat",  # Confusion detector endpoint
