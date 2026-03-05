@@ -69,7 +69,7 @@ class FeedbackDAO:
         """Get feedback counts (positive and negative) for multiple sessions.
 
         Args:
-            session_ids: List of session IDs to get feedback counts for
+            session_ids: List of session IDs (UUID strings, not numeric IDs) to get feedback counts for
 
         Returns:
             Dictionary with session_id as key and {positive: count, negative: count} as value
@@ -77,18 +77,11 @@ class FeedbackDAO:
         if not session_ids:
             return {}
 
-        # Convert session_ids to integers (database expects integer IDs)
-        try:
-            session_ids_int = [int(sid) for sid in session_ids]
-        except (ValueError, TypeError) as e:
-            logger.error(f"Invalid session_ids format: {session_ids}, error: {e}")
-            return {session_id: {'positive': 0, 'negative': 0} for session_id in session_ids}
-
         # Build dynamic IN clause for asyncpg compatibility
-        placeholders = ",".join([f":id_{i}" for i in range(len(session_ids_int))])
-        params = {f"id_{i}": sid for i, sid in enumerate(session_ids_int)}
+        placeholders = ",".join([f":id_{i}" for i in range(len(session_ids))])
+        params = {f"id_{i}": sid for i, sid in enumerate(session_ids)}
 
-        # Initialize result with zero counts for all sessions (keep original string IDs for response)
+        # Initialize result with zero counts for all sessions
         result_dict = {session_id: {'positive': 0, 'negative': 0} for session_id in session_ids}
 
         query = f"""
