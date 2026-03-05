@@ -3,7 +3,7 @@ Consolidated Configuration Router
 All configuration endpoints in one file for easier debugging
 """
 
-from fastapi import APIRouter, HTTPException, Request, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Request, Depends, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
 from typing import Dict, List, Any, Optional
 import json
