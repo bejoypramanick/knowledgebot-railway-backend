@@ -358,6 +358,8 @@ class ChatLogDAO:
             return 0
 
     async def get_all_sessions(self, archive_status: str, limit: int, offset: int) -> List[Dict[str, Any]]:
+        logger.info(f"🔍 DAO get_all_sessions called: archive_status={archive_status}, limit={limit}, offset={offset}")
+        
         # Handle 'all' status - return all sessions regardless of archive status
         if archive_status.lower() == 'all':
             query = """
@@ -371,13 +373,16 @@ class ChatLogDAO:
             """
             try:
                 params = {"limit": limit, "offset": offset}
+                logger.info(f"🔍 Executing query with params: {params}")
                 logger.log_db_operation(query, params)
                 async with get_db_session() as session:
                     result = await session.execute(text(query), params)
                     rows = result.fetchall()
+                    logger.info(f"✅ Query returned {len(rows)} rows")
                     logger.log_db_query(query, params, rows)
                     return [dict(row._mapping) for row in rows]
             except Exception as e:
+                logger.error(f"❌ Error in get_all_sessions: {e}")
                 logger.log_db_query(query, params, error=e)
                 return []
         else:
@@ -393,13 +398,16 @@ class ChatLogDAO:
             """
             try:
                 params = {"archive_status": archive_status, "limit": limit, "offset": offset}
+                logger.info(f"🔍 Executing query with params: {params}")
                 logger.log_db_operation(query, params)
                 async with get_db_session() as session:
                     result = await session.execute(text(query), params)
                     rows = result.fetchall()
+                    logger.info(f"✅ Query returned {len(rows)} rows")
                     logger.log_db_query(query, params, rows)
                     return [dict(row._mapping) for row in rows]
             except Exception as e:
+                logger.error(f"❌ Error in get_all_sessions: {e}")
                 logger.log_db_query(query, params, error=e)
                 return []
 

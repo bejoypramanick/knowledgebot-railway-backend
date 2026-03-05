@@ -810,6 +810,10 @@ async def get_admin_chat_sessions(
     try:
         # Get user email from request headers
         user_email = request.headers.get("X-User-Email", "admin@example.com")
+        
+        logger.info(f"🔍 GET /admin/chat-sessions called")
+        logger.info(f"🔍 Parameters: agent_id={agent_id}, role={role}, status={status}, page={page}, limit={limit}")
+        logger.info(f"🔍 User email from headers: {user_email}")
 
         # Use chat_log_service to get sessions from real database
         sessions, total_count = await chat_log_service.get_chat_sessions(
@@ -820,6 +824,8 @@ async def get_admin_chat_sessions(
             limit=limit,
             agent_id=agent_id
         )
+        
+        logger.info(f"✅ Retrieved {len(sessions)} sessions, total_count={total_count}")
 
         # Convert sessions to dict format (messages already included by service)
         sessions_data = []
@@ -839,6 +845,8 @@ async def get_admin_chat_sessions(
             sessions_data.append(session_dict)
 
         total_pages = (total_count + limit - 1) // limit if total_count > 0 else 1
+        
+        logger.info(f"✅ Returning {len(sessions_data)} sessions to frontend")
 
         return {
             "success": True,
@@ -849,7 +857,10 @@ async def get_admin_chat_sessions(
             "total_pages": total_pages
         }
     except Exception as e:
-        logger.error(f"Error getting admin chat sessions: {e}")
+        logger.error(f"❌ Error getting admin chat sessions: {e}")
+        logger.error(f"❌ Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/admin/chat-sessions/{session_id}/messages")
