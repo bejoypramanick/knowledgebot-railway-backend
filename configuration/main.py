@@ -15,6 +15,7 @@ print(f"🚀 Script location: {__file__}")
 import logging
 from contextlib import asynccontextmanager
 from shared.telemetry import setup_telemetry, instrument_fastapi
+from shared.otel_logger import get_otel_logger
 
 # Initialize Telemetry
 # Use default behavior (span exporter disabled by default via env var)
