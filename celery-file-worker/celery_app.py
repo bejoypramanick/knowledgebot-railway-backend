@@ -177,26 +177,26 @@ def init_worker_process(**kwargs):
         logger.info("✅ [WORKER_INIT] Created fresh event loop for worker process")
         
         # Now handle database engine pool
-        from shared.sqlalchemy_db import SQLAlchemyDB
+        from shared import sqlalchemy_db
 
-        # Reset the singleton instance to force recreation
-        if SQLAlchemyDB._instance:
-            logger.warning("⚠️ [WORKER_INIT] Found inherited SQLAlchemyDB instance from parent process")
+        # Reset the global engine to force recreation in worker process
+        if sqlalchemy_db._engine:
+            logger.warning("⚠️ [WORKER_INIT] Found inherited database engine from parent process")
 
             # Try to dispose of the engine pool gracefully if it exists
             try:
-                if hasattr(SQLAlchemyDB._instance, '_engine') and SQLAlchemyDB._instance._engine:
-                    # Dispose of all connections in the pool
-                    SQLAlchemyDB._instance._engine.dispose()
-                    logger.info("✅ [WORKER_INIT] Disposed of inherited database engine pool")
+                # Dispose of all connections in the pool
+                asyncio.run(sqlalchemy_db._engine.dispose())
+                logger.info("✅ [WORKER_INIT] Disposed of inherited database engine pool")
             except Exception as e:
                 logger.warning(f"⚠️ [WORKER_INIT] Error disposing inherited pool: {e}")
 
-            # Reset the singleton to None so it will be recreated
-            SQLAlchemyDB._instance = None
-            logger.info("✅ [WORKER_INIT] Reset SQLAlchemyDB singleton, will create fresh instance on first use")
+            # Reset the global engine to None so it will be recreated
+            sqlalchemy_db._engine = None
+            sqlalchemy_db._async_session_maker = None
+            logger.info("✅ [WORKER_INIT] Reset database engine, will create fresh instance on first use")
         else:
-            logger.info("✅ [WORKER_INIT] No inherited SQLAlchemyDB found")
+            logger.info("✅ [WORKER_INIT] No inherited database engine found")
         
         # Force garbage collection to clean up any lingering file descriptors
         gc.collect()
