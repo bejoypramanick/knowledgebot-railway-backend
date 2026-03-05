@@ -98,91 +98,21 @@ token_usage_service = TokenUsageService()
 admin_session_dao = AdminSessionDAO()
 admin_action_dao = AdminActionDAO()
 
-# Initialize SSE broadcast function in chat_log_service
-from ..service.chat_log_service import broadcast_event_to_agent as chat_broadcast_event_to_agent
-
 # =================================
-# SSE EVENT BROADCASTING SYSTEM
+# SSE EVENT BROADCASTING SYSTEM (Redis Pub/Sub)
 # =================================
-# Global event queues for each connected agent: email -> (Queue, role)
-agent_event_queues: Dict[str, tuple] = {}  # email -> (asyncio.Queue, role)
-agent_event_queues_lock = asyncio.Lock()
+# Import Redis Pub/Sub manager - replaces in-memory queues
+from shared.redis_pubsub_manager import (
+    AgentEventSubscriber,
+    broadcast_event_to_agent,
+    broadcast_event_to_all_agents,
+    broadcast_event_for_session
+)
 
-async def broadcast_event_to_agent(agent_email: str, event_data: Dict[str, Any]):
-    """Broadcast an event to a specific agent's SSE connection"""
-    async with agent_event_queues_lock:
-        if agent_email in agent_event_queues:
-            try:
-                queue, role = agent_event_queues[agent_email]
-                await queue.put(event_data)
-                logger.info(f"📤 Broadcasted event to agent {agent_email}: {event_data.get('type')}")
-            except Exception as e:
-                logger.error(f"Error broadcasting event to {agent_email}: {e}")
+logger.info("✅ Redis Pub/Sub manager initialized for agent SSE events")
 
 # Set the broadcast function reference in chat_log_service
-from ..service.chat_log_service import broadcast_event_to_agent as chat_broadcast_event_ref
-chat_broadcast_event_ref = broadcast_event_to_agent
-
-async def broadcast_event_to_all_agents(event_data: Dict[str, Any]):
-    """Broadcast an event to all connected agents"""
-    async with agent_event_queues_lock:
-        for agent_email, (queue, role) in agent_event_queues.items():
-            try:
-                await queue.put(event_data)
-            except Exception as e:
-                logger.error(f"Error broadcasting to {agent_email}: {e}")
-
-async def broadcast_event_for_session(session_id: str, event_data: Dict[str, Any]):
-    """
-    Broadcast event to agents who should see this session:
-    - All admins (they see all sessions)
-    - The assigned human agent (if any)
-
-    This prevents human agents from seeing other agents' conversations.
-    """
-    try:
-        # Get session details to find assigned agent
-        from shared.sqlalchemy_db import get_db_session
-        from sqlalchemy import text
-        query = """
-            SELECT assigned_agent, user_role_id
-            FROM chat_sessions
-            WHERE id = :session_id
-        """
-        async with get_db_session() as session:
-            result = await session.execute(text(query), {"session_id": session_id})
-            session_data = result.mappings().first()
-
-        if not session_data:
-            logger.warning(f"Session {session_id} not found for broadcasting")
-            return
-
-        assigned_agent = session_data.get('assigned_agent')
-
-        # Broadcast to admins + assigned agent only
-        async with agent_event_queues_lock:
-            for agent_email, (queue, role) in agent_event_queues.items():
-                # Send to:
-                # 1. All admins (they see everything)
-                # 2. The assigned human agent
-                should_receive = (
-                    role == 'admin' or  # Admins see all
-                    (assigned_agent and agent_email == assigned_agent)  # Assigned agent
-                )
-
-                if should_receive:
-                    try:
-                        await queue.put(event_data)
-                        logger.info(f"📤 Sent event to {role} {agent_email}")
-                    except Exception as e:
-                        logger.error(f"Error broadcasting to {agent_email}: {e}")
-                else:
-                    logger.debug(f"Skipping {agent_email} (role={role}, not assigned)")
-
-    except Exception as e:
-        logger.error(f"Error in broadcast_event_for_session: {e}")
-        # Fallback to broadcast to all
-        await broadcast_event_to_all_agents(event_data)
+logger.info("✅ Redis Pub/Sub manager initialized for agent SSE events")
 
 # =================================
 # CHATBOT CONFIGURATION ENDPOINTS
@@ -756,8 +686,14 @@ async def get_online_agents():
 @router.get("/admin/events")
 async def agent_events_stream(request: Request, token: str = None):
     """
-    Server-Sent Events endpoint for real-time agent updates
-    Streams events for ALL sessions assigned to the logged-in agent
+    Server-Sent Events endpoint for real-time agent updates using Redis Pub/Sub.
+    Streams events for ALL sessions assigned to the logged-in agent.
+    
+    Simplified implementation:
+    - No in-memory queues
+    - No locks required
+    - Automatic cleanup
+    - Scales horizontally
     """
     try:
         # Get user email from token or request headers
@@ -769,47 +705,28 @@ async def agent_events_stream(request: Request, token: str = None):
 
         # Get user role from request headers (set by API Gateway)
         user_role = request.headers.get("X-User-Role", "human_agent")
-        logger.info(f"🔌 Agent {user_email} (role={user_role}) connecting to SSE stream")
+        logger.info(f"🔌 Agent {user_email} (role={user_role}) connecting to Redis Pub/Sub SSE stream")
 
-        # Create event queue for this agent
-        event_queue = asyncio.Queue()
-
-        async with agent_event_queues_lock:
-            agent_event_queues[user_email] = (event_queue, user_role)
+        # Create Redis Pub/Sub subscriber for this agent
+        subscriber = AgentEventSubscriber(user_email, user_role)
 
         async def event_generator():
+            """
+            Generator that yields SSE events from Redis Pub/Sub.
+            Automatic cleanup on disconnect.
+            """
             try:
-                # Send initial connection event
-                yield f"data: {json.dumps({'type': 'connected', 'agent_email': user_email})}\n\n"
-
-                # Send heartbeat every 30 seconds to keep connection alive
-                last_heartbeat = asyncio.get_event_loop().time()
-
-                while True:
-                    try:
-                        # Wait for event with timeout for heartbeat
-                        event_data = await asyncio.wait_for(event_queue.get(), timeout=30.0)
-
-                        # Send event to client
-                        yield f"data: {json.dumps(event_data)}\n\n"
-
-                    except asyncio.TimeoutError:
-                        # Send heartbeat
-                        current_time = asyncio.get_event_loop().time()
-                        if current_time - last_heartbeat >= 30:
-                            yield f"data: {json.dumps({'type': 'ping'})}\n\n"
-                            last_heartbeat = current_time
-
+                # Subscribe and yield events as they arrive from Redis
+                async for event_data in subscriber.subscribe():
+                    yield f"data: {json.dumps(event_data)}\n\n"
+                    
             except asyncio.CancelledError:
                 logger.info(f"🔌 SSE connection cancelled for {user_email}")
             except Exception as e:
-                logger.error(f"Error in SSE generator for {user_email}: {e}")
+                logger.error(f"❌ Error in SSE generator for {user_email}: {e}")
             finally:
-                # Cleanup: remove queue when connection closes
-                async with agent_event_queues_lock:
-                    if user_email in agent_event_queues:
-                        del agent_event_queues[user_email]
-                logger.info(f"🔌 Agent {user_email} disconnected from SSE stream")
+                # Cleanup is automatic in subscriber.subscribe()
+                logger.info(f"🔌 Agent {user_email} disconnected from Redis Pub/Sub SSE stream")
 
         return StreamingResponse(
             event_generator(),
@@ -822,7 +739,7 @@ async def agent_events_stream(request: Request, token: str = None):
         )
 
     except Exception as e:
-        logger.error(f"Error setting up SSE stream: {e}")
+        logger.error(f"❌ Error setting up Redis Pub/Sub SSE stream: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/admin/chat-sessions")

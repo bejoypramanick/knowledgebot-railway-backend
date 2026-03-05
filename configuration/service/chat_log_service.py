@@ -10,8 +10,11 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger("chat_log_service", "configuration")
 
-# Import SSE broadcast function (will be initialized in router)
-broadcast_event_to_agent = None
+# Import Redis Pub/Sub broadcast functions
+from shared.redis_pubsub_manager import (
+    broadcast_event_to_agent,
+    broadcast_event_for_session
+)
 
 class ChatLogService:
     """Service layer for chat log operations"""
@@ -50,19 +53,18 @@ class ChatLogService:
             else:
                 await self.dao.create_session_assignment(session_db_id, agent_email, assignee_type, status='active')
             
-            # Send real-time notification to assigned agent via SSE
-            if broadcast_event_to_agent:
-                assignment_event = {
-                    "type": "chat_assigned",
-                    "session_id": str(session_db_id),
-                    "agent_email": agent_email,
-                    "assignee_type": assignee_type,
-                    "status": "active",
-                    "message": "New chat assigned to you",
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-                await broadcast_event_to_agent(agent_email, assignment_event)
-                logger.info(f"📤 Sent real-time assignment notification to agent {agent_email}")
+            # Send real-time notification to assigned agent via Redis Pub/Sub
+            assignment_event = {
+                "type": "chat_assigned",
+                "session_id": str(session_db_id),
+                "agent_email": agent_email,
+                "assignee_type": assignee_type,
+                "status": "active",
+                "message": "New chat assigned to you",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            await broadcast_event_to_agent(agent_email, assignment_event)
+            logger.info(f"📤 Sent real-time assignment notification to agent {agent_email} via Redis Pub/Sub")
             
         except Exception as e:
             logger.error(f"Error assigning chat to agent: {e}", exc_info=True)
