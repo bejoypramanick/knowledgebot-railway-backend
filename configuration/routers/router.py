@@ -973,6 +973,19 @@ async def end_agent_session(session_id: str, request: Request):
             user_email=user_email,
             status="closed"
         )
+        
+        # Broadcast session_ended event with feedback prompt to customer
+        from shared.redis_pubsub_manager import broadcast_event_to_session
+        import datetime
+        
+        event_data = {
+            "type": "session_ended",
+            "session_id": session_id,
+            "ended_by": "agent",
+            "show_feedback": True,  # Trigger feedback UI for customer
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        }
+        await broadcast_event_to_session(session_id, event_data)
 
         return {
             "success": True,
@@ -999,6 +1012,19 @@ async def end_customer_session(request: Request):
 
         # Pass numeric ID directly to service
         await chat_log_service.end_customer_session(str(session_id), user_email)
+        
+        # Broadcast session_ended event with feedback prompt
+        from shared.redis_pubsub_manager import broadcast_event_to_session
+        import datetime
+        
+        event_data = {
+            "type": "session_ended",
+            "session_id": str(session_id),
+            "ended_by": "customer",
+            "show_feedback": True,  # Trigger feedback UI
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        }
+        await broadcast_event_to_session(str(session_id), event_data)
 
         return {
             "success": True,
@@ -1010,6 +1036,48 @@ async def end_customer_session(request: Request):
     except Exception as e:
         logger.error(f"Error ending customer session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/admin/chat-sessions/{session_id}/feedback")
+async def submit_session_feedback(session_id: str, request: Request):
+    """
+    Submit customer feedback for a chat session (thumbs up/down).
+    
+    No authentication required - anonymous customer feedback.
+    
+    Request Body:
+        feedback_type: 'positive' or 'negative'
+    """
+    try:
+        body = await request.json()
+        feedback_type = body.get("feedback_type")
+        
+        if not feedback_type:
+            raise HTTPException(status_code=400, detail="feedback_type is required")
+        
+        if feedback_type not in ['positive', 'negative']:
+            raise HTTPException(status_code=400, detail="feedback_type must be 'positive' or 'negative'")
+        
+        # Update feedback in database
+        success = await chat_log_service.dao.update_session_feedback(session_id, feedback_type)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        logger.info(f"✅ Customer feedback '{feedback_type}' submitted for session {session_id}")
+        
+        return {
+            "success": True,
+            "message": "Feedback submitted successfully",
+            "session_id": session_id,
+            "feedback_type": feedback_type
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error submitting feedback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/admin/chat-sessions/transfer")
 async def transfer_session(request: Request):

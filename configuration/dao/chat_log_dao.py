@@ -550,6 +550,40 @@ class ChatLogDAO:
             logger.log_db_query(query, {"session_id": session_id, "status": status}, error=e)
             return False
 
+    async def update_session_feedback(self, session_id: int | str, feedback_type: str) -> bool:
+        """
+        Update session feedback (thumbs up/down).
+        
+        Args:
+            session_id: Session ID (numeric or string)
+            feedback_type: 'positive' or 'negative'
+        
+        Returns:
+            True if updated successfully
+        """
+        try:
+            # Convert to int if string
+            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+
+            query = """
+                UPDATE chat_sessions 
+                SET feedback_type = :feedback_type,
+                    feedback_provided_at = NOW()
+                WHERE id = :id
+            """
+            params = {"id": session_db_id, "feedback_type": feedback_type}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, None)
+                logger.info(f"✅ Feedback '{feedback_type}' saved for session {session_db_id}")
+                return result.rowcount > 0 if hasattr(result, 'rowcount') else True
+        except Exception as e:
+            logger.error(f"❌ Error updating session feedback: {e}")
+            logger.log_db_query(query, {"session_id": session_id, "feedback_type": feedback_type}, error=e)
+            return False
+
     async def get_session_by_id_with_messages(self, session_id: int | str) -> Optional[Dict[str, Any]]:
         """Get session by numeric ID only."""
         try:
