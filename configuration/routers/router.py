@@ -892,7 +892,6 @@ async def get_session_messages(session_id: int):
         logger.error(f"Error getting session messages: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/admin/chat-sessions/progressive")
 async def get_chat_sessions_progressive(
     request: Request,
     user: dict = Depends(get_current_user),
@@ -909,9 +908,9 @@ async def get_chat_sessions_progressive(
         logger.info(f"🔍 GET /admin/chat-sessions/progressive - offset={offset}, limit={limit}")
 
         sessions, total_count = await chat_log_service.get_chat_sessions(
-            user_email=user.get('email'),
             role=role,
-            status=status,
+            user_email=user.get('email'),
+            archive_status=status,  # Fixed: use archive_status parameter name
             page=1,
             limit=limit,
             offset=offset
