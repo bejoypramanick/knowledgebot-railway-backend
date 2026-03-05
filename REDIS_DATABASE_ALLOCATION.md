@@ -4,19 +4,17 @@ This document describes how Redis databases are allocated across the system.
 
 ## Database Allocation
 
-| Database | Purpose | Environment Variable | Used By | Notes |
-|----------|---------|---------------------|---------|-------|
-| **DB 0** | File Processing (Celery) | `FILE_REDIS_URL` | celery-file-worker, knowledgebase-ingestion | Must include `/0` in URL |
-| **DB 1** | Web Crawling (Celery) | `WEB_REDIS_URL` | celery-web-worker, knowledgebase-ingestion | Must include `/1` in URL |
-| **DB 2** | *(Reserved/Unused)* | - | - | Available for future use |
-| **DB 3** | Session Storage | `REDIS_URL` | api-gateway (session_store) | Auto-appended by code |
-| **DB 4** | Pub/Sub (SSE Events) | `REDIS_URL` | configuration service (redis_pubsub_manager) | Auto-appended by code |
+| Database | Purpose | Environment Variable | Used By |
+|----------|---------|---------------------|---------|
+| **DB 0** | File Processing (Celery) | `FILE_REDIS_URL` | celery-file-worker, knowledgebase-ingestion |
+| **DB 1** | Web Crawling (Celery) | `WEB_REDIS_URL` | celery-web-worker, knowledgebase-ingestion |
+| **DB 2** | Session Storage | `SESSION_REDIS_URL` | api-gateway (session_store) |
+| **DB 3** | Pub/Sub (SSE Events) | `PUBSUB_REDIS_URL` | configuration service (redis_pubsub_manager) |
+| **DB 4** | *(Reserved/Unused)* | - | Available for future use |
 
 ## Environment Variable Configuration
 
-### For Services Using DB 0 and DB 1 (Celery Workers)
-
-These services require **explicit database numbers in the URL**:
+All services require **explicit database numbers in the URL**:
 
 ```bash
 # File Processing (DB 0)
@@ -24,52 +22,30 @@ FILE_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/0
 
 # Web Crawling (DB 1)
 WEB_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/1
+
+# Session Storage (DB 2)
+SESSION_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/2
+
+# Pub/Sub for SSE Events (DB 3)
+PUBSUB_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/3
 ```
-
-**Services that need these:**
-- `celery-file-worker` - needs `FILE_REDIS_URL`
-- `celery-web-worker` - needs `WEB_REDIS_URL`
-- `knowledgebase-ingestion` - needs both `FILE_REDIS_URL` and `WEB_REDIS_URL`
-
-### For Services Using DB 3 and DB 4 (Sessions and Pub/Sub)
-
-These services use a **base URL without database number** - the code automatically appends the correct database:
-
-```bash
-# Base Redis URL (no database number)
-REDIS_URL=redis://default:<password>@redis.railway.internal:6379
-```
-
-**Services that need this:**
-- `api-gateway` - uses DB 3 for sessions (auto-appended)
-- `configuration` - uses DB 4 for Pub/Sub (auto-appended)
-
-**Important:** The code will strip any database number from `REDIS_URL` and append the correct one:
-- `session_store.py` appends `/3` or uses `db=3` parameter
-- `redis_pubsub_manager.py` strips existing DB and uses `db=4` parameter
 
 ## Code Behavior
 
-### Session Store (DB 3)
+All Redis connections now use explicit environment variables with database numbers in the URL.
+
+### Session Store (DB 2)
 ```python
 # From api_gateway/core/session_store.py
-if redis_url.endswith('/3'):
-    # Use URL as-is
-    redis.from_url(redis_url)
-else:
-    # Append db=3 parameter
-    redis.from_url(redis_url, db=3)
+redis_url = os.getenv('SESSION_REDIS_URL')  # Must include /2
+redis.from_url(redis_url)
 ```
 
-### Pub/Sub Manager (DB 4)
+### Pub/Sub Manager (DB 3)
 ```python
 # From shared/redis_pubsub_manager.py
-if redis_url.endswith(('/0', '/1', '/2', '/3')):
-    # Strip existing database number
-    redis_url = redis_url.rsplit('/', 1)[0]
-
-# Always use db=4
-redis.from_url(redis_url, db=4)
+redis_url = os.getenv('PUBSUB_REDIS_URL')  # Must include /3
+redis.from_url(redis_url)
 ```
 
 ### Celery Workers (DB 0 and DB 1)
@@ -93,22 +69,19 @@ redis_url = os.getenv('WEB_REDIS_URL')  # Must include /1
 
 #### API Gateway Service
 ```bash
-REDIS_URL=redis://default:<password>@redis.railway.internal:6379
+SESSION_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/2
 ```
-(No database number - code appends `/3`)
 
 #### Configuration Service
 ```bash
-REDIS_URL=redis://default:<password>@redis.railway.internal:6379
+PUBSUB_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/3
 ```
-(No database number - code appends `/4`)
 
 #### Knowledgebase Ingestion Service
 ```bash
 FILE_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/0
 WEB_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/1
 ```
-(Must include database numbers)
 
 #### Celery File Worker
 ```bash
@@ -129,8 +102,11 @@ WEB_REDIS_URL=redis://default:<password>@redis.railway.internal:6379/1
 
 ## Troubleshooting
 
-### Error: "REDIS_URL environment variable not set"
-**Solution**: Add `REDIS_URL` to the service (without database number for API Gateway and Configuration)
+### Error: "SESSION_REDIS_URL environment variable not set"
+**Solution**: Add `SESSION_REDIS_URL` with `/2` to API Gateway service
+
+### Error: "PUBSUB_REDIS_URL environment variable not set"
+**Solution**: Add `PUBSUB_REDIS_URL` with `/3` to Configuration service
 
 ### Error: "FILE_REDIS_URL not set"
 **Solution**: Add `FILE_REDIS_URL` with `/0` to knowledgebase-ingestion and celery-file-worker

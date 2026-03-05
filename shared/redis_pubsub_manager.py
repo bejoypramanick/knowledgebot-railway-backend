@@ -18,17 +18,14 @@ _pubsub_redis_client: Optional[redis.Redis] = None
 
 def init_pubsub_redis() -> redis.Redis:
     """
-    Initialize Redis client for Pub/Sub on database 4.
+    Initialize Redis client for Pub/Sub on database 3.
     
-    Databases in use:
-    - 0: Celery tasks
-    - 1: Web crawling queue
-    - 2: File processing
-    - 3: Session storage
-    - 4: Agent SSE Pub/Sub (NEW)
+    Uses DATABASE 3 for Pub/Sub (SSE events)
+    Requires PUBSUB_REDIS_URL environment variable with explicit database number
+    Format: redis://default:<password>@redis.railway.internal:6379/3
     
     Returns:
-        Redis client connected to database 4
+        Redis client connected to database 3
     
     Raises:
         RuntimeError if Redis is not configured
@@ -38,25 +35,20 @@ def init_pubsub_redis() -> redis.Redis:
     if _pubsub_redis_client is not None:
         return _pubsub_redis_client
     
-    redis_url = os.getenv('REDIS_URL')
+    redis_url = os.getenv('PUBSUB_REDIS_URL')
     
     if not redis_url:
         raise RuntimeError(
-            "REDIS_URL environment variable not set. "
-            "Redis Pub/Sub is required for agent SSE events."
+            "PUBSUB_REDIS_URL environment variable not set. "
+            "Redis Pub/Sub is required for agent SSE events. "
+            "Format: redis://default:<password>@redis.railway.internal:6379/3"
         )
     
     try:
-        logger.info(f"🔌 Initializing Redis Pub/Sub client (database 4)...")
-        
-        # Always use database 4 for Pub/Sub
-        if redis_url.endswith(('/0', '/1', '/2', '/3')):
-            # Remove existing database number
-            redis_url = redis_url.rsplit('/', 1)[0]
+        logger.info(f"🔌 Initializing Redis Pub/Sub client (database 3)...")
         
         _pubsub_redis_client = redis.from_url(
             redis_url,
-            db=4,  # Use database 4 for Pub/Sub
             decode_responses=True,
             socket_connect_timeout=5,
             socket_keepalive=True,
@@ -65,13 +57,14 @@ def init_pubsub_redis() -> redis.Redis:
         
         # Test connection
         _pubsub_redis_client.ping()
-        logger.info("✅ Redis Pub/Sub client initialized successfully (db=4)")
+        logger.info("✅ Redis Pub/Sub client initialized successfully (db=3)")
         
         return _pubsub_redis_client
         
     except redis.ConnectionError as e:
         logger.error(f"❌ Failed to connect to Redis for Pub/Sub: {e}")
         raise RuntimeError(f"Redis Pub/Sub connection failed: {e}")
+
 
 
 def get_pubsub_redis() -> redis.Redis:

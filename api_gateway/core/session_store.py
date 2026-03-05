@@ -19,12 +19,9 @@ def init_redis() -> redis.Redis:
     """
     Initialize Redis connection for session storage
     
-    Uses existing Railway Redis instance via REDIS_URL environment variable
-    Uses database 3 to isolate sessions from other data (0, 1, 2 already in use)
-    
-    REDIS_URL can specify database in two ways:
-    1. In URL: redis://...@host:6379/3
-    2. Via db parameter (if not in URL)
+    Uses DATABASE 2 for sessions
+    Requires SESSION_REDIS_URL environment variable with explicit database number
+    Format: redis://default:<password>@redis.railway.internal:6379/2
     
     Raises RuntimeError if Redis is not configured or connection fails.
     """
@@ -34,58 +31,44 @@ def init_redis() -> redis.Redis:
         logger.info("Redis client already initialized")
         return _redis_client
     
-    # REDIS_URL is required - no fallback
-    redis_url = os.getenv('REDIS_URL')
+    # SESSION_REDIS_URL is required - must include /2 for database 2
+    redis_url = os.getenv('SESSION_REDIS_URL')
     
     if not redis_url:
         error_msg = (
-            "REDIS_URL environment variable not set. "
+            "SESSION_REDIS_URL environment variable not set. "
             "Session storage requires Redis. "
-            "Please configure REDIS_URL in Railway API Gateway service."
+            "Please configure SESSION_REDIS_URL in Railway API Gateway service. "
+            "Format: redis://default:<password>@redis.railway.internal:6379/2"
         )
         logger.error(f"❌ {error_msg}")
         raise RuntimeError(error_msg)
     
     try:
-        # Check if database is specified in URL
-        # If URL ends with /3, use that; otherwise default to database 3
-        if redis_url.endswith('/3'):
-            # Database already specified in URL
-            _redis_client = redis.from_url(
-                redis_url,
-                decode_responses=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-                retry_on_timeout=True,
-                health_check_interval=30
-            )
-            logger.info(f"✅ Redis connected successfully for session storage (database 3 from URL)")
-        else:
-            # Database not in URL, specify db=3
-            _redis_client = redis.from_url(
-                redis_url,
-                db=3,  # Use database 3 for sessions
-                decode_responses=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-                retry_on_timeout=True,
-                health_check_interval=30
-            )
-            logger.info(f"✅ Redis connected successfully for session storage (database 3 via parameter)")
+        _redis_client = redis.from_url(
+            redis_url,
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+            retry_on_timeout=True,
+            health_check_interval=30
+        )
         
         # Test connection
         _redis_client.ping()
+        logger.info(f"✅ Redis connected successfully for session storage (database 2)")
         
         return _redis_client
         
     except redis.ConnectionError as e:
-        error_msg = f"Failed to connect to Redis: {e}. Check REDIS_URL and ensure Redis service is running."
+        error_msg = f"Failed to connect to Redis: {e}. Check SESSION_REDIS_URL and ensure Redis service is running."
         logger.error(f"❌ {error_msg}")
         raise RuntimeError(error_msg)
     except Exception as e:
         error_msg = f"Error initializing Redis: {e}"
         logger.error(f"❌ {error_msg}")
         raise RuntimeError(error_msg)
+
 
 
 def get_redis_client() -> Optional[redis.Redis]:
