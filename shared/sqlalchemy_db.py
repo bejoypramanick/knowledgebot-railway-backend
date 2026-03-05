@@ -29,6 +29,7 @@ Usage:
 """
 
 import os
+import asyncio
 from typing import Optional, AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -96,9 +97,10 @@ async def init_database(database_url: Optional[str] = None) -> None:
     else:
         async_url = db_url
 
-    # Read Railway environment configuration with defaults
-    pool_size = int(os.getenv("DB_POOL_SIZE", "5"))
-    pool_max_overflow = int(os.getenv("DB_POOL_MAX_OVERFLOW", "3"))
+    # Read Railway environment configuration with production-appropriate defaults
+    # Increased from 5/3 to 10/10 to handle concurrent requests better
+    pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
+    pool_max_overflow = int(os.getenv("DB_POOL_MAX_OVERFLOW", "10"))
     pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "3600"))
     statement_timeout = os.getenv("DB_STATEMENT_TIMEOUT", "60000")
     connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "10"))
@@ -174,15 +176,25 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
             "Database not initialized. Call init_database() first."
         )
 
-    async with _async_session_maker() as session:
-        try:
+    session = None
+    try:
+        session = _async_session_maker()
+        async with session:
             yield session
-        except Exception as e:
+    except asyncio.CancelledError:
+        # Handle request cancellation gracefully
+        logger.warning("⚠️ Database session cancelled (likely due to request timeout)")
+        if session:
+            try:
+                await session.rollback()
+            except Exception:
+                pass  # Ignore errors during cancellation cleanup
+        raise
+    except Exception as e:
+        if session:
             await session.rollback()
-            logger.error(f"Database error: {e}")
-            raise
-        finally:
-            await session.close()
+        logger.error(f"Database error: {e}")
+        raise
 
 
 async def health_check() -> dict:
