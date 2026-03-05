@@ -51,6 +51,16 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # This ensures otelTraceID and otelSpanID are available in log records
     LoggingInstrumentor().instrument(set_logging_format=False)
     
+    # Add a filter to ensure otelTraceID and otelSpanID always exist
+    class OTelFieldFilter(logging.Filter):
+        def filter(self, record):
+            # Ensure these fields always exist, even if LoggingInstrumentor didn't set them
+            if not hasattr(record, 'otelTraceID'):
+                record.otelTraceID = '0'
+            if not hasattr(record, 'otelSpanID'):
+                record.otelSpanID = '0'
+            return True
+    
     # Format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] - Message
     log_format = f"%(asctime)s [%(levelname)s] [{service_name}] [%(otelTraceID)s] [%(otelSpanID)s] - %(message)s"
     formatter = logging.Formatter(log_format)
@@ -58,6 +68,9 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # Reset root logger handlers to clean state
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
+    
+    # Add the filter to root logger
+    root_logger.addFilter(OTelFieldFilter())
     
     # Remove existing handlers to avoid duplicate logs
     if root_logger.hasHandlers():
