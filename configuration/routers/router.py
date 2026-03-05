@@ -682,10 +682,12 @@ async def get_online_agents():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/admin/events")
-async def agent_events_stream(request: Request, token: str = None):
+async def agent_events_stream(request: Request, user: dict = Depends(get_current_user)):
     """
     Server-Sent Events endpoint for real-time agent updates using Redis Pub/Sub.
     Streams events for ALL sessions assigned to the logged-in agent.
+    
+    Uses cookie-based authentication (no token parameter needed).
     
     Simplified implementation:
     - No in-memory queues
@@ -694,15 +696,14 @@ async def agent_events_stream(request: Request, token: str = None):
     - Scales horizontally
     """
     try:
-        # Get user email from token or request headers
-        user_email = request.headers.get("X-User-Email")
+        # Get user email from authenticated user (via cookie)
+        user_email = user.get("email")
+        user_role = user.get("role", "human_agent")
 
         if not user_email:
             logger.error("No user email in SSE request")
-            raise HTTPException(status_code=401, detail="Unauthorized")
+            raise HTTPException(status_code=401, detail="Authentication required. Please sign in.")
 
-        # Get user role from request headers (set by API Gateway)
-        user_role = request.headers.get("X-User-Role", "human_agent")
         logger.info(f"🔌 Agent {user_email} (role={user_role}) connecting to Redis Pub/Sub SSE stream")
 
         # Create Redis Pub/Sub subscriber for this agent
