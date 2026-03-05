@@ -892,6 +892,60 @@ async def get_session_messages(session_id: int):
         logger.error(f"Error getting session messages: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/admin/chat-sessions/progressive")
+async def get_chat_sessions_progressive(
+    request: Request,
+    user: dict = Depends(get_current_user),
+    role: str = Query('admin'),
+    status: str = Query('all'),
+    offset: int = Query(0),
+    limit: int = Query(1)
+):
+    """
+    Get chat sessions one at a time with messages for progressive loading.
+    Use offset to get the next session.
+    """
+    try:
+        logger.info(f"🔍 GET /admin/chat-sessions/progressive - offset={offset}, limit={limit}")
+
+        sessions, total_count = await chat_log_service.get_chat_sessions(
+            user_email=user.get('email'),
+            role=role,
+            status=status,
+            page=1,
+            limit=limit,
+            offset=offset
+        )
+
+        # Load messages for each session
+        for session in sessions:
+            messages = await chat_log_service.get_session_messages(session['id'])
+            formatted_messages = []
+            for msg in messages:
+                formatted_messages.append({
+                    "id": str(msg.get("id", "")),
+                    "text": msg.get("content", ""),
+                    "sender": msg.get("role", "user"),
+                    "timestamp": msg.get("created_at").isoformat() if msg.get("created_at") else None,
+                    "session_id": session['id']
+                })
+            session['messages'] = formatted_messages
+
+        return {
+            "success": True,
+            "sessions": sessions,
+            "total_count": total_count,
+            "offset": offset,
+            "limit": limit,
+            "has_more": (offset + limit) < total_count
+        }
+    except Exception as e:
+        logger.error(f"Error getting progressive sessions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
 @router.post("/admin/chat-sessions/{session_id}/messages")
 async def send_agent_message(session_id: str, request: Request):
     """Send a message from an agent or customer in a chat session"""
