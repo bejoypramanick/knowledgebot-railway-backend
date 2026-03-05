@@ -94,6 +94,96 @@ async def verify_auth_token(request: Request):
         logger.error(f"Error verifying token: {e}")
         raise HTTPException(status_code=500, detail=f"Error verifying token: {str(e)}")
 
+# =================================
+# SSE (Server-Sent Events) ENDPOINTS
+# =================================
+
+@router.get("/configuration/admin/events")
+async def proxy_admin_events_sse(request: Request):
+    """
+    Proxy SSE endpoint for admin/agent events.
+    SSE requires special handling - no timeout, streaming response.
+    """
+    try:
+        settings = get_settings()
+        config_service_url = settings.configuration_service_url
+        full_url = f"{config_service_url}/api/v1/configuration/admin/events"
+
+        logger.info(f"🔄 Proxying SSE stream to: {full_url}")
+
+        # Prepare headers - forward cookies for authentication
+        headers = dict(request.headers)
+        headers.pop("host", None)
+
+        # Create streaming client with NO timeout for SSE
+        async def event_stream():
+            try:
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream("GET", full_url, headers=headers) as response:
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+            except Exception as e:
+                logger.error(f"❌ Error in SSE stream: {e}")
+                # Send error event to client
+                yield f"event: error\ndata: {str(e)}\n\n".encode()
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error setting up SSE proxy: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/configuration/customer/events/{session_id}")
+async def proxy_customer_events_sse(session_id: str, request: Request):
+    """
+    Proxy SSE endpoint for customer events.
+    SSE requires special handling - no timeout, streaming response.
+    """
+    try:
+        settings = get_settings()
+        config_service_url = settings.configuration_service_url
+        full_url = f"{config_service_url}/api/v1/configuration/customer/events/{session_id}"
+
+        logger.info(f"🔄 Proxying customer SSE stream to: {full_url}")
+
+        # Prepare headers
+        headers = dict(request.headers)
+        headers.pop("host", None)
+
+        # Create streaming client with NO timeout for SSE
+        async def event_stream():
+            try:
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream("GET", full_url, headers=headers) as response:
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+            except Exception as e:
+                logger.error(f"❌ Error in customer SSE stream: {e}")
+                yield f"event: error\ndata: {str(e)}\n\n".encode()
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error setting up customer SSE proxy: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/auth/user/{uid}")
 async def get_user_by_uid(uid: str):
     """Get user information by Firebase UID."""
