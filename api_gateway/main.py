@@ -212,9 +212,9 @@ app.add_middleware(
     allow_origins=[
         "https://digibot-dev.globistaan.com",
         "https://digibot.globistaan.com",
+        "https://dailogue.globistaan.com",  # Production frontend
         "http://localhost:3000",
         "http://localhost:5173",
-        "*"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
