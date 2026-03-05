@@ -1417,7 +1417,7 @@ async def get_feedback():
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/feedback/counts")
-async def get_feedback_counts(request: Request):
+async def get_feedback_counts(request: Request, user: dict = Depends(get_current_user)):
     """Get feedback counts for multiple sessions
 
     Request Body:
