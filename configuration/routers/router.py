@@ -925,8 +925,9 @@ async def get_chat_sessions_progressive(
             # Convert Pydantic model to dict
             session_dict = session.dict() if hasattr(session, 'dict') else session.model_dump()
             
-            # Load full messages for this session
-            messages = await chat_log_service.get_session_messages(session_dict['id'])
+            # Load full messages for this session (convert string ID to int)
+            session_db_id = int(session_dict['id'])
+            messages = await chat_log_service.get_session_messages(session_db_id)
             formatted_messages = []
             for msg in messages:
                 formatted_messages.append({
