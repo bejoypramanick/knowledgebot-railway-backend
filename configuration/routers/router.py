@@ -69,14 +69,16 @@ async def get_current_user(request: Request):
     user_uid = request.headers.get('X-User-UID')
     user_email = request.headers.get('X-User-Email')
     user_name = request.headers.get('X-User-Name')
+    user_role = request.headers.get('X-User-Role')
     
-    logger.info(f"🔍 Headers - UID: {user_uid}, Email: {user_email}, Name: {user_name}")
+    logger.info(f"🔍 Headers - UID: {user_uid}, Email: {user_email}, Name: {user_name}, Role: {user_role}")
     
     if user_email:
         user_data = {
             "uid": user_uid,
             "email": user_email,
             "name": user_name or user_email,
+            "role": user_role,
             "picture": None  # Not forwarded in headers
         }
         logger.info(f"🔍 Returning user from headers: {user_data}")

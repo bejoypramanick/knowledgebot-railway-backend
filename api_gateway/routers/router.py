@@ -98,7 +98,6 @@ async def verify_auth_token(request: Request):
 # SSE (Server-Sent Events) ENDPOINTS
 # =================================
 
-@router.get("/configuration/admin/events")
 async def proxy_admin_events_sse(request: Request):
     """
     Proxy SSE endpoint for admin/agent events.
@@ -111,9 +110,20 @@ async def proxy_admin_events_sse(request: Request):
 
         logger.info(f"🔄 Proxying SSE stream to: {full_url}")
 
-        # Prepare headers - forward cookies for authentication
+        # Prepare headers - DO NOT forward cookies to internal services
         headers = dict(request.headers)
         headers.pop("host", None)
+        headers.pop("cookie", None)  # Remove cookie - we'll use X-User-* headers instead
+
+        # Extract user from request.state (set by auth middleware) and forward as headers
+        if hasattr(request.state, 'user'):
+            headers['X-User-UID'] = request.state.user.get('uid', '')
+            headers['X-User-Email'] = request.state.user.get('email', '')
+            headers['X-User-Name'] = request.state.user.get('name', '')
+            headers['X-User-Role'] = request.state.user.get('role', '')
+            logger.info(f"✅ Forwarding user headers for SSE: {request.state.user.get('email')}")
+        else:
+            logger.warning("⚠️ No user found in request.state - authentication may fail")
 
         # Create streaming client with NO timeout for SSE
         async def event_stream():
@@ -141,7 +151,6 @@ async def proxy_admin_events_sse(request: Request):
         logger.error(f"❌ Error setting up SSE proxy: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/configuration/customer/events/{session_id}")
 async def proxy_customer_events_sse(session_id: str, request: Request):
     """
     Proxy SSE endpoint for customer events.
@@ -154,9 +163,19 @@ async def proxy_customer_events_sse(session_id: str, request: Request):
 
         logger.info(f"🔄 Proxying customer SSE stream to: {full_url}")
 
-        # Prepare headers
+        # Prepare headers - DO NOT forward cookies to internal services
         headers = dict(request.headers)
         headers.pop("host", None)
+        headers.pop("cookie", None)  # Remove cookie - we'll use X-User-* headers instead
+
+        # Extract user from request.state (set by auth middleware) and forward as headers
+        # Customer SSE may not require auth, so this is optional
+        if hasattr(request.state, 'user'):
+            headers['X-User-UID'] = request.state.user.get('uid', '')
+            headers['X-User-Email'] = request.state.user.get('email', '')
+            headers['X-User-Name'] = request.state.user.get('name', '')
+            headers['X-User-Role'] = request.state.user.get('role', '')
+            logger.info(f"✅ Forwarding user headers for customer SSE: {request.state.user.get('email')}")
 
         # Create streaming client with NO timeout for SSE
         async def event_stream():
@@ -628,6 +647,7 @@ async def generic_proxy_handler(request: Request, path: str):
             headers['X-User-UID'] = request.state.user.get('uid', '')
             headers['X-User-Email'] = request.state.user.get('email', '')
             headers['X-User-Name'] = request.state.user.get('name', '')
+            headers['X-User-Role'] = request.state.user.get('role', '')
             logger.info(f"🔍 User data forwarded: {request.state.user}")
         
         # Make HTTP request to service
