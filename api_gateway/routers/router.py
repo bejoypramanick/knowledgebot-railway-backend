@@ -375,6 +375,55 @@ async def public_chat_stream(request: Request):
         logger.error(f"Error in public chat stream: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/chat/{session_id}/events")
+async def legacy_chat_events(session_id: str, request: Request):
+    """
+    Legacy route for chat events - redirects to configuration service.
+    This handles old client code that uses /api/v1/chat/{session_id}/events
+    instead of /api/v1/gateway/configuration/customer/events/{session_id}
+    """
+    try:
+        from ..core.config import get_settings
+        import httpx
+
+        settings = get_settings()
+        config_service_url = settings.configuration_service_url
+
+        # Forward to the correct endpoint in configuration service
+        full_url = f"{config_service_url}/api/v1/configuration/customer/events/{session_id}"
+
+        logger.info(f"🔄 Legacy route redirect: /chat/{session_id}/events -> {full_url}")
+
+        # Prepare headers
+        headers = dict(request.headers)
+        headers.pop("host", None)
+
+        # Make request to configuration service
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                full_url,
+                headers=headers
+            )
+
+            # Return the SSE stream
+            return StreamingResponse(
+                response.aiter_bytes(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no"
+                }
+            )
+
+    except httpx.TimeoutException:
+        logger.error(f"❌ Timeout connecting to configuration service for events")
+        raise HTTPException(status_code=504, detail="Service timeout")
+    except Exception as e:
+        logger.error(f"❌ Error in legacy chat events route: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # =================================
 # PUBLIC WIDGET ENDPOINT (No Authentication Required)
 # =================================
