@@ -5,16 +5,15 @@ All API Gateway endpoints in one file for easier debugging
 
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse, Response, JSONResponse
-import logging
-import asyncio
 from typing import Dict, Any
 from httpx import AsyncClient
 import httpx
 
 from ..core.firebase_auth import verify_firebase_token, get_user_by_uid as get_user_from_firebase
 from ..core.config import get_settings
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger("api_gateway.routers.router", "api-gateway")
 router = APIRouter()
 
 
