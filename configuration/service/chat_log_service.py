@@ -133,9 +133,11 @@ class ChatLogService:
             await self.dao.create_session_assignment(heartbeat_cs_id, user_email, assignee_type, status='active')
         return True
 
-    async def get_chat_sessions(self, role: str, user_email: str, archive_status: str, page: int, limit: int, agent_id: Optional[str] = None):
+    async def get_chat_sessions(self, role: str, user_email: str, archive_status: str, page: int, limit: int, agent_id: Optional[str] = None, offset: Optional[int] = None):
         """Get chat sessions with pagination, filtering, and efficiency."""
-        offset = (page - 1) * limit
+        # Use provided offset or calculate from page
+        if offset is None:
+            offset = (page - 1) * limit
         
         if role == 'human_agent':
             await self.record_heartbeat(user_email)
