@@ -919,9 +919,14 @@ async def get_chat_sessions_progressive(
             offset=offset
         )
 
-        # Load messages for each session
+        # Convert Pydantic models to dicts and load messages for each session
+        sessions_with_messages = []
         for session in sessions:
-            messages = await chat_log_service.get_session_messages(session['id'])
+            # Convert Pydantic model to dict
+            session_dict = session.dict() if hasattr(session, 'dict') else session.model_dump()
+            
+            # Load full messages for this session
+            messages = await chat_log_service.get_session_messages(session_dict['id'])
             formatted_messages = []
             for msg in messages:
                 formatted_messages.append({
@@ -929,13 +934,14 @@ async def get_chat_sessions_progressive(
                     "text": msg.get("content", ""),
                     "sender": msg.get("role", "user"),
                     "timestamp": msg.get("created_at").isoformat() if msg.get("created_at") else None,
-                    "session_id": session['id']
+                    "session_id": session_dict['id']
                 })
-            session['messages'] = formatted_messages
+            session_dict['messages'] = formatted_messages
+            sessions_with_messages.append(session_dict)
 
         return {
             "success": True,
-            "sessions": sessions,
+            "sessions": sessions_with_messages,
             "total_count": total_count,
             "offset": offset,
             "limit": limit,
