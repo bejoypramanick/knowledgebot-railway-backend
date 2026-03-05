@@ -77,11 +77,18 @@ class FeedbackDAO:
         if not session_ids:
             return {}
 
-        # Build dynamic IN clause for asyncpg compatibility
-        placeholders = ",".join([f":id_{i}" for i in range(len(session_ids))])
-        params = {f"id_{i}": sid for i, sid in enumerate(session_ids)}
+        # Convert session_ids to integers (database expects integer IDs)
+        try:
+            session_ids_int = [int(sid) for sid in session_ids]
+        except (ValueError, TypeError) as e:
+            logger.error(f"Invalid session_ids format: {session_ids}, error: {e}")
+            return {session_id: {'positive': 0, 'negative': 0} for session_id in session_ids}
 
-        # Initialize result with zero counts for all sessions
+        # Build dynamic IN clause for asyncpg compatibility
+        placeholders = ",".join([f":id_{i}" for i in range(len(session_ids_int))])
+        params = {f"id_{i}": sid for i, sid in enumerate(session_ids_int)}
+
+        # Initialize result with zero counts for all sessions (keep original string IDs for response)
         result_dict = {session_id: {'positive': 0, 'negative': 0} for session_id in session_ids}
 
         query = f"""
