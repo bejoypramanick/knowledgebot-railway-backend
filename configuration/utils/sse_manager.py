@@ -1,8 +1,9 @@
 import asyncio
 import logging
 from typing import Dict, Set
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "configuration")
 
 class SSEConnectionManager:
     """Manages SSE connections for real-time chat between agents and customers."""

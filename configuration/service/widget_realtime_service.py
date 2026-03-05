@@ -7,8 +7,9 @@ import json
 import logging
 from typing import Dict, Set, Any
 from datetime import datetime
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "configuration")
 
 class WidgetRealtimeService:
     """Service for managing real-time widget state synchronization"""
