@@ -47,8 +47,20 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # We want a standardized format.
     # Note: LoggingInstrumentor sets otelTraceID and otelSpanID to "0" if no span is active.
     
-    # Add a filter to ensure otelTraceID and otelSpanID always exist
-    # This MUST be done BEFORE LoggingInstrumentor to catch early logs
+    # Create a safe formatter that handles missing OTel fields gracefully
+    # This MUST be defined before any logging setup
+    class SafeOTelFormatter(logging.Formatter):
+        """Formatter that safely handles missing otelTraceID and otelSpanID fields"""
+        def format(self, record):
+            # Ensure OTel fields exist before formatting - this is the critical fix
+            if not hasattr(record, 'otelTraceID'):
+                record.otelTraceID = '0'
+            if not hasattr(record, 'otelSpanID'):
+                record.otelSpanID = '0'
+            return super().format(record)
+    
+    # Add a global filter to ensure otelTraceID and otelSpanID always exist
+    # This catches ALL log records across ALL loggers
     class OTelFieldFilter(logging.Filter):
         def filter(self, record):
             # Ensure these fields always exist, even if LoggingInstrumentor didn't set them
@@ -58,31 +70,19 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
                 record.otelSpanID = '0'
             return True
     
+    # Create the global filter instance
+    global_filter = OTelFieldFilter()
+    
     # Reset root logger handlers to clean state FIRST
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
     
     # Add the filter to root logger BEFORE any other setup
-    root_logger.addFilter(OTelFieldFilter())
-    
-    # Create a safe formatter that handles missing OTel fields gracefully
-    class SafeOTelFormatter(logging.Formatter):
-        """Formatter that safely handles missing otelTraceID and otelSpanID fields"""
-        def format(self, record):
-            # Ensure OTel fields exist before formatting
-            if not hasattr(record, 'otelTraceID'):
-                record.otelTraceID = '0'
-            if not hasattr(record, 'otelSpanID'):
-                record.otelSpanID = '0'
-            return super().format(record)
+    root_logger.addFilter(global_filter)
     
     # Format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] - Message
     log_format = f"%(asctime)s [%(levelname)s] [{service_name}] [%(otelTraceID)s] [%(otelSpanID)s] - %(message)s"
     formatter = SafeOTelFormatter(log_format)
-    
-    # Instrument standard logging AFTER filter is in place
-    # This ensures otelTraceID and otelSpanID are available in log records
-    LoggingInstrumentor().instrument(set_logging_format=False)
     
     # Remove existing handlers to avoid duplicate logs
     if root_logger.hasHandlers():
@@ -92,15 +92,27 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
     stream_handler.setLevel(log_level)
+    # Add the filter to the handler as well for double protection
+    stream_handler.addFilter(global_filter)
+    
     # Override emit to flush immediately after each log (ensures real-time output during streaming)
     original_emit = stream_handler.emit
     def emit_with_flush(record):
+        # Ensure fields exist right before emit as final safety check
+        if not hasattr(record, 'otelTraceID'):
+            record.otelTraceID = '0'
+        if not hasattr(record, 'otelSpanID'):
+            record.otelSpanID = '0'
         original_emit(record)
         # Flush immediately so logs appear in real-time during streaming/async operations
         if stream_handler.stream:
             stream_handler.stream.flush()
     stream_handler.emit = emit_with_flush
     root_logger.addHandler(stream_handler)
+    
+    # Instrument standard logging AFTER all filters and handlers are in place
+    # This ensures otelTraceID and otelSpanID are available in log records
+    LoggingInstrumentor().instrument(set_logging_format=False)
     
     # Instrument HTTPX Clients (The Glue for Outgoing Requests)
     # This automatically injects the 'traceparent' header into outgoing httpx calls
