@@ -52,6 +52,7 @@ async def lifespan(app: FastAPI):
             try:
                 await init_database(settings.railway_postgres_url)
                 logger.info("✅ SQLAlchemy engine initialized")
+                app.state.database_ready = True
 
                 is_valid = await validate_database()
                 if is_valid:
@@ -60,7 +61,12 @@ async def lifespan(app: FastAPI):
                     logger.warning("⚠️ Database schema validation returned False")
             except Exception as e:
                 logger.error(f"❌ Error initializing database: {e}")
-                raise
+                app.state.database_ready = False
+                logger.warning("⚠️ Service starting with database unavailable - endpoints will return 503")
+        else:
+            logger.error("❌ DATABASE_URL not set")
+            app.state.database_ready = False
+            logger.warning("⚠️ Service starting without database - endpoints will return 503")
 
         # Initialize Gemini Client (Check)
         if get_genai_client():
@@ -121,6 +127,27 @@ register_fastapi_exception_handlers(app, "knowledgebase_ingestion")
 # Middleware
 app.middleware("http")(log_requests_middleware)
 app.add_middleware(CorrelationIDMiddleware)
+
+# Database readiness check middleware
+@app.middleware("http")
+async def check_database_ready(request: Request, call_next):
+    """Check if database is ready before processing requests"""
+    # Skip check for health endpoint
+    if request.url.path == "/health":
+        return await call_next(request)
+    
+    # Check database readiness for other endpoints
+    database_ready = getattr(request.app.state, 'database_ready', False)
+    if not database_ready:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "detail": "Service temporarily unavailable - database not ready",
+                "service": "knowledgebase_ingestion"
+            }
+        )
+    return await call_next(request)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
