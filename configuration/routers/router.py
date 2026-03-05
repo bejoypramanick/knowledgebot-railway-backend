@@ -104,15 +104,13 @@ admin_action_dao = AdminActionDAO()
 # Import Redis Pub/Sub manager - replaces in-memory queues
 from shared.redis_pubsub_manager import (
     AgentEventSubscriber,
+    SessionEventSubscriber,
     broadcast_event_to_agent,
     broadcast_event_to_all_agents,
     broadcast_event_for_session
 )
 
-logger.info("✅ Redis Pub/Sub manager initialized for agent SSE events")
-
-# Set the broadcast function reference in chat_log_service
-logger.info("✅ Redis Pub/Sub manager initialized for agent SSE events")
+logger.info("✅ Redis Pub/Sub manager initialized for agent and customer SSE events")
 
 # =================================
 # CHATBOT CONFIGURATION ENDPOINTS
@@ -741,6 +739,62 @@ async def agent_events_stream(request: Request, token: str = None):
     except Exception as e:
         logger.error(f"❌ Error setting up Redis Pub/Sub SSE stream: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/customer/events/{session_id}")
+async def customer_events_stream(session_id: str):
+    """
+    Server-Sent Events endpoint for customers (anonymous).
+    Streams real-time events for a specific session.
+    
+    No authentication required - uses session ID only.
+    Perfect for anonymous customer chat widgets.
+    
+    Security:
+    - Session IDs are UUIDs (hard to guess)
+    - Rate limiting applied at API Gateway level
+    - Channel isolation per session
+    """
+    try:
+        logger.info(f"🔌 Customer connecting to SSE stream for session {session_id}")
+        
+        # Import SessionEventSubscriber
+        from shared.redis_pubsub_manager import SessionEventSubscriber
+        
+        # Create Redis Pub/Sub subscriber for this session
+        subscriber = SessionEventSubscriber(session_id)
+        
+        async def event_generator():
+            """
+            Generator that yields SSE events from Redis Pub/Sub.
+            Automatic cleanup on disconnect.
+            """
+            try:
+                # Subscribe and yield events as they arrive from Redis
+                async for event_data in subscriber.subscribe():
+                    yield f"data: {json.dumps(event_data)}\n\n"
+                    
+            except asyncio.CancelledError:
+                logger.info(f"🔌 SSE connection cancelled for session {session_id}")
+            except Exception as e:
+                logger.error(f"❌ Error in SSE generator for session {session_id}: {e}")
+            finally:
+                logger.info(f"🔌 Customer disconnected from session {session_id}")
+        
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"  # Disable nginx buffering
+            }
+        )
+    
+    except Exception as e:
+        logger.error(f"❌ Error setting up customer SSE stream: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/admin/chat-sessions")
 async def get_admin_chat_sessions(

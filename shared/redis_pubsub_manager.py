@@ -85,6 +85,7 @@ class AgentEventBroadcaster:
     """
     Simplified event broadcaster using Redis Pub/Sub.
     Replaces in-memory event queues with Redis channels.
+    Supports both agent channels and session channels (for customers).
     """
     
     def __init__(self):
@@ -97,6 +98,10 @@ class AgentEventBroadcaster:
     def _get_broadcast_channel(self) -> str:
         """Get Redis channel name for broadcasting to all agents"""
         return "agent:events:broadcast"
+    
+    def _get_session_channel(self, session_id: str) -> str:
+        """Get Redis channel name for specific session (customer + agent)"""
+        return f"session:events:{session_id}"
     
     async def publish_to_agent(self, agent_email: str, event_data: Dict[str, Any]) -> bool:
         """
@@ -150,9 +155,44 @@ class AgentEventBroadcaster:
             logger.error(f"❌ Error broadcasting to all agents: {e}")
             return False
     
+    async def publish_to_session(self, session_id: str, event_data: Dict[str, Any]) -> bool:
+        """
+        Publish event to session channel (customer + agent receive).
+        
+        Args:
+            session_id: Session ID
+            event_data: Event data to send
+        
+        Returns:
+            True if published successfully
+        """
+        try:
+            channel = self._get_session_channel(session_id)
+            message = json.dumps(event_data)
+            
+            # Publish to Redis channel
+            subscribers = self.redis_client.publish(channel, message)
+            
+            if subscribers > 0:
+                logger.info(f"📤 Published event to session {session_id}: "
+                           f"{event_data.get('type')} ({subscribers} subscribers)")
+            else:
+                logger.debug(f"📭 No subscribers for session {session_id}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error publishing to session {session_id}: {e}")
+            return False
+    
     async def publish_for_session(self, session_id: str, event_data: Dict[str, Any], assigned_agent: Optional[str] = None) -> bool:
         """
-        Publish event to agents who should see this session.
+        Publish event to all relevant channels for a session.
+        
+        Publishes to:
+        1. Session channel (customer + agent)
+        2. Agent-specific channel (agent only)
+        3. Broadcast channel (admins)
         
         Args:
             session_id: Session ID
@@ -163,12 +203,14 @@ class AgentEventBroadcaster:
             True if published successfully
         """
         try:
-            # If assigned agent is known, publish directly to them
+            # 1. Publish to session channel (customer + agent receive)
+            await self.publish_to_session(session_id, event_data)
+            
+            # 2. If assigned agent is known, also publish to agent-specific channel
             if assigned_agent:
                 await self.publish_to_agent(assigned_agent, event_data)
             
-            # Always broadcast to admins (they see all sessions)
-            # Admins subscribe to broadcast channel
+            # 3. Always broadcast to admins (they see all sessions)
             await self.publish_to_all_agents(event_data)
             
             return True
@@ -176,6 +218,93 @@ class AgentEventBroadcaster:
         except Exception as e:
             logger.error(f"❌ Error publishing for session {session_id}: {e}")
             return False
+
+
+
+
+class SessionEventSubscriber:
+    """
+    Event subscriber for customers using session-based channels.
+    No authentication required - uses session ID only.
+    Perfect for anonymous customer chat widgets.
+    """
+    
+    def __init__(self, session_id: str):
+        self.session_id = session_id
+        self.redis_client = get_pubsub_redis()
+        self.pubsub = None
+    
+    async def subscribe(self) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Subscribe to session's event channel and yield events.
+        
+        Yields:
+            Event data dictionaries
+        """
+        try:
+            # Create pubsub instance
+            self.pubsub = self.redis_client.pubsub()
+            
+            # Subscribe to session-specific channel
+            session_channel = f"session:events:{self.session_id}"
+            self.pubsub.subscribe(session_channel)
+            
+            logger.info(f"🔌 Customer subscribed to session {self.session_id}")
+            
+            # Send initial connection event
+            yield {
+                'type': 'connected',
+                'session_id': self.session_id
+            }
+            
+            # Listen for messages
+            while True:
+                try:
+                    # Get message with timeout (for heartbeat)
+                    message = self.pubsub.get_message(timeout=30.0)
+                    
+                    if message and message['type'] == 'message':
+                        # Parse and yield event data
+                        event_data = json.loads(message['data'])
+                        yield event_data
+                    
+                    elif message is None:
+                        # Timeout - send heartbeat
+                        yield {'type': 'ping'}
+                    
+                    # Small sleep to prevent busy loop
+                    await asyncio.sleep(0.1)
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ Invalid JSON in Redis message: {e}")
+                    continue
+                    
+                except Exception as e:
+                    logger.error(f"❌ Error receiving message: {e}")
+                    # Send error event but continue listening
+                    yield {
+                        'type': 'error',
+                        'message': str(e)
+                    }
+                    await asyncio.sleep(1)
+        
+        except Exception as e:
+            logger.error(f"❌ Error in subscription for session {self.session_id}: {e}")
+            raise
+        
+        finally:
+            # Cleanup
+            if self.pubsub:
+                self.pubsub.unsubscribe()
+                self.pubsub.close()
+                logger.info(f"🔌 Customer unsubscribed from session {self.session_id}")
+    
+    async def unsubscribe(self):
+        """Unsubscribe and cleanup"""
+        if self.pubsub:
+            self.pubsub.unsubscribe()
+            self.pubsub.close()
+            logger.info(f"🔌 Customer unsubscribed from session {self.session_id}")
 
 
 class AgentEventSubscriber:
@@ -295,7 +424,13 @@ async def broadcast_event_to_all_agents(event_data: Dict[str, Any]) -> bool:
     return await broadcaster.publish_to_all_agents(event_data)
 
 
+async def broadcast_event_to_session(session_id: str, event_data: Dict[str, Any]) -> bool:
+    """Broadcast event to session channel (customer + agent)"""
+    broadcaster = get_broadcaster()
+    return await broadcaster.publish_to_session(session_id, event_data)
+
+
 async def broadcast_event_for_session(session_id: str, event_data: Dict[str, Any], assigned_agent: Optional[str] = None) -> bool:
-    """Broadcast event for specific session"""
+    """Broadcast event for specific session (all channels)"""
     broadcaster = get_broadcaster()
     return await broadcaster.publish_for_session(session_id, event_data, assigned_agent)
