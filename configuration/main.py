@@ -6,7 +6,7 @@ import sys
 import os
 
 # VERY EARLY LOGGING - Before any other imports
-print("🚀 CONFIGURATION SERVICE: STARTING EXECUTION - VERSION 3.0")
+print("🚀 CONFIGURATION SERVICE: STARTING EXECUTION - VERSION 3.1")
 print(f"🚀 Python version: {sys.version}")
 print(f"🚀 Working directory: {os.getcwd()}")
 print(f"🚀 Script location: {__file__}")
