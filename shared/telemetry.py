@@ -47,11 +47,8 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # We want a standardized format.
     # Note: LoggingInstrumentor sets otelTraceID and otelSpanID to "0" if no span is active.
     
-    # Instrument standard logging FIRST before setting up formatters
-    # This ensures otelTraceID and otelSpanID are available in log records
-    LoggingInstrumentor().instrument(set_logging_format=False)
-    
     # Add a filter to ensure otelTraceID and otelSpanID always exist
+    # This MUST be done BEFORE LoggingInstrumentor to catch early logs
     class OTelFieldFilter(logging.Filter):
         def filter(self, record):
             # Ensure these fields always exist, even if LoggingInstrumentor didn't set them
@@ -61,16 +58,31 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
                 record.otelSpanID = '0'
             return True
     
-    # Format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] - Message
-    log_format = f"%(asctime)s [%(levelname)s] [{service_name}] [%(otelTraceID)s] [%(otelSpanID)s] - %(message)s"
-    formatter = logging.Formatter(log_format)
-    
-    # Reset root logger handlers to clean state
+    # Reset root logger handlers to clean state FIRST
     root_logger = logging.getLogger()
     root_logger.setLevel(log_level)
     
-    # Add the filter to root logger
+    # Add the filter to root logger BEFORE any other setup
     root_logger.addFilter(OTelFieldFilter())
+    
+    # Create a safe formatter that handles missing OTel fields gracefully
+    class SafeOTelFormatter(logging.Formatter):
+        """Formatter that safely handles missing otelTraceID and otelSpanID fields"""
+        def format(self, record):
+            # Ensure OTel fields exist before formatting
+            if not hasattr(record, 'otelTraceID'):
+                record.otelTraceID = '0'
+            if not hasattr(record, 'otelSpanID'):
+                record.otelSpanID = '0'
+            return super().format(record)
+    
+    # Format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] - Message
+    log_format = f"%(asctime)s [%(levelname)s] [{service_name}] [%(otelTraceID)s] [%(otelSpanID)s] - %(message)s"
+    formatter = SafeOTelFormatter(log_format)
+    
+    # Instrument standard logging AFTER filter is in place
+    # This ensures otelTraceID and otelSpanID are available in log records
+    LoggingInstrumentor().instrument(set_logging_format=False)
     
     # Remove existing handlers to avoid duplicate logs
     if root_logger.hasHandlers():
