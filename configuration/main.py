@@ -108,20 +108,22 @@ async def lifespan(app: FastAPI):
                 is_valid = await validate_database()
                 if is_valid:
                     logger.info("✅ LIFESPAN: Database schema validated successfully")
+                    app.state.database_ready = True
                 else:
                     logger.warning("⚠️ LIFESPAN: Database schema validation returned False")
+                    app.state.database_ready = False
             except Exception as e:
                 logger.error(f"❌ LIFESPAN: Failed to initialize database: {e}")
                 import traceback
                 logger.error(f"❌ LIFESPAN: Database error traceback: {traceback.format_exc()}")
-                service_status.set_status("error")
-                # Fail startup if database can't be initialized
-                raise
+                # Don't fail startup - allow service to start and return 503 for endpoints
+                app.state.database_ready = False
+                logger.warning("⚠️ LIFESPAN: Service starting with database unavailable - endpoints will return 503")
         else:
             logger.error("❌ LIFESPAN: DATABASE_URL not set - configuration endpoints will not work")
             app.state.database_url = None
-            service_status.set_status("error")
-            raise ValueError("Database URL not configured")
+            app.state.database_ready = False
+            logger.warning("⚠️ LIFESPAN: Service starting without database - endpoints will return 503")
 
         service_status.set_status("running")
         logger.info(f"🚀 LIFESPAN: Configuration service started successfully on port {PORT}")
@@ -169,7 +171,22 @@ app.add_middleware(
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     """Add security headers to prevent COOP/COEP issues with popup windows."""
-    response = await call_next(request)
+    # Skip database check for health endpoint
+    if request.url.path == "/health":
+        response = await call_next(request)
+    else:
+        # Check if database is ready for other endpoints
+        database_ready = getattr(request.app.state, 'database_ready', False)
+        if not database_ready:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": "Service temporarily unavailable - database not ready",
+                    "service": "configuration_service"
+                }
+            )
+        response = await call_next(request)
     
     # Set COOP and COEP headers to allow popup operations without restrictions
     response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
@@ -179,8 +196,22 @@ async def add_security_headers(request: Request, call_next):
 
 # Health check endpoint
 @app.get("/health")
-async def health_check():
+async def health_check(request: Request):
     """Health check endpoint with database connection verification"""
+    # Check if database is ready
+    database_ready = getattr(request.app.state, 'database_ready', False)
+    
+    if not database_ready:
+        # Service is up but database is not ready
+        return {
+            "status": "degraded",
+            "service": "configuration_service",
+            "database": "unavailable",
+            "message": "Service is running but database is not available",
+            "timestamp": datetime.datetime.utcnow().isoformat() + "Z"
+        }
+    
+    # Database is ready, check connection
     db_health = await db_health_check()
 
     # Get overall service status
