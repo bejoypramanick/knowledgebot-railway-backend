@@ -151,14 +151,9 @@ class ChatLogService:
         session_db_ids = [int(s['id']) if isinstance(s['id'], str) else s['id'] for s in sessions_data]
         logger.info(f"⚡ Fetching latest messages for {len(session_db_ids)} sessions (optimized)")
 
-        # Fetch only LATEST message per session (optimized for list view)
-        latest_messages = {}
-        for session_id in session_db_ids:
-            latest_msg = await self.dao.get_latest_message_for_session(session_id)
-            if latest_msg:
-                latest_messages[session_id] = latest_msg
-
-        logger.info(f"📨 Loaded latest messages for {len(latest_messages)} sessions")
+        # Fetch latest messages for ALL sessions in ONE query (optimized)
+        latest_messages = await self.dao.get_latest_messages_batch(session_db_ids)
+        logger.info(f"📨 Loaded latest messages for {len(latest_messages)} sessions in single query")
 
         # Get all session IDs for batch feedback query (uses session_id UUID)
         session_ids = [s['session_id'] for s in sessions_data]

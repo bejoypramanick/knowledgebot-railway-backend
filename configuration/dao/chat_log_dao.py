@@ -496,6 +496,34 @@ class ChatLogDAO:
             logger.log_db_query(query, params, error=e)
             return None
 
+    async def get_latest_messages_batch(self, session_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+        """Get the latest message for multiple sessions in a single query (OPTIMIZED)."""
+        if not session_ids:
+            return {}
+
+        # Use window function to get latest message per session efficiently
+        query = """
+            WITH ranked_messages AS (
+                SELECT *,
+                       ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at DESC) as rn
+                FROM chat_messages
+                WHERE session_id = ANY(:session_ids)
+            )
+            SELECT * FROM ranked_messages WHERE rn = 1
+        """
+        try:
+            params = {"session_ids": session_ids}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                rows = result.fetchall()
+                # Return dict keyed by session_id for fast lookup
+                return {row.session_id: dict(row._mapping) for row in rows}
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            return {}
+
+
     async def get_session_messages(self, session_id: int) -> List[Dict[str, Any]]:
         """Get all messages for a single session (full conversation)."""
         query = """
