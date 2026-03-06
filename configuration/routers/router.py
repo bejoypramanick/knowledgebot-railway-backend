@@ -904,7 +904,13 @@ async def send_agent_message(session_id: str, request: Request):
             raise HTTPException(status_code=400, detail="Message text is required")
 
         # Save message to database
-        message_id = await chat_log_service.send_agent_message(session_id, sender_id, text)
+        # Convert session_id to integer for database operations
+        try:
+            session_db_id = int(session_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
+        
+        message_id = await chat_log_service.send_agent_message(session_db_id, sender_id, text)
 
         # Prepare event data
         import datetime
@@ -926,7 +932,7 @@ async def send_agent_message(session_id: str, request: Request):
         if sender_type == "user":
             # Customer sent message → Only notify assigned agent
             # Get assigned agent from database
-            session = await chat_log_service.dao.get_session_by_id(int(session_id))
+            session = await chat_log_service.dao.get_session_by_id(session_db_id)
             assigned_agent = session.get('assigned_agent') if session else None
             
             if assigned_agent:
