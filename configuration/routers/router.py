@@ -1132,25 +1132,38 @@ async def request_human_agent(request: Request):
         session_id: Numeric ID from chat_sessions.id (e.g., "269")
     """
     try:
+        logger.info(f"🧑 [ENDPOINT] POST /admin/chat-sessions/request-agent called")
+        
+        # Parse request body
         body = await request.json()
+        logger.info(f"🔍 [ENDPOINT] Request body: {body}")
+        
         session_id = body.get("session_id")
+        logger.info(f"🔍 [ENDPOINT] Extracted session_id: {session_id} (type: {type(session_id).__name__})")
 
         if not session_id:
+            logger.error(f"❌ [ENDPOINT] Missing session_id in request body")
             raise HTTPException(status_code=400, detail="session_id (numeric id from chat_sessions.id) is required in request body")
 
         # Pass to service - only accepts numeric ID
+        logger.info(f"🔍 [ENDPOINT] Calling chat_log_service.request_human_agent with session_id={session_id}")
         assigned_agent = await chat_log_service.request_human_agent(str(session_id))
+        logger.info(f"✅ [ENDPOINT] Agent assigned: {assigned_agent}")
 
-        return {
+        response = {
             "success": True,
             "message": "Human agent assigned",
             "agent_assigned": assigned_agent,
             "session_id": session_id
         }
-    except HTTPException:
+        logger.info(f"✅ [ENDPOINT] Returning response: {response}")
+        return response
+        
+    except HTTPException as he:
+        logger.error(f"❌ [ENDPOINT] HTTPException: {he.status_code} - {he.detail}")
         raise
     except Exception as e:
-        logger.error(f"Error requesting human agent: {e}")
+        logger.error(f"❌ [ENDPOINT] Unexpected error requesting human agent: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/admin/chat-sessions/{session_id}")

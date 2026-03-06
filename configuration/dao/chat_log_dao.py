@@ -26,13 +26,18 @@ class ChatLogDAO:
             WHERE r.role_name = 'human_agent'
         """
         try:
+            logger.info(f"🔍 [DAO] Fetching all human agents")
             logger.log_db_operation(query)
             async with get_db_session() as session:
                 result = await session.execute(text(query))
                 rows = result.fetchall()
                 logger.log_db_query(query, None, rows)
-                return [dict(r._mapping)['email'] for r in rows] if rows else []  # Use mapping for dictionary access
+                
+                emails = [dict(r._mapping)['email'] for r in rows] if rows else []
+                logger.info(f"✅ [DAO] Found {len(emails)} human agents: {emails}")
+                return emails
         except Exception as e:
+            logger.error(f"❌ [DAO] Error fetching human agents: {e}", exc_info=True)
             logger.log_db_query(query, None, error=e)
             return []
 
@@ -46,13 +51,18 @@ class ChatLogDAO:
             WHERE r.role_name = 'admin'
         """
         try:
+            logger.info(f"🔍 [DAO] Fetching all admins")
             logger.log_db_operation(query)
             async with get_db_session() as session:
                 result = await session.execute(text(query))
                 rows = result.fetchall()
                 logger.log_db_query(query, None, rows)
-                return [dict(r._mapping)['email'] for r in rows] if rows else []  # Use mapping for dictionary access
+                
+                emails = [dict(r._mapping)['email'] for r in rows] if rows else []
+                logger.info(f"✅ [DAO] Found {len(emails)} admins: {emails}")
+                return emails
         except Exception as e:
+            logger.error(f"❌ [DAO] Error fetching admins: {e}", exc_info=True)
             logger.log_db_query(query, None, error=e)
             return []
 

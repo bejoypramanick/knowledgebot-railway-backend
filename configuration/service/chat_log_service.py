@@ -92,31 +92,62 @@ class ChatLogService:
     async def assign_chat_with_load_balancing(self, session_id: str) -> Optional[str]:
         """Assign a chat to an available agent using load balancing."""
         try:
+            logger.info(f"🔍 [LOAD_BALANCE] Starting load balancing for session {session_id}")
+            
+            # Step 1: Get all human agents
             agent_emails = await self.dao.get_all_human_agents()
+            logger.info(f"🔍 [LOAD_BALANCE] Found {len(agent_emails)} human agents: {agent_emails}")
+            
             agent_loads = []
             
             if agent_emails:
+                logger.info(f"🔍 [LOAD_BALANCE] Checking availability of {len(agent_emails)} human agents")
                 for email in agent_emails:
-                    if await self.get_agent_online_status(email):
+                    is_online = await self.get_agent_online_status(email)
+                    logger.info(f"🔍 [LOAD_BALANCE] Agent {email} online status: {is_online}")
+                    
+                    if is_online:
                         chat_count = await self.get_agent_chat_count(email)
+                        logger.info(f"🔍 [LOAD_BALANCE] Agent {email} has {chat_count} active chats")
                         agent_loads.append({'email': email, 'chat_count': chat_count})
+            else:
+                logger.warning(f"⚠️ [LOAD_BALANCE] No human agents found in database")
             
+            # Step 2: If no human agents, try admins
             if not agent_loads:
+                logger.info(f"🔍 [LOAD_BALANCE] No available human agents, checking admins")
                 admin_emails = await self.dao.get_all_admins()
+                logger.info(f"🔍 [LOAD_BALANCE] Found {len(admin_emails)} admins: {admin_emails}")
+                
                 for email in admin_emails:
-                    if await self.get_agent_online_status(email):
+                    is_online = await self.get_agent_online_status(email)
+                    logger.info(f"🔍 [LOAD_BALANCE] Admin {email} online status: {is_online}")
+                    
+                    if is_online:
                         chat_count = await self.get_agent_chat_count(email)
+                        logger.info(f"🔍 [LOAD_BALANCE] Admin {email} has {chat_count} active chats")
                         agent_loads.append({'email': email, 'chat_count': chat_count})
             
+            # Step 3: Check if we found any agents
             if not agent_loads:
+                logger.error(f"❌ [LOAD_BALANCE] No available agents or admins found for session {session_id}")
+                logger.error(f"❌ [LOAD_BALANCE] Human agents in DB: {agent_emails}")
+                logger.error(f"❌ [LOAD_BALANCE] Admins in DB: {admin_emails if 'admin_emails' in locals() else 'Not checked'}")
                 return None
             
+            # Step 4: Sort by chat count and assign to least busy agent
             agent_loads.sort(key=lambda x: x['chat_count'])
             assigned_agent = agent_loads[0]['email']
+            logger.info(f"✅ [LOAD_BALANCE] Selected agent {assigned_agent} with {agent_loads[0]['chat_count']} chats")
+            logger.info(f"🔍 [LOAD_BALANCE] All available agents: {agent_loads}")
+            
+            # Step 5: Assign the chat
             await self.assign_chat_to_agent(session_id, assigned_agent)
+            logger.info(f"✅ [LOAD_BALANCE] Successfully assigned session {session_id} to {assigned_agent}")
+            
             return assigned_agent
         except Exception as e:
-            logger.error(f"Error in load balancing: {e}", exc_info=True)
+            logger.error(f"❌ [LOAD_BALANCE] Error in load balancing for session {session_id}: {e}", exc_info=True)
             return None
 
     async def record_heartbeat(self, user_email: str):
@@ -406,26 +437,40 @@ class ChatLogService:
 
     async def request_human_agent(self, session_id: int | str):
         """Request human agent connection - only accepts numeric ID from chat_sessions.id"""
+        logger.info(f"🧑 [HUMAN_AGENT] Request received for session {session_id}")
+        
+        # Step 1: Check if HIL is enabled
         hil_enabled = await self.dao.get_hil_enabled()
+        logger.info(f"🔍 [HUMAN_AGENT] HIL enabled: {hil_enabled}")
 
         if not hil_enabled:
+            logger.error(f"❌ [HUMAN_AGENT] HIL is disabled in configuration")
             raise HTTPException(status_code=503, detail="Human agent support is currently disabled")
 
-        # Get numeric session ID from chat_sessions table
+        # Step 2: Get numeric session ID from chat_sessions table
         session_db_id = None
 
         if isinstance(session_id, str):
             # Must be numeric ID from chat_sessions.id - no UUID fallback
             try:
                 session_db_id = int(session_id)
+                logger.info(f"✅ [HUMAN_AGENT] Converted string session_id to numeric: {session_db_id}")
             except ValueError:
+                logger.error(f"❌ [HUMAN_AGENT] Invalid session_id format: {session_id} (must be numeric)")
                 raise HTTPException(status_code=400, detail=f"Invalid session_id format. Must be numeric ID from chat_sessions table, got: {session_id}")
         else:
             session_db_id = session_id
+            logger.info(f"✅ [HUMAN_AGENT] Using numeric session_id: {session_db_id}")
 
+        # Step 3: Assign chat with load balancing
+        logger.info(f"🔍 [HUMAN_AGENT] Starting load balancing for session {session_db_id}")
         assigned_agent = await self.assign_chat_with_load_balancing(str(session_db_id))
+        
         if not assigned_agent:
+            logger.error(f"❌ [HUMAN_AGENT] No available agents or admins to assign chat {session_db_id}")
             raise HTTPException(status_code=503, detail="No available agents or admins to assign chat")
+        
+        logger.info(f"✅ [HUMAN_AGENT] Successfully assigned session {session_db_id} to agent {assigned_agent}")
         return assigned_agent
 
     async def delete_session_messages(self, session_id: int | str) -> bool:
