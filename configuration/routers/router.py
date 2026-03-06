@@ -1134,11 +1134,11 @@ async def transfer_session(request: Request):
 async def request_human_agent(request: Request):
     """Request a human agent for a chat session
 
-    Accepts session_id in request body. MUST be numeric ID from chat_sessions.id table.
-    No UUID fallback allowed.
+    Accepts session_id in request body. Can be either UUID or numeric ID.
+    Backend handles conversion internally.
 
     Request Body:
-        session_id: Numeric ID from chat_sessions.id (e.g., "269")
+        session_id: UUID session_id (e.g., "session_xxx") or numeric ID (e.g., "269")
     """
     try:
         logger.info(f"🧑 [ENDPOINT] POST /admin/chat-sessions/request-agent called")
@@ -1152,18 +1152,46 @@ async def request_human_agent(request: Request):
 
         if not session_id:
             logger.error(f"❌ [ENDPOINT] Missing session_id in request body")
-            raise HTTPException(status_code=400, detail="session_id (numeric id from chat_sessions.id) is required in request body")
+            raise HTTPException(status_code=400, detail="session_id is required in request body")
 
-        # Pass to service - only accepts numeric ID
-        logger.info(f"🔍 [ENDPOINT] Calling chat_log_service.request_human_agent with session_id={session_id}")
-        assigned_agent = await chat_log_service.request_human_agent(str(session_id))
+        # Convert UUID to numeric ID if needed
+        session_db_id = None
+        if isinstance(session_id, str) and session_id.startswith('session_'):
+            # UUID format - convert to numeric ID
+            logger.info(f"🔍 [ENDPOINT] Converting UUID {session_id} to numeric ID")
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
+            
+            async with get_db_session() as db_session:
+                query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
+                result = await db_session.execute(text(query), {"session_id": session_id})
+                row = result.fetchone()
+                
+                if not row:
+                    logger.error(f"❌ [ENDPOINT] Session {session_id} not found")
+                    raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+                
+                session_db_id = row[0]
+                logger.info(f"✅ [ENDPOINT] Converted UUID to numeric ID: {session_db_id}")
+        else:
+            # Already numeric ID
+            try:
+                session_db_id = int(session_id)
+                logger.info(f"✅ [ENDPOINT] Using numeric ID: {session_db_id}")
+            except ValueError:
+                logger.error(f"❌ [ENDPOINT] Invalid session_id format: {session_id}")
+                raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
+
+        # Pass numeric ID to service
+        logger.info(f"🔍 [ENDPOINT] Calling chat_log_service.request_human_agent with session_id={session_db_id}")
+        assigned_agent = await chat_log_service.request_human_agent(session_db_id)
         logger.info(f"✅ [ENDPOINT] Agent assigned: {assigned_agent}")
 
         response = {
             "success": True,
             "message": "Human agent assigned",
             "agent_assigned": assigned_agent,
-            "session_id": session_id
+            "session_id": str(session_db_id)  # Return numeric ID
         }
         logger.info(f"✅ [ENDPOINT] Returning response: {response}")
         return response

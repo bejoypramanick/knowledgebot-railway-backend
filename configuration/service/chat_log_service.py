@@ -435,8 +435,8 @@ class ChatLogService:
             await self.connection_manager.broadcast_to_session(session_ended_message, str(session_db_id))
         return True
 
-    async def request_human_agent(self, session_id: int | str):
-        """Request human agent connection - only accepts numeric ID from chat_sessions.id"""
+    async def request_human_agent(self, session_id: int):
+        """Request human agent connection - accepts numeric ID only (endpoint handles UUID conversion)"""
         logger.info(f"🧑 [HUMAN_AGENT] Request received for session {session_id}")
         
         # Step 1: Check if HIL is enabled
@@ -447,30 +447,15 @@ class ChatLogService:
             logger.error(f"❌ [HUMAN_AGENT] HIL is disabled in configuration")
             raise HTTPException(status_code=503, detail="Human agent support is currently disabled")
 
-        # Step 2: Get numeric session ID from chat_sessions table
-        session_db_id = None
-
-        if isinstance(session_id, str):
-            # Must be numeric ID from chat_sessions.id - no UUID fallback
-            try:
-                session_db_id = int(session_id)
-                logger.info(f"✅ [HUMAN_AGENT] Converted string session_id to numeric: {session_db_id}")
-            except ValueError:
-                logger.error(f"❌ [HUMAN_AGENT] Invalid session_id format: {session_id} (must be numeric)")
-                raise HTTPException(status_code=400, detail=f"Invalid session_id format. Must be numeric ID from chat_sessions table, got: {session_id}")
-        else:
-            session_db_id = session_id
-            logger.info(f"✅ [HUMAN_AGENT] Using numeric session_id: {session_db_id}")
-
-        # Step 3: Assign chat with load balancing
-        logger.info(f"🔍 [HUMAN_AGENT] Starting load balancing for session {session_db_id}")
-        assigned_agent = await self.assign_chat_with_load_balancing(str(session_db_id))
+        # Step 2: Assign chat with load balancing
+        logger.info(f"🔍 [HUMAN_AGENT] Starting load balancing for session {session_id}")
+        assigned_agent = await self.assign_chat_with_load_balancing(str(session_id))
         
         if not assigned_agent:
-            logger.error(f"❌ [HUMAN_AGENT] No available agents or admins to assign chat {session_db_id}")
+            logger.error(f"❌ [HUMAN_AGENT] No available agents or admins to assign chat {session_id}")
             raise HTTPException(status_code=503, detail="No available agents or admins to assign chat")
         
-        logger.info(f"✅ [HUMAN_AGENT] Successfully assigned session {session_db_id} to agent {assigned_agent}")
+        logger.info(f"✅ [HUMAN_AGENT] Successfully assigned session {session_id} to agent {assigned_agent}")
         return assigned_agent
 
     async def delete_session_messages(self, session_id: int | str) -> bool:
