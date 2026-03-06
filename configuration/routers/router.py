@@ -604,8 +604,14 @@ async def get_chat_logs():
 async def delete_chat_log(session_id: str, request: Request):
     """Delete a chat log"""
     try:
-        result = await chat_log_service.delete_chat_log(session_id, "admin@example.com")
+        # Get numeric session ID (API Gateway resolved UUID if present, else parse numeric string)
+        numeric_session_id = get_session_id_from_context(request, session_id)
+        logger.info(f"🔍 Delete chat log endpoint: session_id={numeric_session_id}")
+
+        result = await chat_log_service.delete_chat_log(numeric_session_id, "admin@example.com")
         return {"success": True, "message": "Chat log deleted successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting chat log: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1073,12 +1079,14 @@ async def get_admin_chat_sessions(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/admin/chat-sessions/{session_id}/messages")
-async def get_session_messages(session_id: int):
+async def get_session_messages(session_id: str, request: Request):
     """Get all messages for a specific chat session"""
     try:
-        logger.info(f"🔍 GET /admin/chat-sessions/{session_id}/messages called")
-        messages = await chat_log_service.get_session_messages(session_id)
-        logger.info(f"✅ Retrieved {len(messages)} messages for session {session_id}")
+        # Get numeric session ID (API Gateway resolved UUID if present, else parse numeric string)
+        numeric_session_id = get_session_id_from_context(request, session_id)
+        logger.info(f"🔍 GET /admin/chat-sessions/{numeric_session_id}/messages called")
+        messages = await chat_log_service.get_session_messages(numeric_session_id)
+        logger.info(f"✅ Retrieved {len(messages)} messages for session {numeric_session_id}")
 
         # Format messages for response
         formatted_messages = []
@@ -1088,14 +1096,16 @@ async def get_session_messages(session_id: int):
                 "text": msg.get("content", ""),
                 "sender": msg.get("role", "user"),
                 "timestamp": msg.get("created_at").isoformat() if msg.get("created_at") else None,
-                "session_id": session_id
+                "session_id": numeric_session_id
             })
 
         return {
             "success": True,
             "messages": formatted_messages,
-            "session_id": session_id
+            "session_id": numeric_session_id
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting session messages: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1188,7 +1198,7 @@ async def send_customer_message(session_uuid: str, request: Request):
 
 
 @router.post("/admin/chat-sessions/{session_id}/messages")
-async def send_agent_message(session_id: int, request: Request):
+async def send_agent_message(session_id: str, request: Request):
     """Send a message from an agent or customer in a chat session"""
     try:
         body = await request.json()
@@ -1199,22 +1209,26 @@ async def send_agent_message(session_id: int, request: Request):
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
 
-        # Get session UUID from database (needed for customer SSE channel)
-        session_data = await chat_log_service.dao.get_session_by_id_with_messages(session_id)
-        if not session_data:
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-        
-        session_uuid = session_data.get('session_id')  # UUID format
-        logger.info(f"🔍 [SEND_MESSAGE] Numeric ID: {session_id}, UUID: {session_uuid}")
+        # Get numeric session ID (API Gateway resolved UUID if present, else parse numeric string)
+        numeric_session_id = get_session_id_from_context(request, session_id)
+        logger.info(f"🔍 POST /admin/chat-sessions/{numeric_session_id}/messages called")
 
-        # Save message to database (session_id is already an int from path parameter)
-        message_id = await chat_log_service.send_agent_message(session_id, sender_id, text)
+        # Get session UUID from database (needed for customer SSE channel)
+        session_data = await chat_log_service.dao.get_session_by_id_with_messages(numeric_session_id)
+        if not session_data:
+            raise HTTPException(status_code=404, detail=f"Session {numeric_session_id} not found")
+
+        session_uuid = session_data.get('session_id')  # UUID format
+        logger.info(f"🔍 [SEND_MESSAGE] Numeric ID: {numeric_session_id}, UUID: {session_uuid}")
+
+        # Save message to database
+        message_id = await chat_log_service.send_agent_message(numeric_session_id, sender_id, text)
 
         # Prepare event data
         import datetime
         event_data = {
             "type": "agent_message",
-            "session_id": str(session_id),  # Numeric ID for reference
+            "session_id": str(numeric_session_id),  # Numeric ID for reference
             "message_id": str(message_id),
             "text": text,
             "sender": sender_type,
@@ -1236,15 +1250,15 @@ async def send_agent_message(session_id: int, request: Request):
 
             if cached_agent:
                 assigned_agent = cached_agent.decode('utf-8')  # Cache HIT
-                logger.info(f"✅ Found cached agent assignment: {session_id} → {assigned_agent}")
+                logger.info(f"✅ Found cached agent assignment: {numeric_session_id} → {assigned_agent}")
             else:
                 # Cache MISS - query database
-                session = await chat_log_service.dao.get_session_by_id(session_id)
+                session = await chat_log_service.dao.get_session_by_id(numeric_session_id)
                 assigned_agent = session.get('assigned_agent') if session else None
                 # Cache for future messages (1 hour TTL)
                 if assigned_agent:
                     await redis_client.set(cache_key, assigned_agent, ex=3600)
-                    logger.info(f"💾 Cached agent assignment: {session_id} → {assigned_agent} (TTL: 1h)")
+                    logger.info(f"💾 Cached agent assignment: {numeric_session_id} → {assigned_agent} (TTL: 1h)")
 
             if assigned_agent:
                 # Notify assigned agent and all admins
@@ -1262,12 +1276,12 @@ async def send_agent_message(session_id: int, request: Request):
             await broadcast_event_to_session(session_uuid, event_data)
             await broadcast_event_to_agent(sender_id, event_data)  # Also notify the sending agent
             await broadcast_event_to_all_agents(event_data)
-            logger.info(f"📤 Agent message sent to customer, agent {sender_id}, and all admins (session UUID: {session_uuid}, numeric: {session_id})")
+            logger.info(f"📤 Agent message sent to customer, agent {sender_id}, and all admins (session UUID: {session_uuid}, numeric: {numeric_session_id})")
 
         return {
             "success": True,
             "message_id": str(message_id),
-            "session_id": str(session_id)
+            "session_id": str(numeric_session_id)
         }
     except HTTPException:
         raise
