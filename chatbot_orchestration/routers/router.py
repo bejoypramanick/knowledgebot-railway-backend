@@ -59,12 +59,14 @@ async def chat_with_agent_stream(request: Request):
             async for chunk in agent_service.stream_agent_response(message, session_id):
                 yield chunk
 
+        # Return session UUID to API Gateway so it can set httpOnly cookie
         return StreamingResponse(
             generate_response(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no"
+                "X-Accel-Buffering": "no",
+                "X-Session-UUID": session_id  # API Gateway will extract this and set httpOnly cookie
             }
         )
     except Exception as e:

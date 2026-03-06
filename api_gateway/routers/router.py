@@ -731,6 +731,9 @@ async def generic_proxy_handler(request: Request, path: str):
             # Create proper FastAPI Response from httpx response
             from fastapi.responses import StreamingResponse, Response
 
+            # Check if response contains a session UUID that needs to be set in httpOnly cookie
+            session_uuid_from_response = response.headers.get("X-Session-UUID") or response.headers.get("x-session-uuid")
+
             # Copy headers from httpx response to FastAPI response
             # CRITICAL: Filter out headers that might contain internal URLs
             response_headers = {}
@@ -741,18 +744,33 @@ async def generic_proxy_handler(request: Request, path: str):
                 'content-location',  # Prevent internal URLs in content location
                 'host',  # Don't expose internal host
                 'server',  # Don't expose server details
+                'x-session-uuid',  # Remove internal header from response
             ]
             for key, value in response.headers.items():
                 # Skip headers that might contain internal URLs or cause issues
                 if key.lower() not in blocked_headers:
                     response_headers[key] = value
 
-            # Return response directly - httpx handles both streaming and non-streaming
-            return Response(
+            # Create response
+            response_obj = Response(
                 content=response.content,
                 status_code=response.status_code,
                 headers=response_headers
             )
+
+            # If response contains session UUID, set httpOnly cookie
+            if session_uuid_from_response:
+                logger.info(f"🍪 Setting httpOnly cookie for session UUID: {session_uuid_from_response}")
+                response_obj.set_cookie(
+                    key="chatbot_session_id",
+                    value=session_uuid_from_response,
+                    httponly=True,
+                    secure=True,
+                    samesite="Strict",
+                    max_age=60 * 60 * 24  # 24 hours
+                )
+
+            return response_obj
     except httpx.ConnectError as e:
         logger.error(f"❌ Connection failed to {full_url}: {e}")
         logger.error(f"❌ Service URL: {service_url}")
