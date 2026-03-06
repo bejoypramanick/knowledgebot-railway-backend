@@ -627,40 +627,63 @@ async def request_human_agent_connection(
                 logger.info(f"✅ Chat {session_numeric_id} assigned to human agent {assigned_agent}")
                 logger.info(f"📚 Agent will see full chat history from chat_messages table")
 
-                # Broadcast notification to agent with session UUID and latest message
-                # Agent's ChatLog UI will receive this and display the session in their list
+                # Broadcast session to agent in ChatSessionResponse format
+                # Agent's ChatLog UI will receive this and merge it seamlessly into their session list
                 try:
                     from shared.redis_pubsub_manager import broadcast_event_to_agent
-
-                    # Get latest message from database
                     from shared.sqlalchemy_db import get_db_session
                     from sqlalchemy import text
-                    latest_msg = None
-                    async with get_db_session() as db_session:
-                        query = "SELECT content, role, created_at FROM chat_messages WHERE session_id = :session_uuid ORDER BY created_at DESC LIMIT 1"
-                        db_result = await db_session.execute(text(query), {"session_uuid": session_uuid})
-                        msg_row = db_result.mappings().first()
-                        if msg_row:
-                            latest_msg = {
-                                "text": msg_row['content'],
-                                "sender": msg_row['role'],
-                                "timestamp": msg_row['created_at'].isoformat() if msg_row['created_at'] else None
-                            }
+                    from datetime import datetime
 
-                    # Broadcast event with session info for agent's ChatLog
-                    event = {
-                        "type": "new_human_handoff",
-                        "session_uuid": session_uuid,
-                        "session_id": session_numeric_id,
-                        "reason": reason,
-                        "latest_message": latest_msg,
-                        "timestamp": int(time.time()),
-                        "message": f"Customer requested human support: {reason}"
-                    }
-                    await broadcast_event_to_agent(assigned_agent, event)
-                    logger.info(f"📤 Notified agent {assigned_agent} about human handoff with session {session_uuid}")
+                    # Query session to build ChatSessionResponse format
+                    async with get_db_session() as db_session:
+                        # Get session details
+                        session_query = "SELECT * FROM chat_sessions WHERE id = :id LIMIT 1"
+                        session_result = await db_session.execute(text(session_query), {"id": session_numeric_id})
+                        session_row = session_result.mappings().first()
+
+                        if session_row:
+                            session_dict = dict(session_row)
+
+                            # Get latest message
+                            msg_query = "SELECT id, content, role, created_at FROM chat_messages WHERE session_id = :session_uuid ORDER BY created_at DESC LIMIT 1"
+                            msg_result = await db_session.execute(text(msg_query), {"session_uuid": session_uuid})
+                            msg_row = msg_result.mappings().first()
+
+                            messages = []
+                            if msg_row:
+                                messages.append({
+                                    "id": str(msg_row['id']),
+                                    "text": msg_row['content'],
+                                    "sender": msg_row['role'],
+                                    "timestamp": msg_row['created_at'].isoformat() if msg_row['created_at'] else datetime.utcnow().isoformat(),
+                                    "session_id": session_uuid
+                                })
+
+                            # Build ChatSessionResponse in exact same format as /admin/chat-sessions endpoint
+                            session_event = {
+                                "type": "session_update",
+                                "data": {
+                                    "id": str(session_dict.get('id')),
+                                    "session_uuid": session_uuid,
+                                    "customer_name": session_dict.get('customer_name'),
+                                    "customer_email": session_dict.get('customer_email'),
+                                    "status": session_dict.get('archive_status', 'active'),
+                                    "last_message_at": session_dict.get('last_activity_at').isoformat() if session_dict.get('last_activity_at') else datetime.utcnow().isoformat(),
+                                    "created_at": session_dict.get('created_at').isoformat() if session_dict.get('created_at') else None,
+                                    "assigned_agent": assigned_agent,
+                                    "feedback": None,
+                                    "customer_feedback": None,
+                                    "agent_feedback": None,
+                                    "chat_type": "human-handoff",
+                                    "is_session_read": False,
+                                    "messages": messages
+                                }
+                            }
+                            await broadcast_event_to_agent(assigned_agent, session_event)
+                            logger.info(f"📤 Broadcasted session {session_uuid} to agent {assigned_agent}")
                 except Exception as e:
-                    logger.warning(f"⚠️ Failed to notify agent about handoff: {e}")
+                    logger.warning(f"⚠️ Failed to broadcast session to agent: {e}", exc_info=True)
 
                 return f"👋 I've connected you to a human agent ({assigned_agent}). They will join the conversation shortly and can see your full chat history. The chat has been opened in their chat log. 💪\n"
             elif response.status_code == 503:
