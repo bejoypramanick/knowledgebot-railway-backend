@@ -677,6 +677,27 @@ async def generic_proxy_handler(request: Request, path: str):
             # Check content-type to decide how to handle the response
             request_body = await request.body()
 
+            # CRITICAL: Convert UUID to numeric ID in request body before forwarding to internal services
+            # API Gateway extracts UUID from cookie and converts to numeric ID
+            # Internal services only accept numeric session_id
+            if request_body and request.method in ["POST", "PUT", "PATCH"]:
+                try:
+                    import json
+                    body_data = json.loads(request_body)
+
+                    # If request has session_numeric_id AND request body contains session_id (UUID)
+                    if hasattr(request.state, "session_numeric_id") and request.state.session_numeric_id:
+                        if "session_id" in body_data:
+                            # Replace UUID with numeric ID in request body
+                            old_session_id = body_data["session_id"]
+                            body_data["session_id"] = request.state.session_numeric_id
+                            logger.info(f"🔄 Converted session_id in request body: {old_session_id} → {request.state.session_numeric_id}")
+                            request_body = json.dumps(body_data).encode()
+                except (json.JSONDecodeError, ValueError) as e:
+                    # Not JSON or other error - forward as-is
+                    logger.debug(f"⚠️  Could not parse request body as JSON: {e}")
+                    pass
+
             # Make request without streaming first to check headers
             response = await client.request(
                 method=request.method,
