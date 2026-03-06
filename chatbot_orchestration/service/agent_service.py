@@ -60,10 +60,6 @@ class PydanticAIGatewayService:
         """Get session metadata - delegates to SessionStateManager."""
         return await agent_manager.session_state_manager.get_session_metadata(session_id)
 
-    async def get_cached_content_id(self, session_id: str):
-        """Get cached content ID - delegates to SessionStateManager."""
-        return await agent_manager.session_state_manager.get_cached_content_id(session_id)
-
     async def get_chat_history(self, session_id: str):
         """Get chat history - delegates to SessionStateManager."""
         return await session_state_manager.get_chat_history(session_id)

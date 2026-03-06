@@ -49,7 +49,7 @@ class ChatDAO:
     async def get_session_metadata(self, session_id: str) -> Optional[Dict[str, Any]]:
         """Get session metadata from database"""
         query = """
-            SELECT session_id, user_role_id, cached_content_id, created_at, last_activity_at, message_count
+            SELECT session_id, user_role_id, created_at, last_activity_at, message_count
             FROM chat_sessions
             WHERE session_id = :session_id
         """
@@ -67,7 +67,6 @@ class ChatDAO:
                         "session_id": record.session_id,
                         "user_role_id": record.user_role_id,
                         "user_email": user_email,
-                        "cached_content_id": record.cached_content_id,
                         "created_at": record.created_at,
                         "last_activity_at": record.last_activity_at,
                         "message_count": record.message_count
@@ -98,30 +97,10 @@ class ChatDAO:
             logger.log_db_query(query, params, error=e)
             return None
 
-    async def update_session_cache_info(self, session_id: str, cached_content_id: str) -> bool:
-        """Update session with cached_content_id"""
-        query = """
-            UPDATE chat_sessions
-            SET cached_content_id = :cached_content_id,
-                last_activity_at = CURRENT_TIMESTAMP
-            WHERE session_id = :session_id
-        """
-        params = {"session_id": session_id, "cached_content_id": cached_content_id}
-        try:
-            logger.log_db_operation(query, params)
-            async with get_db_session() as session:
-                await session.execute(text(query), params)
-                await session.commit()
-                logger.log_db_query(query, params, "UPDATE 1")
-                return True
-        except Exception as e:
-            logger.log_db_query(query, params, error=e)
-            return False
-
     async def get_chat_history(self, session_id: str) -> Dict[str, Any]:
         """Get chat history for a session"""
         session_query = """
-            SELECT id, session_id, user_role_id, cached_content_id, created_at, last_activity_at, message_count
+            SELECT id, session_id, user_role_id, created_at, last_activity_at, message_count
             FROM chat_sessions
             WHERE session_id = :session_id
         """
@@ -134,7 +113,7 @@ class ChatDAO:
                 if not session_record:
                     insert_query = """INSERT INTO chat_sessions (session_id, user_role_id, started_at, last_activity_at, is_active, message_count)
                                    VALUES (:session_id, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
-                                   RETURNING id, session_id, user_role_id, cached_content_id, created_at, last_activity_at, message_count"""
+                                   RETURNING id, session_id, user_role_id, created_at, last_activity_at, message_count"""
                     logger.log_db_operation(insert_query, session_id)
                     session_record = (await session.execute(text(insert_query), {"session_id": session_id})).fetchone()
                     await session.commit()

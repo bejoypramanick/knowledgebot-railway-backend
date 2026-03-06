@@ -44,41 +44,6 @@ class SessionStateManager:
             logger.error(f"❌ Error retrieving session metadata: {e}")
             return {}
 
-    async def get_cached_content_id(self, session_id: str) -> Optional[str]:
-        """Get cached content ID for a session."""
-        try:
-            metadata = await self.get_session_metadata(session_id)
-            cached_content_id = metadata.get('cached_content_id')
-            
-            if cached_content_id:
-                logger.info(f"✅ Found cached content ID: {cached_content_id}")
-                return cached_content_id
-            else:
-                logger.info(f"ℹ️ No cached content ID found for session: {session_id}")
-                return None
-        except Exception as e:
-            logger.error(f"❌ Error getting cached content ID: {e}")
-            return None
-
-    
-    async def _save_cache_to_session_background(self, session_id: str, cached_content_id: str):
-        """Save cache ID to session in background."""
-        try:
-            await asyncio.sleep(0.1)  # Small delay to ensure cache is created
-            
-            metadata = {
-                'cached_content_id': cached_content_id,
-                'cache_created_at': datetime.utcnow().isoformat(),
-                'cache_expires_at': (datetime.utcnow() + timedelta(hours=1)).isoformat()
-            }
-            
-            # Update session with cache info (use update_session_cache_info from chat_dao)
-            await self.chat_dao.update_session_cache_info(session_id, cached_content_id)
-            logger.info(f"✅ Saved cache ID to session: {session_id}")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to save cache to session: {e}")
-
     def get_session_state(self, session_id: str) -> Dict[str, Any]:
         """Get or create session state."""
         if session_id not in self.session_states:
