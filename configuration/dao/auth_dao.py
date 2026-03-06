@@ -2,6 +2,7 @@
 Authentication Data Access Object for Configuration Service
 Handles database operations for user authentication and role management
 """
+import time
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
@@ -12,7 +13,26 @@ logger = get_otel_logger("auth_dao", "configuration")
 
 class AuthDAO:
     def __init__(self):
-        pass  # No connection parameter - DAO manages its own connection
+        # Simple in-memory cache with TTL for rarely-changing data
+        self._cache = {}
+        self._cache_ttl = 60  # 60 seconds cache
+    
+    def _get_cached(self, key: str):
+        """Get cached value if not expired"""
+        if key in self._cache:
+            value, timestamp = self._cache[key]
+            if time.time() - timestamp < self._cache_ttl:
+                logger.debug(f"✅ Cache hit for {key}")
+                return value
+            else:
+                logger.debug(f"⏰ Cache expired for {key}")
+                del self._cache[key]
+        return None
+    
+    def _set_cache(self, key: str, value: Any):
+        """Set cached value with timestamp"""
+        self._cache[key] = (value, time.time())
+        logger.debug(f"💾 Cached {key}")
 
     async def check_user_exists(self, email: str) -> Optional[Dict[str, Any]]:
         """Check if user exists for given email."""
@@ -194,17 +214,20 @@ class AuthDAO:
             return False
 
     async def get_admins(self) -> List[Dict[str, Any]]:
-        """Get all users with admin role."""
+        """Get all users with admin role (cached for 60s)."""
+        # Check cache first
+        cached = self._get_cached('admins')
+        if cached is not None:
+            return cached
+        
         query = text("""
-            SELECT urm.user_role_id, u.email, u.created_at as user_created_at,
-                   urm.created_at as role_assigned_at
+            SELECT DISTINCT u.email
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
             WHERE r.role_name = 'admin'
             AND u.is_active = true
             AND urm.is_active = true
-            ORDER BY u.email
         """)
         try:
             logger.log_db_operation(str(query))

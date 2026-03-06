@@ -516,21 +516,6 @@ async def remove_admin_user(email: str, request: Request):
         logger.error(f"Error removing admin user: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/human-agents")
-async def get_human_agents():
-    """Get all human agents"""
-    try:
-        agents = await config_service.get_human_agents()
-        return {"success": True, "data": agents}
-    except Exception as e:
-        logger.error(f"Error getting human agents: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/admin/human-agents")
-async def get_human_agents_admin():
-    """Get all human agents (admin alias endpoint)"""
-    return await get_human_agents()
-
 @router.post("/human-agents")
 async def add_human_agent(request_data: AdminManagementRequest, request: Request):
     """Add a new human agent"""
