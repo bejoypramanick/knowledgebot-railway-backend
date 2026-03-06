@@ -212,22 +212,38 @@ async def create_session_endpoint(
         
         logger.info(f"✅ [SESSION_CREATE] Firebase token verified for user: {user_data.get('email')}")
         
-        # Fetch user role from database
-        from configuration.service.auth_service import AuthService
-        auth_service = AuthService()
+        # Fetch user role from database via configuration service
         try:
-            role_result = await auth_service.get_user_role(user_data.get('email'))
-            roles = role_result.get('roles', [])
-            # Determine primary role: admin > human_agent > user
-            if 'admin' in roles:
-                user_role = 'admin'
-            elif 'human_agent' in roles:
-                user_role = 'human_agent'
-            else:
-                user_role = 'user'
-            user_data['role'] = user_role
-            user_data['roles'] = roles
-            logger.info(f"✅ [SESSION_CREATE] User role fetched: {user_role} (all roles: {roles})")
+            import httpx
+            config_service_url = os.getenv(
+                'CONFIGURATION_SERVICE_URL',
+                'http://configuration.railway.internal:8080'
+            )
+            role_endpoint = f"{config_service_url}/api/v1/configuration/admin/users/role"
+            
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                role_response = await client.get(
+                    role_endpoint,
+                    params={"email": user_data.get('email')}
+                )
+                
+                if role_response.status_code == 200:
+                    role_result = role_response.json()
+                    roles = role_result.get('roles', [])
+                    # Determine primary role: admin > human_agent > user
+                    if 'admin' in roles:
+                        user_role = 'admin'
+                    elif 'human_agent' in roles:
+                        user_role = 'human_agent'
+                    else:
+                        user_role = 'user'
+                    user_data['role'] = user_role
+                    user_data['roles'] = roles
+                    logger.info(f"✅ [SESSION_CREATE] User role fetched: {user_role} (all roles: {roles})")
+                else:
+                    logger.warning(f"⚠️ [SESSION_CREATE] Failed to fetch user role: {role_response.status_code}")
+                    user_data['role'] = 'user'
+                    user_data['roles'] = ['user']
         except Exception as e:
             logger.warning(f"⚠️ [SESSION_CREATE] Failed to fetch user role: {e}")
             user_data['role'] = 'user'  # Default to user if role fetch fails
