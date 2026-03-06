@@ -88,13 +88,28 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
 
-        # 🔄 STEP 1: Extract chat session UUID from httpOnly cookie for ALL requests
-        # Session UUID should ONLY come from httpOnly cookie, never from URL/params/body
-        # This happens ONCE at API Gateway, so internal services don't need to lookup
-        # This applies to BOTH authenticated and anonymous customer requests
+        # 🔄 STEP 1: Extract chat session UUID from httpOnly cookie OR request body for ALL requests
+        # Session UUID can come from:
+        # 1. httpOnly cookie (preferred, after /set-current is called)
+        # 2. Request body session_id (on first message before cookie is set)
         from api_gateway.core.session_resolver import extract_session_uuid_from_cookie, resolve_session_uuid_to_numeric_id
 
         session_uuid = extract_session_uuid_from_cookie(request)
+
+        # If not in cookie, try to extract from request body (for first message flows)
+        if not session_uuid and request.method in ["POST", "PUT", "PATCH"]:
+            try:
+                import json
+                body = await request.body()
+                if body:
+                    body_data = json.loads(body)
+                    session_id_from_body = body_data.get("session_id")
+                    # Only use if it looks like a UUID (contains 'session_')
+                    if session_id_from_body and isinstance(session_id_from_body, str) and session_id_from_body.startswith("session_"):
+                        session_uuid = session_id_from_body
+                        logger.debug(f"🔄 Extracted session UUID from request body: {session_uuid}")
+            except Exception as e:
+                logger.debug(f"Could not extract session UUID from body: {e}")
 
         if session_uuid:
             # Resolve UUID to numeric ID
@@ -105,7 +120,7 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
                 request.state.session_numeric_id = numeric_session_id
                 logger.debug(f"🔄 Resolved session UUID {session_uuid} → numeric ID {numeric_session_id}")
             else:
-                logger.warning(f"⚠️ Could not resolve session UUID {session_uuid}")
+                logger.debug(f"⚠️ Could not resolve session UUID {session_uuid} (new session or not in DB yet)")
 
         # Skip authentication for excluded paths (anonymous customers, public endpoints)
         if self.is_excluded_path(path):
