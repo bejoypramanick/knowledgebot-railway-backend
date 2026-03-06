@@ -943,14 +943,14 @@ async def customer_events_stream(request: Request):
     Streams real-time events for current session via httpOnly cookie.
 
     Session ID comes ONLY from httpOnly cookie: chatbot_session_id
-    Frontend must set this cookie before connecting to SSE.
+    Frontend must call /customer/sessions/set-current first to set the cookie.
 
     No authentication required - uses session cookie only.
     Perfect for anonymous customer chat widgets.
 
     Security:
     - Session ID in httpOnly cookie (cannot be accessed by JavaScript)
-    - Not exposed in URL or query params
+    - Never exposed in URL paths or query params
     - Rate limiting applied at API Gateway level
     - Channel isolation per session
     """
@@ -960,7 +960,7 @@ async def customer_events_stream(request: Request):
 
         if not session_id:
             logger.warning("❌ No chatbot_session_id cookie found for customer events")
-            raise HTTPException(status_code=400, detail="Session cookie required. Please set chatbot_session_id cookie before connecting.")
+            raise HTTPException(status_code=400, detail="Session cookie required. Call /customer/sessions/set-current first.")
 
         logger.info(f"🔌 Customer connecting to SSE stream for session {session_id}")
         
