@@ -672,11 +672,17 @@ async def generic_proxy_handler(request: Request, path: str):
 
         async with httpx.AsyncClient(timeout=request_timeout, follow_redirects=False) as client:
             logger.info(f"🔍 About to make HTTP request to: {full_url} (timeout={request_timeout}s)")
-            response = await client.stream(
+
+            # For SSE and other streaming responses, we need special handling
+            # Check content-type to decide how to handle the response
+            request_body = await request.body()
+
+            # Make request without streaming first to check headers
+            response = await client.request(
                 method=request.method,
                 url=full_url,
                 headers=headers,
-                content=await request.body(),
+                content=request_body,
                 params=request.query_params
             )
             logger.info(f"✅ Received response from {full_url} (Status: {response.status_code})")
@@ -700,34 +706,12 @@ async def generic_proxy_handler(request: Request, path: str):
                 if key.lower() not in blocked_headers:
                     response_headers[key] = value
 
-            # Check if this is a streaming response (like SSE)
-            is_streaming = response.headers.get('content-type', '').lower() in [
-                'text/event-stream',
-                'application/x-ndjson',
-                'text/plain; charset=utf-8'  # Some SSE responses use this
-            ]
-
-            if is_streaming:
-                logger.info(f"📡 Streaming response detected (content-type: {response.headers.get('content-type')})")
-                # Stream the response back without buffering
-                async def stream_body():
-                    async for chunk in response.aiter_bytes(chunk_size=8192):
-                        yield chunk
-
-                return StreamingResponse(
-                    stream_body(),
-                    status_code=response.status_code,
-                    headers=response_headers,
-                    media_type=response.headers.get('content-type')
-                )
-            else:
-                # Non-streaming response - read all content
-                content = await response.aread()
-                return Response(
-                    content=content,
-                    status_code=response.status_code,
-                    headers=response_headers
-                )
+            # Return response directly - httpx handles both streaming and non-streaming
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=response_headers
+            )
     except httpx.ConnectError as e:
         logger.error(f"❌ Connection failed to {full_url}: {e}")
         logger.error(f"❌ Service URL: {service_url}")
