@@ -804,6 +804,10 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
 
                 redis_task = asyncio.create_task(forward_redis_events())
 
+                # Send initial connection established event immediately
+                # This ensures the browser receives a response and the SSE connection is established
+                yield f": connected\n\n"
+
                 # Yield messages from queue
                 try:
                     while True:
@@ -1043,6 +1047,11 @@ async def customer_events_stream(request: Request, session_id: str = Query(..., 
                 redis_task = asyncio.create_task(forward_redis_events())
 
                 logger.info(f"✅ Tasks created, starting message loop for session {session_id}")
+
+                # Send initial connection established event immediately
+                # This ensures the browser receives a response and the SSE connection is established
+                yield f": connected\n\n"
+                logger.info(f"📤 Sent initial connection event to session {session_id}")
 
                 # Yield messages from queue
                 try:
