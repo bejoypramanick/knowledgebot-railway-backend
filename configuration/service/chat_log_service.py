@@ -113,24 +113,23 @@ class ChatLogService:
             return None
 
     async def record_heartbeat(self, user_email: str):
-        """Record heartbeat for an agent or admin."""
+        """
+        Record heartbeat for an agent or admin.
+        
+        NOTE: This is a lightweight presence indicator - does NOT create sessions.
+        Simply updates the last activity timestamp for the agent.
+        Actual agent presence can be tracked via:
+        - SSE connection status (/admin/events)
+        - Last API call timestamp
+        - Session assignments with recent activity
+        """
         roles = await self.dao.check_user_role(user_email)
         if not roles["is_agent"] and not roles["is_admin"]:
             raise HTTPException(status_code=403, detail="User is not a human agent or admin")
 
-        heartbeat_session_id = f"heartbeat_{user_email}"
-        # Use UUID-based lookup for heartbeat sessions
-        heartbeat_cs_id = await self.dao.get_session_db_id_by_uuid(heartbeat_session_id)
-        if not heartbeat_cs_id:
-            heartbeat_cs_id = await self.dao.create_chat_session(heartbeat_session_id, {})
-
-        assignee_type = await self.dao.get_assignee_type(user_email)
-        existing = await self.dao.get_session_assignment(heartbeat_cs_id)
-
-        if existing:
-            await self.dao.update_session_assignment(heartbeat_cs_id, user_email, assignee_type, status='active')
-        else:
-            await self.dao.create_session_assignment(heartbeat_cs_id, user_email, assignee_type, status='active')
+        # Heartbeat is now a no-op - presence is tracked via SSE connections
+        # and session assignments, not via fake heartbeat sessions
+        logger.debug(f"💓 Heartbeat received from {user_email} (no session created)")
         return True
 
     async def get_chat_sessions(self, role: str, user_email: str, archive_status: str, page: int, limit: int, agent_id: Optional[str] = None, offset: Optional[int] = None):
