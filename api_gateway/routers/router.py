@@ -130,10 +130,14 @@ async def proxy_admin_events_sse(request: Request):
         # Create streaming client with NO timeout for SSE
         async def event_stream():
             try:
+                logger.info(f"📡 Starting httpx stream for admin SSE")
                 async with httpx.AsyncClient(timeout=None) as client:
                     async with client.stream("GET", full_url, headers=headers) as response:
+                        logger.info(f"📡 httpx stream connected, status: {response.status_code}")
                         async for chunk in response.aiter_bytes():
+                            logger.info(f"📦 Received chunk ({len(chunk)} bytes) for admin SSE")
                             yield chunk
+                        logger.info(f"📡 httpx stream ended for admin SSE")
             except Exception as e:
                 logger.error(f"❌ Error in SSE stream: {e}")
                 # Send error event to client
@@ -183,10 +187,14 @@ async def proxy_customer_events_sse(request: Request, session_id: str = Query(..
         # Create streaming client with NO timeout for SSE
         async def event_stream():
             try:
+                logger.info(f"📡 Starting httpx stream for session {session_id}")
                 async with httpx.AsyncClient(timeout=None) as client:
                     async with client.stream("GET", full_url, headers=headers) as response:
+                        logger.info(f"📡 httpx stream connected, status: {response.status_code}")
                         async for chunk in response.aiter_bytes():
+                            logger.info(f"📦 Received chunk ({len(chunk)} bytes) for session {session_id}")
                             yield chunk
+                        logger.info(f"📡 httpx stream ended for session {session_id}")
             except Exception as e:
                 logger.error(f"❌ Error in customer SSE stream: {e}")
                 yield f"event: error\ndata: {str(e)}\n\n".encode()
