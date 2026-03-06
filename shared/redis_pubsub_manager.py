@@ -346,20 +346,22 @@ class AgentEventSubscriber:
                 logger.info(f"🔌 Admin {self.agent_email} subscribed to broadcast channel")
             
             logger.info(f"🔌 Agent {self.agent_email} subscribed to Redis Pub/Sub")
-            
+
             # Send initial connection event
             yield {
                 'type': 'connected',
                 'agent_email': self.agent_email,
                 'role': self.role
             }
-            
+
             # Listen for messages using async iteration (non-blocking)
             async for message in self.pubsub.listen():
                 try:
                     if message['type'] == 'message':
                         # Parse and yield event data
+                        logger.info(f"🔌 Agent {self.agent_email} received Redis message on channel {message.get('channel')}")
                         event_data = json.loads(message['data'])
+                        logger.info(f"🔌 Parsed event type: {event_data.get('type')}, yielding to SSE client")
                         yield event_data
                     elif message['type'] == 'subscribe':
                         # Subscription confirmation
