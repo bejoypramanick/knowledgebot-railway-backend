@@ -81,32 +81,6 @@ class StreamingService:
             logger.info(f"🚀 Starting agent stream for session: {session_id}")
             logger.info(f"📝 Message: {message[:100]}...")
 
-            # 🚨 CRITICAL: Check if a human agent has been assigned to this session
-            # If yes, DON'T respond with AI - forward to agent instead
-            logger.info(f"🔍 Checking if human agent is assigned to session {session_id}...")
-
-            try:
-                # Step 1: Check Redis cache first (FAST - set when agent assigned)
-                # Cache key pattern: session:assigned_agent:{session_uuid}
-                from shared.redis_pubsub_manager import get_pubsub_redis
-
-                redis_client = await get_pubsub_redis()
-                cache_key = f"session:assigned_agent:{session_id}"
-                assigned_agent = await redis_client.get(cache_key)
-
-                if assigned_agent:
-                    logger.info(f"✅ Found cached agent assignment: {assigned_agent}")
-                    logger.info(f"👤 Human agent '{assigned_agent}' is assigned to session {session_id}")
-                    logger.info(f"⏸️ NOT responding with AI - forwarding to human agent")
-                    yield f"data: {json.dumps({'type': 'human_agent_active', 'agent': assigned_agent, 'message': 'A human agent is now handling your chat. Please wait for their response.'})}\n\n"
-                    return
-                else:
-                    logger.debug(f"ℹ️ No cached agent assignment for session {session_id} - proceeding with AI response")
-
-            except Exception as e:
-                logger.warning(f"⚠️ Error checking for human agent assignment: {e}")
-                logger.warning(f"⚠️ Proceeding with AI response as fallback")
-
             # Update session activity
             session_state_manager.update_session_activity(session_id)
             session_state_manager.set_streaming_state(session_id, True)
