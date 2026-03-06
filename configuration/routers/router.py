@@ -892,7 +892,7 @@ async def get_session_messages(session_id: int):
 
 
 @router.post("/admin/chat-sessions/{session_id}/messages")
-async def send_agent_message(session_id: str, request: Request):
+async def send_agent_message(session_id: int, request: Request):
     """Send a message from an agent or customer in a chat session"""
     try:
         body = await request.json()
@@ -903,20 +903,14 @@ async def send_agent_message(session_id: str, request: Request):
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
 
-        # Save message to database
-        # Convert session_id to integer for database operations
-        try:
-            session_db_id = int(session_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
-        
-        message_id = await chat_log_service.send_agent_message(session_db_id, sender_id, text)
+        # Save message to database (session_id is already an int from path parameter)
+        message_id = await chat_log_service.send_agent_message(session_id, sender_id, text)
 
         # Prepare event data
         import datetime
         event_data = {
             "type": "agent_message",
-            "session_id": session_id,
+            "session_id": str(session_id),  # Convert to string for event data
             "message_id": str(message_id),
             "text": text,
             "sender": sender_type,
@@ -932,7 +926,7 @@ async def send_agent_message(session_id: str, request: Request):
         if sender_type == "user":
             # Customer sent message → Only notify assigned agent
             # Get assigned agent from database
-            session = await chat_log_service.dao.get_session_by_id(session_db_id)
+            session = await chat_log_service.dao.get_session_by_id(session_id)
             assigned_agent = session.get('assigned_agent') if session else None
             
             if assigned_agent:
@@ -946,13 +940,13 @@ async def send_agent_message(session_id: str, request: Request):
         
         else:
             # Agent sent message → Only notify customer
-            await broadcast_event_to_session(session_id, event_data)
+            await broadcast_event_to_session(str(session_id), event_data)
             logger.info(f"📤 Agent message sent to customer (session {session_id})")
 
         return {
             "success": True,
             "message_id": str(message_id),
-            "session_id": session_id
+            "session_id": str(session_id)
         }
     except HTTPException:
         raise
