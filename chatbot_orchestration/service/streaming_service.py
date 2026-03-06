@@ -357,8 +357,10 @@ class StreamingService:
                                                 "messages": messages
                                             }
                                         }
-                                        await broadcast_event_to_agent(assigned_agent, session_event)
-                                        logger.info(f"📤 Broadcasted session with {len(messages)} messages to agent {assigned_agent}")
+                                        result = await broadcast_event_to_agent(assigned_agent, session_event)
+                                        logger.info(f"📤 Broadcasted session_update to agent {assigned_agent} on channel agent:events:{assigned_agent}")
+                                        logger.info(f"📤 Broadcast result: {result}")
+                                        logger.info(f"📤 Session data includes {len(messages)} messages")
                                     
                                     # Send confirmation to customer
                                     confirmation_msg = f"👋 I've connected you to a human agent ({assigned_agent}). They will join the conversation shortly and can see your full chat history. 💪\n"

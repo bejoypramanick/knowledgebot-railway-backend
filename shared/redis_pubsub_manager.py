@@ -123,7 +123,7 @@ class AgentEventBroadcaster:
             if subscribers > 0:
                 logger.info(f"📤 Published event to {agent_email} on channel {channel}: {event_data.get('type')} ({subscribers} subscribers)")
             else:
-                logger.debug(f"📭 No subscribers for {agent_email} on channel {channel}, event queued in Redis")
+                logger.warning(f"📭 No subscribers for {agent_email} on channel {channel} - agent may not be connected to SSE")
             
             return True
             
