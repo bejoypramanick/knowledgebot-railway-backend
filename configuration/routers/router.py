@@ -39,16 +39,14 @@ def get_session_id_from_context(request: Request, session_id: str | int) -> int:
     """
     Get the numeric session ID from request context.
 
-    API Gateway resolves UUID → numeric ID at the gateway level.
-    This helper extracts the resolved numeric ID from request state,
-    OR parses numeric string IDs from URL parameters.
-
-    This ensures internal services always work with numeric IDs,
-    eliminating the need for UUID lookups within services.
+    Handles three cases:
+    1. API Gateway's resolved numeric ID (fastest)
+    2. Numeric string IDs (parse to int)
+    3. UUID strings (lookup in database)
 
     Args:
         request: FastAPI Request object
-        session_id: Session ID from URL parameter (could be UUID string or numeric string)
+        session_id: Session ID from parameter (UUID, numeric string, or int)
 
     Returns:
         Numeric session ID (int)
@@ -56,22 +54,55 @@ def get_session_id_from_context(request: Request, session_id: str | int) -> int:
     Raises:
         HTTPException: If session ID cannot be resolved
     """
+    import asyncio
+    from sqlalchemy import text
+    from shared.sqlalchemy_db import get_db_session
+
     # Prefer API Gateway's resolved numeric ID (fastest)
     if hasattr(request.state, "session_numeric_id") and request.state.session_numeric_id:
         logger.debug(f"✅ Using resolved numeric session ID from API Gateway: {request.state.session_numeric_id}")
         return request.state.session_numeric_id
 
-    # Fallback: Try to parse as numeric string
+    # Handle int directly
     if isinstance(session_id, int):
         return session_id
 
-    try:
+    # Try to parse as numeric string first
+    if isinstance(session_id, str) and session_id.isdigit():
         numeric_id = int(session_id)
         logger.debug(f"✅ Converted session ID string '{session_id}' to numeric: {numeric_id}")
         return numeric_id
-    except ValueError:
-        logger.error(f"❌ Could not resolve session ID: {session_id}")
-        raise HTTPException(status_code=400, detail=f"Invalid session ID format: {session_id}")
+
+    # If it's a UUID string (starts with 'session_'), lookup in database
+    if isinstance(session_id, str) and session_id.startswith("session_"):
+        try:
+            # Run async DB query synchronously
+            async def lookup_uuid():
+                async with get_db_session() as session:
+                    query = "SELECT id FROM chat_sessions WHERE session_id = :session_id LIMIT 1"
+                    result = await session.execute(text(query), {"session_id": session_id})
+                    row = result.mappings().first()
+                    if row:
+                        return row["id"]
+                    return None
+
+            # Execute async function
+            loop = asyncio.new_event_loop()
+            numeric_id = loop.run_until_complete(lookup_uuid())
+            loop.close()
+
+            if numeric_id:
+                logger.debug(f"✅ Resolved UUID '{session_id}' to numeric ID: {numeric_id}")
+                return numeric_id
+            else:
+                logger.error(f"❌ UUID not found in database: {session_id}")
+                raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        except Exception as e:
+            logger.error(f"❌ Error resolving UUID {session_id}: {e}")
+            raise HTTPException(status_code=500, detail=f"Error resolving session: {e}")
+
+    logger.error(f"❌ Could not resolve session ID: {session_id}")
+    raise HTTPException(status_code=400, detail=f"Invalid session ID format: {session_id}")
 
 @router.get("/version")
 async def get_version():
