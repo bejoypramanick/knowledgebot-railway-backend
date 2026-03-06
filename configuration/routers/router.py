@@ -889,65 +889,6 @@ async def get_session_messages(session_id: int):
         logger.error(f"Error getting session messages: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/admin/chat-sessions/progressive")
-async def get_chat_sessions_progressive(
-    request: Request,
-    user: dict = Depends(get_current_user),
-    role: str = Query('admin'),
-    status: str = Query('all'),
-    offset: int = Query(0),
-    limit: int = Query(1)
-):
-    """
-    Get chat sessions one at a time with messages for progressive loading.
-    Use offset to get the next session.
-    """
-    try:
-        logger.info(f"🔍 GET /admin/chat-sessions/progressive - offset={offset}, limit={limit}")
-
-        sessions, total_count = await chat_log_service.get_chat_sessions(
-            role=role,
-            user_email=user.get('email'),
-            archive_status=status,  # Fixed: use archive_status parameter name
-            page=1,
-            limit=limit,
-            offset=offset
-        )
-
-        # Convert Pydantic models to dicts and load messages for each session
-        sessions_with_messages = []
-        for session in sessions:
-            # Convert Pydantic model to dict
-            session_dict = session.dict() if hasattr(session, 'dict') else session.model_dump()
-            
-            # Load full messages for this session (convert string ID to int)
-            session_db_id = int(session_dict['id'])
-            messages = await chat_log_service.get_session_messages(session_db_id)
-            formatted_messages = []
-            for msg in messages:
-                formatted_messages.append({
-                    "id": str(msg.get("id", "")),
-                    "text": msg.get("content", ""),
-                    "sender": msg.get("role", "user"),
-                    "timestamp": msg.get("created_at").isoformat() if msg.get("created_at") else None,
-                    "session_id": session_dict['id']
-                })
-            session_dict['messages'] = formatted_messages
-            sessions_with_messages.append(session_dict)
-
-        return {
-            "success": True,
-            "sessions": sessions_with_messages,
-            "total_count": total_count,
-            "offset": offset,
-            "limit": limit,
-            "has_more": (offset + limit) < total_count
-        }
-    except Exception as e:
-        logger.error(f"Error getting progressive sessions: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 
 
 @router.post("/admin/chat-sessions/{session_id}/messages")
