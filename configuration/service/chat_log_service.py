@@ -45,6 +45,13 @@ class ChatLogService:
         try:
             # Convert session_id to integer for DAO operations
             session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+            
+            # Validate that session exists before creating assignment
+            session = await self.dao.get_session_by_id_with_messages(session_db_id)
+            if not session:
+                logger.error(f"❌ Cannot assign chat: session {session_db_id} does not exist")
+                raise HTTPException(status_code=404, detail=f"Session {session_db_id} not found")
+            
             logger.info(f"Chat session {session_db_id} assigned to agent {agent_email}")
             assignee_type = "agent"
             existing = await self.dao.get_session_assignment(session_db_id)
