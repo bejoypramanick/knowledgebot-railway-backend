@@ -277,6 +277,13 @@ class StreamingService:
                                     assigned_agent = result.get('agent_assigned')
                                     logger.info(f"✅ Agent {assigned_agent} assigned before AI response")
                                     
+                                    # Cache the agent assignment immediately for future message broadcasts
+                                    from shared.redis_pubsub_manager import get_pubsub_redis
+                                    redis_client = await get_pubsub_redis()
+                                    cache_key = f"session:assigned_agent:{session_id}"
+                                    await redis_client.set(cache_key, assigned_agent, ex=3600)
+                                    logger.info(f"💾 Cached agent assignment: {session_id} → {assigned_agent}")
+                                    
                                     # Save user message first
                                     await session_state_manager.save_message(
                                         session_id=session_id,
@@ -346,8 +353,9 @@ class StreamingService:
                                         metadata={}
                                     )
                                     
-                                    # Stream confirmation to customer
+                                    # Stream confirmation to customer with proper SSE format
                                     yield f"data: {json.dumps({'type': 'chunk', 'text': confirmation_msg})}\n\n"
+                                    await asyncio.sleep(0.01)  # Small delay to ensure message is sent
                                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
                                     logger.info(f"✅ Agent assigned and customer notified")
                                     return
