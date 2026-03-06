@@ -135,10 +135,15 @@ class ChatLogService:
 
     async def get_chat_sessions(self, role: str, user_email: str, archive_status: str, page: int, limit: int, agent_id: Optional[str] = None, offset: Optional[int] = None):
         """Get chat sessions with pagination, filtering, and efficiency."""
+        import time
+        start_time = time.time()
+        logger.info(f"🔍 [CHATLOG] Starting get_chat_sessions - role={role}, status={archive_status}, page={page}, limit={limit}")
+        
         # Use provided offset or calculate from page
         if offset is None:
             offset = (page - 1) * limit
         
+        step_start = time.time()
         if role == 'human_agent':
             await self.record_heartbeat(user_email)
             sessions_data = await self.dao.get_sessions_for_agent(user_email, archive_status, limit, offset)
@@ -146,21 +151,32 @@ class ChatLogService:
         else:
             sessions_data = await self.dao.get_all_sessions(archive_status, limit, offset)
             total_count = await self.dao.count_all_sessions(archive_status)
+        
+        step_duration = time.time() - step_start
+        logger.info(f"⏱️ [CHATLOG] Step 1: Fetched {len(sessions_data) if sessions_data else 0} sessions in {step_duration:.2f}s")
 
         if not sessions_data:
+            logger.info(f"✅ [CHATLOG] No sessions found, returning empty list (total time: {time.time() - start_time:.2f}s)")
             return [], total_count
 
         session_db_ids = [int(s['id']) if isinstance(s['id'], str) else s['id'] for s in sessions_data]
-        logger.info(f"⚡ Fetching latest messages for {len(session_db_ids)} sessions (optimized)")
+        logger.info(f"⚡ [CHATLOG] Fetching latest messages for {len(session_db_ids)} sessions: {session_db_ids[:5]}{'...' if len(session_db_ids) > 5 else ''}")
 
         # Fetch latest messages for ALL sessions in ONE query (optimized)
+        step_start = time.time()
         latest_messages = await self.dao.get_latest_messages_batch(session_db_ids)
-        logger.info(f"📨 Loaded latest messages for {len(latest_messages)} sessions in single query")
+        step_duration = time.time() - step_start
+        logger.info(f"⏱️ [CHATLOG] Step 2: Loaded latest messages for {len(latest_messages)} sessions in {step_duration:.2f}s")
 
         # Get all session IDs for batch feedback query (uses session_id UUID)
         session_ids = [s['session_id'] for s in sessions_data]
+        logger.info(f"⚡ [CHATLOG] Fetching feedback for {len(session_ids)} sessions")
+        
         # OPTIMIZATION: Fetch feedback counts for all sessions in one query
+        step_start = time.time()
         batch_feedback_counts = await self.dao.get_batch_feedback_counts(session_ids)
+        step_duration = time.time() - step_start
+        logger.info(f"⏱️ [CHATLOG] Step 3: Loaded feedback counts in {step_duration:.2f}s")
 
         formatted_sessions = []
         for session_row in sessions_data:
@@ -246,6 +262,8 @@ class ChatLogService:
                 messages=messages
             ))
         
+        total_duration = time.time() - start_time
+        logger.info(f"✅ [CHATLOG] Completed get_chat_sessions: {len(formatted_sessions)} sessions formatted in {total_duration:.2f}s total")
         return formatted_sessions, total_count
 
     async def get_session_messages(self, session_id: int):

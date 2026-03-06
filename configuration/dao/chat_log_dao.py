@@ -358,7 +358,9 @@ class ChatLogDAO:
             return 0
 
     async def get_all_sessions(self, archive_status: str, limit: int, offset: int) -> List[Dict[str, Any]]:
-        logger.info(f"🔍 DAO get_all_sessions called: archive_status={archive_status}, limit={limit}, offset={offset}")
+        import time
+        start_time = time.time()
+        logger.info(f"🔍 [CHATLOG-DAO] get_all_sessions called: archive_status={archive_status}, limit={limit}, offset={offset}")
         
         # Handle 'all' status - return all sessions regardless of archive status
         if archive_status.lower() == 'all':
@@ -373,16 +375,20 @@ class ChatLogDAO:
             """
             try:
                 params = {"limit": limit, "offset": offset}
-                logger.info(f"🔍 Executing query with params: {params}")
+                logger.info(f"🔍 [CHATLOG-DAO] Executing query with params: {params}")
                 logger.log_db_operation(query, params)
+                
+                db_start = time.time()
                 async with get_db_session() as session:
                     result = await session.execute(text(query), params)
                     rows = result.fetchall()
-                    logger.info(f"✅ Query returned {len(rows)} rows")
-                    logger.log_db_query(query, params, rows)
-                    return [dict(row._mapping) for row in rows]
+                db_duration = time.time() - db_start
+                
+                logger.info(f"⏱️ [CHATLOG-DAO] Query returned {len(rows)} rows in {db_duration:.2f}s (total: {time.time() - start_time:.2f}s)")
+                logger.log_db_query(query, params, rows)
+                return [dict(row._mapping) for row in rows]
             except Exception as e:
-                logger.error(f"❌ Error in get_all_sessions: {e}")
+                logger.error(f"❌ [CHATLOG-DAO] Error in get_all_sessions after {time.time() - start_time:.2f}s: {e}")
                 logger.log_db_query(query, params, error=e)
                 return []
         else:
@@ -398,40 +404,57 @@ class ChatLogDAO:
             """
             try:
                 params = {"archive_status": archive_status, "limit": limit, "offset": offset}
-                logger.info(f"🔍 Executing query with params: {params}")
+                logger.info(f"🔍 [CHATLOG-DAO] Executing query with params: {params}")
                 logger.log_db_operation(query, params)
+                
+                db_start = time.time()
                 async with get_db_session() as session:
                     result = await session.execute(text(query), params)
                     rows = result.fetchall()
-                    logger.info(f"✅ Query returned {len(rows)} rows")
-                    logger.log_db_query(query, params, rows)
-                    return [dict(row._mapping) for row in rows]
+                db_duration = time.time() - db_start
+                
+                logger.info(f"⏱️ [CHATLOG-DAO] Query returned {len(rows)} rows in {db_duration:.2f}s (total: {time.time() - start_time:.2f}s)")
+                logger.log_db_query(query, params, rows)
+                return [dict(row._mapping) for row in rows]
             except Exception as e:
-                logger.error(f"❌ Error in get_all_sessions: {e}")
+                logger.error(f"❌ [CHATLOG-DAO] Error in get_all_sessions after {time.time() - start_time:.2f}s: {e}")
                 logger.log_db_query(query, params, error=e)
                 return []
 
     async def count_all_sessions(self, archive_status: str) -> int:
+        import time
+        start_time = time.time()
+        
         try:
             # Handle 'all' status - count all sessions regardless of archive status
             if archive_status.lower() == 'all':
                 query = "SELECT COUNT(*) FROM chat_sessions"
                 params = {}
                 logger.log_db_operation(query, params)
+                
+                db_start = time.time()
                 async with get_db_session() as session:
                     result = await session.execute(text(query), params)
                     count = result.scalar()
-                    logger.log_db_query(query, params, count)
-                    return count or 0
+                db_duration = time.time() - db_start
+                
+                logger.info(f"⏱️ [CHATLOG-DAO] count_all_sessions returned {count} in {db_duration:.2f}s")
+                logger.log_db_query(query, params, count)
+                return count or 0
             else:
                 query = "SELECT COUNT(*) FROM chat_sessions WHERE archive_status = :archive_status"
                 params = {"archive_status": archive_status}
                 logger.log_db_operation(query, params)
+                
+                db_start = time.time()
                 async with get_db_session() as session:
                     result = await session.execute(text(query), params)
                     count = result.scalar()
-                    logger.log_db_query(query, params, count)
-                    return count or 0
+                db_duration = time.time() - db_start
+                
+                logger.info(f"⏱️ [CHATLOG-DAO] count_all_sessions (filtered) returned {count} in {db_duration:.2f}s")
+                logger.log_db_query(query, params, count)
+                return count or 0
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             return 0
@@ -498,9 +521,14 @@ class ChatLogDAO:
 
     async def get_latest_messages_batch(self, session_ids: List[int]) -> Dict[int, Dict[str, Any]]:
         """Get the latest message for multiple sessions in a single query (OPTIMIZED)."""
+        import time
+        start_time = time.time()
+        
         if not session_ids:
             return {}
 
+        logger.info(f"🔍 [CHATLOG-DAO] get_latest_messages_batch called for {len(session_ids)} sessions")
+        
         # Use window function to get latest message per session efficiently
         query = """
             WITH ranked_messages AS (
@@ -514,12 +542,19 @@ class ChatLogDAO:
         try:
             params = {"session_ids": session_ids}
             logger.log_db_operation(query, params)
+            
+            db_start = time.time()
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
                 rows = result.fetchall()
-                # Return dict keyed by session_id for fast lookup
-                return {row.session_id: dict(row._mapping) for row in rows}
+            db_duration = time.time() - db_start
+            
+            result_dict = {row.session_id: dict(row._mapping) for row in rows}
+            logger.info(f"⏱️ [CHATLOG-DAO] Fetched {len(result_dict)} latest messages in {db_duration:.2f}s (total: {time.time() - start_time:.2f}s)")
+            
+            return result_dict
         except Exception as e:
+            logger.error(f"❌ [CHATLOG-DAO] Error in get_latest_messages_batch after {time.time() - start_time:.2f}s: {e}")
             logger.log_db_query(query, params, error=e)
             return {}
 
@@ -689,8 +724,13 @@ class ChatLogDAO:
 
     async def get_batch_feedback_counts(self, session_ids: List[str]) -> Dict[str, Dict[str, int]]:
         """Get feedback for multiple sessions in a single query."""
+        import time
+        start_time = time.time()
+        
         if not session_ids:
             return {}
+
+        logger.info(f"🔍 [CHATLOG-DAO] get_batch_feedback_counts called for {len(session_ids)} sessions")
 
         # Build dynamic IN clause for asyncpg compatibility
         placeholders = ",".join([f":id_{i}" for i in range(len(session_ids))])
@@ -706,29 +746,34 @@ class ChatLogDAO:
 
         try:
             logger.log_db_operation(query, params)
+            
+            db_start = time.time()
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
                 rows = result.fetchall()
-                logger.log_db_query(query, params, rows)
+            db_duration = time.time() - db_start
+            
+            logger.log_db_query(query, params, rows)
 
-                # Build result dictionary
-                result_dict = {}
-                for row in rows:
-                    row_dict = dict(row._mapping)
-                    session_id = row_dict['session_id']
-                    feedback_type = row_dict.get('feedback_type')
-                    
-                    result_dict[session_id] = {
-                        "positive_count": 1 if feedback_type == 'positive' else 0,
-                        "negative_count": 1 if feedback_type == 'negative' else 0
-                    }
+            # Build result dictionary
+            result_dict = {}
+            for row in rows:
+                row_dict = dict(row._mapping)
+                session_id = row_dict['session_id']
+                feedback_type = row_dict.get('feedback_type')
+                
+                result_dict[session_id] = {
+                    "positive_count": 1 if feedback_type == 'positive' else 0,
+                    "negative_count": 1 if feedback_type == 'negative' else 0
+                }
 
-                # Fill in missing sessions with zero counts
-                for session_id in session_ids:
-                    if session_id not in result_dict:
-                        result_dict[session_id] = {"positive_count": 0, "negative_count": 0}
+            # Fill in missing sessions with zero counts
+            for session_id in session_ids:
+                if session_id not in result_dict:
+                    result_dict[session_id] = {"positive_count": 0, "negative_count": 0}
 
-                return result_dict
+            logger.info(f"⏱️ [CHATLOG-DAO] Fetched feedback for {len(result_dict)} sessions in {db_duration:.2f}s (total: {time.time() - start_time:.2f}s)")
+            return result_dict
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             # Return empty counts for all sessions on error
