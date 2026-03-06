@@ -570,6 +570,7 @@ class ChatLogDAO:
             return {}
 
         logger.info(f"🔍 [CHATLOG-DAO] get_latest_messages_batch called for {len(session_ids)} sessions")
+        logger.info(f"🔍 [CHATLOG-DAO] Session IDs: {session_ids}")
         
         # Use a simpler approach: for each session, get the message with MAX(id)
         query = """
@@ -583,26 +584,20 @@ class ChatLogDAO:
             ) latest ON cm.session_id = latest.session_id AND cm.id = latest.max_id
         """
         
-        explain_query = f"EXPLAIN ANALYZE {query}"
-        
         try:
             params = {"session_ids": session_ids}
-            
-            # Run EXPLAIN ANALYZE
-            async with get_db_session() as session:
-                explain_result = await session.execute(text(explain_query), params)
-                explain_rows = explain_result.fetchall()
-                logger.info(f"📊 [CHATLOG-DAO] get_latest_messages_batch EXPLAIN ANALYZE:")
-                for row in explain_rows:
-                    logger.info(f"📊 {row[0]}")
-            
+            logger.info(f"🔍 [CHATLOG-DAO] About to execute query...")
             logger.log_db_operation(query, params)
             
             db_start = time.time()
+            logger.info(f"🔍 [CHATLOG-DAO] Executing query at {db_start}...")
+            
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
                 rows = result.fetchall()
+            
             db_duration = time.time() - db_start
+            logger.info(f"🔍 [CHATLOG-DAO] Query completed after {db_duration:.2f}s")
             
             result_dict = {row.session_id: dict(row._mapping) for row in rows}
             logger.info(f"⏱️ [CHATLOG-DAO] Fetched {len(result_dict)} latest messages in {db_duration:.2f}s (total: {time.time() - start_time:.2f}s)")
@@ -610,6 +605,8 @@ class ChatLogDAO:
             return result_dict
         except Exception as e:
             logger.error(f"❌ [CHATLOG-DAO] Error in get_latest_messages_batch after {time.time() - start_time:.2f}s: {e}")
+            import traceback
+            logger.error(f"❌ [CHATLOG-DAO] Traceback: {traceback.format_exc()}")
             logger.log_db_query(query, params, error=e)
             return {}
 
