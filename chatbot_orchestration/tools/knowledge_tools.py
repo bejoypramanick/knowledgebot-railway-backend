@@ -622,6 +622,10 @@ async def request_human_agent_connection(
                 headers={}
             )
 
+            logger.info(f"🔄 HTTP Response received: status={response.status_code}")
+            if response.status_code != 200:
+                logger.info(f"🔄 Response body: {response.text}")
+
             if response.status_code == 200:
                 result = response.json()
                 assigned_agent = result.get('agent_assigned', 'an agent')
