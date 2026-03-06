@@ -1,6 +1,7 @@
 """
 Configuration Service - Handles chatbot and widget configuration management
 """
+import asyncio
 import datetime
 import sys
 import os
