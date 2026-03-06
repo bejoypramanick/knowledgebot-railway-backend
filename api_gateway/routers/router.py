@@ -99,7 +99,7 @@ async def verify_auth_token(request: Request):
 # SSE (Server-Sent Events) ENDPOINTS
 # =================================
 
-@router.get("/gateway/configuration/admin/events")
+@router.get("/configuration/admin/events")
 async def proxy_admin_events_sse(request: Request):
     """
     Proxy SSE endpoint for admin/agent events.
@@ -157,7 +157,7 @@ async def proxy_admin_events_sse(request: Request):
         logger.error(f"❌ Error setting up SSE proxy: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/gateway/configuration/customer/events")
+@router.get("/configuration/customer/events")
 async def proxy_customer_events_sse(request: Request, session_id: str = Query(..., description="Session UUID")):
     """
     Proxy SSE endpoint for customer events.
