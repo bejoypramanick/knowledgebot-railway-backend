@@ -759,31 +759,55 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                 redis_task = asyncio.create_task(forward_redis_events())
 
                 # Yield messages from queue
-                while True:
-                    try:
-                        msg = await asyncio.wait_for(message_queue.get(), timeout=30)
-                        if msg.get("type") == "heartbeat":
-                            # SSE comment (: prefix) doesn't trigger client event
-                            yield f": keep-alive {msg['timestamp']}\n\n"
-                        else:
-                            # Real event data
-                            yield f"data: {json.dumps(msg)}\n\n"
-                    except asyncio.TimeoutError:
-                        # Queue empty for 30s, send heartbeat manually
-                        yield f": timeout-heartbeat {int(time.time())}\n\n"
-                    except Exception as e:
-                        logger.error(f"❌ Error yielding message: {e}")
-                        break
+                try:
+                    while True:
+                        try:
+                            msg = await asyncio.wait_for(message_queue.get(), timeout=30)
+                            if msg.get("type") == "heartbeat":
+                                # SSE comment (: prefix) doesn't trigger client event
+                                yield f": keep-alive {msg['timestamp']}\n\n"
+                            else:
+                                # Real event data
+                                yield f"data: {json.dumps(msg)}\n\n"
+                        except asyncio.TimeoutError:
+                            # Queue empty for 30s, send heartbeat manually
+                            yield f": timeout-heartbeat {int(time.time())}\n\n"
+                        except json.JSONDecodeError as e:
+                            logger.error(f"❌ Invalid JSON in message: {e}")
+                            # Continue listening, don't break
+                            continue
+                        except Exception as e:
+                            logger.error(f"❌ Error yielding message: {e}")
+                            # On error, wait a bit then continue (don't break connection abruptly)
+                            await asyncio.sleep(0.1)
+                            continue
+
+                except asyncio.CancelledError:
+                    logger.info(f"🔌 SSE connection cancelled for {user_email}")
+                except Exception as e:
+                    logger.error(f"❌ Error in SSE generator for {user_email}: {e}")
 
             except asyncio.CancelledError:
                 logger.info(f"🔌 SSE connection cancelled for {user_email}")
             except Exception as e:
                 logger.error(f"❌ Error in SSE generator for {user_email}: {e}")
             finally:
+                # Cancel tasks and wait for cleanup
                 if heartbeat_task and not heartbeat_task.done():
                     heartbeat_task.cancel()
                 if redis_task and not redis_task.done():
                     redis_task.cancel()
+
+                # Give tasks a moment to clean up
+                try:
+                    await asyncio.gather(
+                        heartbeat_task if heartbeat_task and not heartbeat_task.done() else asyncio.sleep(0),
+                        redis_task if redis_task and not redis_task.done() else asyncio.sleep(0),
+                        return_exceptions=True
+                    )
+                except Exception:
+                    pass
+
                 logger.info(f"🔌 Agent {user_email} disconnected from Redis Pub/Sub SSE stream")
 
         return StreamingResponse(
@@ -876,31 +900,55 @@ async def customer_events_stream(session_id: str):
                 redis_task = asyncio.create_task(forward_redis_events())
 
                 # Yield messages from queue
-                while True:
-                    try:
-                        msg = await asyncio.wait_for(message_queue.get(), timeout=30)
-                        if msg.get("type") == "heartbeat":
-                            # SSE comment (: prefix) doesn't trigger client event
-                            yield f": keep-alive {msg['timestamp']}\n\n"
-                        else:
-                            # Real event data
-                            yield f"data: {json.dumps(msg)}\n\n"
-                    except asyncio.TimeoutError:
-                        # Queue empty for 30s, send heartbeat manually
-                        yield f": timeout-heartbeat {int(time.time())}\n\n"
-                    except Exception as e:
-                        logger.error(f"❌ Error yielding message for session {session_id}: {e}")
-                        break
+                try:
+                    while True:
+                        try:
+                            msg = await asyncio.wait_for(message_queue.get(), timeout=30)
+                            if msg.get("type") == "heartbeat":
+                                # SSE comment (: prefix) doesn't trigger client event
+                                yield f": keep-alive {msg['timestamp']}\n\n"
+                            else:
+                                # Real event data
+                                yield f"data: {json.dumps(msg)}\n\n"
+                        except asyncio.TimeoutError:
+                            # Queue empty for 30s, send heartbeat manually
+                            yield f": timeout-heartbeat {int(time.time())}\n\n"
+                        except json.JSONDecodeError as e:
+                            logger.error(f"❌ Invalid JSON in message for session {session_id}: {e}")
+                            # Continue listening, don't break
+                            continue
+                        except Exception as e:
+                            logger.error(f"❌ Error yielding message for session {session_id}: {e}")
+                            # On error, wait a bit then continue (don't break connection abruptly)
+                            await asyncio.sleep(0.1)
+                            continue
+
+                except asyncio.CancelledError:
+                    logger.info(f"🔌 SSE connection cancelled for session {session_id}")
+                except Exception as e:
+                    logger.error(f"❌ Error in SSE generator for session {session_id}: {e}")
 
             except asyncio.CancelledError:
                 logger.info(f"🔌 SSE connection cancelled for session {session_id}")
             except Exception as e:
                 logger.error(f"❌ Error in SSE generator for session {session_id}: {e}")
             finally:
+                # Cancel tasks and wait for cleanup
                 if heartbeat_task and not heartbeat_task.done():
                     heartbeat_task.cancel()
                 if redis_task and not redis_task.done():
                     redis_task.cancel()
+
+                # Give tasks a moment to clean up
+                try:
+                    await asyncio.gather(
+                        heartbeat_task if heartbeat_task and not heartbeat_task.done() else asyncio.sleep(0),
+                        redis_task if redis_task and not redis_task.done() else asyncio.sleep(0),
+                        return_exceptions=True
+                    )
+                except Exception:
+                    pass
+
                 logger.info(f"🔌 Customer disconnected from session {session_id}")
         
         return StreamingResponse(
