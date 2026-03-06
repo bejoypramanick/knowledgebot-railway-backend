@@ -346,45 +346,6 @@ class ChatLogService:
 
         return message_id
 
-    async def archive_chat_session(self, session_id: int, archive_status: str, user_email: str):
-        """Archive status of a chat session (numeric ID only)."""
-        roles = await self.dao.check_user_role(user_email)
-        if not roles["is_admin"] and not roles["is_agent"]:
-            raise HTTPException(status_code=403, detail="Only admins and human agents can archive sessions")
-
-        # session_id is already numeric (resolved by API Gateway)
-        success = await self.dao.archive_session(session_id, archive_status)
-        if not success:
-            raise HTTPException(status_code=404, detail="Session not found")
-        return True
-
-    async def transfer_chat_session(self, session_id: int, user_email: str, target_agent_email: str):
-        """Transfer a chat session to another agent (numeric ID only)."""
-        roles = await self.dao.check_user_role(user_email)
-        if not roles["is_agent"] and not roles["is_admin"]:
-            raise HTTPException(status_code=403, detail="Access denied")
-
-        target_roles = await self.dao.check_user_role(target_agent_email)
-        if not target_roles["is_agent"] and not target_roles["is_admin"]:
-            raise HTTPException(status_code=400, detail="Target user is not an agent or admin")
-
-        # session_id is already numeric (resolved by API Gateway)
-
-        await self.assign_chat_to_agent(str(session_db_id), target_agent_email)
-
-        if self.connection_manager:
-            transfer_message = {
-                "type": "chat_transferred",
-                "session_id": str(session_db_id),
-                "transferred_to": target_agent_email,
-                "transferred_by": user_email,
-                "timestamp": datetime.utcnow().isoformat(),
-                "text": "Chat has been transferred to another support agent"
-            }
-            await self.connection_manager.broadcast_to_session(transfer_message, str(session_db_id))
-
-        await self.dao.create_message(session_db_id, 'system', "Chat transferred to another support agent")
-        return True
 
     async def update_chat_session(self, session_id: int, user_email: str, status: Optional[str] = None,
                                  assigned_agent: Optional[str] = None):
