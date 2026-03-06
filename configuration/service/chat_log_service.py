@@ -64,11 +64,11 @@ class ChatLogService:
                 except (json.JSONDecodeError, TypeError):
                     metadata = {}
             
-            # Set customer_name to "Customer #<numeric_id>" if not already set
+            # Set customer_name to "User-<numeric_id>" if not already set
             if not metadata.get('customer_name'):
-                metadata['customer_name'] = f"Customer #{session_db_id}"
+                metadata['customer_name'] = f"User-{session_db_id}"
                 await self.dao.update_chat_session_metadata(session_db_id, metadata)
-                logger.info(f"✅ Set customer_name to 'Customer #{session_db_id}' for session {session_uuid}")
+                logger.info(f"✅ Set customer_name to 'User-{session_db_id}' for session {session_uuid}")
             
             logger.info(f"Chat session {session_db_id} assigned to agent {agent_email}")
             assignee_type = "agent"
