@@ -950,30 +950,23 @@ async def set_current_customer_session(request: Request):
 
 
 @router.get("/customer/events")
-async def customer_events_stream(request: Request):
+async def customer_events_stream(request: Request, session_id: str = Query(..., description="Session UUID")):
     """
     Server-Sent Events endpoint for customers (anonymous).
-    Streams real-time events for current session via httpOnly cookie.
+    Streams real-time events for specified session.
 
-    Session ID comes ONLY from httpOnly cookie: chatbot_session_id
-    Frontend must call /customer/sessions/set-current first to set the cookie.
-
-    No authentication required - uses session cookie only.
+    Session ID comes from query parameter (no authentication required).
     Perfect for anonymous customer chat widgets.
 
     Security:
-    - Session ID in httpOnly cookie (cannot be accessed by JavaScript)
-    - Never exposed in URL paths or query params
     - Rate limiting applied at API Gateway level
     - Channel isolation per session
+    - No sensitive data exposed
     """
     try:
-        # Get session_id ONLY from httpOnly cookie
-        session_id = request.cookies.get("chatbot_session_id")
-
         if not session_id:
-            logger.warning("❌ No chatbot_session_id cookie found for customer events")
-            raise HTTPException(status_code=400, detail="Session cookie required. Call /customer/sessions/set-current first.")
+            logger.warning("❌ No session_id provided for customer events")
+            raise HTTPException(status_code=400, detail="session_id query parameter required")
 
         logger.info(f"🔌 Customer connecting to SSE stream for session {session_id}")
         
