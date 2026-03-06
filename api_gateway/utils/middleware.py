@@ -24,7 +24,9 @@ async def log_requests_middleware(request: Request, call_next):
         if response.status_code >= 400:
             logger.warning(f"↩️ [{request_id}] Response: {response.status_code} - Path: {request.url.path} - Total time: {duration:.3f}s")
             if response.status_code == 404:
-                logger.error(f"❌ 404 DETECTED on path: {request.url.path}")
+                # Don't log 404 for static assets like favicon.ico
+                if not request.url.path.endswith(('.ico', '.png', '.jpg', '.css', '.js')):
+                    logger.error(f"❌ 404 DETECTED on path: {request.url.path}")
         else:
             logger.info(f"↩️ [{request_id}] Response: {response.status_code} - Total time: {duration:.3f}s")
 

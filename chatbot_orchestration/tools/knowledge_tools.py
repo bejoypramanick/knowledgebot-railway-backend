@@ -584,12 +584,12 @@ async def request_human_agent_connection(
     try:
         import httpx
         from shared.sqlalchemy_db import get_db_session
-        from knowledgebase_ingestion.dao.chat_session_dao import ChatSessionDAO
+        from configuration.dao.chat_log_dao import ChatLogDAO
 
         # Step 1: Convert UUID to numeric session ID
         # Internal services only work with numeric IDs, not UUIDs
         # UUIDs are only used by the chat system; API Gateway converts to numeric IDs
-        dao = ChatSessionDAO()
+        dao = ChatLogDAO()
         async for session in get_db_session():
             session_data = await dao.get_session_by_uuid(session_uuid, session=session)
 

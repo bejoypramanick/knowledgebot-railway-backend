@@ -680,7 +680,14 @@ async def generic_proxy_handler(request: Request, path: str):
             # CRITICAL: Convert UUID to numeric ID in request body before forwarding to internal services
             # API Gateway extracts UUID from cookie and converts to numeric ID
             # Internal services only accept numeric session_id
-            if request_body and request.method in ["POST", "PUT", "PATCH"]:
+            # EXCEPTION: set-current endpoints intentionally accept UUIDs - don't convert those
+            should_convert_uuid = (
+                request_body and
+                request.method in ["POST", "PUT", "PATCH"] and
+                "set-current" not in full_url  # Exclude set-current endpoints
+            )
+
+            if should_convert_uuid:
                 try:
                     import json
                     body_data = json.loads(request_body)
@@ -695,7 +702,8 @@ async def generic_proxy_handler(request: Request, path: str):
                             request_body = json.dumps(body_data).encode()
 
                             # IMPORTANT: Update Content-Length header after modifying request body
-                            # Otherwise httpx throws LocalProtocolError: Too little data for declared Content-Length
+                            # Remove old header first to avoid conflicting Content-Length headers
+                            headers.pop("content-length", None)
                             headers["Content-Length"] = str(len(request_body))
                 except (json.JSONDecodeError, ValueError) as e:
                     # Not JSON or other error - forward as-is
