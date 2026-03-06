@@ -357,9 +357,16 @@ class StreamingService:
                                                 "messages": messages
                                             }
                                         }
+                                        # Broadcast to assigned agent's specific channel
                                         result = await broadcast_event_to_agent(assigned_agent, session_event)
                                         logger.info(f"📤 Broadcasted session_update to agent {assigned_agent} on channel agent:events:{assigned_agent}")
                                         logger.info(f"📤 Broadcast result: {result}")
+                                        
+                                        # ALSO broadcast to all admins via broadcast channel
+                                        from shared.redis_pubsub_manager import broadcast_event_to_all_agents
+                                        broadcast_result = await broadcast_event_to_all_agents(session_event)
+                                        logger.info(f"📢 Broadcasted session_update to ALL admins on channel agent:events:broadcast")
+                                        logger.info(f"📢 Broadcast result: {broadcast_result}")
                                         logger.info(f"📤 Session data includes {len(messages)} messages")
                                     
                                     # Send confirmation to customer
