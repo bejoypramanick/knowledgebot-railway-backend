@@ -186,14 +186,16 @@ class PerformanceDAO:
         Returns all 6 months with data, showing 0 for months without interactions.
         This provides a consistent 6-month view matching the uptime chart.
         """
-        try:
-            from datetime import datetime, timedelta
-            import calendar
-
-            logger.info("📊 Calculating interactions over time for last 6 months")
-
-            # Query to get actual interaction data by month
-            query = """
+        query = """
+        WITH month_series AS (
+            SELECT 
+                generate_series(
+                    DATE_TRUNC('month', NOW() - INTERVAL '5 months'),
+                    DATE_TRUNC('month', NOW()),
+                    '1 month'::interval
+                ) AS month
+        ),
+        monthly_data AS (
             SELECT
                 DATE_TRUNC('month', cm.created_at) as month,
                 COUNT(*) as total,
@@ -203,99 +205,28 @@ class PerformanceDAO:
             LEFT JOIN session_assignments sa ON cm.session_id = sa.session_id
                 AND sa.status != 'ended'
             WHERE cm.role = 'user'
-            AND cm.created_at >= NOW() - INTERVAL '6 months'
+            AND cm.created_at >= DATE_TRUNC('month', NOW() - INTERVAL '5 months')
             GROUP BY DATE_TRUNC('month', cm.created_at)
-            ORDER BY DATE_TRUNC('month', cm.created_at)
-            """
-
+        )
+        SELECT
+            TO_CHAR(ms.month, 'Mon') as month,
+            COALESCE(md.total, 0) as total,
+            COALESCE(md.ai_handled, 0) as ai_handled,
+            COALESCE(md.human_handoff, 0) as human_handoff
+        FROM month_series ms
+        LEFT JOIN monthly_data md ON ms.month = md.month
+        ORDER BY ms.month
+        """
+        try:
             logger.log_db_operation(query)
             async with get_db_session() as session:
                 result = await session.execute(text(query))
                 rows = result.fetchall()
                 logger.log_db_query(query, None, rows)
-
-            # Organize data by month
-            month_data_map = {}
-            for row in rows:
-                row_dict = dict(row._mapping)
-                month = row_dict['month']
-                
-                if month:
-                    # Normalize month to start of month
-                    if isinstance(month, str):
-                        from datetime import datetime as dt
-                        month_date = dt.fromisoformat(month.replace('Z', '+00:00')).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                    else:
-                        month_date = month.replace(day=1, hour=0, minute=0, second=0, microsecond=0) if hasattr(month, 'replace') else month
-                    
-                    month_data_map[month_date] = {
-                        'total': int(row_dict['total']),
-                        'ai_handled': int(row_dict['ai_handled']),
-                        'human_handoff': int(row_dict['human_handoff'])
-                    }
-
-            # Generate all 6 months (current month + 5 previous months)
-            now = datetime.utcnow()
-            formatted_history = []
-
-            # Generate 6 months backwards from current month
-            current_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            for i in range(5, -1, -1):  # 5, 4, 3, 2, 1, 0 (6 months back from current)
-                # Calculate month date by going back i months
-                month_date = current_month
-                for _ in range(i):
-                    # Go to previous month
-                    if month_date.month == 1:
-                        month_date = month_date.replace(year=month_date.year - 1, month=12)
-                    else:
-                        month_date = month_date.replace(month=month_date.month - 1)
-
-                month_label = month_date.strftime('%b')
-
-                # Get data for this month if available, otherwise use 0
-                month_stats = month_data_map.get(month_date, {
-                    'total': 0,
-                    'ai_handled': 0,
-                    'human_handoff': 0
-                })
-
-                formatted_history.append({
-                    'month': month_label,
-                    'total': month_stats['total'],
-                    'ai_handled': month_stats['ai_handled'],
-                    'human_handoff': month_stats['human_handoff']
-                })
-
-            logger.info(f"✅ Formatted 6 months of interaction history")
-            return formatted_history
-
+                return [dict(row._mapping) for row in rows]
         except Exception as e:
-            logger.error(f"❌ Error in get_interactions_over_time: {e}", exc_info=True)
-            # Return 6 empty months on error
-            try:
-                from datetime import datetime
-                now = datetime.utcnow()
-                current_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                empty_months = []
-
-                for i in range(5, -1, -1):
-                    month_date = current_month
-                    for _ in range(i):
-                        if month_date.month == 1:
-                            month_date = month_date.replace(year=month_date.year - 1, month=12)
-                        else:
-                            month_date = month_date.replace(month=month_date.month - 1)
-
-                    empty_months.append({
-                        'month': month_date.strftime('%b'),
-                        'total': 0,
-                        'ai_handled': 0,
-                        'human_handoff': 0
-                    })
-                return empty_months
-            except Exception as inner_e:
-                logger.error(f"❌ Error generating fallback empty months: {inner_e}")
-                return []
+            logger.log_db_query(query, None, error=e)
+            return []
 
     async def get_satisfaction_score(self) -> float:
         """Calculate average satisfaction score from chat_sessions feedback (thumbs up/down)."""
@@ -327,14 +258,16 @@ class PerformanceDAO:
         Returns all 6 months with data, showing 0 for months without feedback.
         This provides a consistent 6-month view matching the uptime chart.
         """
-        try:
-            from datetime import datetime, timedelta
-            import calendar
-
-            logger.info("📊 Calculating satisfaction over time for last 6 months")
-
-            # Query to get actual feedback data by month
-            query = """
+        query = """
+        WITH month_series AS (
+            SELECT 
+                generate_series(
+                    DATE_TRUNC('month', NOW() - INTERVAL '5 months'),
+                    DATE_TRUNC('month', NOW()),
+                    '1 month'::interval
+                ) AS month
+        ),
+        monthly_feedback AS (
             SELECT
                 DATE_TRUNC('month', feedback_provided_at) as month,
                 COUNT(CASE WHEN feedback_type = 'positive' THEN 1 END) as thumbs_up,
@@ -346,107 +279,40 @@ class PerformanceDAO:
                 END) as satisfaction_score
             FROM chat_sessions
             WHERE feedback_provided_at IS NOT NULL
-            AND feedback_provided_at >= NOW() - INTERVAL '6 months'
+            AND feedback_provided_at >= DATE_TRUNC('month', NOW() - INTERVAL '5 months')
             GROUP BY DATE_TRUNC('month', feedback_provided_at)
-            ORDER BY DATE_TRUNC('month', feedback_provided_at)
-            """
-
+        )
+        SELECT
+            TO_CHAR(ms.month, 'Mon') as month,
+            COALESCE(mf.thumbs_up, 0) as thumbs_up,
+            COALESCE(mf.thumbs_down, 0) as thumbs_down,
+            COALESCE(mf.satisfaction_score, 0) as satisfaction_score
+        FROM month_series ms
+        LEFT JOIN monthly_feedback mf ON ms.month = mf.month
+        ORDER BY ms.month
+        """
+        try:
             logger.log_db_operation(query)
             async with get_db_session() as session:
                 result = await session.execute(text(query))
                 rows = result.fetchall()
                 logger.log_db_query(query, None, rows)
-
-            # Organize data by month
-            month_data_map = {}
-            for row in rows:
-                row_dict = dict(row._mapping)
-                month = row_dict['month']
-                
-                if month:
-                    # Normalize month to start of month
-                    if isinstance(month, str):
-                        from datetime import datetime as dt
-                        month_date = dt.fromisoformat(month.replace('Z', '+00:00')).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                    else:
-                        month_date = month.replace(day=1, hour=0, minute=0, second=0, microsecond=0) if hasattr(month, 'replace') else month
-                    
-                    month_data_map[month_date] = {
-                        'thumbs_up': int(row_dict['thumbs_up']),
-                        'thumbs_down': int(row_dict['thumbs_down']),
-                        'satisfaction_score': round(row_dict['satisfaction_score'] or 4.0, 2)
+                return [
+                    {
+                        "day": row["month"],
+                        "month": row["month"],
+                        "positive": row["thumbs_up"],
+                        "thumbs_up": row["thumbs_up"],
+                        "negative": row["thumbs_down"],
+                        "thumbs_down": row["thumbs_down"],
+                        "score": round(row["satisfaction_score"] or 0, 2),
+                        "satisfaction_score": round(row["satisfaction_score"] or 0, 2)
                     }
-
-            # Generate all 6 months (current month + 5 previous months)
-            now = datetime.utcnow()
-            formatted_history = []
-
-            # Generate 6 months backwards from current month
-            current_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            for i in range(5, -1, -1):  # 5, 4, 3, 2, 1, 0 (6 months back from current)
-                # Calculate month date by going back i months
-                month_date = current_month
-                for _ in range(i):
-                    # Go to previous month
-                    if month_date.month == 1:
-                        month_date = month_date.replace(year=month_date.year - 1, month=12)
-                    else:
-                        month_date = month_date.replace(month=month_date.month - 1)
-
-                month_label = month_date.strftime('%b')
-
-                # Get data for this month if available, otherwise use 0
-                month_stats = month_data_map.get(month_date, {
-                    'thumbs_up': 0,
-                    'thumbs_down': 0,
-                    'satisfaction_score': 0
-                })
-
-                formatted_history.append({
-                    'day': month_label,
-                    'month': month_label,
-                    'positive': month_stats['thumbs_up'],
-                    'thumbs_up': month_stats['thumbs_up'],
-                    'negative': month_stats['thumbs_down'],
-                    'thumbs_down': month_stats['thumbs_down'],
-                    'score': month_stats['satisfaction_score'],
-                    'satisfaction_score': month_stats['satisfaction_score']
-                })
-
-            logger.info(f"✅ Formatted 6 months of satisfaction history")
-            return formatted_history
-
+                    for row in rows
+                ]
         except Exception as e:
-            logger.error(f"❌ Error in get_satisfaction_over_time: {e}", exc_info=True)
-            # Return 6 empty months on error
-            try:
-                from datetime import datetime
-                now = datetime.utcnow()
-                current_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                empty_months = []
-
-                for i in range(5, -1, -1):
-                    month_date = current_month
-                    for _ in range(i):
-                        if month_date.month == 1:
-                            month_date = month_date.replace(year=month_date.year - 1, month=12)
-                        else:
-                            month_date = month_date.replace(month=month_date.month - 1)
-
-                    empty_months.append({
-                        'day': month_date.strftime('%b'),
-                        'month': month_date.strftime('%b'),
-                        'positive': 0,
-                        'thumbs_up': 0,
-                        'negative': 0,
-                        'thumbs_down': 0,
-                        'score': 0,
-                        'satisfaction_score': 0
-                    })
-                return empty_months
-            except Exception as inner_e:
-                logger.error(f"❌ Error generating fallback empty months: {inner_e}")
-                return []
+            logger.log_db_query(query, None, error=e)
+            return []
 
     async def get_uptime_percentage(self, days: int = 30) -> float:
         """Get system uptime percentage from health monitoring (with fallback)."""
