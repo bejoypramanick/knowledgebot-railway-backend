@@ -958,10 +958,11 @@ async def send_customer_message(session_uuid: str, request: Request):
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
 
-        # Broadcast to assigned agent only
-        from shared.redis_pubsub_manager import broadcast_event_to_agent
+        # Broadcast to assigned agent AND all admins
+        from shared.redis_pubsub_manager import broadcast_event_to_agent, broadcast_event_to_all_agents
         await broadcast_event_to_agent(assigned_agent, event_data)
-        logger.info(f"📤 Customer message sent to agent {assigned_agent} (session: {session_uuid})")
+        await broadcast_event_to_all_agents(event_data)
+        logger.info(f"📤 Customer message sent to agent {assigned_agent} and all admins (session: {session_uuid})")
 
         return {
             "success": True,
@@ -1016,25 +1017,27 @@ async def send_agent_message(session_id: int, request: Request):
         from shared.redis_pubsub_manager import broadcast_event_to_session, broadcast_event_to_agent, broadcast_event_to_all_agents
         
         if sender_type == "user":
-            # Customer sent message → Only notify assigned agent
+            # Customer sent message → Notify assigned agent AND all admins
             # Get assigned agent from database
             session = await chat_log_service.dao.get_session_by_id(session_id)
             assigned_agent = session.get('assigned_agent') if session else None
             
             if assigned_agent:
-                # Notify assigned agent only
+                # Notify assigned agent and all admins
                 await broadcast_event_to_agent(assigned_agent, event_data)
-                logger.info(f"📤 Customer message sent to agent {assigned_agent}")
+                await broadcast_event_to_all_agents(event_data)
+                logger.info(f"📤 Customer message sent to agent {assigned_agent} and all admins")
             else:
                 # No agent assigned - notify all admins (for assignment)
                 await broadcast_event_to_all_agents(event_data)
                 logger.info(f"📤 Customer message sent to admins (no agent assigned)")
         
         else:
-            # Agent sent message → Only notify customer
+            # Agent sent message → Notify customer AND all admins
             # CRITICAL: Use UUID session_id for customer SSE channel (not numeric ID)
             await broadcast_event_to_session(session_uuid, event_data)
-            logger.info(f"📤 Agent message sent to customer (session UUID: {session_uuid}, numeric: {session_id})")
+            await broadcast_event_to_all_agents(event_data)
+            logger.info(f"📤 Agent message sent to customer and all admins (session UUID: {session_uuid}, numeric: {session_id})")
 
         return {
             "success": True,
