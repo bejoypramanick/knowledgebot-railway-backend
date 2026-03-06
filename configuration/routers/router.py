@@ -1515,26 +1515,46 @@ async def end_agent_session(request: Request):
 @router.post("/admin/chat-sessions/end-customer")
 async def end_customer_session(request: Request):
     """End a chat session from the customer side
-
-    Request body: {session_id: int (numeric session ID)}
+    
+    Session ID is extracted from httpOnly cookie (chatbot_session_id).
+    The cookie contains the UUID, which is converted to numeric ID for internal use.
     """
     try:
-        body = await request.json()
-        session_id = body.get("session_id")
+        # Get session UUID from httpOnly cookie
+        session_uuid = request.cookies.get("chatbot_session_id")
+        
+        if not session_uuid:
+            raise HTTPException(status_code=400, detail="No active session found. Please start a chat first.")
 
-        if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required in request body")
+        # Convert UUID to numeric ID
+        from shared.redis_pubsub_manager import get_pubsub_redis
+        redis_client = await get_pubsub_redis()
+        
+        # Check Redis cache first
+        cached_id = await redis_client.get(f"session:uuid_to_id:{session_uuid}")
+        if cached_id:
+            if isinstance(cached_id, bytes):
+                numeric_session_id = int(cached_id.decode('utf-8'))
+            else:
+                numeric_session_id = int(cached_id)
+            logger.debug(f"✅ Found cached session ID: {session_uuid} → {numeric_session_id}")
+        else:
+            # Cache miss - query database
+            session_data = await chat_log_service.dao.get_session_by_uuid(session_uuid)
+            if not session_data:
+                raise HTTPException(status_code=404, detail=f"Session not found")
+            numeric_session_id = session_data.get('id')
+            # Cache for future requests
+            await redis_client.set(f"session:uuid_to_id:{session_uuid}", str(numeric_session_id), ex=86400)
+            await redis_client.set(f"session:id_to_uuid:{numeric_session_id}", session_uuid, ex=86400)
+            logger.info(f"💾 Cached session mapping: {session_uuid} ↔ {numeric_session_id}")
 
-        try:
-            numeric_session_id = int(session_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
         user_email = request.headers.get("X-User-Email", "customer@example.com")
 
-        # Pass numeric ID directly to service
-        await chat_log_service.end_customer_session(str(numeric_session_id), user_email)
+        # Pass numeric ID to service
+        await chat_log_service.end_customer_session(numeric_session_id, user_email)
 
-        # Broadcast session_ended event with feedback prompt
+        # Broadcast session_ended event with feedback prompt to customer
         from shared.redis_pubsub_manager import broadcast_event_to_session
         import datetime
 
@@ -1545,7 +1565,8 @@ async def end_customer_session(request: Request):
             "show_feedback": True,  # Trigger feedback UI
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
-        await broadcast_event_to_session(str(numeric_session_id), event_data)
+        # CRITICAL: Use UUID for customer SSE channel, not numeric ID
+        await broadcast_event_to_session(session_uuid, event_data)
 
         return {
             "success": True,
