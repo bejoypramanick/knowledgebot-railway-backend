@@ -579,6 +579,9 @@ async def request_human_agent_connection(
     This will assign the chat to an available human agent and the chat will appear in their chat log.
     The agent will see the FULL chat history including all previous AI conversations.
     """
+    import sys
+    print(f"[TOOL_EXECUTION] request_human_agent_connection called", file=sys.stderr, flush=True)
+
     # Get numeric session ID from ChatSessionDeps
     # ctx.deps.session_id is the UUID from frontend/cookie
     # ctx.deps.numeric_session_id is the numeric ID from database (created on first message)
