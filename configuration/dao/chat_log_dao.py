@@ -281,6 +281,7 @@ class ChatLogDAO:
                 LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                 LEFT JOIN users u ON urm.user_id = u.id
                 WHERE sa.user_role_id = :user_role_id
+                  AND cs.session_id NOT LIKE 'heartbeat_%'
                 ORDER BY cs.last_activity_at DESC
                 LIMIT :limit OFFSET :offset
             """
@@ -302,7 +303,9 @@ class ChatLogDAO:
                 LEFT JOIN session_assignments sa ON cs.id = sa.session_id
                 LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                 LEFT JOIN users u ON urm.user_id = u.id
-                WHERE sa.user_role_id = :user_role_id AND cs.archive_status = :archive_status
+                WHERE sa.user_role_id = :user_role_id 
+                  AND cs.archive_status = :archive_status
+                  AND cs.session_id NOT LIKE 'heartbeat_%'
                 ORDER BY cs.last_activity_at DESC
                 LIMIT :limit OFFSET :offset
             """
@@ -331,6 +334,7 @@ class ChatLogDAO:
                     FROM chat_sessions cs
                     LEFT JOIN session_assignments sa ON cs.id = sa.session_id
                     WHERE sa.user_role_id = :user_role_id
+                      AND cs.session_id NOT LIKE 'heartbeat_%'
                 """
                 params = {"user_role_id": user_role_id}
                 logger.log_db_operation(query, params)
@@ -344,7 +348,9 @@ class ChatLogDAO:
                     SELECT COUNT(*)
                     FROM chat_sessions cs
                     LEFT JOIN session_assignments sa ON cs.id = sa.session_id
-                    WHERE sa.user_role_id = :user_role_id AND cs.archive_status = :archive_status
+                    WHERE sa.user_role_id = :user_role_id 
+                      AND cs.archive_status = :archive_status
+                      AND cs.session_id NOT LIKE 'heartbeat_%'
                 """
                 params = {"user_role_id": user_role_id, "archive_status": archive_status}
                 logger.log_db_operation(query, params)
@@ -370,6 +376,7 @@ class ChatLogDAO:
                 LEFT JOIN session_assignments sa ON cs.id = sa.session_id AND sa.status = 'active'
                 LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                 LEFT JOIN users u ON urm.user_id = u.id
+                WHERE cs.session_id NOT LIKE 'heartbeat_%'
                 ORDER BY cs.last_activity_at DESC
                 LIMIT :limit OFFSET :offset
             """
@@ -410,6 +417,7 @@ class ChatLogDAO:
                 LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                 LEFT JOIN users u ON urm.user_id = u.id
                 WHERE cs.archive_status = :archive_status
+                  AND cs.session_id NOT LIKE 'heartbeat_%'
                 ORDER BY cs.last_activity_at DESC
                 LIMIT :limit OFFSET :offset
             """
@@ -450,7 +458,7 @@ class ChatLogDAO:
         try:
             # Handle 'all' status - count all sessions regardless of archive status
             if archive_status.lower() == 'all':
-                query = "SELECT COUNT(*) FROM chat_sessions"
+                query = "SELECT COUNT(*) FROM chat_sessions WHERE session_id NOT LIKE 'heartbeat_%'"
                 explain_query = f"EXPLAIN ANALYZE {query}"
                 params = {}
                 
@@ -474,7 +482,7 @@ class ChatLogDAO:
                 logger.log_db_query(query, params, count)
                 return count or 0
             else:
-                query = "SELECT COUNT(*) FROM chat_sessions WHERE archive_status = :archive_status"
+                query = "SELECT COUNT(*) FROM chat_sessions WHERE archive_status = :archive_status AND session_id NOT LIKE 'heartbeat_%'"
                 explain_query = f"EXPLAIN ANALYZE {query}"
                 params = {"archive_status": archive_status}
                 
