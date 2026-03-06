@@ -304,6 +304,7 @@ class ChatLogService:
             from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(
                 id=str(session_db_id),
+                session_uuid=session_id,  # Include the UUID for frontend to use in mark-read/unread calls
                 customer_name=metadata.get('customer_name'),
                 customer_email=metadata.get('customer_email'),
                 status=status,
