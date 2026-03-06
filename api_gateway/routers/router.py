@@ -214,6 +214,71 @@ async def proxy_customer_events_sse(request: Request, session_id: str = Query(..
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =================================
+# AGENT MESSAGE PROXY
+# =================================
+
+@router.post("/configuration/admin/chat-sessions/messages")
+async def proxy_agent_message(request: Request):
+    """Proxy agent messages - converts session UUID to numeric ID before forwarding"""
+    try:
+        settings = get_settings()
+        config_service_url = settings.CONFIGURATION_SERVICE_URL
+        
+        # Get request body
+        body = await request.json()
+        session_uuid = body.get("session_id")  # UUID from frontend
+        
+        if not session_uuid:
+            raise HTTPException(status_code=400, detail="session_id is required")
+        
+        logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Received agent message for session UUID: {session_uuid}")
+        
+        # Convert UUID to numeric ID
+        from sqlalchemy import text
+        from shared.sqlalchemy_db import get_db_session
+        
+        async with get_db_session() as db_session:
+            query = text("SELECT id FROM chat_sessions WHERE session_id = :session_uuid")
+            result = await db_session.execute(query, {"session_uuid": session_uuid})
+            row = result.mappings().first()
+            
+            if not row:
+                raise HTTPException(status_code=404, detail=f"Session not found: {session_uuid}")
+            
+            numeric_session_id = row['id']
+            logger.info(f"✅ [AGENT_MESSAGE_PROXY] Converted UUID {session_uuid} to numeric ID {numeric_session_id}")
+        
+        # Update body with numeric ID
+        body["session_id"] = numeric_session_id
+        
+        # Forward to configuration service
+        async with AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{config_service_url}/api/v1/configuration/admin/chat-sessions/messages",
+                json=body,
+                headers={
+                    "X-User-Email": request.headers.get("X-User-Email", ""),
+                    "X-User-Role": request.headers.get("X-User-Role", ""),
+                    "Content-Type": "application/json"
+                }
+            )
+            
+            logger.info(f"✅ [AGENT_MESSAGE_PROXY] Forwarded message to configuration service, status: {response.status_code}")
+            
+            if response.status_code != 200:
+                logger.error(f"❌ [AGENT_MESSAGE_PROXY] Configuration service returned error: {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            
+            return response.json()
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ [AGENT_MESSAGE_PROXY] Error proxying agent message: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/auth/user/{uid}")
 async def get_user_by_uid(uid: str):
     """Get user information by Firebase UID."""
