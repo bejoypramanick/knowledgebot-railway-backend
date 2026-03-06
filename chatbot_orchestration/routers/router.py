@@ -135,43 +135,6 @@ async def get_user_sessions():
         logger.error(f"Error getting sessions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/sessions/current")
-async def get_current_session(request: Request):
-    """
-    Get current session information from httpOnly cookie.
-    
-    NOTE: Does NOT create a database session - sessions are created lazily
-    when the first message is sent. This prevents empty sessions from cluttering
-    the database when users open the chat widget but never send a message.
-
-    Returns:
-        {"success": True, "data": {"exists": <bool>}}
-    """
-    try:
-        # Get session UUID from httpOnly cookie
-        session_uuid = request.cookies.get("chatbot_session_id")
-        
-        if session_uuid:
-            logger.info(f"✅ Current session from cookie: {session_uuid[:20]}... (no DB record created)")
-            return {
-                "success": True,
-                "data": {
-                    "exists": True
-                    # session_id intentionally omitted - it's in httpOnly cookie only
-                }
-            }
-        else:
-            logger.info("ℹ️ No current session cookie found")
-            return {
-                "success": True,
-                "data": {
-                    "exists": False
-                }
-            }
-    except Exception as e:
-        logger.error(f"Error checking current session: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 # =================================
 # HEALTH ENDPOINTS
 # =================================
