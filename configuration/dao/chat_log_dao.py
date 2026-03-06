@@ -541,21 +541,8 @@ class ChatLogDAO:
             ) latest ON cm.session_id = latest.session_id AND cm.id = latest.max_id
         """
         
-        # Add EXPLAIN ANALYZE to see what's happening
-        explain_query = f"EXPLAIN ANALYZE {query}"
-        
         try:
             params = {"session_ids": session_ids}
-            logger.info(f"🔍 [CHATLOG-DAO] Executing query for {len(session_ids)} sessions")
-            
-            # First run EXPLAIN ANALYZE to see the query plan
-            async with get_db_session() as session:
-                explain_result = await session.execute(text(explain_query), params)
-                explain_rows = explain_result.fetchall()
-                logger.info(f"📊 [CHATLOG-DAO] EXPLAIN ANALYZE:")
-                for row in explain_rows:
-                    logger.info(f"📊 {row[0]}")
-            
             logger.log_db_operation(query, params)
             
             db_start = time.time()
