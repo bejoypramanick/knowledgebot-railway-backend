@@ -169,7 +169,7 @@ class SessionStateManager:
                         
                         # Check if session is assigned to an agent
                         assignment_query = """
-                            SELECT agent_email FROM session_assignments 
+                            SELECT assignee_email FROM session_assignments 
                             WHERE session_id = :session_id AND status = 'active'
                         """
                         assignment_result = await session.execute(
@@ -177,7 +177,7 @@ class SessionStateManager:
                             {"session_id": integer_session_id}
                         )
                         assignment = assignment_result.mappings().first()
-                        assigned_agent = assignment["agent_email"] if assignment else None
+                        assigned_agent = assignment["assignee_email"] if assignment else None
                         
                         # Broadcast to session channel (customer) and agent channel (if assigned)
                         event_data = {
