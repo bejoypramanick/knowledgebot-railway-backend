@@ -672,7 +672,7 @@ async def generic_proxy_handler(request: Request, path: str):
 
         async with httpx.AsyncClient(timeout=request_timeout, follow_redirects=False) as client:
             logger.info(f"🔍 About to make HTTP request to: {full_url} (timeout={request_timeout}s)")
-            response = await client.request(
+            response = await client.stream(
                 method=request.method,
                 url=full_url,
                 headers=headers,
@@ -680,10 +680,10 @@ async def generic_proxy_handler(request: Request, path: str):
                 params=request.query_params
             )
             logger.info(f"✅ Received response from {full_url} (Status: {response.status_code})")
-            
+
             # Create proper FastAPI Response from httpx response
-            from fastapi.responses import Response
-            
+            from fastapi.responses import StreamingResponse, Response
+
             # Copy headers from httpx response to FastAPI response
             # CRITICAL: Filter out headers that might contain internal URLs
             response_headers = {}
@@ -699,12 +699,35 @@ async def generic_proxy_handler(request: Request, path: str):
                 # Skip headers that might contain internal URLs or cause issues
                 if key.lower() not in blocked_headers:
                     response_headers[key] = value
-            
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                headers=response_headers
-            )
+
+            # Check if this is a streaming response (like SSE)
+            is_streaming = response.headers.get('content-type', '').lower() in [
+                'text/event-stream',
+                'application/x-ndjson',
+                'text/plain; charset=utf-8'  # Some SSE responses use this
+            ]
+
+            if is_streaming:
+                logger.info(f"📡 Streaming response detected (content-type: {response.headers.get('content-type')})")
+                # Stream the response back without buffering
+                async def stream_body():
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        yield chunk
+
+                return StreamingResponse(
+                    stream_body(),
+                    status_code=response.status_code,
+                    headers=response_headers,
+                    media_type=response.headers.get('content-type')
+                )
+            else:
+                # Non-streaming response - read all content
+                content = await response.aread()
+                return Response(
+                    content=content,
+                    status_code=response.status_code,
+                    headers=response_headers
+                )
     except httpx.ConnectError as e:
         logger.error(f"❌ Connection failed to {full_url}: {e}")
         logger.error(f"❌ Service URL: {service_url}")
