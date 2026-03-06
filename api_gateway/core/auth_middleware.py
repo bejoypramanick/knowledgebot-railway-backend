@@ -123,12 +123,32 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         request.state.user_uid = session_data["uid"]
         request.state.user_email = session_data["email"]
         request.state.user_name = session_data["name"]
-        
+
         logger.debug(f"✅ Authenticated via session cookie: {session_data['email']} for {path}")
-        
+
+        # 🔄 STEP 2: Resolve chat session UUID to numeric ID (if present in request)
+        # This happens ONCE at API Gateway, so internal services don't need to lookup
+        # Extract session UUID from path or query params
+        from api_gateway.core.session_resolver import extract_session_uuid_from_path, resolve_session_uuid_to_numeric_id
+
+        session_uuid = extract_session_uuid_from_path(path)
+        if not session_uuid and "session_id" in request.query_params:
+            session_uuid = request.query_params.get("session_id")
+
+        if session_uuid:
+            # Resolve UUID to numeric ID
+            numeric_session_id = await resolve_session_uuid_to_numeric_id(session_uuid)
+            if numeric_session_id:
+                # Store both UUID and numeric ID in request state for internal services to use
+                request.state.session_uuid = session_uuid
+                request.state.session_numeric_id = numeric_session_id
+                logger.debug(f"🔄 Resolved session UUID {session_uuid} → numeric ID {numeric_session_id}")
+            else:
+                logger.warning(f"⚠️ Could not resolve session UUID {session_uuid}")
+
         # Continue to next middleware/endpoint
         response = await call_next(request)
-        
+
         return response
 
 

@@ -34,6 +34,45 @@ from ..schemas.models import (
 logger = get_otel_logger("configuration_router", "configuration")
 router = APIRouter()
 
+
+def get_session_id_from_context(request: Request, session_id: str | int) -> int:
+    """
+    Get the numeric session ID from request context.
+
+    API Gateway resolves UUID → numeric ID at the gateway level.
+    This helper extracts the resolved numeric ID from request state,
+    OR parses numeric string IDs from URL parameters.
+
+    This ensures internal services always work with numeric IDs,
+    eliminating the need for UUID lookups within services.
+
+    Args:
+        request: FastAPI Request object
+        session_id: Session ID from URL parameter (could be UUID string or numeric string)
+
+    Returns:
+        Numeric session ID (int)
+
+    Raises:
+        HTTPException: If session ID cannot be resolved
+    """
+    # Prefer API Gateway's resolved numeric ID (fastest)
+    if hasattr(request.state, "session_numeric_id") and request.state.session_numeric_id:
+        logger.debug(f"✅ Using resolved numeric session ID from API Gateway: {request.state.session_numeric_id}")
+        return request.state.session_numeric_id
+
+    # Fallback: Try to parse as numeric string
+    if isinstance(session_id, int):
+        return session_id
+
+    try:
+        numeric_id = int(session_id)
+        logger.debug(f"✅ Converted session ID string '{session_id}' to numeric: {numeric_id}")
+        return numeric_id
+    except ValueError:
+        logger.error(f"❌ Could not resolve session ID: {session_id}")
+        raise HTTPException(status_code=400, detail=f"Invalid session ID format: {session_id}")
+
 @router.get("/version")
 async def get_version():
     """Simple version check endpoint"""
@@ -1244,15 +1283,10 @@ async def archive_session(session_id: str, request: Request):
         archive_status = body.get("status", "archived")
         user_email = request.headers.get("X-User-Email", "admin@example.com")
 
-        # Convert numeric string IDs to int for proper resolution
-        try:
-            numeric_session_id = int(session_id)
-            logger.info(f"🔍 Archive endpoint: session_id={numeric_session_id} (converted from string), status={archive_status}")
-            await chat_log_service.archive_chat_session(numeric_session_id, archive_status, user_email)
-        except ValueError:
-            # session_id is a UUID string (e.g., "session_xxx")
-            logger.info(f"🔍 Archive endpoint: session_id={session_id} (UUID), status={archive_status}")
-            await chat_log_service.archive_chat_session(session_id, archive_status, user_email)
+        # Get numeric session ID (API Gateway resolved UUID if present, else parse numeric string)
+        numeric_session_id = get_session_id_from_context(request, session_id)
+        logger.info(f"🔍 Archive endpoint: session_id={numeric_session_id}, status={archive_status}")
+        await chat_log_service.archive_chat_session(numeric_session_id, archive_status, user_email)
 
         return {
             "success": True,
@@ -1271,17 +1305,12 @@ async def end_agent_session(session_id: str, request: Request):
     try:
         user_email = request.headers.get("X-User-Email", "agent@example.com")
 
-        # Convert numeric string IDs to int for proper resolution
-        try:
-            numeric_session_id = int(session_id)
-            session_id = numeric_session_id
-            logger.info(f"🔍 End-agent endpoint: session_id={numeric_session_id} (converted from string)")
-        except ValueError:
-            # session_id is a UUID string (e.g., "session_xxx")
-            logger.info(f"🔍 End-agent endpoint: session_id={session_id} (UUID)")
+        # Get numeric session ID (API Gateway resolved UUID if present, else parse numeric string)
+        numeric_session_id = get_session_id_from_context(request, session_id)
+        logger.info(f"🔍 End-agent endpoint: session_id={numeric_session_id}")
 
         await chat_log_service.update_chat_session(
-            session_id=session_id,
+            session_id=numeric_session_id,
             user_email=user_email,
             status="closed"
         )
@@ -1370,17 +1399,12 @@ async def submit_session_feedback(session_id: str, request: Request):
         if feedback_type not in ['positive', 'negative']:
             raise HTTPException(status_code=400, detail="feedback_type must be 'positive' or 'negative'")
 
-        # Convert numeric string IDs to int for proper resolution
-        try:
-            numeric_session_id = int(session_id)
-            session_id = numeric_session_id
-            logger.info(f"🔍 Feedback endpoint: session_id={numeric_session_id} (converted from string)")
-        except ValueError:
-            # session_id is a UUID string (e.g., "session_xxx")
-            logger.info(f"🔍 Feedback endpoint: session_id={session_id} (UUID)")
+        # Get numeric session ID (API Gateway resolved UUID if present, else parse numeric string)
+        numeric_session_id = get_session_id_from_context(request, session_id)
+        logger.info(f"🔍 Feedback endpoint: session_id={numeric_session_id}")
 
         # Update feedback in database
-        success = await chat_log_service.dao.update_session_feedback(session_id, feedback_type)
+        success = await chat_log_service.dao.update_session_feedback(numeric_session_id, feedback_type)
         
         if not success:
             raise HTTPException(status_code=404, detail="Session not found")
@@ -1508,20 +1532,15 @@ async def delete_chat_session(session_id: str, request: Request):
     try:
         user_email = request.headers.get("X-User-Email", "admin@example.com")
 
-        # Convert numeric string IDs to int for proper resolution
-        try:
-            numeric_session_id = int(session_id)
-            session_id = numeric_session_id
-            logger.info(f"🔍 Delete endpoint: session_id={numeric_session_id} (converted from string)")
-        except ValueError:
-            # session_id is a UUID string (e.g., "session_xxx")
-            logger.info(f"🔍 Delete endpoint: session_id={session_id} (UUID)")
+        # Get numeric session ID (API Gateway resolved UUID if present, else parse numeric string)
+        numeric_session_id = get_session_id_from_context(request, session_id)
+        logger.info(f"🔍 Delete endpoint: session_id={numeric_session_id}")
 
         # Delete all messages for the session first
-        await chat_log_service.delete_session_messages(session_id)
+        await chat_log_service.delete_session_messages(numeric_session_id)
 
         # Delete the session itself
-        await chat_log_service.delete_chat_session(session_id)
+        await chat_log_service.delete_chat_session(numeric_session_id)
 
         logger.info(f"Deleted chat session {session_id} by {user_email}")
 
@@ -1537,22 +1556,17 @@ async def delete_chat_session(session_id: str, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/admin/chat-sessions/{session_id}/mark-read")
-async def mark_session_as_read(session_id: str, user: dict = Depends(get_current_user)):
+async def mark_session_as_read(session_id: str, request: Request, user: dict = Depends(get_current_user)):
     """Mark entire session as read (session-level)"""
     try:
         user_email = user.get("email")
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
 
-        # Convert numeric string IDs to int for proper resolution
-        try:
-            numeric_session_id = int(session_id)
-            logger.info(f"🔍 Mark-read endpoint: session_id={numeric_session_id} (converted from string), user={user_email}")
-            await chat_log_service.mark_session_as_read(numeric_session_id, user_email)
-        except ValueError:
-            # session_id is a UUID string (e.g., "session_xxx")
-            logger.info(f"🔍 Mark-read endpoint: session_id={session_id} (UUID), user={user_email}")
-            await chat_log_service.mark_session_as_read(session_id, user_email)
+        # Get numeric session ID (API Gateway resolved UUID if present, else parse numeric string)
+        numeric_session_id = get_session_id_from_context(request, session_id)
+        logger.info(f"🔍 Mark-read endpoint: session_id={numeric_session_id}, user={user_email}")
+        await chat_log_service.mark_session_as_read(numeric_session_id, user_email)
 
         return {
             "success": True,
@@ -1566,22 +1580,17 @@ async def mark_session_as_read(session_id: str, user: dict = Depends(get_current
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/admin/chat-sessions/{session_id}/mark-unread")
-async def mark_session_as_unread(session_id: str, user: dict = Depends(get_current_user)):
+async def mark_session_as_unread(session_id: str, request: Request, user: dict = Depends(get_current_user)):
     """Mark entire session as unread (session-level)"""
     try:
         user_email = user.get("email")
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
 
-        # Convert numeric string IDs to int for proper resolution
-        try:
-            numeric_session_id = int(session_id)
-            logger.info(f"🔍 Mark-unread endpoint: session_id={numeric_session_id} (converted from string), user={user_email}")
-            await chat_log_service.mark_session_as_unread(numeric_session_id, user_email)
-        except ValueError:
-            # session_id is a UUID string (e.g., "session_xxx")
-            logger.info(f"🔍 Mark-unread endpoint: session_id={session_id} (UUID), user={user_email}")
-            await chat_log_service.mark_session_as_unread(session_id, user_email)
+        # Get numeric session ID (API Gateway resolved UUID if present, else parse numeric string)
+        numeric_session_id = get_session_id_from_context(request, session_id)
+        logger.info(f"🔍 Mark-unread endpoint: session_id={numeric_session_id}, user={user_email}")
+        await chat_log_service.mark_session_as_unread(numeric_session_id, user_email)
 
         return {
             "success": True,
@@ -1623,16 +1632,11 @@ async def get_unread_message_count(session_id: str, request: Request):
     try:
         user_email = request.headers.get("X-User-Email", "admin@example.com")
 
-        # Convert numeric string IDs to int for proper resolution
-        try:
-            numeric_session_id = int(session_id)
-            session_id = numeric_session_id
-            logger.info(f"🔍 Unread-count endpoint: session_id={numeric_session_id} (converted from string)")
-        except ValueError:
-            # session_id is a UUID string (e.g., "session_xxx")
-            logger.info(f"🔍 Unread-count endpoint: session_id={session_id} (UUID)")
+        # Get numeric session ID (API Gateway resolved UUID if present, else parse numeric string)
+        numeric_session_id = get_session_id_from_context(request, session_id)
+        logger.info(f"🔍 Unread-count endpoint: session_id={numeric_session_id}")
 
-        count = await chat_log_service.get_unread_message_count(session_id)
+        count = await chat_log_service.get_unread_message_count(numeric_session_id)
 
         logger.info(f"Retrieved unread message count for session {session_id} by {user_email}")
 
