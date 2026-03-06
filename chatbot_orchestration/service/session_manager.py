@@ -96,13 +96,18 @@ class SessionStateManager:
         return result.get("messages", []) if result else []
 
     async def save_message(self, session_id: str, role: str, content: str, metadata: Dict[str, Any] = None):
-        """Save message to database."""
+        """
+        Save message to database with lazy session creation.
+        
+        Session is created ONLY when the first message arrives (lazy creation).
+        This prevents empty sessions from cluttering the database.
+        """
         try:
             from shared.sqlalchemy_db import get_db_session
             from sqlalchemy import text
 
             async with get_db_session() as session:
-                # First, get or create the session integer ID
+                # First, get or create the session integer ID (LAZY CREATION)
                 session_query = """
                     SELECT id FROM chat_sessions WHERE session_id = :session_id
                 """
@@ -110,15 +115,17 @@ class SessionStateManager:
                 session_record = result.mappings().first()
 
                 if not session_record:
-                    # Create session if it doesn't exist
+                    # Create session ONLY when first message arrives (lazy creation)
+                    logger.info(f"🆕 Creating new session {session_id} (first message received)")
                     create_session_query = """
-                        INSERT INTO chat_sessions (session_id, started_at, last_activity_at, is_active, message_count)
-                        VALUES (:session_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
+                        INSERT INTO chat_sessions (session_id, started_at, last_activity_at, is_active, message_count, archive_status)
+                        VALUES (:session_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0, 'active')
                         RETURNING id
                     """
                     result = await session.execute(text(create_session_query), {"session_id": session_id})
                     session_record = result.mappings().first()
                     await session.commit()
+                    logger.info(f"✅ Session {session_id} created with ID {session_record['id']}")
 
                 integer_session_id = session_record["id"]
 
@@ -133,7 +140,19 @@ class SessionStateManager:
                     {"session_id": integer_session_id, "role": role, "content": content}
                 )
                 record = result.mappings().first()
+                
+                # Increment message count
+                update_count_query = """
+                    UPDATE chat_sessions 
+                    SET message_count = message_count + 1,
+                        last_activity_at = CURRENT_TIMESTAMP
+                    WHERE id = :session_id
+                """
+                await session.execute(text(update_count_query), {"session_id": integer_session_id})
+                
                 await session.commit()
+
+                logger.debug(f"💾 Saved {role} message to session {session_id} (DB ID: {integer_session_id})")
 
                 return {
                     "id": record["id"],
