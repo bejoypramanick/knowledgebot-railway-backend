@@ -693,6 +693,10 @@ async def generic_proxy_handler(request: Request, path: str):
                             body_data["session_id"] = request.state.session_numeric_id
                             logger.info(f"🔄 Converted session_id in request body: {old_session_id} → {request.state.session_numeric_id}")
                             request_body = json.dumps(body_data).encode()
+
+                            # IMPORTANT: Update Content-Length header after modifying request body
+                            # Otherwise httpx throws LocalProtocolError: Too little data for declared Content-Length
+                            headers["Content-Length"] = str(len(request_body))
                 except (json.JSONDecodeError, ValueError) as e:
                     # Not JSON or other error - forward as-is
                     logger.debug(f"⚠️  Could not parse request body as JSON: {e}")
