@@ -1442,36 +1442,6 @@ async def send_agent_message(request: Request):
         logger.error(f"Error sending message: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/admin/chat-sessions/archive")
-async def archive_session(request: Request):
-    """Archive current chat session (from httpOnly cookie)"""
-    try:
-        # Get numeric session ID from cookie (set by API Gateway middleware)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
-            raise HTTPException(
-                status_code=400,
-                detail="No current chat session. Call /admin/chat-sessions/set-current first."
-            )
-
-        numeric_session_id = request.state.session_numeric_id
-        body = await request.json()
-        archive_status = body.get("status", "archived")
-        user_email = request.headers.get("X-User-Email", "admin@example.com")
-
-        logger.info(f"🔍 Archive endpoint: session_id={numeric_session_id}, status={archive_status}")
-        await chat_log_service.archive_chat_session(numeric_session_id, archive_status, user_email)
-
-        return {
-            "success": True,
-            "message": f"Session {archive_status} successfully",
-            "session_id": numeric_session_id
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error archiving session: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @router.post("/admin/chat-sessions/end-agent")
 async def end_agent_session(request: Request):
     """End current chat session from the agent side (from httpOnly cookie)"""
@@ -1615,35 +1585,6 @@ async def submit_session_feedback(request: Request):
         logger.error(f"❌ Error submitting feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@router.post("/admin/chat-sessions/transfer")
-async def transfer_session(request: Request):
-    """Transfer a chat session to another agent"""
-    try:
-        body = await request.json()
-        session_id = body.get("session_id")  # Accept numeric ID from chat_sessions.id
-        target_agent_email = body.get("target_agent_email")
-        user_email = request.headers.get("X-User-Email", "agent@example.com")
-
-        if not session_id:
-            raise HTTPException(status_code=400, detail="session_id (numeric id from chat_sessions) is required in request body")
-        if not target_agent_email:
-            raise HTTPException(status_code=400, detail="target_agent_email is required in request body")
-
-        # Pass numeric ID directly to service
-        await chat_log_service.transfer_chat_session(str(session_id), user_email, target_agent_email)
-
-        return {
-            "success": True,
-            "message": f"Session transferred to {target_agent_email}",
-            "session_id": session_id,
-            "transferred_to": target_agent_email
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error transferring session: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/admin/chat-sessions/request-agent")
 async def request_human_agent(request: Request):
