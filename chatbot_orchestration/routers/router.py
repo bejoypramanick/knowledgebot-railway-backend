@@ -39,9 +39,8 @@ async def chat_with_agent_stream(request: Request):
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
 
-        # Create session if not provided
         if not session_id:
-            session_id = f"session_{int(time.time())}"
+            raise HTTPException(status_code=400, detail="session_id is required (must be numeric ID from API Gateway)")
 
         # Stream response (tools are configured internally in agent_manager)
         async def generate_response():
