@@ -42,17 +42,14 @@ async def chat_with_agent_stream(request: Request):
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
 
-        # If no session_id provided, create one in database on first message
-        if not session_id:
-            # Generate UUID for new session (same format as /set-current endpoint)
-            import time
-            import random
-            import string
-            timestamp = int(time.time() * 1000)
-            random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
-            session_id = f"session_{timestamp}_{random_suffix}"
+        # Get session UUID from request header (set by API Gateway on first message)
+        # API Gateway generates UUID for every request, passes it via internal header
+        internal_session_uuid = request.headers.get("X-Internal-Session-UUID")
 
-            logger.info(f"✅ Generated new session UUID for first message: {session_id}")
+        # If no session_id in body, use the one from header (first message)
+        if not session_id:
+            session_id = internal_session_uuid
+            logger.info(f"✅ Received session UUID from API Gateway: {session_id}")
 
             # CRITICAL: Save session to database BEFORE returning response
             # This ensures API Gateway can resolve UUID → numeric ID for subsequent requests
@@ -70,14 +67,15 @@ async def chat_with_agent_stream(request: Request):
             async for chunk in agent_service.stream_agent_response(message, session_id):
                 yield chunk
 
-        # Return session UUID to API Gateway so it can set httpOnly cookie
+        # Return streaming response without exposing session UUID
+        # Session UUID is managed entirely via httpOnly cookie by API Gateway
+        # Internal services work with numeric session ID only
         return StreamingResponse(
             generate_response(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-                "X-Session-UUID": session_id  # API Gateway will extract this and set httpOnly cookie
+                "X-Accel-Buffering": "no"
             }
         )
     except Exception as e:
