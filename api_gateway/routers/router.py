@@ -3,7 +3,7 @@ Consolidated API Gateway Router
 All API Gateway endpoints in one file for easier debugging
 """
 
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, Query
 from fastapi.responses import StreamingResponse, Response, JSONResponse
 from typing import Dict, Any
 from httpx import AsyncClient
