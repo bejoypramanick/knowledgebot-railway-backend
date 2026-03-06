@@ -44,11 +44,19 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
             # Public chat widget endpoints (no authentication required)
             "/api/v1/gateway/chatbot/chat/stream",  # Anonymous chat for website visitors
             "/api/v1/gateway/widget",  # Widget HTML page for iframe embedding
+            # Customer session endpoints (anonymous customers)
+            "/api/v1/gateway/configuration/admin/chat-sessions/end-customer",  # Customer ending their session
+            "/api/v1/gateway/configuration/customer/sessions/set-current",  # Customer setting current session
+            "/api/v1/gateway/configuration/customer/sessions/messages",  # Customer sending messages
+            "/api/v1/gateway/configuration/customer/events",  # Customer SSE events
+            "/api/v1/gateway/configuration/admin/chat-sessions/feedback",  # Customer feedback
+            "/api/v1/gateway/configuration/admin/chat-sessions/request-agent",  # Customer requesting agent
         ]
-        
+
         # Path prefixes that don't require authentication
         self.exclude_prefixes = [
             "/api/v1/gateway/chatbot/sessions/",  # Anonymous chat session creation
+            "/api/v1/gateway/configuration/customer/",  # All customer-facing endpoints
         ]
         
         # Also exclude any path ending with /health
