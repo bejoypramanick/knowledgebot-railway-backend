@@ -467,6 +467,9 @@ async def public_chat_stream(request: Request):
 
             logger.info(f"✅ [{correlation_id}] Chat stream response: {response.status_code}")
 
+            # Check if response contains a new session UUID (first message)
+            session_uuid_from_response = response.headers.get("X-Session-UUID") or response.headers.get("x-session-uuid")
+
             # Filter response headers to prevent internal URL leakage
             response_headers = {}
             blocked_headers = [
@@ -476,6 +479,7 @@ async def public_chat_stream(request: Request):
                 'content-location',
                 'host',
                 'server',
+                'x-session-uuid',  # Remove internal header from response
             ]
             for key, value in response.headers.items():
                 if key.lower() not in blocked_headers:
@@ -488,11 +492,25 @@ async def public_chat_stream(request: Request):
                 async for chunk in response.aiter_bytes():
                     yield chunk
 
-            return StreamingResponse(
+            response_obj = StreamingResponse(
                 stream_response(),
                 status_code=response.status_code,
                 headers=response_headers
             )
+
+            # If this is a new session (first message), set httpOnly cookie
+            if session_uuid_from_response:
+                logger.info(f"🍪 Setting httpOnly cookie for new session: {session_uuid_from_response}")
+                response_obj.set_cookie(
+                    key="chatbot_session_id",
+                    value=session_uuid_from_response,
+                    httponly=True,
+                    secure=True,
+                    samesite="Strict",
+                    max_age=60 * 60 * 24  # 24 hours
+                )
+
+            return response_obj
 
     except HTTPException:
         raise
