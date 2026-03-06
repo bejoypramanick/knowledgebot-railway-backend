@@ -370,19 +370,14 @@ async def public_chat_stream(request: Request):
         import json
         from ..core.config import get_settings
 
-        # Session ID is extracted from httpOnly cookie by auth middleware
-        # and stored in request.state.session_numeric_id
-        # No need to pass it in request body anymore
-
         # Get request body and remove session_id and use_rag from it
-        # These should come from cookie/headers, not request body
+        # Client shouldn't send these - they come from cookie/headers
         body_bytes = await request.body()
         body = json.loads(body_bytes) if body_bytes else {}
 
         body.pop("session_id", None)
         body.pop("use_rag", None)
 
-        # Encode cleaned body
         body_bytes = json.dumps(body).encode() if body else b''
 
         # Only check chat enabled status on first message of each session
