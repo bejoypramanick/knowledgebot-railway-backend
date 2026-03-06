@@ -1152,45 +1152,6 @@ async def get_admin_chat_sessions(
         logger.error(f"❌ Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-
-@router.get("/admin/chat-sessions/messages")
-async def get_session_messages(request: Request, session_id: int = Query(...)):
-    """Get all messages for a chat session
-
-    Args:
-        session_id: Numeric session ID (required query parameter)
-    """
-    try:
-        numeric_session_id = session_id
-        logger.info(f"🔍 GET /admin/chat-sessions/messages called for session {numeric_session_id}")
-        messages = await chat_log_service.get_session_messages(numeric_session_id)
-        logger.info(f"✅ Retrieved {len(messages)} messages for session {numeric_session_id}")
-
-        # Format messages for response
-        formatted_messages = []
-        for msg in messages:
-            formatted_messages.append({
-                "id": str(msg.get("id", "")),
-                "text": msg.get("content", ""),
-                "sender": msg.get("role", "user"),
-                "timestamp": msg.get("created_at").isoformat() if msg.get("created_at") else None,
-                "session_id": numeric_session_id
-            })
-
-        return {
-            "success": True,
-            "messages": formatted_messages,
-            "session_id": numeric_session_id
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting session messages: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
 @router.post("/customer/sessions/messages")
 async def send_customer_message(request: Request):
     """Send a message from a customer to an assigned agent (no AI processing)
