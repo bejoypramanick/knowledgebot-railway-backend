@@ -1244,7 +1244,15 @@ async def archive_session(session_id: str, request: Request):
         archive_status = body.get("status", "archived")
         user_email = request.headers.get("X-User-Email", "admin@example.com")
 
-        await chat_log_service.archive_chat_session(session_id, archive_status, user_email)
+        # Convert numeric string IDs to int for proper resolution
+        try:
+            numeric_session_id = int(session_id)
+            logger.info(f"🔍 Archive endpoint: session_id={numeric_session_id} (converted from string), status={archive_status}")
+            await chat_log_service.archive_chat_session(numeric_session_id, archive_status, user_email)
+        except ValueError:
+            # session_id is a UUID string (e.g., "session_xxx")
+            logger.info(f"🔍 Archive endpoint: session_id={session_id} (UUID), status={archive_status}")
+            await chat_log_service.archive_chat_session(session_id, archive_status, user_email)
 
         return {
             "success": True,
@@ -1262,6 +1270,15 @@ async def end_agent_session(session_id: str, request: Request):
     """End a chat session from the agent side"""
     try:
         user_email = request.headers.get("X-User-Email", "agent@example.com")
+
+        # Convert numeric string IDs to int for proper resolution
+        try:
+            numeric_session_id = int(session_id)
+            session_id = numeric_session_id
+            logger.info(f"🔍 End-agent endpoint: session_id={numeric_session_id} (converted from string)")
+        except ValueError:
+            # session_id is a UUID string (e.g., "session_xxx")
+            logger.info(f"🔍 End-agent endpoint: session_id={session_id} (UUID)")
 
         await chat_log_service.update_chat_session(
             session_id=session_id,
@@ -1337,22 +1354,31 @@ async def end_customer_session(request: Request):
 async def submit_session_feedback(session_id: str, request: Request):
     """
     Submit customer feedback for a chat session (thumbs up/down).
-    
+
     No authentication required - anonymous customer feedback.
-    
+
     Request Body:
         feedback_type: 'positive' or 'negative'
     """
     try:
         body = await request.json()
         feedback_type = body.get("feedback_type")
-        
+
         if not feedback_type:
             raise HTTPException(status_code=400, detail="feedback_type is required")
-        
+
         if feedback_type not in ['positive', 'negative']:
             raise HTTPException(status_code=400, detail="feedback_type must be 'positive' or 'negative'")
-        
+
+        # Convert numeric string IDs to int for proper resolution
+        try:
+            numeric_session_id = int(session_id)
+            session_id = numeric_session_id
+            logger.info(f"🔍 Feedback endpoint: session_id={numeric_session_id} (converted from string)")
+        except ValueError:
+            # session_id is a UUID string (e.g., "session_xxx")
+            logger.info(f"🔍 Feedback endpoint: session_id={session_id} (UUID)")
+
         # Update feedback in database
         success = await chat_log_service.dao.update_session_feedback(session_id, feedback_type)
         
@@ -1482,6 +1508,15 @@ async def delete_chat_session(session_id: str, request: Request):
     try:
         user_email = request.headers.get("X-User-Email", "admin@example.com")
 
+        # Convert numeric string IDs to int for proper resolution
+        try:
+            numeric_session_id = int(session_id)
+            session_id = numeric_session_id
+            logger.info(f"🔍 Delete endpoint: session_id={numeric_session_id} (converted from string)")
+        except ValueError:
+            # session_id is a UUID string (e.g., "session_xxx")
+            logger.info(f"🔍 Delete endpoint: session_id={session_id} (UUID)")
+
         # Delete all messages for the session first
         await chat_log_service.delete_session_messages(session_id)
 
@@ -1509,8 +1544,15 @@ async def mark_session_as_read(session_id: str, user: dict = Depends(get_current
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
 
-        logger.info(f"🔍 Mark-read endpoint: session_id={session_id}, user={user_email}")
-        await chat_log_service.mark_session_as_read(session_id, user_email)
+        # Convert numeric string IDs to int for proper resolution
+        try:
+            numeric_session_id = int(session_id)
+            logger.info(f"🔍 Mark-read endpoint: session_id={numeric_session_id} (converted from string), user={user_email}")
+            await chat_log_service.mark_session_as_read(numeric_session_id, user_email)
+        except ValueError:
+            # session_id is a UUID string (e.g., "session_xxx")
+            logger.info(f"🔍 Mark-read endpoint: session_id={session_id} (UUID), user={user_email}")
+            await chat_log_service.mark_session_as_read(session_id, user_email)
 
         return {
             "success": True,
@@ -1531,8 +1573,15 @@ async def mark_session_as_unread(session_id: str, user: dict = Depends(get_curre
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
 
-        logger.info(f"🔍 Mark-unread endpoint: session_id={session_id}, user={user_email}")
-        await chat_log_service.mark_session_as_unread(session_id, user_email)
+        # Convert numeric string IDs to int for proper resolution
+        try:
+            numeric_session_id = int(session_id)
+            logger.info(f"🔍 Mark-unread endpoint: session_id={numeric_session_id} (converted from string), user={user_email}")
+            await chat_log_service.mark_session_as_unread(numeric_session_id, user_email)
+        except ValueError:
+            # session_id is a UUID string (e.g., "session_xxx")
+            logger.info(f"🔍 Mark-unread endpoint: session_id={session_id} (UUID), user={user_email}")
+            await chat_log_service.mark_session_as_unread(session_id, user_email)
 
         return {
             "success": True,
@@ -1573,6 +1622,15 @@ async def get_unread_message_count(session_id: str, request: Request):
     """Get count of unread messages in a session"""
     try:
         user_email = request.headers.get("X-User-Email", "admin@example.com")
+
+        # Convert numeric string IDs to int for proper resolution
+        try:
+            numeric_session_id = int(session_id)
+            session_id = numeric_session_id
+            logger.info(f"🔍 Unread-count endpoint: session_id={numeric_session_id} (converted from string)")
+        except ValueError:
+            # session_id is a UUID string (e.g., "session_xxx")
+            logger.info(f"🔍 Unread-count endpoint: session_id={session_id} (UUID)")
 
         count = await chat_log_service.get_unread_message_count(session_id)
 
