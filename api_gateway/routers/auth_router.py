@@ -219,40 +219,56 @@ async def create_session_endpoint(
             
             settings = get_settings()
             config_service_url = settings.configuration_service_url
-            role_endpoint = f"{config_service_url}/api/v1/configuration/admin/users/role"
+            # Use existing /users/profile endpoint
+            profile_endpoint = f"{config_service_url}/api/v1/configuration/users/profile"
             
-            logger.info(f"🔍 [SESSION_CREATE] Fetching role from: {role_endpoint}")
+            logger.info(f"🔍 [SESSION_CREATE] Fetching user profile from: {profile_endpoint}")
             logger.info(f"🔍 [SESSION_CREATE] Email: {user_data.get('email')}")
             
+            # Create a temporary session cookie to authenticate the request
+            # The profile endpoint requires authentication
+            temp_session_id = secrets.token_urlsafe(32)
+            temp_session_data = {
+                "uid": user_data.get("uid"),
+                "email": user_data.get("email"),
+                "name": user_data.get("name", user_data.get("email")),
+                "picture": user_data.get("picture"),
+            }
+            
+            # Store temporary session
+            store = get_session_store()
+            store.create(temp_session_id, temp_session_data, 60)  # 60 second TTL
+            
             async with httpx.AsyncClient(timeout=5.0) as client:
-                role_response = await client.get(
-                    role_endpoint,
-                    params={"email": user_data.get('email')}
+                profile_response = await client.get(
+                    profile_endpoint,
+                    cookies={SESSION_COOKIE_NAME: temp_session_id}
                 )
                 
-                logger.info(f"🔍 [SESSION_CREATE] Role endpoint response status: {role_response.status_code}")
-                logger.info(f"🔍 [SESSION_CREATE] Role endpoint response body: {role_response.text}")
+                logger.info(f"🔍 [SESSION_CREATE] Profile endpoint response status: {profile_response.status_code}")
                 
-                if role_response.status_code == 200:
-                    role_result = role_response.json()
-                    roles = role_result.get('roles', [])
-                    # Determine primary role: admin > human_agent > user
-                    if 'admin' in roles:
-                        user_role = 'admin'
-                    elif 'human_agent' in roles:
-                        user_role = 'human_agent'
-                    else:
-                        user_role = 'user'
-                    user_data['role'] = user_role
+                if profile_response.status_code == 200:
+                    profile_result = profile_response.json()
+                    logger.info(f"🔍 [SESSION_CREATE] Profile response: {profile_result}")
+                    
+                    profile_data = profile_result.get('data', {})
+                    roles = profile_data.get('roles', [])
+                    primary_role = profile_data.get('role', 'user')
+                    
+                    user_data['role'] = primary_role
                     user_data['roles'] = roles
-                    logger.info(f"✅ [SESSION_CREATE] User role fetched: {user_role} (all roles: {roles})")
+                    logger.info(f"✅ [SESSION_CREATE] User role fetched: {primary_role} (all roles: {roles})")
                 else:
-                    logger.warning(f"⚠️ [SESSION_CREATE] Failed to fetch user role: {role_response.status_code}")
-                    logger.warning(f"⚠️ [SESSION_CREATE] Response body: {role_response.text}")
+                    logger.warning(f"⚠️ [SESSION_CREATE] Failed to fetch user profile: {profile_response.status_code}")
+                    logger.warning(f"⚠️ [SESSION_CREATE] Response body: {profile_response.text}")
                     user_data['role'] = 'user'
                     user_data['roles'] = ['user']
+                
+                # Clean up temporary session
+                store.delete(temp_session_id)
+                
         except Exception as e:
-            logger.error(f"❌ [SESSION_CREATE] Exception while fetching user role: {e}")
+            logger.error(f"❌ [SESSION_CREATE] Exception while fetching user profile: {e}")
             logger.error(f"❌ [SESSION_CREATE] Exception type: {type(e).__name__}")
             import traceback
             logger.error(f"❌ [SESSION_CREATE] Traceback: {traceback.format_exc()}")
