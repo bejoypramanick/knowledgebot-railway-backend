@@ -373,9 +373,20 @@ class ChatLogDAO:
                 ORDER BY cs.last_activity_at DESC
                 LIMIT :limit OFFSET :offset
             """
+            explain_query = f"EXPLAIN ANALYZE {query}"
+            
             try:
                 params = {"limit": limit, "offset": offset}
                 logger.info(f"🔍 [CHATLOG-DAO] Executing query with params: {params}")
+                
+                # Run EXPLAIN ANALYZE
+                async with get_db_session() as session:
+                    explain_result = await session.execute(text(explain_query), params)
+                    explain_rows = explain_result.fetchall()
+                    logger.info(f"📊 [CHATLOG-DAO] get_all_sessions EXPLAIN ANALYZE:")
+                    for row in explain_rows:
+                        logger.info(f"📊 {row[0]}")
+                
                 logger.log_db_operation(query, params)
                 
                 db_start = time.time()
@@ -402,9 +413,20 @@ class ChatLogDAO:
                 ORDER BY cs.last_activity_at DESC
                 LIMIT :limit OFFSET :offset
             """
+            explain_query = f"EXPLAIN ANALYZE {query}"
+            
             try:
                 params = {"archive_status": archive_status, "limit": limit, "offset": offset}
                 logger.info(f"🔍 [CHATLOG-DAO] Executing query with params: {params}")
+                
+                # Run EXPLAIN ANALYZE
+                async with get_db_session() as session:
+                    explain_result = await session.execute(text(explain_query), params)
+                    explain_rows = explain_result.fetchall()
+                    logger.info(f"📊 [CHATLOG-DAO] get_all_sessions (filtered) EXPLAIN ANALYZE:")
+                    for row in explain_rows:
+                        logger.info(f"📊 {row[0]}")
+                
                 logger.log_db_operation(query, params)
                 
                 db_start = time.time()
@@ -429,7 +451,17 @@ class ChatLogDAO:
             # Handle 'all' status - count all sessions regardless of archive status
             if archive_status.lower() == 'all':
                 query = "SELECT COUNT(*) FROM chat_sessions"
+                explain_query = f"EXPLAIN ANALYZE {query}"
                 params = {}
+                
+                # Run EXPLAIN ANALYZE
+                async with get_db_session() as session:
+                    explain_result = await session.execute(text(explain_query), params)
+                    explain_rows = explain_result.fetchall()
+                    logger.info(f"📊 [CHATLOG-DAO] count_all_sessions EXPLAIN ANALYZE:")
+                    for row in explain_rows:
+                        logger.info(f"📊 {row[0]}")
+                
                 logger.log_db_operation(query, params)
                 
                 db_start = time.time()
@@ -443,7 +475,17 @@ class ChatLogDAO:
                 return count or 0
             else:
                 query = "SELECT COUNT(*) FROM chat_sessions WHERE archive_status = :archive_status"
+                explain_query = f"EXPLAIN ANALYZE {query}"
                 params = {"archive_status": archive_status}
+                
+                # Run EXPLAIN ANALYZE
+                async with get_db_session() as session:
+                    explain_result = await session.execute(text(explain_query), params)
+                    explain_rows = explain_result.fetchall()
+                    logger.info(f"📊 [CHATLOG-DAO] count_all_sessions (filtered) EXPLAIN ANALYZE:")
+                    for row in explain_rows:
+                        logger.info(f"📊 {row[0]}")
+                
                 logger.log_db_operation(query, params)
                 
                 db_start = time.time()
@@ -541,8 +583,19 @@ class ChatLogDAO:
             ) latest ON cm.session_id = latest.session_id AND cm.id = latest.max_id
         """
         
+        explain_query = f"EXPLAIN ANALYZE {query}"
+        
         try:
             params = {"session_ids": session_ids}
+            
+            # Run EXPLAIN ANALYZE
+            async with get_db_session() as session:
+                explain_result = await session.execute(text(explain_query), params)
+                explain_rows = explain_result.fetchall()
+                logger.info(f"📊 [CHATLOG-DAO] get_latest_messages_batch EXPLAIN ANALYZE:")
+                for row in explain_rows:
+                    logger.info(f"📊 {row[0]}")
+            
             logger.log_db_operation(query, params)
             
             db_start = time.time()
@@ -745,8 +798,18 @@ class ChatLogDAO:
             FROM chat_sessions
             WHERE session_id IN ({placeholders})
         """
+        
+        explain_query = f"EXPLAIN ANALYZE {query}"
 
         try:
+            # Run EXPLAIN ANALYZE
+            async with get_db_session() as session:
+                explain_result = await session.execute(text(explain_query), params)
+                explain_rows = explain_result.fetchall()
+                logger.info(f"📊 [CHATLOG-DAO] get_batch_feedback_counts EXPLAIN ANALYZE:")
+                for row in explain_rows:
+                    logger.info(f"📊 {row[0]}")
+            
             logger.log_db_operation(query, params)
             
             db_start = time.time()
