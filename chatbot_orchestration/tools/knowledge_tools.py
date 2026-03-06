@@ -583,31 +583,49 @@ async def request_human_agent_connection(
     
     try:
         import httpx
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text
 
-        # Get configuration service URL from environment
+        # Step 1: Convert UUID session_id to numeric database ID
+        # The endpoint expects numeric ID from chat_sessions.id column
+        logger.info(f"🔍 Looking up numeric ID for session UUID: {session_id}")
+        
+        async with get_db_session() as db_session:
+            query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
+            result = await db_session.execute(text(query), {"session_id": session_id})
+            row = result.fetchone()
+            
+            if not row:
+                logger.error(f"❌ Session {session_id} not found in database")
+                return "I couldn't find your chat session in the system. Please try refreshing the page and sending a new message."
+            
+            session_db_id = row[0]
+            logger.info(f"✅ Found numeric session ID: {session_db_id} for UUID: {session_id}")
+
+        # Step 2: Get configuration service URL from environment
         config_service_url = os.getenv(
             'CONFIGURATION_SERVICE_URL',
             'https://configuration-service-production.up.railway.app'
         )
         
-        # Call the configuration service to assign a human agent
+        # Step 3: Call the configuration service to assign a human agent
         # This will:
         # 1. Find an available agent using load balancing
         # 2. Assign the session to that agent
         # 3. The agent will see ALL messages in chat_messages table (full history)
-        logger.info(f"📞 Calling configuration service to assign human agent for session {session_id}")
+        logger.info(f"📞 Calling configuration service to assign human agent for session {session_db_id}")
         
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 f"{config_service_url}/api/v1/gateway/configuration/admin/chat-sessions/request-agent",
-                json={"session_id": session_id},
+                json={"session_id": str(session_db_id)},  # Send numeric ID as string
                 headers={}
             )
             
             if response.status_code == 200:
                 result = response.json()
-                assigned_agent = result.get('assigned_agent', 'an agent')
-                logger.info(f"✅ Chat {session_id} assigned to human agent {assigned_agent}")
+                assigned_agent = result.get('agent_assigned', 'an agent')
+                logger.info(f"✅ Chat {session_id} (DB ID: {session_db_id}) assigned to human agent {assigned_agent}")
                 logger.info(f"📚 Agent will see full chat history from chat_messages table")
                 return f"👋 I've connected you to a human agent ({assigned_agent}). They will join the conversation shortly and can see your full chat history. The chat has been opened in their chat log. 💪\n"
             elif response.status_code == 503:
@@ -617,6 +635,7 @@ async def request_human_agent_connection(
             else:
                 error_detail = response.json().get('detail', 'Failed to connect to human agent')
                 logger.error(f"❌ Human agent request failed with status {response.status_code}: {error_detail}")
+                logger.error(f"❌ Response body: {response.text}")
                 return f"I encountered an error while trying to connect you to a human agent: {error_detail}. Please try again later."
                 
     except httpx.TimeoutException:

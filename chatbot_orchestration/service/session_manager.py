@@ -154,13 +154,48 @@ class SessionStateManager:
 
                 logger.debug(f"💾 Saved {role} message to session {session_id} (DB ID: {integer_session_id})")
 
-                return {
+                message_data = {
                     "id": record["id"],
                     "session_id": record["session_id"],
                     "role": record["role"],
                     "content": record["content"],
                     "created_at": record["created_at"].isoformat() if record["created_at"] else None
                 }
+
+                # Broadcast messages to agents in real-time via Redis Pub/Sub
+                if role in ["user", "assistant"]:
+                    try:
+                        from shared.redis_pubsub_manager import broadcast_event_for_session
+                        
+                        # Check if session is assigned to an agent
+                        assignment_query = """
+                            SELECT agent_email FROM session_assignments 
+                            WHERE session_id = :session_id AND status = 'active'
+                        """
+                        assignment_result = await session.execute(
+                            text(assignment_query), 
+                            {"session_id": integer_session_id}
+                        )
+                        assignment = assignment_result.mappings().first()
+                        assigned_agent = assignment["agent_email"] if assignment else None
+                        
+                        # Broadcast to session channel (customer) and agent channel (if assigned)
+                        event_data = {
+                            "type": "customer_message" if role == "user" else "agent_message",
+                            "message_id": str(record["id"]),
+                            "session_id": session_id,
+                            "text": content,
+                            "sender": "customer" if role == "user" else "assistant",
+                            "timestamp": record["created_at"].isoformat() if record["created_at"] else None
+                        }
+                        
+                        await broadcast_event_for_session(session_id, event_data, assigned_agent)
+                        logger.info(f"📤 Broadcasted {role} message to session {session_id} and agent {assigned_agent}")
+                    except Exception as broadcast_error:
+                        logger.warning(f"⚠️ Failed to broadcast {role} message: {broadcast_error}")
+                        # Don't fail the save operation if broadcast fails
+
+                return message_data
         except Exception as e:
             logger.error(f"Error saving message: {e}")
             return None
