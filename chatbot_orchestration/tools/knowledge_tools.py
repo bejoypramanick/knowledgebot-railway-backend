@@ -579,9 +579,6 @@ async def request_human_agent_connection(
     This will assign the chat to an available human agent and the chat will appear in their chat log.
     The agent will see the FULL chat history including all previous AI conversations.
     """
-    import sys
-    print(f"[TOOL_EXECUTION] request_human_agent_connection called", file=sys.stderr, flush=True)
-
     # Get numeric session ID from ChatSessionDeps
     # ctx.deps.session_id is the UUID from frontend/cookie
     # ctx.deps.numeric_session_id is the numeric ID from database (created on first message)
@@ -593,6 +590,7 @@ async def request_human_agent_connection(
         return "I encountered an error: Session not properly initialized. Please try again."
 
     logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_uuid} (numeric: {session_numeric_id}) with reason: {reason}")
+    logger.info(f"📍 Tool execution starting - session_numeric_id={session_numeric_id}, session_uuid={session_uuid}")
 
     try:
         import httpx
