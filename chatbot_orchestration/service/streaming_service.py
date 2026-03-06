@@ -372,7 +372,7 @@ class StreamingService:
                                     )
                                     
                                     # Stream confirmation to customer with proper SSE format
-                                    yield f"data: {json.dumps({'type': 'chunk', 'text': confirmation_msg})}\n\n"
+                                    yield f"data: {json.dumps({'type': 'chunk', 'content': confirmation_msg})}\n\n"
                                     await asyncio.sleep(0.01)  # Small delay to ensure message is sent
                                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
                                     logger.info(f"✅ Agent assigned and customer notified")
