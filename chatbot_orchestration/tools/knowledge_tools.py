@@ -6,6 +6,7 @@ Contains all tool implementations as standalone functions
 import os
 import re
 import json
+import time
 import logging
 from typing import List, Dict, Any, Optional
 from pydantic_ai import RunContext
@@ -625,6 +626,42 @@ async def request_human_agent_connection(
                 assigned_agent = result.get('agent_assigned', 'an agent')
                 logger.info(f"✅ Chat {session_numeric_id} assigned to human agent {assigned_agent}")
                 logger.info(f"📚 Agent will see full chat history from chat_messages table")
+
+                # Broadcast notification to agent with session UUID and latest message
+                # Agent's ChatLog UI will receive this and display the session in their list
+                try:
+                    from shared.redis_pubsub_manager import broadcast_event_to_agent
+
+                    # Get latest message from database
+                    from shared.sqlalchemy_db import get_db_session
+                    from sqlalchemy import text
+                    latest_msg = None
+                    async with get_db_session() as db_session:
+                        query = "SELECT content, role, created_at FROM chat_messages WHERE session_id = :session_uuid ORDER BY created_at DESC LIMIT 1"
+                        db_result = await db_session.execute(text(query), {"session_uuid": session_uuid})
+                        msg_row = db_result.mappings().first()
+                        if msg_row:
+                            latest_msg = {
+                                "text": msg_row['content'],
+                                "sender": msg_row['role'],
+                                "timestamp": msg_row['created_at'].isoformat() if msg_row['created_at'] else None
+                            }
+
+                    # Broadcast event with session info for agent's ChatLog
+                    event = {
+                        "type": "new_human_handoff",
+                        "session_uuid": session_uuid,
+                        "session_id": session_numeric_id,
+                        "reason": reason,
+                        "latest_message": latest_msg,
+                        "timestamp": int(time.time()),
+                        "message": f"Customer requested human support: {reason}"
+                    }
+                    await broadcast_event_to_agent(assigned_agent, event)
+                    logger.info(f"📤 Notified agent {assigned_agent} about human handoff with session {session_uuid}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to notify agent about handoff: {e}")
+
                 return f"👋 I've connected you to a human agent ({assigned_agent}). They will join the conversation shortly and can see your full chat history. The chat has been opened in their chat log. 💪\n"
             elif response.status_code == 503:
                 error_detail = response.json().get('detail', 'No agents available')
