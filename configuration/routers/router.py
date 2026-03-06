@@ -1661,55 +1661,23 @@ async def transfer_session(request: Request):
 
 @router.post("/admin/chat-sessions/request-agent")
 async def request_human_agent(request: Request):
-    """Request a human agent for a chat session
+    """Request a human agent for current chat session (from httpOnly cookie)
 
-    Accepts session_id in request body. Can be either UUID or numeric ID.
-    Backend handles conversion internally.
-
-    Request Body:
-        session_id: UUID session_id (e.g., "session_xxx") or numeric ID (e.g., "269")
+    Session UUID comes ONLY from httpOnly cookie: chatbot_session_id
+    Customer must call /customer/sessions/set-current first to set the cookie.
     """
     try:
         logger.info(f"🧑 [ENDPOINT] POST /admin/chat-sessions/request-agent called")
-        
-        # Parse request body
-        body = await request.json()
-        logger.info(f"🔍 [ENDPOINT] Request body: {body}")
-        
-        session_id = body.get("session_id")
-        logger.info(f"🔍 [ENDPOINT] Extracted session_id: {session_id} (type: {type(session_id).__name__})")
 
-        if not session_id:
-            logger.error(f"❌ [ENDPOINT] Missing session_id in request body")
-            raise HTTPException(status_code=400, detail="session_id is required in request body")
+        # Get numeric session ID from cookie (set by API Gateway middleware)
+        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
+            raise HTTPException(
+                status_code=400,
+                detail="No current chat session. Call /customer/sessions/set-current first."
+            )
 
-        # Convert UUID to numeric ID if needed
-        session_db_id = None
-        if isinstance(session_id, str) and session_id.startswith('session_'):
-            # UUID format - convert to numeric ID
-            logger.info(f"🔍 [ENDPOINT] Converting UUID {session_id} to numeric ID")
-            from shared.sqlalchemy_db import get_db_session
-            from sqlalchemy import text
-            
-            async with get_db_session() as db_session:
-                query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
-                result = await db_session.execute(text(query), {"session_id": session_id})
-                row = result.fetchone()
-                
-                if not row:
-                    logger.error(f"❌ [ENDPOINT] Session {session_id} not found")
-                    raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-                
-                session_db_id = row[0]
-                logger.info(f"✅ [ENDPOINT] Converted UUID to numeric ID: {session_db_id}")
-        else:
-            # Already numeric ID
-            try:
-                session_db_id = int(session_id)
-                logger.info(f"✅ [ENDPOINT] Using numeric ID: {session_db_id}")
-            except ValueError:
-                logger.error(f"❌ [ENDPOINT] Invalid session_id format: {session_id}")
-                raise HTTPException(status_code=400, detail=f"Invalid session_id format: {session_id}")
+        session_db_id = request.state.session_numeric_id
+        logger.info(f"🧑 [ENDPOINT] Session ID from cookie: {session_db_id}")
 
         # Pass numeric ID to service
         logger.info(f"🔍 [ENDPOINT] Calling chat_log_service.request_human_agent with session_id={session_db_id}")
@@ -1720,11 +1688,11 @@ async def request_human_agent(request: Request):
             "success": True,
             "message": "Human agent assigned",
             "agent_assigned": assigned_agent,
-            "session_id": str(session_db_id)  # Return numeric ID
+            "session_id": session_db_id
         }
         logger.info(f"✅ [ENDPOINT] Returning response: {response}")
         return response
-        
+
     except HTTPException as he:
         logger.error(f"❌ [ENDPOINT] HTTPException: {he.status_code} - {he.detail}")
         raise
