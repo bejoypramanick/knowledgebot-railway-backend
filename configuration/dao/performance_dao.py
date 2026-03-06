@@ -449,7 +449,7 @@ class PerformanceDAO:
                     else:
                         month_date = month_date.replace(month=month_date.month - 1)
 
-                month_label = month_date.strftime('%b %Y')
+                month_label = month_date.strftime('%b')
 
                 # Get service data for this month if available
                 services_for_month = month_data_map.get(month_date, {})
@@ -503,7 +503,7 @@ class PerformanceDAO:
                             month_date = month_date.replace(month=month_date.month - 1)
 
                     empty_months.append({
-                        "month": month_date.strftime('%b %Y'),
+                        "month": month_date.strftime('%b'),
                         "services": [
                             {
                                 "service": s,
