@@ -52,6 +52,9 @@ class ChatLogService:
                 logger.error(f"❌ Cannot assign chat: session {session_db_id} does not exist")
                 raise HTTPException(status_code=404, detail=f"Session {session_db_id} not found")
             
+            # Get session UUID for caching and broadcasting
+            session_uuid = session.get('session_id')  # UUID format
+            
             logger.info(f"Chat session {session_db_id} assigned to agent {agent_email}")
             assignee_type = "agent"
             existing = await self.dao.get_session_assignment(session_db_id)
@@ -60,7 +63,15 @@ class ChatLogService:
             else:
                 await self.dao.create_session_assignment(session_db_id, agent_email, assignee_type, status='active')
             
-            # Send real-time notification to assigned agent via Redis Pub/Sub
+            # Cache the agent assignment in Redis (TTL: 1 hour)
+            # This avoids querying session_assignments table on every message
+            from shared.redis_pubsub_manager import get_pubsub_redis, broadcast_event_to_session
+            redis_client = await get_pubsub_redis()
+            agent_cache_key = f"session:assigned_agent:{session_uuid}"
+            await redis_client.set(agent_cache_key, agent_email, ex=3600)
+            logger.info(f"💾 Cached agent assignment: {session_uuid} → {agent_email} (TTL: 1h)")
+            
+            # CRITICAL: Broadcast to BOTH agent AND customer
             assignment_event = {
                 "type": "chat_assigned",
                 "session_id": str(session_db_id),
@@ -70,8 +81,15 @@ class ChatLogService:
                 "message": "New chat assigned to you",
                 "timestamp": datetime.utcnow().isoformat()
             }
+            
+            # Send to agent (so it appears in their ChatLog)
             await broadcast_event_to_agent(agent_email, assignment_event)
-            logger.info(f"📤 Sent real-time assignment notification to agent {agent_email} via Redis Pub/Sub")
+            logger.info(f"📤 Sent assignment notification to agent {agent_email} via Redis Pub/Sub")
+            
+            # Send to customer (so UI blocks AI and enables agent chat)
+            # CRITICAL: Use session UUID, not numeric ID
+            await broadcast_event_to_session(session_uuid, assignment_event)
+            logger.info(f"📤 Sent assignment notification to customer session {session_uuid} via Redis Pub/Sub")
             
         except Exception as e:
             logger.error(f"Error assigning chat to agent: {e}", exc_info=True)
@@ -378,6 +396,9 @@ class ChatLogService:
         session_data = await self.dao.get_session_by_id_with_messages(session_db_id)
         if not session_data:
             raise HTTPException(status_code=404, detail="Chat session not found")
+        
+        # Get session UUID for cache clearing
+        session_uuid = session_data.get('session_id')  # UUID format
 
         metadata = session_data['metadata'] or {}
         if isinstance(metadata, str):
@@ -387,6 +408,13 @@ class ChatLogService:
             metadata['status'] = status
             if status == 'closed':
                 await self.dao.archive_session(session_db_id, 'closed')
+                
+                # Clear agent assignment cache when session closes
+                from shared.redis_pubsub_manager import get_pubsub_redis
+                redis_client = await get_pubsub_redis()
+                agent_cache_key = f"session:assigned_agent:{session_uuid}"
+                await redis_client.delete(agent_cache_key)
+                logger.info(f"🗑️ Cleared agent assignment cache for session {session_uuid}")
 
         if assigned_agent is not None:
             if assigned_agent == '' or assigned_agent is None:
@@ -421,8 +449,18 @@ class ChatLogService:
         session = await self.dao.get_session_by_id_with_messages(session_db_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Get session UUID for cache clearing
+        session_uuid = session.get('session_id')  # UUID format
 
         await self.dao.archive_session(session_db_id, 'closed')
+        
+        # Clear agent assignment cache when session ends
+        from shared.redis_pubsub_manager import get_pubsub_redis
+        redis_client = await get_pubsub_redis()
+        agent_cache_key = f"session:assigned_agent:{session_uuid}"
+        await redis_client.delete(agent_cache_key)
+        logger.info(f"🗑️ Cleared agent assignment cache for session {session_uuid}")
 
         if self.connection_manager:
             session_ended_message = {

@@ -165,23 +165,39 @@ class SessionStateManager:
                 # Broadcast messages to agents in real-time via Redis Pub/Sub
                 if role in ["user", "assistant"]:
                     try:
-                        from shared.redis_pubsub_manager import broadcast_event_for_session
+                        from shared.redis_pubsub_manager import broadcast_event_for_session, get_pubsub_redis
                         
-                        # Check if session is assigned to an agent
-                        # Join through session_assignments → user_role_mapping → users to get agent email
-                        assignment_query = """
-                            SELECT u.email as agent_email
-                            FROM session_assignments sa
-                            LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-                            LEFT JOIN users u ON urm.user_id = u.id
-                            WHERE sa.session_id = :session_id AND sa.status = 'active'
-                        """
-                        assignment_result = await session.execute(
-                            text(assignment_query), 
-                            {"session_id": integer_session_id}
-                        )
-                        assignment = assignment_result.mappings().first()
-                        assigned_agent = assignment["agent_email"] if assignment else None
+                        # Check Redis cache first for assigned agent (avoids DB query on every message)
+                        redis_client = await get_pubsub_redis()
+                        agent_cache_key = f"session:assigned_agent:{session_id}"
+                        cached_agent = await redis_client.get(agent_cache_key)
+                        
+                        if cached_agent:
+                            assigned_agent = cached_agent.decode('utf-8')
+                            logger.debug(f"✅ Found cached agent assignment: {session_id} → {assigned_agent}")
+                        else:
+                            # Not in cache - query database (only happens once per session)
+                            # Join through session_assignments → user_role_mapping → users to get agent email
+                            assignment_query = """
+                                SELECT u.email as agent_email
+                                FROM session_assignments sa
+                                LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                                LEFT JOIN users u ON urm.user_id = u.id
+                                WHERE sa.session_id = :session_id AND sa.status = 'active'
+                            """
+                            assignment_result = await session.execute(
+                                text(assignment_query), 
+                                {"session_id": integer_session_id}
+                            )
+                            assignment = assignment_result.mappings().first()
+                            assigned_agent = assignment["agent_email"] if assignment else None
+                            
+                            # Cache the assignment for future messages (TTL: 1 hour)
+                            if assigned_agent:
+                                await redis_client.set(agent_cache_key, assigned_agent, ex=3600)
+                                logger.info(f"💾 Cached agent assignment: {session_id} → {assigned_agent} (TTL: 1h)")
+                            else:
+                                logger.debug(f"No agent assigned to session {session_id}")
                         
                         # Broadcast to session channel (customer) and agent channel (if assigned)
                         event_data = {
