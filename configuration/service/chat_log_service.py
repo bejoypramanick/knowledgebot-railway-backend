@@ -24,40 +24,6 @@ class ChatLogService:
         self.auth_dao = AuthDAO()
         self.connection_manager = None  # Placeholder - should be initialized if needed for websockets
 
-    async def _resolve_session_db_id(self, session_id: int | str) -> Optional[int]:
-        """
-        Resolve session_id (UUID or int) to database ID.
-        Tries Redis cache first, then falls back to DB query.
-        Returns None if session not found.
-        """
-        # If already numeric, return as-is
-        if isinstance(session_id, int):
-            return session_id
-
-        # Try Redis cache first
-        from shared.redis_pubsub_manager import get_pubsub_redis
-        try:
-            redis_client = await get_pubsub_redis()
-            cache_key = f"session:{session_id}:db_id"
-            cached_id = await redis_client.get(cache_key)
-            if cached_id:
-                return int(cached_id)
-        except Exception as e:
-            logger.warning(f"Redis cache lookup failed for {session_id}: {e}, falling back to DB")
-
-        # Fall back to DB lookup
-        session_db_id = await self.dao.get_session_db_id_by_uuid(session_id)
-
-        # Cache the result if found
-        if session_db_id:
-            try:
-                redis_client = await get_pubsub_redis()
-                cache_key = f"session:{session_id}:db_id"
-                await redis_client.setex(cache_key, 3600, str(session_db_id))  # 1 hour TTL
-            except Exception as e:
-                logger.warning(f"Failed to cache session ID mapping: {e}")
-
-        return session_db_id
 
     async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
         """Get all chat logs"""
@@ -67,7 +33,7 @@ class ChatLogService:
             logger.error(f"Error getting all chat logs: {e}")
             raise
 
-    async def delete_chat_log(self, session_id: str, user_email: str) -> Dict[str, Any]:
+    async def delete_chat_log(self, session_id: int, user_email: str) -> Dict[str, Any]:
         """Delete a chat log"""
         try:
             return await self.dao.delete_chat_log(session_id)
@@ -75,14 +41,11 @@ class ChatLogService:
             logger.error(f"Error deleting chat log {session_id}: {e}")
             raise
 
-    async def assign_chat_to_agent(self, session_id: str, agent_email: str):
+    async def assign_chat_to_agent(self, session_id: int, agent_email: str):
         """Assign chat to specific agent"""
         try:
-            # Resolve session_id using cache and DB
-            session_db_id = await self._resolve_session_db_id(session_id)
-            if not session_db_id:
-                logger.error(f"❌ Cannot assign chat: session {session_id} does not exist")
-                raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+            # session_id is already numeric (resolved by API Gateway)
+            session_db_id = session_id
 
             # Validate that session exists before creating assignment
             session = await self.dao.get_session_by_id_with_messages(session_db_id)
@@ -145,8 +108,8 @@ class ChatLogService:
             logger.error(f"Error getting agent chat count: {e}")
             return 0
 
-    async def assign_chat_with_load_balancing(self, session_id: int | str) -> Optional[str]:
-        """Assign a chat to an available agent using load balancing (accepts numeric ID or UUID)."""
+    async def assign_chat_with_load_balancing(self, session_id: int) -> Optional[str]:
+        """Assign a chat to an available agent using load balancing (numeric ID only)."""
         try:
             logger.info(f"🔍 [LOAD_BALANCE] Starting load balancing for session {session_id}")
             
@@ -328,7 +291,7 @@ class ChatLogService:
                     status = 'closed'
 
                 if is_expired and session_row['is_active']:
-                    await self.dao.archive_session(session_db_id, 'closed') # Effectively close in DB
+                    await self.dao.archive_session(session_id, 'closed') # Effectively close in DB
 
             # Use cached feedback counts
             feedback_counts = batch_feedback_counts.get(session_id, {'positive_count': 0, 'negative_count': 0})
@@ -382,24 +345,20 @@ class ChatLogService:
 
         return message_id
 
-    async def archive_chat_session(self, session_id: int | str, archive_status: str, user_email: str):
-        """Archive status of a chat session using numeric ID only."""
+    async def archive_chat_session(self, session_id: int, archive_status: str, user_email: str):
+        """Archive status of a chat session (numeric ID only)."""
         roles = await self.dao.check_user_role(user_email)
         if not roles["is_admin"] and not roles["is_agent"]:
             raise HTTPException(status_code=403, detail="Only admins and human agents can archive sessions")
 
-        # Resolve session_id using cache and DB
-        session_db_id = await self._resolve_session_db_id(session_id)
-        if not session_db_id:
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-
-        success = await self.dao.archive_session(session_db_id, archive_status)
+        # session_id is already numeric (resolved by API Gateway)
+        success = await self.dao.archive_session(session_id, archive_status)
         if not success:
             raise HTTPException(status_code=404, detail="Session not found")
         return True
 
-    async def transfer_chat_session(self, session_id: int | str, user_email: str, target_agent_email: str):
-        """Transfer a chat session to another agent using numeric ID only."""
+    async def transfer_chat_session(self, session_id: int, user_email: str, target_agent_email: str):
+        """Transfer a chat session to another agent (numeric ID only)."""
         roles = await self.dao.check_user_role(user_email)
         if not roles["is_agent"] and not roles["is_admin"]:
             raise HTTPException(status_code=403, detail="Access denied")
@@ -408,10 +367,7 @@ class ChatLogService:
         if not target_roles["is_agent"] and not target_roles["is_admin"]:
             raise HTTPException(status_code=400, detail="Target user is not an agent or admin")
 
-        # Resolve session_id using cache and DB
-        session_db_id = await self._resolve_session_db_id(session_id)
-        if not session_db_id:
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        # session_id is already numeric (resolved by API Gateway)
 
         await self.assign_chat_to_agent(str(session_db_id), target_agent_email)
 
@@ -429,15 +385,11 @@ class ChatLogService:
         await self.dao.create_message(session_db_id, 'system', "Chat transferred to another support agent")
         return True
 
-    async def update_chat_session(self, session_id: int | str, user_email: str, status: Optional[str] = None,
+    async def update_chat_session(self, session_id: int, user_email: str, status: Optional[str] = None,
                                  assigned_agent: Optional[str] = None):
-        """Update a chat session's metadata and status using numeric ID only."""
-        # Resolve session_id using cache and DB
-        session_db_id = await self._resolve_session_db_id(session_id)
-        if not session_db_id:
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-
-        session_data = await self.dao.get_session_by_id_with_messages(session_db_id)
+        """Update a chat session's metadata and status (numeric ID only)."""
+        # session_id is already numeric (resolved by API Gateway)
+        session_data = await self.dao.get_session_by_id_with_messages(session_id)
         if not session_data:
             raise HTTPException(status_code=404, detail="Chat session not found")
         
@@ -451,7 +403,7 @@ class ChatLogService:
         if status is not None:
             metadata['status'] = status
             if status == 'closed':
-                await self.dao.archive_session(session_db_id, 'closed')
+                await self.dao.archive_session(session_id, 'closed')
                 
                 # Clear agent assignment cache when session closes
                 from shared.redis_pubsub_manager import get_pubsub_redis
@@ -467,7 +419,7 @@ class ChatLogService:
             else:
                 metadata['assigned_agent'] = assigned_agent
 
-        await self.dao.update_chat_session_metadata(session_db_id, metadata)
+        await self.dao.update_chat_session_metadata(session_id, metadata)
 
         if status == 'closed' and not assigned_agent:
             if self.connection_manager:
@@ -476,30 +428,26 @@ class ChatLogService:
 
                 session_ended_message = {
                     "type": "session_ended",
-                    "session_id": str(session_db_id),
+                    "session_id": str(session_id),
                     "text": f"Session has been ended by the {ended_by}.",
                     "ended_by": ended_by,
                     "timestamp": datetime.utcnow().isoformat()
                 }
-                await self.connection_manager.broadcast_to_session(session_ended_message, str(session_db_id))
+                await self.connection_manager.broadcast_to_session(session_ended_message, str(session_id))
         return True
 
-    async def end_customer_session(self, session_id: int | str, user_email: str):
-        """End a chat session from the customer side."""
-        # Resolve session_id using cache and DB
-        session_db_id = await self._resolve_session_db_id(session_id)
-        if not session_db_id:
-            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-
+    async def end_customer_session(self, session_id: int, user_email: str):
+        """End a chat session from the customer side (numeric ID only)."""
+        # session_id is already numeric (resolved by API Gateway)
         # Verify session exists
-        session = await self.dao.get_session_by_id_with_messages(session_db_id)
+        session = await self.dao.get_session_by_id_with_messages(session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
         
         # Get session UUID for cache clearing
         session_uuid = session.get('session_id')  # UUID format
 
-        await self.dao.archive_session(session_db_id, 'closed')
+        await self.dao.archive_session(session_id, 'closed')
         
         # Clear agent assignment cache when session ends
         from shared.redis_pubsub_manager import get_pubsub_redis
@@ -542,52 +490,40 @@ class ChatLogService:
         logger.info(f"✅ [HUMAN_AGENT] Successfully assigned session {session_id} to agent {assigned_agent}")
         return assigned_agent
 
-    async def delete_session_messages(self, session_id: int | str) -> bool:
+    async def delete_session_messages(self, session_id: int) -> bool:
         """Delete all messages for a chat session using numeric ID only."""
         try:
-            # Resolve session_id using cache and DB
-            session_db_id = await self._resolve_session_db_id(session_id)
-            if not session_db_id:
-                raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-
-            await self.dao.delete_messages_for_session(session_db_id)
+            # session_id is already numeric (resolved by API Gateway)
+            await self.dao.delete_messages_for_session(session_id)
             logger.info(f"Deleted all messages for session {session_db_id}")
             return True
         except Exception as e:
             logger.error(f"Error deleting messages for session {session_id}: {e}")
             raise
 
-    async def delete_chat_session(self, session_id: int | str) -> bool:
+    async def delete_chat_session(self, session_id: int) -> bool:
         """Delete a chat session and its metadata using numeric ID only."""
         try:
-            # Resolve session_id using cache and DB
-            session_db_id = await self._resolve_session_db_id(session_id)
-            if not session_db_id:
-                raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-
-            await self.dao.delete_chat_session_by_id(session_db_id)
-            logger.info(f"Deleted chat session {session_db_id}")
+            # session_id is already numeric (resolved by API Gateway)
+            await self.dao.delete_chat_session_by_id(session_id)
+            logger.info(f"Deleted chat session {session_id}")
             return True
         except Exception as e:
             logger.error(f"Error deleting chat session {session_id}: {e}")
             raise
 
-    async def mark_session_messages_as_unread(self, session_id: int | str) -> bool:
+    async def mark_session_messages_as_unread(self, session_id: int) -> bool:
         """Mark all messages in a session as unread (delivered) using numeric ID only."""
         try:
-            # Resolve session_id using cache and DB
-            session_db_id = await self._resolve_session_db_id(session_id)
-            if not session_db_id:
-                raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-
-            await self.dao.update_messages_status_for_session(session_db_id, 'delivered')
-            logger.info(f"Marked all messages as unread for session {session_db_id}")
+            # session_id is already numeric (resolved by API Gateway)
+            await self.dao.update_messages_status_for_session(session_id, 'delivered')
+            logger.info(f"Marked all messages as unread for session {session_id}")
             return True
         except Exception as e:
             logger.error(f"Error marking messages as unread for session {session_id}: {e}")
             raise
 
-    async def mark_session_as_read(self, session_id: int | str, user_email: str) -> bool:
+    async def mark_session_as_read(self, session_id: int, user_email: str) -> bool:
         """Mark entire session as read by human agent or admin (session-level)."""
         try:
             # Verify user is agent or admin
@@ -596,23 +532,20 @@ class ChatLogService:
                 logger.warning(f"User {user_email} is not a human agent or admin")
                 raise HTTPException(status_code=403, detail="Only human agents and admins can mark sessions as read")
 
-            # Resolve session_id using cache and DB
-            session_db_id = await self._resolve_session_db_id(session_id)
-            if not session_db_id:
-                raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-            logger.info(f"🔍 Marking session {session_db_id} as read by {user_email}")
+            # session_id is already numeric (resolved by API Gateway)
+            logger.info(f"🔍 Marking session {session_id} as read by {user_email}")
 
-            success = await self.dao.mark_session_as_read(session_db_id)
+            success = await self.dao.mark_session_as_read(session_id)
             if success:
-                logger.info(f"✅ User {user_email} marked session {session_db_id} as read")
+                logger.info(f"✅ User {user_email} marked session {session_id} as read")
             else:
-                logger.warning(f"❌ Failed to mark session {session_db_id} as read")
+                logger.warning(f"❌ Failed to mark session {session_id} as read")
             return success
         except Exception as e:
             logger.error(f"Error marking session {session_id} as read: {e}")
             raise
 
-    async def mark_session_as_unread(self, session_id: int | str, user_email: str) -> bool:
+    async def mark_session_as_unread(self, session_id: int, user_email: str) -> bool:
         """Mark entire session as unread by human agent or admin (session-level)."""
         try:
             # Verify user is agent or admin
@@ -621,30 +554,22 @@ class ChatLogService:
                 logger.warning(f"User {user_email} is not a human agent or admin")
                 raise HTTPException(status_code=403, detail="Only human agents and admins can mark sessions as unread")
 
-            # Resolve session_id using cache and DB
-            session_db_id = await self._resolve_session_db_id(session_id)
-            if not session_db_id:
-                raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-
-            success = await self.dao.mark_session_as_unread(session_db_id)
+            # session_id is already numeric (resolved by API Gateway)
+            success = await self.dao.mark_session_as_unread(session_id)
             if success:
-                logger.info(f"✅ User {user_email} marked session {session_db_id} as unread")
+                logger.info(f"✅ User {user_email} marked session {session_id} as unread")
             else:
-                logger.warning(f"❌ Failed to mark session {session_db_id} as unread")
+                logger.warning(f"❌ Failed to mark session {session_id} as unread")
             return success
         except Exception as e:
             logger.error(f"Error marking session {session_id} as unread: {e}")
             raise
 
-    async def get_unread_message_count(self, session_id: int | str) -> int:
-        """Get count of unread messages in a session using numeric ID only."""
+    async def get_unread_message_count(self, session_id: int) -> int:
+        """Get count of unread messages in a session (numeric ID only)."""
         try:
-            # Resolve session_id using cache and DB
-            session_db_id = await self._resolve_session_db_id(session_id)
-            if not session_db_id:
-                raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-
-            count = await self.dao.get_unread_messages_count(session_db_id)
+            # session_id is already numeric (resolved by API Gateway)
+            count = await self.dao.get_unread_messages_count(session_id)
             logger.info(f"Session {session_db_id} has {count} unread messages")
             return count
         except Exception as e:
