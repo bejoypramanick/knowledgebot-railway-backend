@@ -215,10 +215,10 @@ async def create_session_endpoint(
         # Fetch user role from database via configuration service
         try:
             import httpx
-            config_service_url = os.getenv(
-                'CONFIGURATION_SERVICE_URL',
-                'http://configuration.railway.internal:8080'
-            )
+            from api_gateway.core.config import get_settings
+            
+            settings = get_settings()
+            config_service_url = settings.configuration_service_url
             role_endpoint = f"{config_service_url}/api/v1/configuration/admin/users/role"
             
             async with httpx.AsyncClient(timeout=5.0) as client:
