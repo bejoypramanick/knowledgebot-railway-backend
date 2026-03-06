@@ -529,15 +529,14 @@ class ChatLogDAO:
 
         logger.info(f"🔍 [CHATLOG-DAO] get_latest_messages_batch called for {len(session_ids)} sessions")
         
-        # Use window function to get latest message per session efficiently
+        # Use subquery with MAX(created_at) instead of window function for better performance
+        # This approach uses the index on (session_id, created_at) more efficiently
         query = """
-            WITH ranked_messages AS (
-                SELECT *,
-                       ROW_NUMBER() OVER (PARTITION BY session_id ORDER BY created_at DESC) as rn
-                FROM chat_messages
-                WHERE session_id = ANY(:session_ids)
-            )
-            SELECT * FROM ranked_messages WHERE rn = 1
+            SELECT DISTINCT ON (cm.session_id) 
+                cm.*
+            FROM chat_messages cm
+            WHERE cm.session_id = ANY(:session_ids)
+            ORDER BY cm.session_id, cm.created_at DESC
         """
         try:
             params = {"session_ids": session_ids}
