@@ -226,7 +226,7 @@ async def proxy_agent_message(request: Request):
         logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Request headers: {dict(request.headers)}")
         
         settings = get_settings()
-        config_service_url = settings.CONFIGURATION_SERVICE_URL
+        config_service_url = settings.configuration_service_url  # Lowercase!
         
         # Get request body
         body = await request.json()
