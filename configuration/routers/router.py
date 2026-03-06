@@ -1566,7 +1566,7 @@ async def end_customer_session(request: Request):
         return {
             "success": True,
             "message": "Session ended by customer",
-            "session_id": numeric_session_id
+            "session_id": session_uuid  # Return UUID, not numeric ID
         }
     except HTTPException:
         raise
@@ -1579,22 +1579,26 @@ async def end_customer_session(request: Request):
 async def submit_session_feedback(request: Request):
     """
     Submit customer feedback for a chat session.
+    
+    API Gateway injects session_id (numeric) and session_uuid (UUID) from cookie.
     Request Body:
-        session_id: int (numeric session ID)
+        session_id: int (numeric, injected by API Gateway)
+        session_uuid: str (UUID, injected by API Gateway)
         feedback_type: str ('positive' or 'negative')
     """
     try:
         body = await request.json()
         session_id = body.get("session_id")
+        session_uuid = body.get("session_uuid")
         feedback_type = body.get("feedback_type")
 
         if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required in request body")
+            raise HTTPException(status_code=400, detail="session_id is required (should be injected by API Gateway)")
 
         try:
             numeric_session_id = int(session_id)
         except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
+            raise HTTPException(status_code=400, detail=f"session_id must be numeric, got: {session_id}")
 
         if not feedback_type:
             raise HTTPException(status_code=400, detail="feedback_type is required")
@@ -1602,7 +1606,7 @@ async def submit_session_feedback(request: Request):
         if feedback_type not in ['positive', 'negative']:
             raise HTTPException(status_code=400, detail="feedback_type must be 'positive' or 'negative'")
 
-        logger.info(f"🔍 Feedback endpoint: session_id={numeric_session_id}")
+        logger.info(f"🔍 Feedback endpoint: session_id={numeric_session_id}, feedback={feedback_type}")
 
         # Update feedback in database
         success = await chat_log_service.dao.update_session_feedback(numeric_session_id, feedback_type)
@@ -1615,7 +1619,7 @@ async def submit_session_feedback(request: Request):
         return {
             "success": True,
             "message": "Feedback submitted successfully",
-            "session_id": numeric_session_id,
+            "session_id": session_uuid if session_uuid else str(numeric_session_id),  # Return UUID, not numeric ID
             "feedback_type": feedback_type
         }
     except HTTPException:
