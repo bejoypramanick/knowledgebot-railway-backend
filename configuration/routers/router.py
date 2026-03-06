@@ -1336,8 +1336,8 @@ async def send_customer_message(request: Request):
 
         return {
             "success": True,
-            "message_id": str(message_id),
-            "session_id": session_uuid
+            "message_id": str(message_id)
+            # session_id intentionally omitted - it's in httpOnly cookie only
         }
     except HTTPException:
         raise
@@ -1565,8 +1565,8 @@ async def end_customer_session(request: Request):
 
         return {
             "success": True,
-            "message": "Session ended by customer",
-            "session_id": session_uuid  # Return UUID, not numeric ID
+            "message": "Session ended by customer"
+            # session_id intentionally omitted - it's in httpOnly cookie only
         }
     except HTTPException:
         raise
@@ -1619,8 +1619,8 @@ async def submit_session_feedback(request: Request):
         return {
             "success": True,
             "message": "Feedback submitted successfully",
-            "session_id": session_uuid if session_uuid else str(numeric_session_id),  # Return UUID, not numeric ID
             "feedback_type": feedback_type
+            # session_id intentionally omitted - it's in httpOnly cookie only
         }
     except HTTPException:
         raise
