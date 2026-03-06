@@ -277,6 +277,24 @@ class StreamingService:
                                     assigned_agent = result.get('agent_assigned')
                                     logger.info(f"✅ Agent {assigned_agent} assigned before AI response")
                                     
+                                    # Small delay to ensure database commit completes
+                                    await asyncio.sleep(0.1)
+                                    
+                                    # Verify assignment was saved in database
+                                    verify_query = """
+                                        SELECT u.email as agent_email
+                                        FROM session_assignments sa
+                                        LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                                        LEFT JOIN users u ON urm.user_id = u.id
+                                        WHERE sa.session_id = :session_id AND sa.status = 'active'
+                                    """
+                                    verify_result = await db_session.execute(text(verify_query), {"session_id": numeric_session_id})
+                                    verify_row = verify_result.mappings().first()
+                                    if verify_row:
+                                        logger.info(f"✅ Verified agent assignment in database: {verify_row['agent_email']}")
+                                    else:
+                                        logger.warning(f"⚠️ Agent assignment not found in database yet for session {numeric_session_id}")
+                                    
                                     # Cache the agent assignment immediately for future message broadcasts
                                     from shared.redis_pubsub_manager import get_pubsub_redis
                                     redis_client = await get_pubsub_redis()

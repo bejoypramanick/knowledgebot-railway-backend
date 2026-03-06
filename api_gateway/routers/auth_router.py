@@ -132,6 +132,8 @@ def create_session(user_data: Dict[str, Any], ip_address: str = None, user_agent
         "email": user_data.get("email"),
         "name": user_data.get("name", user_data.get("email")),
         "picture": user_data.get("picture"),
+        "role": user_data.get("role", "user"),  # Store user role
+        "roles": user_data.get("roles", ["user"]),  # Store all roles
         "created_at": int(time.time()),
         "expires_at": int(time.time()) + SESSION_MAX_AGE,
         # Security: Bind session to IP and User Agent
@@ -144,7 +146,7 @@ def create_session(user_data: Dict[str, Any], ip_address: str = None, user_agent
     # Store session in Redis/memory with TTL
     store.create(session_id, session_data, SESSION_MAX_AGE)
     
-    logger.info(f"✅ Session created for user {user_data.get('email')} from IP {ip_address} (expires in {SESSION_MAX_AGE}s)")
+    logger.info(f"✅ Session created for user {user_data.get('email')} (role={user_data.get('role')}) from IP {ip_address} (expires in {SESSION_MAX_AGE}s)")
     
     return session_id
 
@@ -173,8 +175,9 @@ async def create_session_endpoint(
     1. Frontend gets Firebase ID token after Google sign-in
     2. Frontend calls this endpoint with the token and context
     3. Backend verifies token with Firebase Admin SDK
-    4. Backend creates session and sets httpOnly, secure cookie
-    5. Frontend uses cookie for all subsequent requests (automatic)
+    4. Backend fetches user role from database
+    5. Backend creates session and sets httpOnly, secure cookie
+    6. Frontend uses cookie for all subsequent requests (automatic)
     
     Context-aware cookie configuration:
     - Admin/Agent screens: SameSite=Lax (same-site only, more secure)
@@ -189,7 +192,7 @@ async def create_session_endpoint(
         request.context: "admin" (default) or "widget"
     
     Returns:
-        User data (uid, email, name, picture)
+        User data (uid, email, name, picture, role)
     """
     try:
         logger.info(f"🔐 [SESSION_CREATE] Received session creation request")
@@ -208,6 +211,27 @@ async def create_session_endpoint(
             )
         
         logger.info(f"✅ [SESSION_CREATE] Firebase token verified for user: {user_data.get('email')}")
+        
+        # Fetch user role from database
+        from configuration.service.auth_service import AuthService
+        auth_service = AuthService()
+        try:
+            role_result = await auth_service.get_user_role(user_data.get('email'))
+            roles = role_result.get('roles', [])
+            # Determine primary role: admin > human_agent > user
+            if 'admin' in roles:
+                user_role = 'admin'
+            elif 'human_agent' in roles:
+                user_role = 'human_agent'
+            else:
+                user_role = 'user'
+            user_data['role'] = user_role
+            user_data['roles'] = roles
+            logger.info(f"✅ [SESSION_CREATE] User role fetched: {user_role} (all roles: {roles})")
+        except Exception as e:
+            logger.warning(f"⚠️ [SESSION_CREATE] Failed to fetch user role: {e}")
+            user_data['role'] = 'user'  # Default to user if role fetch fails
+            user_data['roles'] = ['user']
         
         # Get client IP and User-Agent for session binding
         ip_address = req.client.host if req.client else None
