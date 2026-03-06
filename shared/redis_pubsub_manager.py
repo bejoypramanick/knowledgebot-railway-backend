@@ -245,7 +245,7 @@ class SessionEventSubscriber:
             
             # Subscribe to session-specific channel
             session_channel = f"session:events:{self.session_id}"
-            self.pubsub.subscribe(session_channel)
+            await self.pubsub.subscribe(session_channel)
             
             logger.info(f"🔌 Customer subscribed to session {self.session_id}")
             
@@ -255,23 +255,16 @@ class SessionEventSubscriber:
                 'session_id': self.session_id
             }
             
-            # Listen for messages
-            while True:
+            # Listen for messages using async iteration
+            async for message in self.pubsub.listen():
                 try:
-                    # Get message with timeout (for heartbeat)
-                    message = self.pubsub.get_message(timeout=30.0)
-                    
-                    if message and message['type'] == 'message':
+                    if message['type'] == 'message':
                         # Parse and yield event data
                         event_data = json.loads(message['data'])
                         yield event_data
-                    
-                    elif message is None:
-                        # Timeout - send heartbeat
-                        yield {'type': 'ping'}
-                    
-                    # Small sleep to prevent busy loop
-                    await asyncio.sleep(0.1)
+                    elif message['type'] == 'subscribe':
+                        # Subscription confirmation
+                        continue
                     
                 except json.JSONDecodeError as e:
                     logger.error(f"❌ Invalid JSON in Redis message: {e}")
@@ -330,12 +323,12 @@ class AgentEventSubscriber:
             
             # Subscribe to agent-specific channel
             agent_channel = f"agent:events:{self.agent_email}"
-            self.pubsub.subscribe(agent_channel)
+            await self.pubsub.subscribe(agent_channel)
             
             # Admins also subscribe to broadcast channel
             if self.role == 'admin':
                 broadcast_channel = "agent:events:broadcast"
-                self.pubsub.subscribe(broadcast_channel)
+                await self.pubsub.subscribe(broadcast_channel)
                 logger.info(f"🔌 Admin {self.agent_email} subscribed to broadcast channel")
             
             logger.info(f"🔌 Agent {self.agent_email} subscribed to Redis Pub/Sub")
@@ -347,23 +340,16 @@ class AgentEventSubscriber:
                 'role': self.role
             }
             
-            # Listen for messages
-            while True:
+            # Listen for messages using async iteration
+            async for message in self.pubsub.listen():
                 try:
-                    # Get message with timeout (for heartbeat)
-                    message = self.pubsub.get_message(timeout=30.0)
-                    
-                    if message and message['type'] == 'message':
+                    if message['type'] == 'message':
                         # Parse and yield event data
                         event_data = json.loads(message['data'])
                         yield event_data
-                    
-                    elif message is None:
-                        # Timeout - send heartbeat
-                        yield {'type': 'ping'}
-                    
-                    # Small sleep to prevent busy loop
-                    await asyncio.sleep(0.1)
+                    elif message['type'] == 'subscribe':
+                        # Subscription confirmation
+                        continue
                     
                 except json.JSONDecodeError as e:
                     logger.error(f"❌ Invalid JSON in Redis message: {e}")
