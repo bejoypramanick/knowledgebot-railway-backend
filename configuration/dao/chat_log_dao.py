@@ -572,6 +572,43 @@ class ChatLogDAO:
         logger.info(f"🔍 [CHATLOG-DAO] get_latest_messages_batch called for {len(session_ids)} sessions")
         logger.info(f"🔍 [CHATLOG-DAO] Session IDs: {session_ids}")
         
+        # Check for database locks before executing query
+        lock_check_query = """
+            SELECT 
+                pid,
+                usename,
+                application_name,
+                state,
+                query,
+                wait_event_type,
+                wait_event,
+                pg_blocking_pids(pid) as blocking_pids
+            FROM pg_stat_activity
+            WHERE state != 'idle'
+            AND pid != pg_backend_pid()
+            ORDER BY query_start DESC
+            LIMIT 10
+        """
+        
+        try:
+            async with get_db_session() as session:
+                lock_result = await session.execute(text(lock_check_query))
+                lock_rows = lock_result.fetchall()
+                if lock_rows:
+                    logger.info(f"📊 [DB-ACTIVITY] Active database connections: {len(lock_rows)}")
+                    for row in lock_rows:
+                        row_dict = dict(row._mapping)
+                        if row_dict.get('wait_event_type'):
+                            logger.warning(f"⚠️ [DB-WAIT] PID {row_dict['pid']}: {row_dict['state']} - Waiting on {row_dict['wait_event_type']}/{row_dict['wait_event']} - Blocked by: {row_dict['blocking_pids']}")
+        except Exception as e:
+            logger.warning(f"⚠️ [DB-ACTIVITY] Could not check database activity: {e}")
+        
+        # Check connection pool status BEFORE query
+        from shared.sqlalchemy_db import _engine
+        if _engine:
+            pool = _engine.pool
+            logger.info(f"📊 [POOL-BEFORE] Pool size: {pool.size()}, Checked out: {pool.checkedout()}, Overflow: {pool.overflow()}, Total: {pool.size() + pool.overflow()}")
+        
         # Use a simpler approach: for each session, get the message with MAX(id)
         query = """
             SELECT cm.*
@@ -586,21 +623,42 @@ class ChatLogDAO:
         
         try:
             params = {"session_ids": session_ids}
-            logger.info(f"🔍 [CHATLOG-DAO] About to execute query...")
-            logger.log_db_operation(query, params)
+            logger.info(f"🔍 [CHATLOG-DAO] About to get DB session...")
             
-            db_start = time.time()
-            logger.info(f"🔍 [CHATLOG-DAO] Executing query at {db_start}...")
-            
+            session_acquire_start = time.time()
             async with get_db_session() as session:
+                session_acquire_duration = time.time() - session_acquire_start
+                logger.info(f"⏱️ [CHATLOG-DAO] DB session acquired in {session_acquire_duration:.2f}s")
+                
+                if session_acquire_duration > 5:
+                    logger.warning(f"⚠️ [CHATLOG-DAO] Slow session acquisition! Took {session_acquire_duration:.2f}s - possible pool exhaustion")
+                
+                logger.info(f"🔍 [CHATLOG-DAO] About to execute query...")
+                logger.log_db_operation(query, params)
+                
+                query_start = time.time()
                 result = await session.execute(text(query), params)
+                query_duration = time.time() - query_start
+                logger.info(f"⏱️ [CHATLOG-DAO] Query executed in {query_duration:.2f}s")
+                
+                if query_duration > 5:
+                    logger.warning(f"⚠️ [CHATLOG-DAO] Slow query execution! Took {query_duration:.2f}s")
+                
+                fetch_start = time.time()
                 rows = result.fetchall()
+                fetch_duration = time.time() - fetch_start
+                logger.info(f"⏱️ [CHATLOG-DAO] Results fetched in {fetch_duration:.2f}s")
             
-            db_duration = time.time() - db_start
-            logger.info(f"🔍 [CHATLOG-DAO] Query completed after {db_duration:.2f}s")
+            # Check connection pool status AFTER query
+            if _engine:
+                pool = _engine.pool
+                logger.info(f"📊 [POOL-AFTER] Pool size: {pool.size()}, Checked out: {pool.checkedout()}, Overflow: {pool.overflow()}, Total: {pool.size() + pool.overflow()}")
+            
+            db_duration = time.time() - start_time
             
             result_dict = {row.session_id: dict(row._mapping) for row in rows}
-            logger.info(f"⏱️ [CHATLOG-DAO] Fetched {len(result_dict)} latest messages in {db_duration:.2f}s (total: {time.time() - start_time:.2f}s)")
+            logger.info(f"⏱️ [CHATLOG-DAO] Fetched {len(result_dict)} latest messages in {db_duration:.2f}s")
+            logger.info(f"⏱️ [CHATLOG-DAO] Breakdown - Acquire: {session_acquire_duration:.2f}s, Execute: {query_duration:.2f}s, Fetch: {fetch_duration:.2f}s")
             
             return result_dict
         except Exception as e:
@@ -608,6 +666,12 @@ class ChatLogDAO:
             import traceback
             logger.error(f"❌ [CHATLOG-DAO] Traceback: {traceback.format_exc()}")
             logger.log_db_query(query, params, error=e)
+            
+            # Check pool status on error
+            if _engine:
+                pool = _engine.pool
+                logger.error(f"📊 [POOL-ERROR] Pool size: {pool.size()}, Checked out: {pool.checkedout()}, Overflow: {pool.overflow()}")
+            
             return {}
 
 

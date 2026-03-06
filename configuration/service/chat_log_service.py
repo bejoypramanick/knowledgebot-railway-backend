@@ -160,12 +160,13 @@ class ChatLogService:
             return [], total_count
 
         session_db_ids = [int(s['id']) if isinstance(s['id'], str) else s['id'] for s in sessions_data]
-        logger.info(f"⚡ [CHATLOG] Skipping message loading - will load on demand when session is clicked")
+        logger.info(f"⚡ [CHATLOG] Fetching latest messages for {len(session_db_ids)} sessions: {session_db_ids[:5]}{'...' if len(session_db_ids) > 5 else ''}")
 
-        # SKIP loading messages - they're causing 60s timeout
-        # Messages will be loaded when user clicks on a session
-        latest_messages = {}
-        logger.info(f"⏱️ [CHATLOG] Step 2: Skipped message loading (0.00s)")
+        # Fetch latest messages for ALL sessions in ONE query (optimized)
+        step_start = time.time()
+        latest_messages = await self.dao.get_latest_messages_batch(session_db_ids)
+        step_duration = time.time() - step_start
+        logger.info(f"⏱️ [CHATLOG] Step 2: Loaded latest messages for {len(latest_messages)} sessions in {step_duration:.2f}s")
 
         # Get all session IDs for batch feedback query (uses session_id UUID)
         session_ids = [s['session_id'] for s in sessions_data]
