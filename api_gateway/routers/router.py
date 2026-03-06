@@ -707,6 +707,11 @@ async def generic_proxy_handler(request: Request, path: str):
                             body_data["session_id"] = request.state.session_numeric_id
                             logger.info(f"✅ Injected numeric session_id into body: {request.state.session_numeric_id}")
 
+                        # ALSO inject session_uuid for broadcasting (customer SSE channels use UUID)
+                        if hasattr(request.state, "session_uuid") and request.state.session_uuid:
+                            body_data["session_uuid"] = request.state.session_uuid
+                            logger.debug(f"✅ Injected session_uuid into body: {request.state.session_uuid}")
+
                         request_body = json.dumps(body_data).encode()
 
                         # IMPORTANT: Update Content-Length header after modifying request body
