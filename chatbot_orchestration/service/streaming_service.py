@@ -337,13 +337,29 @@ class StreamingService:
                                                 "session_id": session_id
                                             })
                                         
+                                        # Get customer_name from metadata or generate it
+                                        metadata = session_dict.get('metadata')
+                                        customer_name = None
+                                        if metadata:
+                                            import json
+                                            if isinstance(metadata, str):
+                                                try:
+                                                    metadata = json.loads(metadata)
+                                                except:
+                                                    metadata = {}
+                                            customer_name = metadata.get('customer_name')
+                                        
+                                        # If customer_name not set, use "User-<numeric_id>" format
+                                        if not customer_name:
+                                            customer_name = f"User-{numeric_session_id}"
+                                        
                                         # Build session event
                                         session_event = {
                                             "type": "session_update",
                                             "data": {
                                                 "id": str(session_dict.get('id')),
                                                 "session_uuid": session_id,
-                                                "customer_name": session_dict.get('customer_name'),
+                                                "customer_name": customer_name,  # Use generated name if not in DB
                                                 "customer_email": session_dict.get('customer_email'),
                                                 "status": session_dict.get('archive_status', 'active'),
                                                 "last_message_at": session_dict.get('last_activity_at').isoformat() if session_dict.get('last_activity_at') else datetime.utcnow().isoformat(),

@@ -1258,7 +1258,7 @@ async def send_customer_message(request: Request):
         import datetime
         event_data = {
             "type": "customer_message",
-            "session_id": str(numeric_session_id),
+            "session_id": session_uuid,  # CRITICAL: Use UUID for SSE channel matching
             "message_id": str(message_id),
             "text": text,
             "sender": "customer",
@@ -1330,7 +1330,7 @@ async def send_agent_message(request: Request):
         import datetime
         event_data = {
             "type": "agent_message",
-            "session_id": str(numeric_session_id),  # Numeric ID for reference
+            "session_id": session_uuid,  # CRITICAL: Use UUID for SSE channel matching
             "message_id": str(message_id),
             "text": text,
             "sender": sender_type,
