@@ -529,17 +529,45 @@ class ChatLogDAO:
 
         logger.info(f"🔍 [CHATLOG-DAO] get_latest_messages_batch called for {len(session_ids)} sessions")
         
-        # Use subquery with MAX(created_at) instead of window function for better performance
-        # This approach uses the index on (session_id, created_at) more efficiently
-        query = """
-            SELECT DISTINCT ON (cm.session_id) 
-                cm.*
-            FROM chat_messages cm
-            WHERE cm.session_id = ANY(:session_ids)
-            ORDER BY cm.session_id, cm.created_at DESC
+        # Simplified approach: Just don't load messages if most sessions don't have them
+        # The frontend shows "No messages yet" for empty sessions anyway
+        # This avoids the 30s query on a large chat_messages table
+        
+        # Quick check: if there are no messages for these sessions, return empty dict
+        count_query = """
+            SELECT COUNT(*) 
+            FROM chat_messages 
+            WHERE session_id = ANY(:session_ids)
         """
+        
         try:
             params = {"session_ids": session_ids}
+            
+            # First check if there are any messages at all
+            async with get_db_session() as session:
+                count_result = await session.execute(text(count_query), params)
+                message_count = count_result.scalar()
+            
+            logger.info(f"🔍 [CHATLOG-DAO] Found {message_count} total messages for {len(session_ids)} sessions")
+            
+            # If no messages, return empty dict immediately
+            if message_count == 0:
+                logger.info(f"⏱️ [CHATLOG-DAO] No messages found, returning empty dict in {time.time() - start_time:.2f}s")
+                return {}
+            
+            # If there are messages, use the optimized query
+            query = """
+                SELECT cm.*
+                FROM chat_messages cm
+                INNER JOIN (
+                    SELECT session_id, MAX(id) as max_id
+                    FROM chat_messages
+                    WHERE session_id = ANY(:session_ids)
+                    GROUP BY session_id
+                ) latest ON cm.session_id = latest.session_id AND cm.id = latest.max_id
+            """
+            
+            logger.info(f"🔍 [CHATLOG-DAO] Executing optimized query for {len(session_ids)} sessions")
             logger.log_db_operation(query, params)
             
             db_start = time.time()
@@ -554,7 +582,7 @@ class ChatLogDAO:
             return result_dict
         except Exception as e:
             logger.error(f"❌ [CHATLOG-DAO] Error in get_latest_messages_batch after {time.time() - start_time:.2f}s: {e}")
-            logger.log_db_query(query, params, error=e)
+            logger.log_db_query(query if 'query' in locals() else count_query, params, error=e)
             return {}
 
 
