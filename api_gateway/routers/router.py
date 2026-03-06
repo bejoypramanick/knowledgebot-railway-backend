@@ -819,6 +819,7 @@ async def generic_proxy_handler(request: Request, path: str):
                                 try:
                                     async with get_db_session() as db_session:
                                         query = text("SELECT id FROM chat_sessions WHERE session_id = :session_uuid")
+                                        logger.debug(f"🔍 Executing query: {query} with session_uuid={client_session_id}")
                                         result = await db_session.execute(query, {"session_uuid": client_session_id})
                                         row = result.mappings().first()
                                         
@@ -827,8 +828,9 @@ async def generic_proxy_handler(request: Request, path: str):
                                             logger.info(f"✅ Resolved UUID to numeric ID: {client_session_id} → {numeric_id}")
                                         else:
                                             logger.warning(f"⚠️ Session UUID not found in database: {client_session_id}")
+                                            logger.warning(f"⚠️ Query returned no results for session_id = '{client_session_id}'")
                                 except Exception as e:
-                                    logger.error(f"❌ Error resolving UUID: {e}")
+                                    logger.error(f"❌ Error resolving UUID: {e}", exc_info=True)
                             
                             if numeric_id:
                                 # Conversion successful - use numeric ID
