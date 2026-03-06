@@ -215,10 +215,35 @@ class StreamingService:
             logger.info(f"🔍 Checking if human agent is assigned to session {session_id}...")
             try:
                 from shared.redis_pubsub_manager import get_pubsub_redis
+                from shared.sqlalchemy_db import get_db_session
+                from sqlalchemy import text
 
                 redis_client = await get_pubsub_redis()
                 cache_key = f"session:assigned_agent:{session_id}"
                 assigned_agent = await redis_client.get(cache_key)
+
+                # If not in Redis cache, check database
+                if not assigned_agent:
+                    logger.info(f"📋 Redis cache miss, checking database for agent assignment...")
+                    try:
+                        async with get_db_session() as db_session:
+                            # Query session_assignments table for active assignment
+                            query = """
+                                SELECT assignee_email FROM session_assignments
+                                WHERE session_id = (SELECT id FROM chat_sessions WHERE session_id = :session_uuid)
+                                AND status = 'active'
+                                LIMIT 1
+                            """
+                            result = await db_session.execute(text(query), {"session_uuid": session_id})
+                            row = result.mappings().first()
+                            if row:
+                                assigned_agent = row['assignee_email']
+                                logger.info(f"✅ Found agent in database: {assigned_agent}")
+                                # Update Redis cache for future requests
+                                await redis_client.set(cache_key, assigned_agent, ex=3600)
+                                logger.info(f"💾 Cached agent assignment in Redis for {session_id}")
+                    except Exception as db_error:
+                        logger.warning(f"⚠️ Database lookup failed: {db_error}")
 
                 if assigned_agent:
                     logger.info(f"👤 Human agent '{assigned_agent}' is assigned to session {session_id}")
