@@ -145,8 +145,8 @@ class ChatLogService:
             logger.error(f"Error getting agent chat count: {e}")
             return 0
 
-    async def assign_chat_with_load_balancing(self, session_id: str) -> Optional[str]:
-        """Assign a chat to an available agent using load balancing."""
+    async def assign_chat_with_load_balancing(self, session_id: int | str) -> Optional[str]:
+        """Assign a chat to an available agent using load balancing (accepts numeric ID or UUID)."""
         try:
             logger.info(f"🔍 [LOAD_BALANCE] Starting load balancing for session {session_id}")
             
@@ -522,7 +522,7 @@ class ChatLogService:
     async def request_human_agent(self, session_id: int):
         """Request human agent connection - accepts numeric ID only (endpoint handles UUID conversion)"""
         logger.info(f"🧑 [HUMAN_AGENT] Request received for session {session_id}")
-        
+
         # Step 1: Check if HIL is enabled
         hil_enabled = await self.dao.get_hil_enabled()
         logger.info(f"🔍 [HUMAN_AGENT] HIL enabled: {hil_enabled}")
@@ -531,9 +531,9 @@ class ChatLogService:
             logger.error(f"❌ [HUMAN_AGENT] HIL is disabled in configuration")
             raise HTTPException(status_code=503, detail="Human agent support is currently disabled")
 
-        # Step 2: Assign chat with load balancing
+        # Step 2: Assign chat with load balancing (keep as numeric ID, don't convert to string)
         logger.info(f"🔍 [HUMAN_AGENT] Starting load balancing for session {session_id}")
-        assigned_agent = await self.assign_chat_with_load_balancing(str(session_id))
+        assigned_agent = await self.assign_chat_with_load_balancing(session_id)
         
         if not assigned_agent:
             logger.error(f"❌ [HUMAN_AGENT] No available agents or admins to assign chat {session_id}")
