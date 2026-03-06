@@ -291,7 +291,7 @@ class ChatLogService:
                     status = 'closed'
 
                 if is_expired and session_row['is_active']:
-                    await self.dao.archive_session(session_id, 'closed') # Effectively close in DB
+                    await self.dao.archive_session(session_db_id, 'closed') # Effectively close in DB
 
             # Use cached feedback counts
             feedback_counts = batch_feedback_counts.get(session_id, {'positive_count': 0, 'negative_count': 0})
