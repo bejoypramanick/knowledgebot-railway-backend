@@ -173,7 +173,11 @@ class SessionStateManager:
                         cached_agent = await redis_client.get(agent_cache_key)
                         
                         if cached_agent:
-                            assigned_agent = cached_agent.decode('utf-8')
+                            # Handle both bytes and string responses from Redis
+                            if isinstance(cached_agent, bytes):
+                                assigned_agent = cached_agent.decode('utf-8')
+                            else:
+                                assigned_agent = str(cached_agent)
                             logger.debug(f"✅ Found cached agent assignment: {session_id} → {assigned_agent}")
                         else:
                             # Not in cache - query database (only happens once per session)
