@@ -177,10 +177,19 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         )
 
     session = None
+    import time
+    start_time = time.time()
+    
     try:
         session = _async_session_maker()
         async with session:
             yield session
+            
+        # Log slow session usage (held for more than 5 seconds)
+        duration = time.time() - start_time
+        if duration > 5.0:
+            logger.warning(f"⚠️ Slow database session: held for {duration:.2f}s")
+            
     except asyncio.CancelledError:
         # Handle request cancellation gracefully
         logger.warning("⚠️ Database session cancelled (likely due to request timeout)")
@@ -199,10 +208,10 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 async def health_check() -> dict:
     """
-    Perform database health check.
+    Perform database health check with connection pool stats.
 
     Returns:
-        dict with status and latency
+        dict with status, latency, and pool statistics
     """
     import time
 
@@ -220,10 +229,26 @@ async def health_check() -> dict:
             await conn.execute(text("SELECT 1"))
 
         latency_ms = (time.time() - start) * 1000
+        
+        # Get connection pool statistics
+        pool = _engine.pool
+        pool_stats = {
+            "size": pool.size(),
+            "checked_in": pool.checkedin(),
+            "checked_out": pool.checkedout(),
+            "overflow": pool.overflow(),
+            "total_connections": pool.size() + pool.overflow(),
+        }
+        
+        # Log pool stats if connections are getting exhausted
+        if pool.checkedout() > pool.size() * 0.8:
+            logger.warning(f"⚠️ Connection pool usage high: {pool_stats}")
+        
         return {
             "status": "healthy",
             "message": "Database connection healthy",
             "latency_ms": round(latency_ms, 2),
+            "pool": pool_stats,
         }
 
     except Exception as e:
