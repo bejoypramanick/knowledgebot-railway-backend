@@ -694,7 +694,10 @@ async def request_human_agent_connection(
                                 }
                             }
                             logger.info(f"🔄 Broadcasting session event to agent {assigned_agent}...")
-                            await broadcast_event_to_agent(assigned_agent, session_event)
+                            logger.info(f"🔄 Event type: {session_event.get('type')}, agent: {assigned_agent}")
+                            logger.info(f"🔄 Session event data keys: {session_event.get('data', {}).keys() if session_event.get('data') else 'NO DATA'}")
+                            result = await broadcast_event_to_agent(assigned_agent, session_event)
+                            logger.info(f"🔄 Broadcast result: {result}, returned from broadcast_event_to_agent")
                             logger.info(f"📤 Broadcasted session {session_uuid} to agent {assigned_agent}")
                         else:
                             logger.warning(f"⚠️ Session query returned no results for id={session_numeric_id}")
