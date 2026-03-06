@@ -529,45 +529,33 @@ class ChatLogDAO:
 
         logger.info(f"🔍 [CHATLOG-DAO] get_latest_messages_batch called for {len(session_ids)} sessions")
         
-        # Simplified approach: Just don't load messages if most sessions don't have them
-        # The frontend shows "No messages yet" for empty sessions anyway
-        # This avoids the 30s query on a large chat_messages table
-        
-        # Quick check: if there are no messages for these sessions, return empty dict
-        count_query = """
-            SELECT COUNT(*) 
-            FROM chat_messages 
-            WHERE session_id = ANY(:session_ids)
+        # Use a simpler approach: for each session, get the message with MAX(id)
+        query = """
+            SELECT cm.*
+            FROM chat_messages cm
+            INNER JOIN (
+                SELECT session_id, MAX(id) as max_id
+                FROM chat_messages
+                WHERE session_id = ANY(:session_ids)
+                GROUP BY session_id
+            ) latest ON cm.session_id = latest.session_id AND cm.id = latest.max_id
         """
+        
+        # Add EXPLAIN ANALYZE to see what's happening
+        explain_query = f"EXPLAIN ANALYZE {query}"
         
         try:
             params = {"session_ids": session_ids}
+            logger.info(f"🔍 [CHATLOG-DAO] Executing query for {len(session_ids)} sessions")
             
-            # First check if there are any messages at all
+            # First run EXPLAIN ANALYZE to see the query plan
             async with get_db_session() as session:
-                count_result = await session.execute(text(count_query), params)
-                message_count = count_result.scalar()
+                explain_result = await session.execute(text(explain_query), params)
+                explain_rows = explain_result.fetchall()
+                logger.info(f"📊 [CHATLOG-DAO] EXPLAIN ANALYZE:")
+                for row in explain_rows:
+                    logger.info(f"📊 {row[0]}")
             
-            logger.info(f"🔍 [CHATLOG-DAO] Found {message_count} total messages for {len(session_ids)} sessions")
-            
-            # If no messages, return empty dict immediately
-            if message_count == 0:
-                logger.info(f"⏱️ [CHATLOG-DAO] No messages found, returning empty dict in {time.time() - start_time:.2f}s")
-                return {}
-            
-            # If there are messages, use the optimized query
-            query = """
-                SELECT cm.*
-                FROM chat_messages cm
-                INNER JOIN (
-                    SELECT session_id, MAX(id) as max_id
-                    FROM chat_messages
-                    WHERE session_id = ANY(:session_ids)
-                    GROUP BY session_id
-                ) latest ON cm.session_id = latest.session_id AND cm.id = latest.max_id
-            """
-            
-            logger.info(f"🔍 [CHATLOG-DAO] Executing optimized query for {len(session_ids)} sessions")
             logger.log_db_operation(query, params)
             
             db_start = time.time()
@@ -582,7 +570,7 @@ class ChatLogDAO:
             return result_dict
         except Exception as e:
             logger.error(f"❌ [CHATLOG-DAO] Error in get_latest_messages_batch after {time.time() - start_time:.2f}s: {e}")
-            logger.log_db_query(query if 'query' in locals() else count_query, params, error=e)
+            logger.log_db_query(query, params, error=e)
             return {}
 
 
