@@ -578,36 +578,21 @@ async def request_human_agent_connection(
     This will assign the chat to an available human agent and the chat will appear in their chat log.
     The agent will see the FULL chat history including all previous AI conversations.
     """
-    session_uuid = ctx.deps.session_id  # This is the chat session UUID
-    logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_uuid} with reason: {reason}")
+    # ctx.deps.session_id is already the numeric session ID (converted by API Gateway from UUID)
+    session_numeric_id = ctx.deps.session_id
+    logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_numeric_id} with reason: {reason}")
 
     try:
         import httpx
-        from shared.sqlalchemy_db import get_db_session
-        from configuration.dao.chat_log_dao import ChatLogDAO
 
-        # Step 1: Convert UUID to numeric session ID
-        # Internal services only work with numeric IDs, not UUIDs
-        # UUIDs are only used by the chat system; API Gateway converts to numeric IDs
-        dao = ChatLogDAO()
-        async for session in get_db_session():
-            session_data = await dao.get_session_by_uuid(session_uuid, session=session)
-
-        if not session_data:
-            logger.error(f"❌ Session {session_uuid} not found in database")
-            return f"I encountered an error while trying to connect you to a human agent: Session not found. Please try again later."
-
-        session_numeric_id = session_data.get('id')
-        logger.info(f"✅ Resolved session UUID {session_uuid} → numeric ID {session_numeric_id}")
-
-        # Step 2: Get configuration service URL from environment
+        # Get configuration service URL from environment
         # Use internal Railway URL for service-to-service communication
         config_service_url = os.getenv(
             'CONFIGURATION_SERVICE_URL',
             'http://configuration.railway.internal:8080'
         )
 
-        # Step 3: Call the configuration service to assign a human agent
+        # Call the configuration service to assign a human agent
         # Pass numeric session_id - internal services only accept numeric IDs
         # This will:
         # 1. Find an available agent using load balancing
@@ -626,11 +611,11 @@ async def request_human_agent_connection(
                 json={"session_id": session_numeric_id},  # Send numeric session_id - internal services only accept numeric IDs
                 headers={}
             )
-            
+
             if response.status_code == 200:
                 result = response.json()
                 assigned_agent = result.get('agent_assigned', 'an agent')
-                logger.info(f"✅ Chat {session_id} assigned to human agent {assigned_agent}")
+                logger.info(f"✅ Chat {session_numeric_id} assigned to human agent {assigned_agent}")
                 logger.info(f"📚 Agent will see full chat history from chat_messages table")
                 return f"👋 I've connected you to a human agent ({assigned_agent}). They will join the conversation shortly and can see your full chat history. The chat has been opened in their chat log. 💪\n"
             elif response.status_code == 503:
@@ -642,7 +627,7 @@ async def request_human_agent_connection(
                 logger.error(f"❌ Human agent request failed with status {response.status_code}: {error_detail}")
                 logger.error(f"❌ Response body: {response.text}")
                 return f"I encountered an error while trying to connect you to a human agent: {error_detail}. Please try again later."
-                
+
     except httpx.TimeoutException:
         logger.error("⏱️ Timeout while requesting human agent connection")
         return "The request to connect to a human agent timed out. Please try again."
