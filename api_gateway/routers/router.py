@@ -801,14 +801,17 @@ async def generic_proxy_handler(request: Request, path: str):
                         # Configuration service endpoints MUST receive numeric session_id only
                         if isinstance(client_session_id, str) and client_session_id.startswith("session_"):
                             # Client sent UUID - must convert to numeric
+                            # Two scenarios:
+                            # 1. Customer endpoints: UUID from cookie, middleware already resolved it
+                            # 2. Admin endpoints: UUID from request body, need to resolve it here
                             numeric_id = None
                             
-                            # First check if middleware already resolved it
+                            # First check if middleware already resolved it (customer endpoints)
                             if hasattr(request.state, "session_numeric_id") and request.state.session_numeric_id:
                                 numeric_id = request.state.session_numeric_id
                                 logger.info(f"🔄 Using middleware-resolved numeric ID: {client_session_id} → {numeric_id}")
                             else:
-                                # Middleware didn't resolve it - do it here
+                                # Middleware didn't resolve it (admin endpoints) - do it here
                                 logger.info(f"🔍 Resolving UUID from request body: {client_session_id}")
                                 from sqlalchemy import text
                                 from shared.sqlalchemy_db import get_db_session
