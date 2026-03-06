@@ -370,15 +370,9 @@ async def public_chat_stream(request: Request):
         import json
         from ..core.config import get_settings
 
-        # Get request body and remove session_id and use_rag from it
-        # Client shouldn't send these - they come from cookie/headers
+        # Get request body - just pass it through as-is
+        # Client should NOT send session_id (comes from cookie) or use_rag (defaults to true)
         body_bytes = await request.body()
-        body = json.loads(body_bytes) if body_bytes else {}
-
-        body.pop("session_id", None)
-        body.pop("use_rag", None)
-
-        body_bytes = json.dumps(body).encode() if body else b''
 
         # Only check chat enabled status on first message of each session
         if not hasattr(request.state, 'chat_status_checked'):
@@ -448,12 +442,6 @@ async def public_chat_stream(request: Request):
         headers = dict(request.headers)
         headers.pop("host", None)
         headers.pop("authorization", None)
-
-        # Update Content-Length header after modifying body
-        if body_bytes:
-            headers["Content-Length"] = str(len(body_bytes))
-        else:
-            headers.pop("content-length", None)
 
         # Make request to chatbot service
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
