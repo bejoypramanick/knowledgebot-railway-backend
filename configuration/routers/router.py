@@ -709,20 +709,63 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
 
         async def event_generator():
             """
-            Generator that yields SSE events from Redis Pub/Sub.
-            Automatic cleanup on disconnect.
+            Generator that yields SSE events from Redis Pub/Sub with heartbeat.
+            Heartbeat (every 15s) keeps connection alive to prevent CDN/gateway timeouts.
             """
+            import asyncio
+            import time
+
+            heartbeat_task = None
+            redis_task = None
             try:
-                # Subscribe and yield events as they arrive from Redis
-                async for event_data in subscriber.subscribe():
-                    yield f"data: {json.dumps(event_data)}\n\n"
-                    
+                async def heartbeat_loop(queue):
+                    """Send keep-alive heartbeat to queue every 15 seconds"""
+                    try:
+                        while True:
+                            await asyncio.sleep(15)
+                            await queue.put({"type": "heartbeat", "timestamp": int(time.time())})
+                    except asyncio.CancelledError:
+                        pass
+
+                # Create a queue for both heartbeat and Redis events
+                message_queue = asyncio.Queue()
+                heartbeat_task = asyncio.create_task(heartbeat_loop(message_queue))
+
+                # Task to forward Redis events to queue
+                async def forward_redis_events():
+                    try:
+                        async for event_data in subscriber.subscribe():
+                            await message_queue.put(event_data)
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        heartbeat_task.cancel()
+
+                redis_task = asyncio.create_task(forward_redis_events())
+
+                # Yield messages from queue
+                while True:
+                    try:
+                        msg = await asyncio.wait_for(message_queue.get(), timeout=30)
+                        if msg.get("type") == "heartbeat":
+                            # SSE comment (: prefix) doesn't trigger client event
+                            yield f": keep-alive {msg['timestamp']}\n\n"
+                        else:
+                            # Real event data
+                            yield f"data: {json.dumps(msg)}\n\n"
+                    except asyncio.TimeoutError:
+                        # Queue empty for 30s, send heartbeat manually
+                        yield f": timeout-heartbeat {int(time.time())}\n\n"
+
             except asyncio.CancelledError:
                 logger.info(f"🔌 SSE connection cancelled for {user_email}")
             except Exception as e:
                 logger.error(f"❌ Error in SSE generator for {user_email}: {e}")
             finally:
-                # Cleanup is automatic in subscriber.subscribe()
+                if heartbeat_task:
+                    heartbeat_task.cancel()
+                if redis_task:
+                    redis_task.cancel()
                 logger.info(f"🔌 Agent {user_email} disconnected from Redis Pub/Sub SSE stream")
 
         return StreamingResponse(
@@ -765,19 +808,63 @@ async def customer_events_stream(session_id: str):
         
         async def event_generator():
             """
-            Generator that yields SSE events from Redis Pub/Sub.
-            Automatic cleanup on disconnect.
+            Generator that yields SSE events from Redis Pub/Sub with heartbeat.
+            Heartbeat (every 15s) keeps connection alive to prevent CDN/gateway timeouts.
             """
+            import asyncio
+            import time
+
+            heartbeat_task = None
+            redis_task = None
             try:
-                # Subscribe and yield events as they arrive from Redis
-                async for event_data in subscriber.subscribe():
-                    yield f"data: {json.dumps(event_data)}\n\n"
-                    
+                async def heartbeat_loop(queue):
+                    """Send keep-alive heartbeat to queue every 15 seconds"""
+                    try:
+                        while True:
+                            await asyncio.sleep(15)
+                            await queue.put({"type": "heartbeat", "timestamp": int(time.time())})
+                    except asyncio.CancelledError:
+                        pass
+
+                # Create a queue for both heartbeat and Redis events
+                message_queue = asyncio.Queue()
+                heartbeat_task = asyncio.create_task(heartbeat_loop(message_queue))
+
+                # Task to forward Redis events to queue
+                async def forward_redis_events():
+                    try:
+                        async for event_data in subscriber.subscribe():
+                            await message_queue.put(event_data)
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        heartbeat_task.cancel()
+
+                redis_task = asyncio.create_task(forward_redis_events())
+
+                # Yield messages from queue
+                while True:
+                    try:
+                        msg = await asyncio.wait_for(message_queue.get(), timeout=30)
+                        if msg.get("type") == "heartbeat":
+                            # SSE comment (: prefix) doesn't trigger client event
+                            yield f": keep-alive {msg['timestamp']}\n\n"
+                        else:
+                            # Real event data
+                            yield f"data: {json.dumps(msg)}\n\n"
+                    except asyncio.TimeoutError:
+                        # Queue empty for 30s, send heartbeat manually
+                        yield f": timeout-heartbeat {int(time.time())}\n\n"
+
             except asyncio.CancelledError:
                 logger.info(f"🔌 SSE connection cancelled for session {session_id}")
             except Exception as e:
                 logger.error(f"❌ Error in SSE generator for session {session_id}: {e}")
             finally:
+                if heartbeat_task:
+                    heartbeat_task.cancel()
+                if redis_task:
+                    redis_task.cancel()
                 logger.info(f"🔌 Customer disconnected from session {session_id}")
         
         return StreamingResponse(
