@@ -186,7 +186,7 @@ app.add_middleware(
 # COOP/COEP headers middleware to fix Cross-Origin-Opener-Policy issues
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
-    """Add security headers to prevent COOP/COEP issues with popup windows."""
+    """Add security headers with targeted COOP policy based on endpoint type."""
     # Skip database check for health endpoint
     if request.url.path == "/health":
         response = await call_next(request)
@@ -203,11 +203,24 @@ async def add_security_headers(request: Request, call_next):
                 }
             )
         response = await call_next(request)
-    
-    # Set COOP and COEP headers to allow popup operations without restrictions
-    response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-    response.headers["Cross-Origin-Embedder-Policy"] = "unsafe-none"
-    
+
+    # Targeted COOP policy:
+    # - Auth endpoints: allow popups (Firebase auth, OAuth, etc.)
+    # - Other endpoints: strict same-origin
+    path = request.url.path
+    auth_endpoints = ['/auth/', '/login', '/session', '/verify']
+
+    is_auth_endpoint = any(path.startswith(ep) for ep in auth_endpoints)
+
+    if is_auth_endpoint:
+        # Allow popups for authentication flows
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin-allow-popups"
+        response.headers["Cross-Origin-Embedder-Policy"] = "unsafe-none"
+    else:
+        # Strict policy for non-auth endpoints
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Embedder-Policy"] = "unsafe-none"
+
     return response
 
 # Health check endpoint
