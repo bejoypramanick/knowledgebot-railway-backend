@@ -341,7 +341,6 @@ class StreamingService:
                                         metadata = session_dict.get('metadata')
                                         customer_name = None
                                         if metadata:
-                                            import json
                                             if isinstance(metadata, str):
                                                 try:
                                                     metadata = json.loads(metadata)
