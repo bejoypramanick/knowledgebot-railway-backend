@@ -592,6 +592,24 @@ async def request_human_agent_connection(
     logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_uuid} (numeric: {session_numeric_id}) with reason: {reason}")
     logger.info(f"📍 Tool execution starting - session_numeric_id={session_numeric_id}, session_uuid={session_uuid}")
 
+    # Check if agent is already assigned (prevents duplicate calls)
+    try:
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text
+        
+        async with get_db_session() as db_session:
+            check_query = "SELECT assigned_agent_email FROM chat_sessions WHERE id = :id LIMIT 1"
+            result = await db_session.execute(text(check_query), {"id": session_numeric_id})
+            row = result.mappings().first()
+            
+            if row and row.get('assigned_agent_email'):
+                assigned_agent = row['assigned_agent_email']
+                logger.info(f"✅ Agent already assigned: {assigned_agent} - skipping duplicate assignment")
+                return f"👋 You're already connected to a human agent ({assigned_agent}). They will respond shortly. 💪\n"
+    except Exception as e:
+        logger.warning(f"⚠️ Could not check existing agent assignment: {e}")
+        # Continue with assignment attempt if check fails
+
     try:
         import httpx
 

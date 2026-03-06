@@ -753,12 +753,16 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
             """
             Generator that yields SSE events from Redis Pub/Sub with heartbeat.
             Heartbeat (every 15s) keeps connection alive to prevent CDN/gateway timeouts.
+            Includes inactivity timeout (5 minutes) to clean up stale connections.
             """
             import asyncio
             import time
 
             heartbeat_task = None
             redis_task = None
+            last_activity = time.time()
+            channel_name = f"agent:events:{user_email}"
+
             try:
                 async def heartbeat_loop(queue):
                     """Send keep-alive heartbeat to queue every 15 seconds"""
@@ -804,13 +808,25 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                 try:
                     while True:
                         try:
+                            # Check for inactivity timeout (5 minutes)
+                            current_time = time.time()
+                            if current_time - last_activity > 300:
+                                logger.info(f"⏱️ Connection timeout for {user_email} on channel {channel_name} - no activity for 5 minutes")
+                                break
+
                             msg = await asyncio.wait_for(message_queue.get(), timeout=30)
                             if msg.get("type") == "heartbeat":
                                 # SSE comment (: prefix) doesn't trigger client event
                                 yield f": keep-alive {msg['timestamp']}\n\n"
                             else:
-                                # Real event data
+                                # Real event data - update last_activity
+                                last_activity = time.time()
                                 yield f"data: {json.dumps(msg)}\n\n"
+
+                                # Check if session ended - close connection immediately
+                                if msg.get("type") == "session_ended":
+                                    logger.info(f"🛑 Session ended event received for {user_email} on channel {channel_name} - closing connection")
+                                    break
                         except asyncio.TimeoutError:
                             # Queue empty for 30s, send heartbeat manually
                             yield f": timeout-heartbeat {int(time.time())}\n\n"
@@ -819,10 +835,10 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                             # Continue listening, don't break
                             continue
                         except Exception as e:
-                            logger.error(f"❌ Error yielding message: {e}")
-                            # On error, wait a bit then continue (don't break connection abruptly)
-                            await asyncio.sleep(0.1)
-                            continue
+                            logger.error(f"❌ Error yielding message to {user_email}: {e}")
+                            # Yield failed = client disconnected. Close connection and cleanup.
+                            logger.info(f"🔌 Client {user_email} disconnected (yield error on channel {channel_name}) - closing connection")
+                            break
 
                 except asyncio.CancelledError:
                     logger.info(f"🔌 SSE connection cancelled for {user_email}")
@@ -971,12 +987,16 @@ async def customer_events_stream(request: Request):
             """
             Generator that yields SSE events from Redis Pub/Sub with heartbeat.
             Heartbeat (every 15s) keeps connection alive to prevent CDN/gateway timeouts.
+            Includes inactivity timeout (5 minutes) to clean up stale connections.
             """
             import asyncio
             import time
 
             heartbeat_task = None
             redis_task = None
+            last_activity = time.time()
+            channel_name = f"session:events:{session_id}"
+
             try:
                 async def heartbeat_loop(queue):
                     """Send keep-alive heartbeat to queue every 15 seconds"""
@@ -1022,13 +1042,25 @@ async def customer_events_stream(request: Request):
                 try:
                     while True:
                         try:
+                            # Check for inactivity timeout (5 minutes)
+                            current_time = time.time()
+                            if current_time - last_activity > 300:
+                                logger.info(f"⏱️ Connection timeout for session {session_id} on channel {channel_name} - no activity for 5 minutes")
+                                break
+
                             msg = await asyncio.wait_for(message_queue.get(), timeout=30)
                             if msg.get("type") == "heartbeat":
                                 # SSE comment (: prefix) doesn't trigger client event
                                 yield f": keep-alive {msg['timestamp']}\n\n"
                             else:
-                                # Real event data
+                                # Real event data - update last_activity
+                                last_activity = time.time()
                                 yield f"data: {json.dumps(msg)}\n\n"
+
+                                # Check if session ended - close connection immediately
+                                if msg.get("type") == "session_ended":
+                                    logger.info(f"🛑 Session ended event received for session {session_id} on channel {channel_name} - closing connection")
+                                    break
                         except asyncio.TimeoutError:
                             # Queue empty for 30s, send heartbeat manually
                             yield f": timeout-heartbeat {int(time.time())}\n\n"
@@ -1037,10 +1069,10 @@ async def customer_events_stream(request: Request):
                             # Continue listening, don't break
                             continue
                         except Exception as e:
-                            logger.error(f"❌ Error yielding message for session {session_id}: {e}")
-                            # On error, wait a bit then continue (don't break connection abruptly)
-                            await asyncio.sleep(0.1)
-                            continue
+                            logger.error(f"❌ Error yielding message to session {session_id}: {e}")
+                            # Yield failed = client disconnected. Close connection and cleanup.
+                            logger.info(f"🔌 Client on session {session_id} disconnected (yield error on channel {channel_name}) - closing connection")
+                            break
 
                 except asyncio.CancelledError:
                     logger.info(f"🔌 SSE connection cancelled for session {session_id}")

@@ -64,6 +64,37 @@ class StreamingService:
 
         logger.info(f"✅ Converted {len(pydantic_messages)} messages to Pydantic AI format")
         return pydantic_messages
+    
+    def _detect_agent_request(self, message: str) -> bool:
+        """
+        Detect if user is explicitly requesting a human agent.
+        Returns True if message contains agent request keywords.
+        """
+        message_lower = message.lower().strip()
+        
+        # Explicit agent request keywords
+        agent_keywords = [
+            "agent",
+            "human",
+            "person",
+            "representative",
+            "support",
+            "help me",
+            "speak to someone",
+            "talk to someone",
+            "connect me",
+            "real person",
+            "customer service",
+            "customer support"
+        ]
+        
+        # Check if any keyword is in the message
+        for keyword in agent_keywords:
+            if keyword in message_lower:
+                logger.info(f"🎯 Detected agent request keyword: '{keyword}' in message: '{message[:50]}...'")
+                return True
+        
+        return False
 
     async def stream_agent_response(
         self,
@@ -211,7 +242,128 @@ class StreamingService:
                 logger.warning("⚠️  WARNING: pydantic_messages is EMPTY!")
                 logger.warning("⚠️  No conversation history will be passed to model!")
 
-            # 🚨 CRITICAL: Check if human agent is assigned BEFORE processing message
+            # 🚨 CRITICAL: Check if user is requesting human agent BEFORE AI responds
+            logger.info(f"🔍 Checking if user is requesting human agent...")
+            user_wants_agent = self._detect_agent_request(message)
+            
+            if user_wants_agent:
+                logger.info(f"🧑 User explicitly requesting human agent - assigning before AI responds")
+                # Assign agent immediately using the tool logic
+                try:
+                    import httpx
+                    config_service_url = os.getenv(
+                        'CONFIGURATION_SERVICE_URL',
+                        'http://configuration.railway.internal:8080'
+                    )
+                    endpoint_url = f"{config_service_url}/api/v1/configuration/admin/chat-sessions/request-agent"
+                    
+                    # Get numeric session ID
+                    async with get_db_session() as db_session:
+                        query = "SELECT id FROM chat_sessions WHERE session_id = :session_uuid LIMIT 1"
+                        result = await db_session.execute(text(query), {"session_uuid": session_id})
+                        row = result.mappings().first()
+                        if row:
+                            numeric_session_id = row['id']
+                            
+                            # Call configuration service to assign agent
+                            async with httpx.AsyncClient(timeout=10.0) as client:
+                                response = await client.post(
+                                    endpoint_url,
+                                    json={"session_id": numeric_session_id}
+                                )
+                                
+                                if response.status_code == 200:
+                                    result = response.json()
+                                    assigned_agent = result.get('agent_assigned')
+                                    logger.info(f"✅ Agent {assigned_agent} assigned before AI response")
+                                    
+                                    # Save user message first
+                                    await session_state_manager.save_message(
+                                        session_id=session_id,
+                                        role="user",
+                                        content=message,
+                                        metadata={"user_email": user_email}
+                                    )
+                                    
+                                    # Broadcast session to agent with all messages
+                                    from shared.redis_pubsub_manager import broadcast_event_to_agent
+                                    from datetime import datetime
+                                    
+                                    # Get session details and messages
+                                    session_query = "SELECT * FROM chat_sessions WHERE id = :id LIMIT 1"
+                                    session_result = await db_session.execute(text(session_query), {"id": numeric_session_id})
+                                    session_row = session_result.mappings().first()
+                                    
+                                    if session_row:
+                                        session_dict = dict(session_row)
+                                        
+                                        # Get ALL messages for this session
+                                        msg_query = "SELECT id, content, role, created_at FROM chat_messages WHERE session_id = :session_id ORDER BY created_at ASC"
+                                        msg_result = await db_session.execute(text(msg_query), {"session_id": numeric_session_id})
+                                        msg_rows = msg_result.mappings().all()
+                                        
+                                        messages = []
+                                        for msg_row in msg_rows:
+                                            messages.append({
+                                                "id": str(msg_row['id']),
+                                                "text": msg_row['content'],
+                                                "sender": msg_row['role'],
+                                                "timestamp": msg_row['created_at'].isoformat() if msg_row['created_at'] else datetime.utcnow().isoformat(),
+                                                "session_id": session_id
+                                            })
+                                        
+                                        # Build session event
+                                        session_event = {
+                                            "type": "session_update",
+                                            "data": {
+                                                "id": str(session_dict.get('id')),
+                                                "session_uuid": session_id,
+                                                "customer_name": session_dict.get('customer_name'),
+                                                "customer_email": session_dict.get('customer_email'),
+                                                "status": session_dict.get('archive_status', 'active'),
+                                                "last_message_at": session_dict.get('last_activity_at').isoformat() if session_dict.get('last_activity_at') else datetime.utcnow().isoformat(),
+                                                "created_at": session_dict.get('created_at').isoformat() if session_dict.get('created_at') else None,
+                                                "assigned_agent": assigned_agent,
+                                                "feedback": None,
+                                                "customer_feedback": None,
+                                                "agent_feedback": None,
+                                                "chat_type": "human-handoff",
+                                                "is_session_read": False,
+                                                "messages": messages
+                                            }
+                                        }
+                                        await broadcast_event_to_agent(assigned_agent, session_event)
+                                        logger.info(f"📤 Broadcasted session with {len(messages)} messages to agent {assigned_agent}")
+                                    
+                                    # Send confirmation to customer
+                                    confirmation_msg = f"👋 I've connected you to a human agent ({assigned_agent}). They will join the conversation shortly and can see your full chat history. 💪\n"
+                                    
+                                    # Save AI confirmation message
+                                    await session_state_manager.save_message(
+                                        session_id=session_id,
+                                        role="assistant",
+                                        content=confirmation_msg,
+                                        metadata={}
+                                    )
+                                    
+                                    # Stream confirmation to customer
+                                    yield f"data: {json.dumps({'type': 'chunk', 'text': confirmation_msg})}\n\n"
+                                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                                    logger.info(f"✅ Agent assigned and customer notified")
+                                    return
+                                    
+                                elif response.status_code == 503:
+                                    logger.warning(f"⚠️ No agents available - letting AI respond")
+                                    # Fall through to normal AI response
+                                else:
+                                    logger.error(f"❌ Agent assignment failed: {response.status_code}")
+                                    # Fall through to normal AI response
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error assigning agent: {e}")
+                    # Fall through to normal AI response
+            
+            # Check if human agent is already assigned to session
             logger.info(f"🔍 Checking if human agent is assigned to session {session_id}...")
             try:
                 from shared.redis_pubsub_manager import get_pubsub_redis

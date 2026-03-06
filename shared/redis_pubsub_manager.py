@@ -119,11 +119,11 @@ class AgentEventBroadcaster:
             
             # Publish to Redis channel (async, non-blocking)
             subscribers = await self.redis_client.publish(channel, message)
-            
+
             if subscribers > 0:
-                logger.info(f"📤 Published event to {agent_email}: {event_data.get('type')} ({subscribers} subscribers)")
+                logger.info(f"📤 Published event to {agent_email} on channel {channel}: {event_data.get('type')} ({subscribers} subscribers)")
             else:
-                logger.debug(f"📭 No subscribers for {agent_email}, event queued in Redis")
+                logger.debug(f"📭 No subscribers for {agent_email} on channel {channel}, event queued in Redis")
             
             return True
             
@@ -147,7 +147,7 @@ class AgentEventBroadcaster:
             message = json.dumps(event_data)
             
             subscribers = await self.redis_client.publish(channel, message)
-            logger.info(f"📢 Broadcasted event to all agents: {event_data.get('type')} ({subscribers} subscribers)")
+            logger.info(f"📢 Broadcasted event on channel {channel}: {event_data.get('type')} ({subscribers} subscribers)")
             
             return True
             
@@ -173,12 +173,12 @@ class AgentEventBroadcaster:
             
             # Publish to Redis channel
             subscribers = await self.redis_client.publish(channel, message)
-            
+
             if subscribers > 0:
-                logger.info(f"📤 Published event to session {session_id}: "
+                logger.info(f"📤 Published event to session {session_id} on channel {channel}: "
                            f"{event_data.get('type')} ({subscribers} subscribers)")
             else:
-                logger.debug(f"📭 No subscribers for session {session_id}")
+                logger.debug(f"📭 No subscribers for session {session_id} on channel {channel}")
             
             return True
             
@@ -257,8 +257,8 @@ class SessionEventSubscriber:
             # Subscribe to session-specific channel (async, non-blocking)
             session_channel = f"session:events:{self.session_id}"
             await self.pubsub.subscribe(session_channel)
-            
-            logger.info(f"🔌 Customer subscribed to session {self.session_id}")
+
+            logger.info(f"🔌 Customer subscribed to channel: {session_channel}")
             
             # Send initial connection event
             yield {
@@ -296,10 +296,20 @@ class SessionEventSubscriber:
         
         finally:
             # Cleanup
+            session_channel = f"session:events:{self.session_id}"
             if self.pubsub:
-                await self.pubsub.unsubscribe()
-                await self.pubsub.close()
-                logger.info(f"🔌 Customer unsubscribed from session {self.session_id}")
+                try:
+                    logger.info(f"🧹 Cleaning up Redis subscription for channel: {session_channel}")
+                    await self.pubsub.unsubscribe()
+                    logger.info(f"✅ Unsubscribed from channel: {session_channel}")
+                except Exception as e:
+                    logger.error(f"❌ Error unsubscribing from channel {session_channel}: {e}")
+                finally:
+                    try:
+                        await self.pubsub.close()
+                        logger.info(f"🔌 Closed Redis pubsub connection for channel: {session_channel}")
+                    except Exception as e:
+                        logger.error(f"❌ Error closing Redis pubsub for channel {session_channel}: {e}")
     
     async def unsubscribe(self):
         """Unsubscribe and cleanup"""
@@ -338,14 +348,14 @@ class AgentEventSubscriber:
             # Subscribe to agent-specific channel (async, non-blocking)
             agent_channel = f"agent:events:{self.agent_email}"
             await self.pubsub.subscribe(agent_channel)
-            
+
+            logger.info(f"🔌 Agent {self.agent_email} subscribed to channel: {agent_channel}")
+
             # Admins also subscribe to broadcast channel
             if self.role == 'admin':
                 broadcast_channel = "agent:events:broadcast"
                 await self.pubsub.subscribe(broadcast_channel)
-                logger.info(f"🔌 Admin {self.agent_email} subscribed to broadcast channel")
-            
-            logger.info(f"🔌 Agent {self.agent_email} subscribed to Redis Pub/Sub")
+                logger.info(f"🔌 Admin {self.agent_email} subscribed to channel: {broadcast_channel}")
 
             # Send initial connection event
             yield {
@@ -386,10 +396,20 @@ class AgentEventSubscriber:
         
         finally:
             # Cleanup
+            agent_channel = f"agent:events:{self.agent_email}"
             if self.pubsub:
-                await self.pubsub.unsubscribe()
-                await self.pubsub.close()
-                logger.info(f"🔌 Agent {self.agent_email} unsubscribed from Redis Pub/Sub")
+                try:
+                    logger.info(f"🧹 Cleaning up Redis subscription for channel: {agent_channel}")
+                    await self.pubsub.unsubscribe()
+                    logger.info(f"✅ Unsubscribed from channel: {agent_channel}")
+                except Exception as e:
+                    logger.error(f"❌ Error unsubscribing from channel {agent_channel}: {e}")
+                finally:
+                    try:
+                        await self.pubsub.close()
+                        logger.info(f"🔌 Closed Redis pubsub connection for channel: {agent_channel}")
+                    except Exception as e:
+                        logger.error(f"❌ Error closing Redis pubsub for channel {agent_channel}: {e}")
     
     async def unsubscribe(self):
         """Unsubscribe and cleanup"""
