@@ -547,11 +547,15 @@ async def public_chat_stream(request: Request):
                 'host',
                 'server',
                 'x-internal-session-uuid',  # Remove internal headers from response
-                'x-session-uuid',
             ]
             for key, value in response.headers.items():
                 if key.lower() not in blocked_headers:
                     response_headers[key] = value
+
+            # If new session, add X-Session-UUID header for client to read
+            if session_uuid_from_response:
+                response_headers['X-Session-UUID'] = session_uuid_from_response
+                logger.info(f"📤 Adding X-Session-UUID header to response: {session_uuid_from_response}")
 
             # Return streaming response
             from fastapi.responses import StreamingResponse
