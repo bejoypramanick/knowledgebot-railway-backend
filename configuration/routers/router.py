@@ -1229,17 +1229,14 @@ async def set_current_chat_session(request: Request):
 
 
 @router.get("/admin/chat-sessions/messages")
-async def get_session_messages(request: Request):
-    """Get all messages for the current chat session (from httpOnly cookie)"""
-    try:
-        # Get numeric session ID from cookie (set by API Gateway middleware)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
-            raise HTTPException(
-                status_code=400,
-                detail="No current chat session. Call /admin/chat-sessions/set-current first."
-            )
+async def get_session_messages(request: Request, session_id: int = Query(...)):
+    """Get all messages for a chat session
 
-        numeric_session_id = request.state.session_numeric_id
+    Args:
+        session_id: Numeric session ID (required query parameter)
+    """
+    try:
+        numeric_session_id = session_id
         logger.info(f"🔍 GET /admin/chat-sessions/messages called for session {numeric_session_id}")
         messages = await chat_log_service.get_session_messages(numeric_session_id)
         logger.info(f"✅ Retrieved {len(messages)} messages for session {numeric_session_id}")
@@ -1272,19 +1269,27 @@ async def get_session_messages(request: Request):
 async def send_customer_message(request: Request):
     """Send a message from a customer to an assigned agent (no AI processing)
 
-    Session numeric ID comes from API Gateway via request.state.session_numeric_id
-    API Gateway extracts UUID from httpOnly cookie and resolves to numeric ID
+    Request body: {
+        session_id: int (numeric session ID),
+        text: str (message text),
+        session_uuid?: str (optional UUID for broadcast, defaults to string of numeric ID)
+    }
     """
     try:
-        # Get numeric session ID from API Gateway (already resolved from cookie)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
-            raise HTTPException(status_code=400, detail="Session cookie required. Please call /customer/sessions/set-current first.")
-
-        session_id = request.state.session_numeric_id
-        session_uuid = request.state.session_uuid if hasattr(request.state, "session_uuid") else str(session_id)
-
         body = await request.json()
+        session_id = body.get("session_id")
         text = body.get("text", "")
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required in request body")
+
+        try:
+            numeric_session_id = int(session_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
+
+        # Use provided UUID or fall back to string of numeric ID
+        session_uuid = body.get("session_uuid", str(numeric_session_id))
 
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
@@ -1303,7 +1308,7 @@ async def send_customer_message(request: Request):
                 assigned_agent = str(cached_agent)
         else:
             # Query database for assignment
-            session = await chat_log_service.dao.get_session_by_id(session_id)
+            session = await chat_log_service.dao.get_session_by_id(numeric_session_id)
             assigned_agent = session.get('assigned_agent') if session else None
             if assigned_agent:
                 await redis_client.set(assigned_agent_key, assigned_agent, ex=3600)
@@ -1312,14 +1317,14 @@ async def send_customer_message(request: Request):
             raise HTTPException(status_code=400, detail="No agent assigned to this session. Use chatbot API instead.")
 
         # Save message to database
-        message_id = await chat_log_service.dao.create_message(session_id, 'user', text)
-        await chat_log_service.dao.increment_message_count(session_id)
+        message_id = await chat_log_service.dao.create_message(numeric_session_id, 'user', text)
+        await chat_log_service.dao.increment_message_count(numeric_session_id)
 
         # Prepare event data
         import datetime
         event_data = {
             "type": "customer_message",
-            "session_id": str(session_id),
+            "session_id": str(numeric_session_id),
             "message_id": str(message_id),
             "text": text,
             "sender": "customer",
@@ -1346,17 +1351,27 @@ async def send_customer_message(request: Request):
 
 @router.post("/admin/chat-sessions/messages")
 async def send_agent_message(request: Request):
-    """Send a message from an agent or customer in current chat session (from httpOnly cookie)"""
-    try:
-        # Get numeric session ID from cookie (set by API Gateway middleware)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
-            raise HTTPException(
-                status_code=400,
-                detail="No current chat session. Call /admin/chat-sessions/set-current first."
-            )
+    """Send a message from an agent or customer in a chat session
 
-        numeric_session_id = request.state.session_numeric_id
+    Request body: {
+        session_id: int (numeric session ID),
+        text: str (message text),
+        agent_id?: str (optional, defaults to X-User-Email header),
+        sender?: str (optional, "agent" or "user", defaults to "agent")
+    }
+    """
+    try:
         body = await request.json()
+        session_id = body.get("session_id")
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required in request body")
+
+        try:
+            numeric_session_id = int(session_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
+
         text = body.get("text", "")
         sender_id = body.get("agent_id", request.headers.get("X-User-Email", "customer@example.com"))
         sender_type = body.get("sender", "agent")  # "agent" or "user" (customer)
@@ -1444,16 +1459,21 @@ async def send_agent_message(request: Request):
 
 @router.post("/admin/chat-sessions/end-agent")
 async def end_agent_session(request: Request):
-    """End current chat session from the agent side (from httpOnly cookie)"""
-    try:
-        # Get numeric session ID from cookie (set by API Gateway middleware)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
-            raise HTTPException(
-                status_code=400,
-                detail="No current chat session. Call /admin/chat-sessions/set-current first."
-            )
+    """End chat session from the agent side
 
-        numeric_session_id = request.state.session_numeric_id
+    Request body: {session_id: int (numeric session ID)}
+    """
+    try:
+        body = await request.json()
+        session_id = body.get("session_id")
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required in request body")
+
+        try:
+            numeric_session_id = int(session_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
         user_email = request.headers.get("X-User-Email", "agent@example.com")
 
         logger.info(f"🔍 End-agent endpoint: session_id={numeric_session_id}")
@@ -1499,19 +1519,23 @@ async def end_agent_session(request: Request):
 async def end_customer_session(request: Request):
     """End a chat session from the customer side
 
-    Session numeric ID comes from API Gateway via request.state.session_numeric_id
-    API Gateway extracts UUID from httpOnly cookie and resolves to numeric ID
+    Request body: {session_id: int (numeric session ID)}
     """
     try:
-        # Get numeric session ID from API Gateway (already resolved from cookie)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
-            raise HTTPException(status_code=400, detail="Session cookie required. Please call /customer/sessions/set-current first.")
+        body = await request.json()
+        session_id = body.get("session_id")
 
-        session_id = request.state.session_numeric_id
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required in request body")
+
+        try:
+            numeric_session_id = int(session_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
         user_email = request.headers.get("X-User-Email", "customer@example.com")
 
         # Pass numeric ID directly to service
-        await chat_log_service.end_customer_session(str(session_id), user_email)
+        await chat_log_service.end_customer_session(str(numeric_session_id), user_email)
 
         # Broadcast session_ended event with feedback prompt
         from shared.redis_pubsub_manager import broadcast_event_to_session
@@ -1519,17 +1543,17 @@ async def end_customer_session(request: Request):
 
         event_data = {
             "type": "session_ended",
-            "session_id": str(session_id),
+            "session_id": str(numeric_session_id),
             "ended_by": "customer",
             "show_feedback": True,  # Trigger feedback UI
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
-        await broadcast_event_to_session(str(session_id), event_data)
+        await broadcast_event_to_session(str(numeric_session_id), event_data)
 
         return {
             "success": True,
             "message": "Session ended by customer",
-            "session_id": session_id
+            "session_id": numeric_session_id
         }
     except HTTPException:
         raise
@@ -1541,21 +1565,23 @@ async def end_customer_session(request: Request):
 @router.post("/admin/chat-sessions/feedback")
 async def submit_session_feedback(request: Request):
     """
-    Submit customer feedback for current chat session (from httpOnly cookie).
+    Submit customer feedback for a chat session.
     Request Body:
-        feedback_type: 'positive' or 'negative'
+        session_id: int (numeric session ID)
+        feedback_type: str ('positive' or 'negative')
     """
     try:
-        # Get numeric session ID from cookie (set by API Gateway middleware)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
-            raise HTTPException(
-                status_code=400,
-                detail="No current chat session. Call /admin/chat-sessions/set-current first."
-            )
-
-        numeric_session_id = request.state.session_numeric_id
         body = await request.json()
+        session_id = body.get("session_id")
         feedback_type = body.get("feedback_type")
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required in request body")
+
+        try:
+            numeric_session_id = int(session_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
 
         if not feedback_type:
             raise HTTPException(status_code=400, detail="feedback_type is required")
@@ -1637,16 +1663,20 @@ async def request_human_agent(request: Request):
 
 @router.delete("/admin/chat-sessions")
 async def delete_chat_session(request: Request):
-    """Delete current chat session and all associated messages (from httpOnly cookie)"""
-    try:
-        # Get numeric session ID from cookie (set by API Gateway middleware)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
-            raise HTTPException(
-                status_code=400,
-                detail="No current chat session. Call /admin/chat-sessions/set-current first."
-            )
+    """Delete a chat session and all associated messages
 
-        numeric_session_id = request.state.session_numeric_id
+    Request params: session_id (numeric session ID as query parameter)
+    """
+    try:
+        session_id = request.query_params.get("session_id")
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id query parameter is required")
+
+        try:
+            numeric_session_id = int(session_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
         user_email = request.headers.get("X-User-Email", "admin@example.com")
 
         logger.info(f"🔍 Delete endpoint: session_id={numeric_session_id}")
@@ -1672,16 +1702,22 @@ async def delete_chat_session(request: Request):
 
 @router.post("/admin/chat-sessions/mark-read")
 async def mark_session_as_read(request: Request, user: dict = Depends(get_current_user)):
-    """Mark current session as read (from httpOnly cookie)"""
-    try:
-        # Get numeric session ID from cookie (set by API Gateway middleware)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
-            raise HTTPException(
-                status_code=400,
-                detail="No current chat session. Call /admin/chat-sessions/set-current first."
-            )
+    """Mark session as read
 
-        numeric_session_id = request.state.session_numeric_id
+    Request body: {session_id: int (numeric session ID)}
+    """
+    try:
+        body = await request.json()
+        session_id = body.get("session_id")
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required in request body")
+
+        try:
+            numeric_session_id = int(session_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
+
         user_email = user.get("email")
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
@@ -1702,16 +1738,22 @@ async def mark_session_as_read(request: Request, user: dict = Depends(get_curren
 
 @router.post("/admin/chat-sessions/mark-unread")
 async def mark_session_as_unread(request: Request, user: dict = Depends(get_current_user)):
-    """Mark current session as unread (from httpOnly cookie)"""
-    try:
-        # Get numeric session ID from cookie (set by API Gateway middleware)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
-            raise HTTPException(
-                status_code=400,
-                detail="No current chat session. Call /admin/chat-sessions/set-current first."
-            )
+    """Mark session as unread
 
-        numeric_session_id = request.state.session_numeric_id
+    Request body: {session_id: int (numeric session ID)}
+    """
+    try:
+        body = await request.json()
+        session_id = body.get("session_id")
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required in request body")
+
+        try:
+            numeric_session_id = int(session_id)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
+
         user_email = user.get("email")
         if not user_email:
             raise HTTPException(status_code=401, detail="User email not found")
@@ -1754,17 +1796,14 @@ async def mark_message_as_read(message_id: int, user: dict = Depends(get_current
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/admin/chat-sessions/unread-count")
-async def get_unread_message_count(request: Request):
-    """Get unread message count for current session (from httpOnly cookie)"""
-    try:
-        # Get numeric session ID from cookie (set by API Gateway middleware)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
-            raise HTTPException(
-                status_code=400,
-                detail="No current chat session. Call /admin/chat-sessions/set-current first."
-            )
+async def get_unread_message_count(request: Request, session_id: int = Query(...)):
+    """Get unread message count for a session
 
-        numeric_session_id = request.state.session_numeric_id
+    Args:
+        session_id: Numeric session ID (required query parameter)
+    """
+    try:
+        numeric_session_id = session_id
         user_email = request.headers.get("X-User-Email", "admin@example.com")
 
         logger.info(f"🔍 Unread-count endpoint: session_id={numeric_session_id}")
