@@ -242,8 +242,8 @@ class ChatLogDAO:
         if roles['is_admin']: return 'admin'
         return 'system'
 
-    async def get_session_assignment(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Get assignment for a session."""
+    async def get_session_assignment(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """Get assignment for a session (numeric ID only)."""
         query = "SELECT * FROM session_assignments WHERE session_id = :session_id"
         try:
             params = {"session_id": session_id}
@@ -257,7 +257,7 @@ class ChatLogDAO:
             logger.log_db_query(query, {"session_id": session_id}, error=e)
             return None
 
-    async def update_session_assignment(self, session_id: str, email: str, type: str, status: str):
+    async def update_session_assignment(self, session_id: int, email: str, type: str, status: str):
         """Update session assignment."""
         user_role_id = await self.get_user_role_id(email)
         if not user_role_id:
