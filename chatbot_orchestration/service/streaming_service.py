@@ -228,16 +228,20 @@ class StreamingService:
                     try:
                         async with get_db_session() as db_session:
                             # Query session_assignments table for active assignment
+                            # Need to JOIN to get email from users table
                             query = """
-                                SELECT assignee_email FROM session_assignments
-                                WHERE session_id = (SELECT id FROM chat_sessions WHERE session_id = :session_uuid)
-                                AND status = 'active'
+                                SELECT u.email FROM session_assignments sa
+                                JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                                JOIN users u ON urm.user_id = u.id
+                                WHERE sa.session_id = (SELECT id FROM chat_sessions WHERE session_id = :session_uuid)
+                                AND sa.status = 'active'
+                                AND u.is_active = true
                                 LIMIT 1
                             """
                             result = await db_session.execute(text(query), {"session_uuid": session_id})
                             row = result.mappings().first()
                             if row:
-                                assigned_agent = row['assignee_email']
+                                assigned_agent = row['email']
                                 logger.info(f"✅ Found agent in database: {assigned_agent}")
                                 # Update Redis cache for future requests
                                 await redis_client.set(cache_key, assigned_agent, ex=3600)
