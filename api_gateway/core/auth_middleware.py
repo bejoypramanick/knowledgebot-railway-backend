@@ -126,14 +126,12 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
 
         logger.debug(f"✅ Authenticated via session cookie: {session_data['email']} for {path}")
 
-        # 🔄 STEP 2: Resolve chat session UUID to numeric ID (if present in request)
+        # 🔄 STEP 2: Resolve chat session UUID to numeric ID (from httpOnly cookie)
+        # Session UUID should ONLY come from httpOnly cookie, never from URL/params/body
         # This happens ONCE at API Gateway, so internal services don't need to lookup
-        # Extract session UUID from path or query params
-        from api_gateway.core.session_resolver import extract_session_uuid_from_path, resolve_session_uuid_to_numeric_id
+        from api_gateway.core.session_resolver import extract_session_uuid_from_cookie, resolve_session_uuid_to_numeric_id
 
-        session_uuid = extract_session_uuid_from_path(path)
-        if not session_uuid and "session_id" in request.query_params:
-            session_uuid = request.query_params.get("session_id")
+        session_uuid = extract_session_uuid_from_cookie(request)
 
         if session_uuid:
             # Resolve UUID to numeric ID

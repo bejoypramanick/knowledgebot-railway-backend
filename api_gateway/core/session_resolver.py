@@ -83,14 +83,38 @@ async def resolve_session_uuid_to_numeric_id(session_uuid: str) -> Optional[int]
         return None
 
 
+def extract_session_uuid_from_cookie(request) -> Optional[str]:
+    """
+    Extract session UUID from httpOnly cookie.
+
+    Session UUID should be stored in httpOnly, Secure, SameSite cookie named 'chatbot_session_id'.
+    This prevents exposure in URL paths, query params, or request bodies.
+
+    Args:
+        request: FastAPI Request object
+
+    Returns:
+        Session UUID if found in cookie, None otherwise
+    """
+    try:
+        session_uuid = request.cookies.get('chatbot_session_id')
+        if session_uuid:
+            logger.debug(f"✅ Extracted session UUID from cookie: {session_uuid[:20]}...")
+            return session_uuid
+        else:
+            logger.debug("ℹ️ No session UUID in chatbot_session_id cookie")
+            return None
+    except Exception as e:
+        logger.warning(f"Error extracting session UUID from cookie: {e}")
+        return None
+
+
 def extract_session_uuid_from_path(path: str) -> Optional[str]:
     """
-    Extract session UUID from request path.
+    DEPRECATED: Extract session UUID from request path.
 
-    Handles various URL patterns:
-    - /api/v1/gateway/chatbot/chat/stream?session_id=session_xxx
-    - /api/v1/gateway/configuration/admin/chat-sessions/session_xxx/...
-    - /api/v1/gateway/configuration/customer/events/session_xxx
+    Session UUID should come from httpOnly cookie, not URL path.
+    This method is kept for backward compatibility only.
 
     Args:
         path: Request URL path
@@ -98,9 +122,10 @@ def extract_session_uuid_from_path(path: str) -> Optional[str]:
     Returns:
         Session UUID if found, None otherwise
     """
-    # Look for session_xxx pattern in path
+    # Look for session_xxx pattern in path (fallback only)
     import re
     match = re.search(r'(session_[a-zA-Z0-9_]+)', path)
     if match:
+        logger.warning(f"⚠️ Session UUID found in URL path (should use cookie): {match.group(1)[:20]}...")
         return match.group(1)
     return None
