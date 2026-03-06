@@ -973,8 +973,12 @@ async def customer_events_stream(request: Request, session_id: str = Query(..., 
         # Import SessionEventSubscriber
         from shared.redis_pubsub_manager import SessionEventSubscriber
         
+        logger.info(f"📦 Creating SessionEventSubscriber for session {session_id}")
+        
         # Create Redis Pub/Sub subscriber for this session
         subscriber = SessionEventSubscriber(session_id)
+        
+        logger.info(f"✅ SessionEventSubscriber created, starting event generator for session {session_id}")
         
         async def event_generator():
             """
@@ -985,12 +989,16 @@ async def customer_events_stream(request: Request, session_id: str = Query(..., 
             import asyncio
             import time
 
+            logger.info(f"🎬 Event generator started for session {session_id}")
+
             heartbeat_task = None
             redis_task = None
             last_activity = time.time()
             channel_name = f"session:events:{session_id}"
 
             try:
+                logger.info(f"🔄 Setting up heartbeat and Redis tasks for session {session_id}")
+                
                 async def heartbeat_loop(queue):
                     """Send keep-alive heartbeat to queue every 15 seconds"""
                     try:
@@ -1010,9 +1018,12 @@ async def customer_events_stream(request: Request, session_id: str = Query(..., 
                 message_queue = asyncio.Queue()
                 heartbeat_task = asyncio.create_task(heartbeat_loop(message_queue))
 
+                logger.info(f"📡 Starting Redis event forwarding for session {session_id}")
+                
                 # Task to forward Redis events to queue
                 async def forward_redis_events():
                     try:
+                        logger.info(f"🔌 Calling subscriber.subscribe() for session {session_id}")
                         async for event_data in subscriber.subscribe():
                             try:
                                 await message_queue.put(event_data)
@@ -1030,6 +1041,8 @@ async def customer_events_stream(request: Request, session_id: str = Query(..., 
                             pass
 
                 redis_task = asyncio.create_task(forward_redis_events())
+
+                logger.info(f"✅ Tasks created, starting message loop for session {session_id}")
 
                 # Yield messages from queue
                 try:
