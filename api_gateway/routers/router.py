@@ -222,14 +222,20 @@ async def proxy_customer_events_sse(request: Request, session_id: str = Query(..
 async def proxy_agent_message(request: Request):
     """Proxy agent messages - converts session UUID to numeric ID before forwarding"""
     try:
+        logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Proxy endpoint called")
+        logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Request headers: {dict(request.headers)}")
+        
         settings = get_settings()
         config_service_url = settings.CONFIGURATION_SERVICE_URL
         
         # Get request body
         body = await request.json()
+        logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Request body: {body}")
+        
         session_uuid = body.get("session_id")  # UUID from frontend
         
         if not session_uuid:
+            logger.error(f"❌ [AGENT_MESSAGE_PROXY] session_id missing in request body")
             raise HTTPException(status_code=400, detail="session_id is required")
         
         logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Received agent message for session UUID: {session_uuid}")

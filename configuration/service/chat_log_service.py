@@ -315,11 +315,16 @@ class ChatLogService:
             elif feedback_counts['negative_count'] > 0:
                 session_feedback = 'negative'
 
+            # Get customer_name from metadata or generate it
+            customer_name = metadata.get('customer_name')
+            if not customer_name:
+                customer_name = f"User-{session_db_id}"
+
             from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(
                 id=str(session_db_id),
                 session_uuid=session_id,  # Include the UUID for frontend to use in mark-read/unread calls
-                customer_name=metadata.get('customer_name'),
+                customer_name=customer_name,  # Use generated name if not in metadata
                 customer_email=metadata.get('customer_email'),
                 status=status,
                 last_message_at=session_row['last_activity_at'].isoformat() if session_row['last_activity_at'] else datetime.utcnow().isoformat(),
