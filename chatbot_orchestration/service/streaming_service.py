@@ -6,6 +6,7 @@ Handles streaming responses and message formatting
 import json
 import asyncio
 import os
+import time
 from typing import Any, Dict, List, AsyncGenerator
 import sys
 from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart
@@ -193,7 +194,55 @@ class StreamingService:
                 logger.warning("⚠️  WARNING: pydantic_messages is EMPTY!")
                 logger.warning("⚠️  No conversation history will be passed to model!")
 
+            # 🚨 CRITICAL: Check if human agent is assigned BEFORE processing message
+            logger.info(f"🔍 Checking if human agent is assigned to session {session_id}...")
+            try:
+                from shared.redis_pubsub_manager import get_pubsub_redis
 
+                redis_client = await get_pubsub_redis()
+                cache_key = f"session:assigned_agent:{session_id}"
+                assigned_agent = await redis_client.get(cache_key)
+
+                if assigned_agent:
+                    logger.info(f"👤 Human agent '{assigned_agent}' is assigned to session {session_id}")
+                    logger.info(f"📧 Saving customer message and notifying agent...")
+
+                    # Save the user message to database (agent will see it)
+                    try:
+                        await session_state_manager.save_message(
+                            session_id=session_id,
+                            role="user",
+                            content=message,
+                            metadata={"user_email": user_email}
+                        )
+                        logger.info("✅ User message saved to database")
+                    except Exception as db_error:
+                        logger.error(f"❌ Failed to save user message: {db_error}")
+
+                    # Notify the agent about the new message via broadcast
+                    try:
+                        from shared.redis_pubsub_manager import broadcast_event_to_agent
+                        event = {
+                            "type": "customer_message",
+                            "session_id": session_id,
+                            "customer_message": message,
+                            "timestamp": int(time.time()),
+                            "message": f"Customer sent: {message[:100]}..."
+                        }
+                        await broadcast_event_to_agent(assigned_agent, event)
+                        logger.info(f"📤 Notified agent {assigned_agent} about new customer message")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Failed to notify agent: {e}")
+
+                    # Tell customer that agent will respond
+                    yield f"data: {json.dumps({'type': 'message_received', 'message': 'Your message has been sent to the agent. Please wait for their response.'})}\n\n"
+                    logger.info(f"✅ Customer message processed and forwarded to agent {assigned_agent}")
+                    return
+
+            except Exception as e:
+                logger.warning(f"⚠️ Error checking agent assignment: {e} - proceeding with AI response")
+
+            # No human agent assigned - proceed with normal AI response
             # Save user message to database
             try:
                 await session_state_manager.save_message(
