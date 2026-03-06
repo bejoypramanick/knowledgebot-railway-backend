@@ -1272,13 +1272,16 @@ async def get_session_messages(request: Request):
 async def send_customer_message(request: Request):
     """Send a message from a customer to an assigned agent (no AI processing)
 
-    Session UUID comes from httpOnly cookie: chatbot_session_id
+    Session numeric ID comes from API Gateway via request.state.session_numeric_id
+    API Gateway extracts UUID from httpOnly cookie and resolves to numeric ID
     """
     try:
-        # Get session UUID from cookie
-        session_uuid = request.cookies.get("chatbot_session_id")
-        if not session_uuid:
-            raise HTTPException(status_code=400, detail="Session cookie required. Please set chatbot_session_id cookie first.")
+        # Get numeric session ID from API Gateway (already resolved from cookie)
+        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
+            raise HTTPException(status_code=400, detail="Session cookie required. Please call /customer/sessions/set-current first.")
+
+        session_id = request.state.session_numeric_id
+        session_uuid = request.state.session_uuid if hasattr(request.state, "session_uuid") else str(session_id)
 
         body = await request.json()
         text = body.get("text", "")
@@ -1286,33 +1289,13 @@ async def send_customer_message(request: Request):
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
 
-        # Get numeric session ID from UUID
+        # Check if agent is assigned
         from shared.redis_pubsub_manager import get_pubsub_redis
         redis_client = await get_pubsub_redis()
-        
-        # Check Redis cache first
-        cached_id = await redis_client.get(f"session:uuid_to_id:{session_uuid}")
-        if cached_id:
-            if isinstance(cached_id, bytes):
-                session_id = int(cached_id.decode('utf-8'))
-            else:
-                session_id = int(cached_id)
-            logger.debug(f"✅ Found cached session ID: {session_uuid} → {session_id}")
-        else:
-            # Cache miss - query database
-            session_data = await chat_log_service.dao.get_session_by_uuid(session_uuid)
-            if not session_data:
-                raise HTTPException(status_code=404, detail=f"Session {session_uuid} not found")
-            session_id = session_data.get('id')
-            # Cache for future requests
-            await redis_client.set(f"session:uuid_to_id:{session_uuid}", str(session_id), ex=86400)
-            await redis_client.set(f"session:id_to_uuid:{session_id}", session_uuid, ex=86400)
-            logger.info(f"💾 Cached session mapping: {session_uuid} ↔ {session_id}")
 
-        # Check if agent is assigned
         assigned_agent_key = f"session:assigned_agent:{session_uuid}"
         cached_agent = await redis_client.get(assigned_agent_key)
-        
+
         if cached_agent:
             if isinstance(cached_agent, bytes):
                 assigned_agent = cached_agent.decode('utf-8')
@@ -1544,23 +1527,26 @@ async def end_agent_session(request: Request):
 
 @router.post("/admin/chat-sessions/end-customer")
 async def end_customer_session(request: Request):
-    """End a chat session from the customer side"""
+    """End a chat session from the customer side
+
+    Session numeric ID comes from API Gateway via request.state.session_numeric_id
+    API Gateway extracts UUID from httpOnly cookie and resolves to numeric ID
+    """
     try:
-        body = await request.json()
-        session_id = body.get("session_id")  # Accept numeric ID from chat_sessions.id
+        # Get numeric session ID from API Gateway (already resolved from cookie)
+        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
+            raise HTTPException(status_code=400, detail="Session cookie required. Please call /customer/sessions/set-current first.")
 
-        if not session_id:
-            raise HTTPException(status_code=400, detail="session_id (numeric id from chat_sessions) is required in request body")
-
+        session_id = request.state.session_numeric_id
         user_email = request.headers.get("X-User-Email", "customer@example.com")
 
         # Pass numeric ID directly to service
         await chat_log_service.end_customer_session(str(session_id), user_email)
-        
+
         # Broadcast session_ended event with feedback prompt
         from shared.redis_pubsub_manager import broadcast_event_to_session
         import datetime
-        
+
         event_data = {
             "type": "session_ended",
             "session_id": str(session_id),

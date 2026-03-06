@@ -83,60 +83,15 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         """Process request and verify authentication"""
         path = request.url.path
-        
-        # Skip authentication for excluded paths
-        if self.is_excluded_path(path):
-            return await call_next(request)
-        
+
         # Skip authentication for OPTIONS requests (CORS preflight)
         if request.method == "OPTIONS":
             return await call_next(request)
-        
-        # ONLY accept session cookies (no Authorization header fallback)
-        session_id = request.cookies.get("session")
-        
-        if not session_id:
-            logger.warning(f"❌ No session cookie for {path}")
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "detail": "Authentication required. Please sign in.",
-                    "error": "unauthorized"
-                }
-            )
-        
-        # Import here to avoid circular dependency
-        from api_gateway.routers.auth_router import get_session
-        
-        # Get client IP and User-Agent for security validation
-        ip_address = request.client.host if request.client else None
-        user_agent = request.headers.get("user-agent")
-        
-        # Validate session with security checks
-        session_data = get_session(session_id, ip_address, user_agent, validate_security=True)
-        
-        if not session_data:
-            # Session invalid, expired, or potentially hijacked
-            logger.warning(f"⚠️ Invalid or expired session cookie for {path}")
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "detail": "Session expired. Please sign in again.",
-                    "error": "session_expired"
-                }
-            )
-        
-        # Valid session found - add user data to request state
-        request.state.user = session_data
-        request.state.user_uid = session_data["uid"]
-        request.state.user_email = session_data["email"]
-        request.state.user_name = session_data["name"]
 
-        logger.debug(f"✅ Authenticated via session cookie: {session_data['email']} for {path}")
-
-        # 🔄 STEP 2: Resolve chat session UUID to numeric ID (from httpOnly cookie)
+        # 🔄 STEP 1: Extract chat session UUID from httpOnly cookie for ALL requests
         # Session UUID should ONLY come from httpOnly cookie, never from URL/params/body
         # This happens ONCE at API Gateway, so internal services don't need to lookup
+        # This applies to BOTH authenticated and anonymous customer requests
         from api_gateway.core.session_resolver import extract_session_uuid_from_cookie, resolve_session_uuid_to_numeric_id
 
         session_uuid = extract_session_uuid_from_cookie(request)
@@ -151,6 +106,53 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
                 logger.debug(f"🔄 Resolved session UUID {session_uuid} → numeric ID {numeric_session_id}")
             else:
                 logger.warning(f"⚠️ Could not resolve session UUID {session_uuid}")
+
+        # Skip authentication for excluded paths (anonymous customers, public endpoints)
+        if self.is_excluded_path(path):
+            return await call_next(request)
+
+        # 🔐 STEP 2: Verify Firebase authentication for protected endpoints
+        # ONLY accept session cookies (no Authorization header fallback)
+        session_id = request.cookies.get("session")
+
+        if not session_id:
+            logger.warning(f"❌ No session cookie for {path}")
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": "Authentication required. Please sign in.",
+                    "error": "unauthorized"
+                }
+            )
+
+        # Import here to avoid circular dependency
+        from api_gateway.routers.auth_router import get_session
+
+        # Get client IP and User-Agent for security validation
+        ip_address = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent")
+
+        # Validate session with security checks
+        session_data = get_session(session_id, ip_address, user_agent, validate_security=True)
+
+        if not session_data:
+            # Session invalid, expired, or potentially hijacked
+            logger.warning(f"⚠️ Invalid or expired session cookie for {path}")
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": "Session expired. Please sign in again.",
+                    "error": "session_expired"
+                }
+            )
+
+        # Valid session found - add user data to request state
+        request.state.user = session_data
+        request.state.user_uid = session_data["uid"]
+        request.state.user_email = session_data["email"]
+        request.state.user_name = session_data["name"]
+
+        logger.debug(f"✅ Authenticated via session cookie: {session_data['email']} for {path}")
 
         # Continue to next middleware/endpoint
         response = await call_next(request)
