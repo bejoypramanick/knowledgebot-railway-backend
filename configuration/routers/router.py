@@ -870,21 +870,98 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/customer/events/{session_id}")
-async def customer_events_stream(session_id: str):
+@router.post("/customer/sessions/set-current")
+async def set_current_customer_session(request: Request):
+    """
+    Set the current customer session by setting httpOnly cookie.
+
+    Frontend calls this before connecting to customer events SSE.
+    Backend looks up the session UUID from numeric ID and sets it in a cookie.
+
+    Args:
+        request.body: {session_id: str | int} - UUID or numeric session ID
+
+    Returns:
+        Success confirmation with session details
+    """
+    try:
+        from fastapi.responses import JSONResponse
+
+        body = await request.json()
+        session_id = body.get("session_id")
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required")
+
+        logger.info(f"🔄 Setting current customer session: {session_id}")
+
+        # Convert numeric ID to UUID if needed
+        if isinstance(session_id, int) or (isinstance(session_id, str) and session_id.isdigit()):
+            # Numeric ID - look up UUID from database
+            session_id = int(session_id)
+            session_data = await chat_log_service.dao.get_session_by_id(session_id)
+            if not session_data:
+                raise HTTPException(status_code=404, detail=f"Chat session {session_id} not found")
+            session_uuid = session_data.get("session_id")
+        else:
+            # Already UUID
+            session_uuid = session_id
+
+        logger.info(f"✅ Found session UUID: {session_uuid}")
+
+        # Create response and set httpOnly cookie
+        response = JSONResponse({
+            "success": True,
+            "session_id": session_uuid,
+            "message": f"Customer session set as current"
+        })
+
+        # Set httpOnly, Secure, SameSite cookie with the session UUID
+        response.set_cookie(
+            key="chatbot_session_id",
+            value=session_uuid,
+            httponly=True,
+            secure=True,
+            samesite="Strict",
+            max_age=60 * 60 * 24  # 24 hours
+        )
+
+        logger.info(f"🍪 Set chatbot_session_id cookie for customer session {session_uuid}")
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error setting current customer session: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/customer/events")
+async def customer_events_stream(request: Request):
     """
     Server-Sent Events endpoint for customers (anonymous).
-    Streams real-time events for a specific session.
-    
-    No authentication required - uses session ID only.
+    Streams real-time events for current session via httpOnly cookie.
+
+    Session ID comes ONLY from httpOnly cookie: chatbot_session_id
+    Frontend must set this cookie before connecting to SSE.
+
+    No authentication required - uses session cookie only.
     Perfect for anonymous customer chat widgets.
-    
+
     Security:
-    - Session IDs are UUIDs (hard to guess)
+    - Session ID in httpOnly cookie (cannot be accessed by JavaScript)
+    - Not exposed in URL or query params
     - Rate limiting applied at API Gateway level
     - Channel isolation per session
     """
     try:
+        # Get session_id ONLY from httpOnly cookie
+        session_id = request.cookies.get("chatbot_session_id")
+
+        if not session_id:
+            logger.warning("❌ No chatbot_session_id cookie found for customer events")
+            raise HTTPException(status_code=400, detail="Session cookie required. Please set chatbot_session_id cookie before connecting.")
+
         logger.info(f"🔌 Customer connecting to SSE stream for session {session_id}")
         
         # Import SessionEventSubscriber
@@ -1191,10 +1268,18 @@ async def get_session_messages(request: Request):
 
 
 
-@router.post("/customer/sessions/{session_uuid}/messages")
-async def send_customer_message(session_uuid: str, request: Request):
-    """Send a message from a customer to an assigned agent (no AI processing)"""
+@router.post("/customer/sessions/messages")
+async def send_customer_message(request: Request):
+    """Send a message from a customer to an assigned agent (no AI processing)
+
+    Session UUID comes from httpOnly cookie: chatbot_session_id
+    """
     try:
+        # Get session UUID from cookie
+        session_uuid = request.cookies.get("chatbot_session_id")
+        if not session_uuid:
+            raise HTTPException(status_code=400, detail="Session cookie required. Please set chatbot_session_id cookie first.")
+
         body = await request.json()
         text = body.get("text", "")
 
