@@ -712,32 +712,45 @@ async def generic_proxy_handler(request: Request, path: str):
                     import json
                     body_data = json.loads(request_body)
 
-                    # If we have numeric_session_id from cookie resolution, ensure it's in the body
-                    if hasattr(request.state, "session_numeric_id") and request.state.session_numeric_id:
-                        if "session_id" in body_data:
-                            # session_id already in body - convert if UUID to numeric
-                            old_session_id = body_data["session_id"]
-                            if isinstance(old_session_id, str) and old_session_id.startswith("session_"):
-                                # It's a UUID - convert to numeric
+                    # Check if request has session_id
+                    if "session_id" in body_data:
+                        client_session_id = body_data["session_id"]
+
+                        # VALIDATION: Reject UUIDs for configuration service endpoints
+                        # Configuration service endpoints MUST receive numeric session_id only
+                        if isinstance(client_session_id, str) and client_session_id.startswith("session_"):
+                            # Client sent UUID - must convert to numeric via middleware
+                            if hasattr(request.state, "session_numeric_id") and request.state.session_numeric_id:
+                                # Conversion successful - use numeric ID
                                 body_data["session_id"] = request.state.session_numeric_id
-                                logger.info(f"🔄 Converted UUID to numeric: {old_session_id} → {request.state.session_numeric_id}")
-                            # else: already numeric or other format, leave as-is
-                        else:
-                            # session_id NOT in body - add numeric_id from cookie
+                                logger.info(f"🔄 Converted UUID to numeric: {client_session_id} → {request.state.session_numeric_id}")
+                            else:
+                                # Conversion failed - reject request
+                                logger.error(f"❌ Failed to resolve session UUID {client_session_id} for {backend_path}")
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail=f"Invalid session: UUID could not be resolved. Session may not exist or may have expired."
+                                )
+                        # else: already numeric or other format - assume it's valid
+                    else:
+                        # No session_id in body - try to inject from cookie if available
+                        if hasattr(request.state, "session_numeric_id") and request.state.session_numeric_id:
                             body_data["session_id"] = request.state.session_numeric_id
                             logger.info(f"✅ Injected numeric session_id into body: {request.state.session_numeric_id}")
 
-                        # ALSO inject session_uuid for broadcasting (customer SSE channels use UUID)
-                        if hasattr(request.state, "session_uuid") and request.state.session_uuid:
-                            body_data["session_uuid"] = request.state.session_uuid
-                            logger.debug(f"✅ Injected session_uuid into body: {request.state.session_uuid}")
+                    # ALSO inject session_uuid for broadcasting (customer SSE channels use UUID)
+                    if hasattr(request.state, "session_uuid") and request.state.session_uuid:
+                        body_data["session_uuid"] = request.state.session_uuid
+                        logger.debug(f"✅ Injected session_uuid into body: {request.state.session_uuid}")
 
-                        request_body = json.dumps(body_data).encode()
+                    request_body = json.dumps(body_data).encode()
 
-                        # IMPORTANT: Update Content-Length header after modifying request body
-                        # Remove old header first to avoid conflicting Content-Length headers
-                        headers.pop("content-length", None)
-                        headers["Content-Length"] = str(len(request_body))
+                    # IMPORTANT: Update Content-Length header after modifying request body
+                    # Remove old header first to avoid conflicting Content-Length headers
+                    headers.pop("content-length", None)
+                    headers["Content-Length"] = str(len(request_body))
+                except HTTPException:
+                    raise
                 except (json.JSONDecodeError, ValueError) as e:
                     # Not JSON or other error - forward as-is
                     logger.debug(f"⚠️  Could not parse request body as JSON: {e}")
