@@ -159,8 +159,16 @@ class ChatLogDAO:
     async def get_session_db_id(self, session_id: int | str) -> Optional[int]:
         """Get database ID for a session (numeric ID only)."""
         try:
-            # Convert to int if string
-            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
+            # Handle both int and string inputs
+            if isinstance(session_id, int):
+                session_db_id = session_id
+            else:
+                try:
+                    session_db_id = int(session_id)
+                except ValueError:
+                    # Not a numeric string - likely a UUID, return None
+                    logger.warning(f"⚠️ Expected numeric session_id, got: {session_id}")
+                    return None
 
             query = "SELECT id FROM chat_sessions WHERE id = :id"
             params = {"id": session_db_id}
@@ -169,9 +177,14 @@ class ChatLogDAO:
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
                 row = result.fetchone()
-                logger.log_db_query(query, params, row)
-                return row[0] if row else None
+                if row:
+                    logger.log_db_query(query, params, row)
+                    return row[0]
+                else:
+                    logger.warning(f"⚠️ Session {session_db_id} not found in database")
+                    return None
         except Exception as e:
+            logger.error(f"❌ Database error in get_session_db_id({session_id}): {e}", exc_info=True)
             logger.log_db_query("get_session_db_id", {"session_id": session_id}, error=e)
             return None
 
@@ -790,7 +803,7 @@ class ChatLogDAO:
     async def get_session_by_id_with_messages(self, session_id: int | str) -> Optional[Dict[str, Any]]:
         """Get session by numeric ID only."""
         try:
-            # Convert to int if string
+            # Handle both int and string inputs
             session_db_id = int(session_id) if isinstance(session_id, str) else session_id
 
             query = "SELECT * FROM chat_sessions WHERE id = :id"
@@ -799,9 +812,16 @@ class ChatLogDAO:
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
                 row = result.fetchone()
-                logger.log_db_query(query, params, row)
-                return dict(row._mapping) if row else None
+
+                if row:
+                    logger.log_db_query(query, params, row)
+                    return dict(row._mapping)
+                else:
+                    logger.warning(f"⚠️ Session {session_db_id} not found in database (query returned 0 rows)")
+                    logger.log_db_query(query, params, None)
+                    return None
         except Exception as e:
+            logger.error(f"❌ Database error fetching session {session_id}: {e}", exc_info=True)
             logger.log_db_query(query, {"session_id": session_id}, error=e)
             return None
 
