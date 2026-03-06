@@ -98,27 +98,42 @@ async def lifespan(app: FastAPI):
         logger.info(f"🔍 LIFESPAN: Database URL configured: {'✅' if database_url else '❌'}")
 
         if database_url:
-            # Initialize SQLAlchemy database
+            # Initialize SQLAlchemy database with retries
             app.state.database_url = database_url
             logger.info("🚀 LIFESPAN: About to initialize SQLAlchemy database")
-            try:
-                await init_database(database_url)
-                logger.info("✅ LIFESPAN: SQLAlchemy engine initialized")
+            
+            max_retries = 5
+            retry_delay = 2  # seconds
+            
+            for attempt in range(1, max_retries + 1):
+                try:
+                    logger.info(f"🔄 LIFESPAN: Database connection attempt {attempt}/{max_retries}")
+                    await init_database(database_url)
+                    logger.info("✅ LIFESPAN: SQLAlchemy engine initialized")
 
-                is_valid = await validate_database()
-                if is_valid:
-                    logger.info("✅ LIFESPAN: Database schema validated successfully")
-                    app.state.database_ready = True
-                else:
-                    logger.warning("⚠️ LIFESPAN: Database schema validation returned False")
+                    is_valid = await validate_database()
+                    if is_valid:
+                        logger.info("✅ LIFESPAN: Database schema validated successfully")
+                        app.state.database_ready = True
+                        break
+                    else:
+                        logger.warning("⚠️ LIFESPAN: Database schema validation returned False")
+                        app.state.database_ready = False
+                        if attempt < max_retries:
+                            logger.info(f"⏳ LIFESPAN: Retrying in {retry_delay}s...")
+                            await asyncio.sleep(retry_delay)
+                except Exception as e:
+                    logger.error(f"❌ LIFESPAN: Database connection attempt {attempt} failed: {e}")
                     app.state.database_ready = False
-            except Exception as e:
-                logger.error(f"❌ LIFESPAN: Failed to initialize database: {e}")
-                import traceback
-                logger.error(f"❌ LIFESPAN: Database error traceback: {traceback.format_exc()}")
-                # Don't fail startup - allow service to start and return 503 for endpoints
-                app.state.database_ready = False
-                logger.warning("⚠️ LIFESPAN: Service starting with database unavailable - endpoints will return 503")
+                    
+                    if attempt < max_retries:
+                        logger.info(f"⏳ LIFESPAN: Retrying in {retry_delay}s...")
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        import traceback
+                        logger.error(f"❌ LIFESPAN: All {max_retries} connection attempts failed")
+                        logger.error(f"❌ LIFESPAN: Final error traceback: {traceback.format_exc()}")
+                        logger.warning("⚠️ LIFESPAN: Service starting with database unavailable - endpoints will return 503")
         else:
             logger.error("❌ LIFESPAN: DATABASE_URL not set - configuration endpoints will not work")
             app.state.database_url = None

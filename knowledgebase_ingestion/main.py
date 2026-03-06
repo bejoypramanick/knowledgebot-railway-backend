@@ -47,23 +47,38 @@ async def lifespan(app: FastAPI):
         # This web service only handles HTTP requests, no Celery initialization needed
         logger.info("✅ Web service started - Celery worker is separate service")
         
-        # Initialize SQLAlchemy database
+        # Initialize SQLAlchemy database with retries
         database_url = settings.railway_postgres_url or settings.database_url or os.getenv("DATABASE_URL")
         if database_url:
-            try:
-                await init_database(database_url)
-                logger.info("✅ SQLAlchemy engine initialized")
-                app.state.database_ready = True
+            max_retries = 5
+            retry_delay = 2  # seconds
+            
+            for attempt in range(1, max_retries + 1):
+                try:
+                    logger.info(f"🔄 Database connection attempt {attempt}/{max_retries}")
+                    await init_database(database_url)
+                    logger.info("✅ SQLAlchemy engine initialized")
+                    app.state.database_ready = True
 
-                is_valid = await validate_database()
-                if is_valid:
-                    logger.info("✅ Database schema validated successfully")
-                else:
-                    logger.warning("⚠️ Database schema validation returned False")
-            except Exception as e:
-                logger.error(f"❌ Error initializing database: {e}")
-                app.state.database_ready = False
-                logger.warning("⚠️ Service starting with database unavailable - endpoints will return 503")
+                    is_valid = await validate_database()
+                    if is_valid:
+                        logger.info("✅ Database schema validated successfully")
+                        break
+                    else:
+                        logger.warning("⚠️ Database schema validation returned False")
+                        if attempt < max_retries:
+                            logger.info(f"⏳ Retrying in {retry_delay}s...")
+                            await asyncio.sleep(retry_delay)
+                except Exception as e:
+                    logger.error(f"❌ Database connection attempt {attempt} failed: {e}")
+                    app.state.database_ready = False
+                    
+                    if attempt < max_retries:
+                        logger.info(f"⏳ Retrying in {retry_delay}s...")
+                        await asyncio.sleep(retry_delay)
+                    else:
+                        logger.error(f"❌ All {max_retries} connection attempts failed")
+                        logger.warning("⚠️ Service starting with database unavailable - endpoints will return 503")
         else:
             logger.error("❌ DATABASE_URL not set")
             app.state.database_ready = False
