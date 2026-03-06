@@ -630,25 +630,32 @@ async def request_human_agent_connection(
                 # Broadcast session to agent in ChatSessionResponse format
                 # Agent's ChatLog UI will receive this and merge it seamlessly into their session list
                 try:
+                    logger.info(f"🔄 Starting broadcast to agent {assigned_agent} for session {session_numeric_id}")
                     from shared.redis_pubsub_manager import broadcast_event_to_agent
                     from shared.sqlalchemy_db import get_db_session
                     from sqlalchemy import text
                     from datetime import datetime
 
                     # Query session to build ChatSessionResponse format
+                    logger.info(f"🔄 Getting DB session to query session details...")
                     async with get_db_session() as db_session:
                         # Get session details
                         session_query = "SELECT * FROM chat_sessions WHERE id = :id LIMIT 1"
+                        logger.info(f"🔄 Executing query: {session_query} with id={session_numeric_id}")
                         session_result = await db_session.execute(text(session_query), {"id": session_numeric_id})
                         session_row = session_result.mappings().first()
+                        logger.info(f"🔄 Session query result: {session_row is not None}")
 
                         if session_row:
                             session_dict = dict(session_row)
+                            logger.info(f"🔄 Got session details, querying for latest message...")
 
                             # Get latest message
                             msg_query = "SELECT id, content, role, created_at FROM chat_messages WHERE session_id = :session_uuid ORDER BY created_at DESC LIMIT 1"
+                            logger.info(f"🔄 Executing message query with session_uuid={session_uuid}")
                             msg_result = await db_session.execute(text(msg_query), {"session_uuid": session_uuid})
                             msg_row = msg_result.mappings().first()
+                            logger.info(f"🔄 Message query result: {msg_row is not None}")
 
                             messages = []
                             if msg_row:
@@ -661,6 +668,7 @@ async def request_human_agent_connection(
                                 })
 
                             # Build ChatSessionResponse in exact same format as /admin/chat-sessions endpoint
+                            logger.info(f"🔄 Building session event for broadcast...")
                             session_event = {
                                 "type": "session_update",
                                 "data": {
@@ -680,10 +688,13 @@ async def request_human_agent_connection(
                                     "messages": messages
                                 }
                             }
+                            logger.info(f"🔄 Broadcasting session event to agent {assigned_agent}...")
                             await broadcast_event_to_agent(assigned_agent, session_event)
                             logger.info(f"📤 Broadcasted session {session_uuid} to agent {assigned_agent}")
+                        else:
+                            logger.warning(f"⚠️ Session query returned no results for id={session_numeric_id}")
                 except Exception as e:
-                    logger.warning(f"⚠️ Failed to broadcast session to agent: {e}", exc_info=True)
+                    logger.error(f"❌ Failed to broadcast session to agent: {e}", exc_info=True)
 
                 return f"👋 I've connected you to a human agent ({assigned_agent}). They will join the conversation shortly and can see your full chat history. The chat has been opened in their chat log. 💪\n"
             elif response.status_code == 503:
