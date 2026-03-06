@@ -562,7 +562,10 @@ async def query_railway_postgres(query: str) -> str:
         logger.error(f"❌ Tool failed: query_railway_postgres - {e}")
         return f"I encountered an error querying the database. The database query functionality may need to be configured properly."
 
-async def request_human_agent_connection(reason: str) -> str:
+async def request_human_agent_connection(
+    ctx: RunContext[ChatSessionDeps],
+    reason: str
+) -> str:
     """
     Request to connect user to a human agent for personalized assistance.
 
@@ -573,8 +576,10 @@ async def request_human_agent_connection(reason: str) -> str:
     - The query cannot be answered by knowledge base or requires human judgment
 
     This will assign the chat to an available human agent and the chat will appear in their chat log.
+    The agent will see the FULL chat history including all previous AI conversations.
     """
-    logger.info(f"🧑 Tool called: request_human_agent_connection with reason: {reason}")
+    session_id = ctx.deps.session_id
+    logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_id} with reason: {reason}")
     
     try:
         import httpx
@@ -585,14 +590,38 @@ async def request_human_agent_connection(reason: str) -> str:
             'https://configuration-service-production.up.railway.app'
         )
         
-        # Note: We don't have access to session_id in this context
-        # For now, return a message indicating human agent request
-        # In a real implementation, we'd need to pass session_id through deps
-
-        result = f"I've noted your request to connect with a human agent for: {reason}. A human agent will join the conversation shortly. The chat has been opened in their chat log."
-        logger.info(f"✅ Tool completed: request_human_agent_connection")
-        return result
-
+        # Call the configuration service to assign a human agent
+        # This will:
+        # 1. Find an available agent using load balancing
+        # 2. Assign the session to that agent
+        # 3. The agent will see ALL messages in chat_messages table (full history)
+        logger.info(f"📞 Calling configuration service to assign human agent for session {session_id}")
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{config_service_url}/api/v1/gateway/configuration/admin/chat-sessions/request-agent",
+                json={"session_id": session_id},
+                headers={}
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                assigned_agent = result.get('assigned_agent', 'an agent')
+                logger.info(f"✅ Chat {session_id} assigned to human agent {assigned_agent}")
+                logger.info(f"📚 Agent will see full chat history from chat_messages table")
+                return f"👋 I've connected you to a human agent ({assigned_agent}). They will join the conversation shortly and can see your full chat history. The chat has been opened in their chat log. 💪\n"
+            elif response.status_code == 503:
+                error_detail = response.json().get('detail', 'No agents available')
+                logger.warning(f"⚠️ Human agent request failed: {error_detail}")
+                return f"I'm sorry, but {error_detail.lower()}. Please try again later or continue chatting with me."
+            else:
+                error_detail = response.json().get('detail', 'Failed to connect to human agent')
+                logger.error(f"❌ Human agent request failed with status {response.status_code}: {error_detail}")
+                return f"I encountered an error while trying to connect you to a human agent: {error_detail}. Please try again later."
+                
+    except httpx.TimeoutException:
+        logger.error("⏱️ Timeout while requesting human agent connection")
+        return "The request to connect to a human agent timed out. Please try again."
     except Exception as e:
-        logger.error(f"❌ Tool failed: request_human_agent_connection - {e}")
-        return f"Error requesting human agent: {str(e)}"
+        logger.error(f"❌ Tool failed: request_human_agent_connection - {e}", exc_info=True)
+        return f"I encountered an error while trying to connect you to a human agent. Please try again later."
