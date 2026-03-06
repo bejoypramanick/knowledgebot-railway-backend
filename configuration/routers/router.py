@@ -891,6 +891,90 @@ async def get_session_messages(session_id: int):
 
 
 
+@router.post("/customer/sessions/{session_uuid}/messages")
+async def send_customer_message(session_uuid: str, request: Request):
+    """Send a message from a customer to an assigned agent (no AI processing)"""
+    try:
+        body = await request.json()
+        text = body.get("text", "")
+
+        if not text:
+            raise HTTPException(status_code=400, detail="Message text is required")
+
+        # Get numeric session ID from UUID
+        from shared.redis_pubsub_manager import get_pubsub_redis
+        redis_client = await get_pubsub_redis()
+        
+        # Check Redis cache first
+        cached_id = await redis_client.get(f"session:uuid_to_id:{session_uuid}")
+        if cached_id:
+            if isinstance(cached_id, bytes):
+                session_id = int(cached_id.decode('utf-8'))
+            else:
+                session_id = int(cached_id)
+            logger.debug(f"✅ Found cached session ID: {session_uuid} → {session_id}")
+        else:
+            # Cache miss - query database
+            session_data = await chat_log_service.dao.get_session_by_uuid(session_uuid)
+            if not session_data:
+                raise HTTPException(status_code=404, detail=f"Session {session_uuid} not found")
+            session_id = session_data.get('id')
+            # Cache for future requests
+            await redis_client.set(f"session:uuid_to_id:{session_uuid}", str(session_id), ex=86400)
+            await redis_client.set(f"session:id_to_uuid:{session_id}", session_uuid, ex=86400)
+            logger.info(f"💾 Cached session mapping: {session_uuid} ↔ {session_id}")
+
+        # Check if agent is assigned
+        assigned_agent_key = f"session:assigned_agent:{session_uuid}"
+        cached_agent = await redis_client.get(assigned_agent_key)
+        
+        if cached_agent:
+            if isinstance(cached_agent, bytes):
+                assigned_agent = cached_agent.decode('utf-8')
+            else:
+                assigned_agent = str(cached_agent)
+        else:
+            # Query database for assignment
+            session = await chat_log_service.dao.get_session_by_id(session_id)
+            assigned_agent = session.get('assigned_agent') if session else None
+            if assigned_agent:
+                await redis_client.set(assigned_agent_key, assigned_agent, ex=3600)
+
+        if not assigned_agent:
+            raise HTTPException(status_code=400, detail="No agent assigned to this session. Use chatbot API instead.")
+
+        # Save message to database
+        message_id = await chat_log_service.dao.create_message(session_id, 'user', text)
+        await chat_log_service.dao.increment_message_count(session_id)
+
+        # Prepare event data
+        import datetime
+        event_data = {
+            "type": "customer_message",
+            "session_id": str(session_id),
+            "message_id": str(message_id),
+            "text": text,
+            "sender": "customer",
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        }
+
+        # Broadcast to assigned agent only
+        from shared.redis_pubsub_manager import broadcast_event_to_agent
+        await broadcast_event_to_agent(assigned_agent, event_data)
+        logger.info(f"📤 Customer message sent to agent {assigned_agent} (session: {session_uuid})")
+
+        return {
+            "success": True,
+            "message_id": str(message_id),
+            "session_id": session_uuid
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending customer message: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/admin/chat-sessions/{session_id}/messages")
 async def send_agent_message(session_id: int, request: Request):
     """Send a message from an agent or customer in a chat session"""

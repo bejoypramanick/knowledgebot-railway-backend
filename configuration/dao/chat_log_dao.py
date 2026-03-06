@@ -192,6 +192,27 @@ class ChatLogDAO:
             logger.log_db_query("get_session_db_id_by_uuid", {"session_uuid": session_uuid}, error=e)
             return None
 
+    async def get_session_by_uuid(self, session_uuid: str) -> Optional[Dict[str, Any]]:
+        """Get session data by UUID (session_id column)."""
+        try:
+            query = """
+                SELECT id, session_id, started_at, last_activity_at, is_active, 
+                       message_count, archive_status, customer_email, customer_name
+                FROM chat_sessions 
+                WHERE session_id = :session_id
+            """
+            params = {"session_id": session_uuid}
+
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.mappings().first()
+                logger.log_db_query(query, params, row)
+                return dict(row) if row else None
+        except Exception as e:
+            logger.log_db_query("get_session_by_uuid", {"session_uuid": session_uuid}, error=e)
+            return None
+
     async def create_chat_session(self, session_id: str, metadata: Dict[str, Any]) -> int:
         """Create a new chat session."""
         query = """
