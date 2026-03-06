@@ -12,6 +12,9 @@ asyncpg>=0.29.0
 psycopg2-binary>=2.9.0
 sqlalchemy>=2.0.23
 
+# Redis for Pub/Sub message broadcasting
+redis>=5.0.0
+
 # Common utilities
 pydantic-settings>=2.5.0
 psutil>=6.1.0
