@@ -370,38 +370,23 @@ async def public_chat_stream(request: Request):
         import json
         from ..core.config import get_settings
 
-        # Get session ID from httpOnly cookie (set by middleware)
-        # The middleware resolves UUID to numeric ID and stores it in request.state
-        session_numeric_id = getattr(request.state, 'session_numeric_id', None)
+        # Session ID is extracted from httpOnly cookie by auth middleware
+        # and stored in request.state.session_numeric_id
+        # No need to pass it in request body anymore
 
-        if not session_numeric_id:
-            logger.warning("⚠️ No session_numeric_id in request.state - chat request may fail")
-
-        # Get request body
+        # Get request body and remove session_id and use_rag from it
+        # These should come from cookie/headers, not request body
         body_bytes = await request.body()
         body = json.loads(body_bytes) if body_bytes else {}
 
-        # Remove session_id and use_rag from request body (they should not be passed)
         body.pop("session_id", None)
         body.pop("use_rag", None)
 
-        # Add numeric session_id from cookie
-        if session_numeric_id:
-            body["session_id"] = session_numeric_id
-            logger.debug(f"✅ Using session_id from cookie: {session_numeric_id}")
-
-        # Ensure use_rag defaults to true
-        # (don't set it if not needed - let chatbot service use its default)
-        # but if it was explicitly sent as false, we override it to true
-        if "use_rag" not in body:
-            # use_rag not in body - it will use chatbot service default (true)
-            logger.debug("use_rag not in request - will use chatbot service default (true)")
-
-        # Update request body with cleaned data
+        # Encode cleaned body
         body_bytes = json.dumps(body).encode() if body else b''
 
         # Only check chat enabled status on first message of each session
-        if session_numeric_id and not hasattr(request.state, 'chat_status_checked'):
+        if not hasattr(request.state, 'chat_status_checked'):
             config_service_url = "http://configuration.railway.internal:8080"  # Internal service URL
 
             config = await check_config_service_with_retry(config_service_url)
@@ -415,7 +400,7 @@ async def public_chat_stream(request: Request):
                     logger.info("Chat is disabled - blocking request")
                     raise HTTPException(status_code=403, detail="Chat is currently disabled")
                 else:
-                    logger.info(f"Chat is enabled for session {session_numeric_id}")
+                    logger.info("Chat is enabled")
             else:
                 # If we can't check the status, allow the request (fail open)
                 logger.warning("⚠️ Could not verify chat status, allowing request (fail open)")
