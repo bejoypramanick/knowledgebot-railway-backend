@@ -1588,23 +1588,31 @@ async def submit_session_feedback(request: Request):
 
 @router.post("/admin/chat-sessions/request-agent")
 async def request_human_agent(request: Request):
-    """Request a human agent for current chat session (from httpOnly cookie)
+    """Request a human agent for current chat session
 
-    Session UUID comes ONLY from httpOnly cookie: chatbot_session_id
-    Customer must call /customer/sessions/set-current first to set the cookie.
+    Session numeric ID comes from request body (session_id parameter)
+    Can be called from:
+    - Browser (via API Gateway which extracts UUID from cookie and converts to numeric ID)
+    - Internal services (pass numeric session_id in request body)
     """
     try:
         logger.info(f"🧑 [ENDPOINT] POST /admin/chat-sessions/request-agent called")
 
-        # Get numeric session ID from cookie (set by API Gateway middleware)
-        if not hasattr(request.state, "session_numeric_id") or not request.state.session_numeric_id:
+        body = await request.json()
+        session_id = body.get("session_id")
+
+        if not session_id:
             raise HTTPException(
                 status_code=400,
-                detail="No current chat session. Call /customer/sessions/set-current first."
+                detail="session_id is required in request body"
             )
 
-        session_db_id = request.state.session_numeric_id
-        logger.info(f"🧑 [ENDPOINT] Session ID from cookie: {session_db_id}")
+        # Session ID should be numeric (API Gateway converts UUID to numeric ID before calling internal services)
+        try:
+            session_db_id = int(session_id)
+            logger.info(f"🧑 [ENDPOINT] Session ID (numeric): {session_db_id}")
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
 
         # Pass numeric ID to service
         logger.info(f"🔍 [ENDPOINT] Calling chat_log_service.request_human_agent with session_id={session_db_id}")

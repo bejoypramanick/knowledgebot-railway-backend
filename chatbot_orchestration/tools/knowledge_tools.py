@@ -578,36 +578,52 @@ async def request_human_agent_connection(
     This will assign the chat to an available human agent and the chat will appear in their chat log.
     The agent will see the FULL chat history including all previous AI conversations.
     """
-    session_id = ctx.deps.session_id
-    logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_id} with reason: {reason}")
-    
+    session_uuid = ctx.deps.session_id  # This is the chat session UUID
+    logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_uuid} with reason: {reason}")
+
     try:
         import httpx
+        from shared.sqlalchemy_db import async_session
+        from knowledgebase_ingestion.dao.chat_session_dao import ChatSessionDAO
 
-        # Step 1: Get configuration service URL from environment
+        # Step 1: Convert UUID to numeric session ID
+        # Internal services only work with numeric IDs, not UUIDs
+        # UUIDs are only used by the chat system; API Gateway converts to numeric IDs
+        dao = ChatSessionDAO()
+        async with async_session() as session:
+            session_data = await dao.get_session_by_uuid(session_uuid, session=session)
+
+        if not session_data:
+            logger.error(f"❌ Session {session_uuid} not found in database")
+            return f"I encountered an error while trying to connect you to a human agent: Session not found. Please try again later."
+
+        session_numeric_id = session_data.get('id')
+        logger.info(f"✅ Resolved session UUID {session_uuid} → numeric ID {session_numeric_id}")
+
+        # Step 2: Get configuration service URL from environment
         # Use internal Railway URL for service-to-service communication
         config_service_url = os.getenv(
             'CONFIGURATION_SERVICE_URL',
             'http://configuration.railway.internal:8080'
         )
-        
-        # Step 2: Call the configuration service to assign a human agent
-        # Pass UUID session_id directly - backend will handle conversion internally
+
+        # Step 3: Call the configuration service to assign a human agent
+        # Pass numeric session_id - internal services only accept numeric IDs
         # This will:
         # 1. Find an available agent using load balancing
         # 2. Assign the session to that agent
         # 3. The agent will see ALL messages in chat_messages table (full history)
-        logger.info(f"📞 Calling configuration service to assign human agent for session {session_id}")
+        logger.info(f"📞 Calling configuration service to assign human agent for session {session_numeric_id}")
         logger.info(f"🔍 Configuration service URL: {config_service_url}")
-        
+
         # Use internal service endpoint (direct path, no /api/v1/gateway prefix)
         endpoint_url = f"{config_service_url}/api/v1/configuration/admin/chat-sessions/request-agent"
         logger.info(f"🔍 Full endpoint URL: {endpoint_url}")
-        
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
                 endpoint_url,
-                json={"session_id": session_id},  # Send UUID session_id - backend converts internally
+                json={"session_id": session_numeric_id},  # Send numeric session_id - internal services only accept numeric IDs
                 headers={}
             )
             
