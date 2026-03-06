@@ -54,6 +54,17 @@ async def chat_with_agent_stream(request: Request):
 
             logger.info(f"✅ Generated new session UUID for first message: {session_id}")
 
+            # CRITICAL: Save session to database BEFORE returning response
+            # This ensures API Gateway can resolve UUID → numeric ID for subsequent requests
+            try:
+                from chatbot_orchestration.dao.session_persistence_dao import SessionPersistenceDAO
+                session_dao = SessionPersistenceDAO()
+                session_db_id = await session_dao.get_or_create_session(session_id)
+                logger.info(f"✅ Session {session_id} created in database with ID {session_db_id}")
+            except Exception as e:
+                logger.error(f"⚠️ Failed to create session in database: {e}")
+                # Continue anyway - session will be created when first message is saved
+
         # Stream response (tools are configured internally in agent_manager)
         async def generate_response():
             async for chunk in agent_service.stream_agent_response(message, session_id):
