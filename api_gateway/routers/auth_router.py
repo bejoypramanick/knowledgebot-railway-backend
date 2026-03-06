@@ -221,11 +221,17 @@ async def create_session_endpoint(
             config_service_url = settings.configuration_service_url
             role_endpoint = f"{config_service_url}/api/v1/configuration/admin/users/role"
             
+            logger.info(f"🔍 [SESSION_CREATE] Fetching role from: {role_endpoint}")
+            logger.info(f"🔍 [SESSION_CREATE] Email: {user_data.get('email')}")
+            
             async with httpx.AsyncClient(timeout=5.0) as client:
                 role_response = await client.get(
                     role_endpoint,
                     params={"email": user_data.get('email')}
                 )
+                
+                logger.info(f"🔍 [SESSION_CREATE] Role endpoint response status: {role_response.status_code}")
+                logger.info(f"🔍 [SESSION_CREATE] Role endpoint response body: {role_response.text}")
                 
                 if role_response.status_code == 200:
                     role_result = role_response.json()
@@ -242,10 +248,14 @@ async def create_session_endpoint(
                     logger.info(f"✅ [SESSION_CREATE] User role fetched: {user_role} (all roles: {roles})")
                 else:
                     logger.warning(f"⚠️ [SESSION_CREATE] Failed to fetch user role: {role_response.status_code}")
+                    logger.warning(f"⚠️ [SESSION_CREATE] Response body: {role_response.text}")
                     user_data['role'] = 'user'
                     user_data['roles'] = ['user']
         except Exception as e:
-            logger.warning(f"⚠️ [SESSION_CREATE] Failed to fetch user role: {e}")
+            logger.error(f"❌ [SESSION_CREATE] Exception while fetching user role: {e}")
+            logger.error(f"❌ [SESSION_CREATE] Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"❌ [SESSION_CREATE] Traceback: {traceback.format_exc()}")
             user_data['role'] = 'user'  # Default to user if role fetch fails
             user_data['roles'] = ['user']
         
