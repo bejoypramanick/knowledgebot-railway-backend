@@ -677,34 +677,42 @@ async def generic_proxy_handler(request: Request, path: str):
             # Check content-type to decide how to handle the response
             request_body = await request.body()
 
-            # CRITICAL: Convert UUID to numeric ID in request body before forwarding to internal services
+            # CRITICAL: Ensure numeric session_id in request body for internal services
             # API Gateway extracts UUID from cookie and converts to numeric ID
-            # Internal services only accept numeric session_id
+            # Internal services ONLY accept numeric session_id (never UUID)
             # EXCEPTION: set-current endpoints intentionally accept UUIDs - don't convert those
-            should_convert_uuid = (
+            should_ensure_session_id = (
                 request_body and
                 request.method in ["POST", "PUT", "PATCH"] and
                 "set-current" not in full_url  # Exclude set-current endpoints
             )
 
-            if should_convert_uuid:
+            if should_ensure_session_id:
                 try:
                     import json
                     body_data = json.loads(request_body)
 
-                    # If request has session_numeric_id AND request body contains session_id (UUID)
+                    # If we have numeric_session_id from cookie resolution, ensure it's in the body
                     if hasattr(request.state, "session_numeric_id") and request.state.session_numeric_id:
                         if "session_id" in body_data:
-                            # Replace UUID with numeric ID in request body
+                            # session_id already in body - convert if UUID to numeric
                             old_session_id = body_data["session_id"]
+                            if isinstance(old_session_id, str) and old_session_id.startswith("session_"):
+                                # It's a UUID - convert to numeric
+                                body_data["session_id"] = request.state.session_numeric_id
+                                logger.info(f"🔄 Converted UUID to numeric: {old_session_id} → {request.state.session_numeric_id}")
+                            # else: already numeric or other format, leave as-is
+                        else:
+                            # session_id NOT in body - add numeric_id from cookie
                             body_data["session_id"] = request.state.session_numeric_id
-                            logger.info(f"🔄 Converted session_id in request body: {old_session_id} → {request.state.session_numeric_id}")
-                            request_body = json.dumps(body_data).encode()
+                            logger.info(f"✅ Injected numeric session_id into body: {request.state.session_numeric_id}")
 
-                            # IMPORTANT: Update Content-Length header after modifying request body
-                            # Remove old header first to avoid conflicting Content-Length headers
-                            headers.pop("content-length", None)
-                            headers["Content-Length"] = str(len(request_body))
+                        request_body = json.dumps(body_data).encode()
+
+                        # IMPORTANT: Update Content-Length header after modifying request body
+                        # Remove old header first to avoid conflicting Content-Length headers
+                        headers.pop("content-length", None)
+                        headers["Content-Length"] = str(len(request_body))
                 except (json.JSONDecodeError, ValueError) as e:
                     # Not JSON or other error - forward as-is
                     logger.debug(f"⚠️  Could not parse request body as JSON: {e}")
