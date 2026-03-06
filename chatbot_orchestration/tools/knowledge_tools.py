@@ -651,10 +651,10 @@ async def request_human_agent_connection(
                             session_dict = dict(session_row)
                             logger.info(f"🔄 Got session details, querying for latest message...")
 
-                            # Get latest message
-                            msg_query = "SELECT id, content, role, created_at FROM chat_messages WHERE session_id = :session_uuid ORDER BY created_at DESC LIMIT 1"
-                            logger.info(f"🔄 Executing message query with session_uuid={session_uuid}")
-                            msg_result = await db_session.execute(text(msg_query), {"session_uuid": session_uuid})
+                            # Get latest message (using numeric session_id, not UUID)
+                            msg_query = "SELECT id, content, role, created_at FROM chat_messages WHERE session_id = :session_id ORDER BY created_at DESC LIMIT 1"
+                            logger.info(f"🔄 Executing message query with numeric session_id={session_numeric_id}")
+                            msg_result = await db_session.execute(text(msg_query), {"session_id": session_numeric_id})
                             msg_row = msg_result.mappings().first()
                             logger.info(f"🔄 Message query result: {msg_row is not None}")
 
