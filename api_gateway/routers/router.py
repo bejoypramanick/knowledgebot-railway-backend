@@ -800,11 +800,37 @@ async def generic_proxy_handler(request: Request, path: str):
                         # VALIDATION: Reject UUIDs for configuration service endpoints
                         # Configuration service endpoints MUST receive numeric session_id only
                         if isinstance(client_session_id, str) and client_session_id.startswith("session_"):
-                            # Client sent UUID - must convert to numeric via middleware
+                            # Client sent UUID - must convert to numeric
+                            numeric_id = None
+                            
+                            # First check if middleware already resolved it
                             if hasattr(request.state, "session_numeric_id") and request.state.session_numeric_id:
+                                numeric_id = request.state.session_numeric_id
+                                logger.info(f"🔄 Using middleware-resolved numeric ID: {client_session_id} → {numeric_id}")
+                            else:
+                                # Middleware didn't resolve it - do it here
+                                logger.info(f"🔍 Resolving UUID from request body: {client_session_id}")
+                                from sqlalchemy import text
+                                from shared.sqlalchemy_db import get_db_session
+                                
+                                try:
+                                    async with get_db_session() as db_session:
+                                        query = text("SELECT id FROM chat_sessions WHERE session_id = :session_uuid")
+                                        result = await db_session.execute(query, {"session_uuid": client_session_id})
+                                        row = result.mappings().first()
+                                        
+                                        if row:
+                                            numeric_id = row['id']
+                                            logger.info(f"✅ Resolved UUID to numeric ID: {client_session_id} → {numeric_id}")
+                                        else:
+                                            logger.warning(f"⚠️ Session UUID not found in database: {client_session_id}")
+                                except Exception as e:
+                                    logger.error(f"❌ Error resolving UUID: {e}")
+                            
+                            if numeric_id:
                                 # Conversion successful - use numeric ID
-                                body_data["session_id"] = request.state.session_numeric_id
-                                logger.info(f"🔄 Converted UUID to numeric: {client_session_id} → {request.state.session_numeric_id}")
+                                body_data["session_id"] = numeric_id
+                                logger.info(f"🔄 Converted UUID to numeric in body: {client_session_id} → {numeric_id}")
                             else:
                                 # Conversion failed - reject request
                                 logger.error(f"❌ Failed to resolve session UUID {client_session_id} for {backend_path}")
