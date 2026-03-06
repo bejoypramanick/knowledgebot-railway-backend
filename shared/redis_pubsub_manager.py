@@ -3,7 +3,7 @@ Redis Pub/Sub Manager for Agent SSE Events
 Uses Redis database 4 for real-time event broadcasting
 Simplifies SSE architecture by replacing in-memory queues
 """
-import redis
+import redis.asyncio as redis
 import json
 import logging
 import os
@@ -16,16 +16,16 @@ logger = logging.getLogger(__name__)
 _pubsub_redis_client: Optional[redis.Redis] = None
 
 
-def init_pubsub_redis() -> redis.Redis:
+async def init_pubsub_redis() -> redis.Redis:
     """
-    Initialize Redis client for Pub/Sub on database 3.
+    Initialize async Redis client for Pub/Sub on database 3.
     
     Uses DATABASE 3 for Pub/Sub (SSE events)
     Requires PUBSUB_REDIS_URL environment variable with explicit database number
     Format: redis://default:<password>@redis.railway.internal:6379/3
     
     Returns:
-        Redis client connected to database 3
+        Async Redis client connected to database 3
     
     Raises:
         RuntimeError if Redis is not configured
@@ -45,7 +45,7 @@ def init_pubsub_redis() -> redis.Redis:
         )
     
     try:
-        logger.info(f"🔌 Initializing Redis Pub/Sub client (database 3)...")
+        logger.info(f"🔌 Initializing async Redis Pub/Sub client (database 3)...")
         
         _pubsub_redis_client = redis.from_url(
             redis_url,
@@ -55,9 +55,9 @@ def init_pubsub_redis() -> redis.Redis:
             health_check_interval=30
         )
         
-        # Test connection
-        _pubsub_redis_client.ping()
-        logger.info("✅ Redis Pub/Sub client initialized successfully (db=3)")
+        # Test connection (async)
+        await _pubsub_redis_client.ping()
+        logger.info("✅ Async Redis Pub/Sub client initialized successfully (db=3)")
         
         return _pubsub_redis_client
         
@@ -67,10 +67,10 @@ def init_pubsub_redis() -> redis.Redis:
 
 
 
-def get_pubsub_redis() -> redis.Redis:
-    """Get Redis Pub/Sub client, initializing if needed"""
+async def get_pubsub_redis() -> redis.Redis:
+    """Get async Redis Pub/Sub client, initializing if needed"""
     if _pubsub_redis_client is None:
-        return init_pubsub_redis()
+        return await init_pubsub_redis()
     return _pubsub_redis_client
 
 
@@ -82,7 +82,12 @@ class AgentEventBroadcaster:
     """
     
     def __init__(self):
-        self.redis_client = get_pubsub_redis()
+        self.redis_client = None  # Will be initialized async
+    
+    async def _ensure_redis(self):
+        """Ensure Redis client is initialized"""
+        if self.redis_client is None:
+            self.redis_client = await get_pubsub_redis()
     
     def _get_agent_channel(self, agent_email: str) -> str:
         """Get Redis channel name for specific agent"""
@@ -108,11 +113,12 @@ class AgentEventBroadcaster:
             True if published successfully
         """
         try:
+            await self._ensure_redis()
             channel = self._get_agent_channel(agent_email)
             message = json.dumps(event_data)
             
-            # Publish to Redis channel (non-blocking)
-            subscribers = self.redis_client.publish(channel, message)
+            # Publish to Redis channel (async, non-blocking)
+            subscribers = await self.redis_client.publish(channel, message)
             
             if subscribers > 0:
                 logger.info(f"📤 Published event to {agent_email}: {event_data.get('type')} ({subscribers} subscribers)")
@@ -136,10 +142,11 @@ class AgentEventBroadcaster:
             True if published successfully
         """
         try:
+            await self._ensure_redis()
             channel = self._get_broadcast_channel()
             message = json.dumps(event_data)
             
-            subscribers = self.redis_client.publish(channel, message)
+            subscribers = await self.redis_client.publish(channel, message)
             logger.info(f"📢 Broadcasted event to all agents: {event_data.get('type')} ({subscribers} subscribers)")
             
             return True
@@ -160,11 +167,12 @@ class AgentEventBroadcaster:
             True if published successfully
         """
         try:
+            await self._ensure_redis()
             channel = self._get_session_channel(session_id)
             message = json.dumps(event_data)
             
             # Publish to Redis channel
-            subscribers = self.redis_client.publish(channel, message)
+            subscribers = await self.redis_client.publish(channel, message)
             
             if subscribers > 0:
                 logger.info(f"📤 Published event to session {session_id}: "
@@ -229,7 +237,7 @@ class SessionEventSubscriber:
     
     def __init__(self, session_id: str):
         self.session_id = session_id
-        self.redis_client = get_pubsub_redis()
+        self.redis_client = None  # Will be initialized async
         self.pubsub = None
     
     async def subscribe(self) -> AsyncIterator[Dict[str, Any]]:
@@ -240,10 +248,13 @@ class SessionEventSubscriber:
             Event data dictionaries
         """
         try:
-            # Create pubsub instance
+            # Initialize async Redis client
+            self.redis_client = await get_pubsub_redis()
+            
+            # Create async pubsub instance
             self.pubsub = self.redis_client.pubsub()
             
-            # Subscribe to session-specific channel
+            # Subscribe to session-specific channel (async, non-blocking)
             session_channel = f"session:events:{self.session_id}"
             await self.pubsub.subscribe(session_channel)
             
@@ -255,7 +266,7 @@ class SessionEventSubscriber:
                 'session_id': self.session_id
             }
             
-            # Listen for messages using async iteration
+            # Listen for messages using async iteration (non-blocking)
             async for message in self.pubsub.listen():
                 try:
                     if message['type'] == 'message':
@@ -286,15 +297,15 @@ class SessionEventSubscriber:
         finally:
             # Cleanup
             if self.pubsub:
-                self.pubsub.unsubscribe()
-                self.pubsub.close()
+                await self.pubsub.unsubscribe()
+                await self.pubsub.close()
                 logger.info(f"🔌 Customer unsubscribed from session {self.session_id}")
     
     async def unsubscribe(self):
         """Unsubscribe and cleanup"""
         if self.pubsub:
-            self.pubsub.unsubscribe()
-            self.pubsub.close()
+            await self.pubsub.unsubscribe()
+            await self.pubsub.close()
             logger.info(f"🔌 Customer unsubscribed from session {self.session_id}")
 
 
@@ -307,7 +318,7 @@ class AgentEventSubscriber:
     def __init__(self, agent_email: str, role: str = 'human_agent'):
         self.agent_email = agent_email
         self.role = role
-        self.redis_client = get_pubsub_redis()
+        self.redis_client = None  # Will be initialized async
         self.pubsub = None
     
     async def subscribe(self) -> AsyncIterator[Dict[str, Any]]:
@@ -318,10 +329,13 @@ class AgentEventSubscriber:
             Event data dictionaries
         """
         try:
-            # Create pubsub instance
+            # Initialize async Redis client
+            self.redis_client = await get_pubsub_redis()
+            
+            # Create async pubsub instance
             self.pubsub = self.redis_client.pubsub()
             
-            # Subscribe to agent-specific channel
+            # Subscribe to agent-specific channel (async, non-blocking)
             agent_channel = f"agent:events:{self.agent_email}"
             await self.pubsub.subscribe(agent_channel)
             
@@ -340,7 +354,7 @@ class AgentEventSubscriber:
                 'role': self.role
             }
             
-            # Listen for messages using async iteration
+            # Listen for messages using async iteration (non-blocking)
             async for message in self.pubsub.listen():
                 try:
                     if message['type'] == 'message':
@@ -371,15 +385,15 @@ class AgentEventSubscriber:
         finally:
             # Cleanup
             if self.pubsub:
-                self.pubsub.unsubscribe()
-                self.pubsub.close()
+                await self.pubsub.unsubscribe()
+                await self.pubsub.close()
                 logger.info(f"🔌 Agent {self.agent_email} unsubscribed from Redis Pub/Sub")
     
     async def unsubscribe(self):
         """Unsubscribe and cleanup"""
         if self.pubsub:
-            self.pubsub.unsubscribe()
-            self.pubsub.close()
+            await self.pubsub.unsubscribe()
+            await self.pubsub.close()
             logger.info(f"🔌 Agent {self.agent_email} unsubscribed")
 
 
