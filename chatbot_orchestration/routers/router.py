@@ -29,7 +29,10 @@ agent_service = PydanticAIGatewayService()
 
 @router.post("/chat/stream")
 async def chat_with_agent_stream(request: Request):
-    """Chat with AI agent with streaming response using Pydantic AI"""
+    """Chat with AI agent with streaming response using Pydantic AI
+
+    Creates session in database on first message if it doesn't exist.
+    """
     try:
         body = await request.json()
 
@@ -39,8 +42,17 @@ async def chat_with_agent_stream(request: Request):
         if not message:
             raise HTTPException(status_code=400, detail="Message is required")
 
+        # If no session_id provided, create one in database on first message
         if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required (must be numeric ID from API Gateway)")
+            # Generate UUID for new session (same format as /set-current endpoint)
+            import time
+            import random
+            import string
+            timestamp = int(time.time() * 1000)
+            random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10))
+            session_id = f"session_{timestamp}_{random_suffix}"
+
+            logger.info(f"✅ Generated new session UUID for first message: {session_id}")
 
         # Stream response (tools are configured internally in agent_manager)
         async def generate_response():

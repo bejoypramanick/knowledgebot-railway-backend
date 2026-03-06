@@ -578,9 +578,17 @@ async def request_human_agent_connection(
     This will assign the chat to an available human agent and the chat will appear in their chat log.
     The agent will see the FULL chat history including all previous AI conversations.
     """
-    # ctx.deps.session_id is already the numeric session ID (converted by API Gateway from UUID)
-    session_numeric_id = ctx.deps.session_id
-    logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_numeric_id} with reason: {reason}")
+    # Get numeric session ID from ChatSessionDeps
+    # ctx.deps.session_id is the UUID from frontend/cookie
+    # ctx.deps.numeric_session_id is the numeric ID from database (created on first message)
+    session_numeric_id = ctx.deps.numeric_session_id
+    session_uuid = ctx.deps.session_id
+
+    if not session_numeric_id:
+        logger.error(f"❌ No numeric session ID available for session {session_uuid}")
+        return "I encountered an error: Session not properly initialized. Please try again."
+
+    logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_uuid} (numeric: {session_numeric_id}) with reason: {reason}")
 
     try:
         import httpx

@@ -81,13 +81,56 @@ class StreamingService:
             logger.info(f"🚀 Starting agent stream for session: {session_id}")
             logger.info(f"📝 Message: {message[:100]}...")
 
+            # STEP 1: Ensure session exists in database (lazy creation on first message)
+            # Session may be created by frontend's /set-current call, or created here on first message
+            try:
+                from shared.sqlalchemy_db import get_db_session
+                from sqlalchemy import text
+
+                session_exists = False
+                numeric_session_id = None
+
+                # Check if session exists in database
+                async with get_db_session() as db_session:
+                    query = "SELECT id FROM chat_sessions WHERE session_id = :session_id LIMIT 1"
+                    result = await db_session.execute(text(query), {"session_id": session_id})
+                    existing_session = result.mappings().first()
+
+                    if existing_session:
+                        # Session exists - use its numeric ID
+                        session_exists = True
+                        numeric_session_id = existing_session["id"]
+                        logger.info(f"✅ Found existing session in DB: {session_id} (numeric ID: {numeric_session_id})")
+                    else:
+                        # Session doesn't exist - create it on first message
+                        logger.info(f"📝 Creating new session in database on first message: {session_id}")
+                        insert_query = """
+                            INSERT INTO chat_sessions (session_id, metadata, created_at, last_activity_at, is_active)
+                            VALUES (:session_id, :metadata, NOW(), NOW(), true)
+                            RETURNING id
+                        """
+                        result = await db_session.execute(
+                            text(insert_query),
+                            {
+                                "session_id": session_id,
+                                "metadata": json.dumps({"created_by": "first_message", "user_email": user_email})
+                            }
+                        )
+                        numeric_session_id = result.scalar()
+                        await db_session.commit()
+                        logger.info(f"✅ Created new session in DB: {session_id} (numeric ID: {numeric_session_id})")
+
+            except Exception as e:
+                logger.error(f"❌ Error managing session in database: {e}", exc_info=True)
+                # Continue anyway - session will be created when message is saved
+
             # Update session activity
             session_state_manager.update_session_activity(session_id)
             session_state_manager.set_streaming_state(session_id, True)
 
-            # Create session dependencies
-            session_deps = ChatSessionDeps(session_id=session_id)
-            logger.info("✅ Session dependencies created")
+            # Create session dependencies with both UUID and numeric ID
+            session_deps = ChatSessionDeps(session_id=session_id, numeric_session_id=numeric_session_id)
+            logger.info(f"✅ Session dependencies created (UUID: {session_id}, numeric ID: {numeric_session_id})")
 
             # Get chat history for context
             chat_history = await session_state_manager.get_chat_history(session_id)
