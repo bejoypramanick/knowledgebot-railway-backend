@@ -603,9 +603,10 @@ async def request_human_agent_connection(
             logger.info(f"✅ Found numeric session ID: {session_db_id} for UUID: {session_id}")
 
         # Step 2: Get configuration service URL from environment
+        # Use internal Railway URL for service-to-service communication
         config_service_url = os.getenv(
             'CONFIGURATION_SERVICE_URL',
-            'https://configuration-service-production.up.railway.app'
+            'http://configuration.railway.internal:8080'
         )
         
         # Step 3: Call the configuration service to assign a human agent
@@ -614,10 +615,15 @@ async def request_human_agent_connection(
         # 2. Assign the session to that agent
         # 3. The agent will see ALL messages in chat_messages table (full history)
         logger.info(f"📞 Calling configuration service to assign human agent for session {session_db_id}")
+        logger.info(f"🔍 Configuration service URL: {config_service_url}")
+        
+        # Use internal service endpoint (not gateway)
+        endpoint_url = f"{config_service_url}/api/v1/configuration/admin/chat-sessions/request-agent"
+        logger.info(f"🔍 Full endpoint URL: {endpoint_url}")
         
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.post(
-                f"{config_service_url}/api/v1/gateway/configuration/admin/chat-sessions/request-agent",
+                endpoint_url,
                 json={"session_id": str(session_db_id)},  # Send numeric ID as string
                 headers={}
             )
