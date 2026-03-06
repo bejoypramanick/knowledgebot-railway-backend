@@ -109,7 +109,8 @@ from shared.redis_pubsub_manager import (
     SessionEventSubscriber,
     broadcast_event_to_agent,
     broadcast_event_to_all_agents,
-    broadcast_event_for_session
+    broadcast_event_for_session,
+    get_pubsub_redis
 )
 
 logger.info("✅ Redis Pub/Sub manager initialized for agent and customer SSE events")
@@ -1018,10 +1019,23 @@ async def send_agent_message(session_id: int, request: Request):
         
         if sender_type == "user":
             # Customer sent message → Notify assigned agent AND all admins
-            # Get assigned agent from database
-            session = await chat_log_service.dao.get_session_by_id(session_id)
-            assigned_agent = session.get('assigned_agent') if session else None
-            
+            # Try Redis cache first (should be set when agent is assigned)
+            redis_client = await get_pubsub_redis()
+            cache_key = f"session:assigned_agent:{session_uuid}"
+            cached_agent = await redis_client.get(cache_key)
+
+            if cached_agent:
+                assigned_agent = cached_agent.decode('utf-8')  # Cache HIT
+                logger.info(f"✅ Found cached agent assignment: {session_id} → {assigned_agent}")
+            else:
+                # Cache MISS - query database
+                session = await chat_log_service.dao.get_session_by_id(session_id)
+                assigned_agent = session.get('assigned_agent') if session else None
+                # Cache for future messages (1 hour TTL)
+                if assigned_agent:
+                    await redis_client.set(cache_key, assigned_agent, ex=3600)
+                    logger.info(f"💾 Cached agent assignment: {session_id} → {assigned_agent} (TTL: 1h)")
+
             if assigned_agent:
                 # Notify assigned agent and all admins
                 await broadcast_event_to_agent(assigned_agent, event_data)
@@ -1033,11 +1047,12 @@ async def send_agent_message(session_id: int, request: Request):
                 logger.info(f"📤 Customer message sent to admins (no agent assigned)")
         
         else:
-            # Agent sent message → Notify customer AND all admins
+            # Agent sent message → Notify customer, this agent, AND all admins
             # CRITICAL: Use UUID session_id for customer SSE channel (not numeric ID)
             await broadcast_event_to_session(session_uuid, event_data)
+            await broadcast_event_to_agent(sender_id, event_data)  # Also notify the sending agent
             await broadcast_event_to_all_agents(event_data)
-            logger.info(f"📤 Agent message sent to customer and all admins (session UUID: {session_uuid}, numeric: {session_id})")
+            logger.info(f"📤 Agent message sent to customer, agent {sender_id}, and all admins (session UUID: {session_uuid}, numeric: {session_id})")
 
         return {
             "success": True,
