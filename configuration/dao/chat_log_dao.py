@@ -156,22 +156,11 @@ class ChatLogDAO:
             logger.log_db_query(query, {"user_role_id": user_role_id}, error=e)
             return 0
 
-    async def get_session_db_id(self, session_id: int | str) -> Optional[int]:
+    async def get_session_db_id(self, session_id: int) -> Optional[int]:
         """Get database ID for a session (numeric ID only)."""
         try:
-            # Handle both int and string inputs
-            if isinstance(session_id, int):
-                session_db_id = session_id
-            else:
-                try:
-                    session_db_id = int(session_id)
-                except ValueError:
-                    # Not a numeric string - likely a UUID, return None
-                    logger.warning(f"⚠️ Expected numeric session_id, got: {session_id}")
-                    return None
-
             query = "SELECT id FROM chat_sessions WHERE id = :id"
-            params = {"id": session_db_id}
+            params = {"id": session_id}
 
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
@@ -181,7 +170,7 @@ class ChatLogDAO:
                     logger.log_db_query(query, params, row)
                     return row[0]
                 else:
-                    logger.warning(f"⚠️ Session {session_db_id} not found in database")
+                    logger.warning(f"⚠️ Session {session_id} not found in database")
                     return None
         except Exception as e:
             logger.error(f"❌ Database error in get_session_db_id({session_id}): {e}", exc_info=True)
@@ -560,9 +549,6 @@ class ChatLogDAO:
         """Get messages for multiple sessions using single LEFT JOIN query."""
         if not session_ids: return {}
 
-        # Ensure all IDs are integers
-        int_session_ids = [int(sid) if isinstance(sid, str) else sid for sid in session_ids]
-
         # Single LEFT JOIN query: get all messages for selected sessions in one go
         query = """
             SELECT cm.*
@@ -571,7 +557,7 @@ class ChatLogDAO:
             WHERE cs.id = ANY(:session_ids)
             ORDER BY cs.id, cm.created_at ASC
         """
-        params = {"session_ids": int_session_ids}
+        params = {"session_ids": session_ids}
 
         try:
             logger.log_db_operation(query, params)
@@ -745,17 +731,14 @@ class ChatLogDAO:
         # Optional: if you have a message_count column in chat_sessions
         pass 
 
-    async def archive_session(self, session_id: int | str, status: str) -> bool:
+    async def archive_session(self, session_id: int, status: str) -> bool:
         """Archive a session using numeric ID only."""
         try:
-            # Convert to int if string
-            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
-
             query = """
                 UPDATE chat_sessions SET archive_status = :status
                 WHERE id = :id
             """
-            params = {"id": session_db_id, "status": status}
+            params = {"id": session_id, "status": status}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
@@ -766,48 +749,44 @@ class ChatLogDAO:
             logger.log_db_query(query, {"session_id": session_id, "status": status}, error=e)
             return False
 
-    async def update_session_feedback(self, session_id: int | str, feedback_type: str) -> bool:
+
+    async def update_session_feedback(self, session_id: int, feedback_type: str) -> bool:
         """
         Update session feedback (thumbs up/down).
-        
+
         Args:
-            session_id: Session ID (numeric or string)
+            session_id: Session ID (numeric only)
             feedback_type: 'positive' or 'negative'
-        
+
         Returns:
             True if updated successfully
         """
         try:
-            # Convert to int if string
-            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
-
             query = """
-                UPDATE chat_sessions 
+                UPDATE chat_sessions
                 SET feedback_type = :feedback_type,
                     feedback_provided_at = NOW()
                 WHERE id = :id
             """
-            params = {"id": session_db_id, "feedback_type": feedback_type}
+            params = {"id": session_id, "feedback_type": feedback_type}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
                 await session.commit()
                 logger.log_db_query(query, params, None)
-                logger.info(f"✅ Feedback '{feedback_type}' saved for session {session_db_id}")
+                logger.info(f"✅ Feedback '{feedback_type}' saved for session {session_id}")
                 return result.rowcount > 0 if hasattr(result, 'rowcount') else True
         except Exception as e:
             logger.error(f"❌ Error updating session feedback: {e}")
             logger.log_db_query(query, {"session_id": session_id, "feedback_type": feedback_type}, error=e)
             return False
 
-    async def get_session_by_id_with_messages(self, session_id: int | str) -> Optional[Dict[str, Any]]:
+
+    async def get_session_by_id_with_messages(self, session_id: int) -> Optional[Dict[str, Any]]:
         """Get session by numeric ID only."""
         try:
-            # Handle both int and string inputs
-            session_db_id = int(session_id) if isinstance(session_id, str) else session_id
-
             query = "SELECT * FROM chat_sessions WHERE id = :id"
-            params = {"id": session_db_id}
+            params = {"id": session_id}
             logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 result = await session.execute(text(query), params)
@@ -817,13 +796,14 @@ class ChatLogDAO:
                     logger.log_db_query(query, params, row)
                     return dict(row._mapping)
                 else:
-                    logger.warning(f"⚠️ Session {session_db_id} not found in database (query returned 0 rows)")
+                    logger.warning(f"⚠️ Session {session_id} not found in database (query returned 0 rows)")
                     logger.log_db_query(query, params, None)
                     return None
         except Exception as e:
             logger.error(f"❌ Database error fetching session {session_id}: {e}", exc_info=True)
             logger.log_db_query(query, {"session_id": session_id}, error=e)
             return None
+
 
     async def update_chat_session_metadata(self, session_db_id: int, metadata: Dict[str, Any]):
         query = "UPDATE chat_sessions SET metadata = :metadata WHERE id = :session_db_id"
