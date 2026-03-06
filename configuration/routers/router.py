@@ -903,6 +903,14 @@ async def send_agent_message(session_id: int, request: Request):
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
 
+        # Get session UUID from database (needed for customer SSE channel)
+        session_data = await chat_log_service.dao.get_session_by_id_with_messages(session_id)
+        if not session_data:
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        
+        session_uuid = session_data.get('session_id')  # UUID format
+        logger.info(f"🔍 [SEND_MESSAGE] Numeric ID: {session_id}, UUID: {session_uuid}")
+
         # Save message to database (session_id is already an int from path parameter)
         message_id = await chat_log_service.send_agent_message(session_id, sender_id, text)
 
@@ -910,7 +918,7 @@ async def send_agent_message(session_id: int, request: Request):
         import datetime
         event_data = {
             "type": "agent_message",
-            "session_id": str(session_id),  # Convert to string for event data
+            "session_id": str(session_id),  # Numeric ID for reference
             "message_id": str(message_id),
             "text": text,
             "sender": sender_type,
@@ -921,7 +929,7 @@ async def send_agent_message(session_id: int, request: Request):
             event_data["agent_email"] = sender_id
 
         # Smart broadcasting based on sender
-        from shared.redis_pubsub_manager import broadcast_event_to_session
+        from shared.redis_pubsub_manager import broadcast_event_to_session, broadcast_event_to_agent, broadcast_event_to_all_agents
         
         if sender_type == "user":
             # Customer sent message → Only notify assigned agent
@@ -940,8 +948,9 @@ async def send_agent_message(session_id: int, request: Request):
         
         else:
             # Agent sent message → Only notify customer
-            await broadcast_event_to_session(str(session_id), event_data)
-            logger.info(f"📤 Agent message sent to customer (session {session_id})")
+            # CRITICAL: Use UUID session_id for customer SSE channel (not numeric ID)
+            await broadcast_event_to_session(session_uuid, event_data)
+            logger.info(f"📤 Agent message sent to customer (session UUID: {session_uuid}, numeric: {session_id})")
 
         return {
             "success": True,
