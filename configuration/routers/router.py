@@ -723,9 +723,15 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                     try:
                         while True:
                             await asyncio.sleep(15)
-                            await queue.put({"type": "heartbeat", "timestamp": int(time.time())})
+                            try:
+                                await queue.put({"type": "heartbeat", "timestamp": int(time.time())})
+                            except Exception as e:
+                                logger.warning(f"Failed to queue heartbeat: {e}")
+                                break
                     except asyncio.CancelledError:
                         pass
+                    except Exception as e:
+                        logger.error(f"❌ Heartbeat loop error: {e}")
 
                 # Create a queue for both heartbeat and Redis events
                 message_queue = asyncio.Queue()
@@ -735,11 +741,20 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                 async def forward_redis_events():
                     try:
                         async for event_data in subscriber.subscribe():
-                            await message_queue.put(event_data)
+                            try:
+                                await message_queue.put(event_data)
+                            except Exception as e:
+                                logger.warning(f"Failed to queue event: {e}")
+                                break
                     except asyncio.CancelledError:
                         pass
+                    except Exception as e:
+                        logger.error(f"❌ Redis event loop error: {e}")
                     finally:
-                        heartbeat_task.cancel()
+                        try:
+                            heartbeat_task.cancel()
+                        except Exception:
+                            pass
 
                 redis_task = asyncio.create_task(forward_redis_events())
 
@@ -756,15 +771,18 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                     except asyncio.TimeoutError:
                         # Queue empty for 30s, send heartbeat manually
                         yield f": timeout-heartbeat {int(time.time())}\n\n"
+                    except Exception as e:
+                        logger.error(f"❌ Error yielding message: {e}")
+                        break
 
             except asyncio.CancelledError:
                 logger.info(f"🔌 SSE connection cancelled for {user_email}")
             except Exception as e:
                 logger.error(f"❌ Error in SSE generator for {user_email}: {e}")
             finally:
-                if heartbeat_task:
+                if heartbeat_task and not heartbeat_task.done():
                     heartbeat_task.cancel()
-                if redis_task:
+                if redis_task and not redis_task.done():
                     redis_task.cancel()
                 logger.info(f"🔌 Agent {user_email} disconnected from Redis Pub/Sub SSE stream")
 
@@ -822,9 +840,15 @@ async def customer_events_stream(session_id: str):
                     try:
                         while True:
                             await asyncio.sleep(15)
-                            await queue.put({"type": "heartbeat", "timestamp": int(time.time())})
+                            try:
+                                await queue.put({"type": "heartbeat", "timestamp": int(time.time())})
+                            except Exception as e:
+                                logger.warning(f"Failed to queue heartbeat for session {session_id}: {e}")
+                                break
                     except asyncio.CancelledError:
                         pass
+                    except Exception as e:
+                        logger.error(f"❌ Heartbeat loop error for session {session_id}: {e}")
 
                 # Create a queue for both heartbeat and Redis events
                 message_queue = asyncio.Queue()
@@ -834,11 +858,20 @@ async def customer_events_stream(session_id: str):
                 async def forward_redis_events():
                     try:
                         async for event_data in subscriber.subscribe():
-                            await message_queue.put(event_data)
+                            try:
+                                await message_queue.put(event_data)
+                            except Exception as e:
+                                logger.warning(f"Failed to queue event for session {session_id}: {e}")
+                                break
                     except asyncio.CancelledError:
                         pass
+                    except Exception as e:
+                        logger.error(f"❌ Redis event loop error for session {session_id}: {e}")
                     finally:
-                        heartbeat_task.cancel()
+                        try:
+                            heartbeat_task.cancel()
+                        except Exception:
+                            pass
 
                 redis_task = asyncio.create_task(forward_redis_events())
 
@@ -855,15 +888,18 @@ async def customer_events_stream(session_id: str):
                     except asyncio.TimeoutError:
                         # Queue empty for 30s, send heartbeat manually
                         yield f": timeout-heartbeat {int(time.time())}\n\n"
+                    except Exception as e:
+                        logger.error(f"❌ Error yielding message for session {session_id}: {e}")
+                        break
 
             except asyncio.CancelledError:
                 logger.info(f"🔌 SSE connection cancelled for session {session_id}")
             except Exception as e:
                 logger.error(f"❌ Error in SSE generator for session {session_id}: {e}")
             finally:
-                if heartbeat_task:
+                if heartbeat_task and not heartbeat_task.done():
                     heartbeat_task.cancel()
-                if redis_task:
+                if redis_task and not redis_task.done():
                     redis_task.cancel()
                 logger.info(f"🔌 Customer disconnected from session {session_id}")
         
