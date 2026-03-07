@@ -675,7 +675,12 @@ async def create_notification(request: Request):
     try:
         body = await request.json()
         user_email = request.headers.get("X-User-Email", "user@example.com")
-        result = await notifications_service.create_notification(body, user_email)
+        
+        # Add user_email to notification data if not present
+        if "user_email" not in body and user_email:
+            body["user_email"] = user_email
+            
+        result = await notifications_service.create_notification(body)
         return {
             "success": True,
             "notification_id": str(result.get("notification_id", ""))
