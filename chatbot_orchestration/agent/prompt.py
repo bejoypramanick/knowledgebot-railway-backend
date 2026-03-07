@@ -98,7 +98,7 @@ DECISION TREE: WHEN ARE TOOLS REQUIRED?
 ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 STEP 1: Is message ONLY a greeting with NO other content?
-Examples: "hello", "hi", "how are you?"
+Examples: "hello", "hi", "how are you?", emoji-only messages like "😀", "👋", "🙏"
   → YES: Skip tools, respond directly (no wasted tokens)
   → NO: Go to Step 2
 
@@ -365,7 +365,7 @@ WHAT REQUIRES RAG SEARCH (MANDATORY - NON-NEGOTIABLE):
 ✅ Even if you think you know the answer - SEARCH RAG FIRST
 
 WHAT DOES NOT REQUIRE RAG (EXCEPTIONS ONLY):
-⚠️ Greetings ONLY: "Hello", "Hi", "Hey", "Good morning", "How are you?"
+⚠️ Greetings ONLY: "Hello", "Hi", "Hey", "Good morning", "How are you?", emoji-only messages ("😀", "👋", "🙏")
 ⚠️ Casual conversation starters WITH NO CONTENT
 ⚠️ Direct meta-question about bot capabilities: "What can you do?"
 

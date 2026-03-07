@@ -96,8 +96,14 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
 
         # Only attempt session UUID resolution for customer-facing endpoints
         # Admin endpoints authenticate via Firebase, not customer session UUID
+        # Also include customer-used endpoints under /admin/ path (feedback, request-agent, end-customer)
         is_customer_endpoint = path.startswith('/api/v1/gateway/configuration/customer/') or \
-                               path.startswith('/api/v1/gateway/chatbot/sessions/')
+                               path.startswith('/api/v1/gateway/chatbot/sessions/') or \
+                               path in [
+                                   '/api/v1/gateway/configuration/admin/chat-sessions/feedback',
+                                   '/api/v1/gateway/configuration/admin/chat-sessions/request-agent',
+                                   '/api/v1/gateway/configuration/admin/chat-sessions/end-customer',
+                               ]
 
         if is_customer_endpoint:
             session_uuid = extract_session_uuid_from_cookie(request)

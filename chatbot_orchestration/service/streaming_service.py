@@ -6,6 +6,7 @@ Handles streaming responses and message formatting
 import json
 import asyncio
 import os
+import re
 import time
 from typing import Any, Dict, List, AsyncGenerator
 import sys
@@ -698,6 +699,31 @@ class StreamingService:
                         if tool_call_count == 0 and message.strip():
                             greeting_patterns = ["hi", "hello", "hey", "good morning", "good afternoon", "greetings"]
                             is_greeting = any(g in message.lower() for g in greeting_patterns)
+
+                            # Detect emoji-only messages as greetings (e.g. "😀", "👋", "🙏")
+                            emoji_pattern = re.compile(
+                                r'^[\U0001F600-\U0001F64F'   # emoticons
+                                r'\U0001F300-\U0001F5FF'     # symbols & pictographs
+                                r'\U0001F680-\U0001F6FF'     # transport & map
+                                r'\U0001F1E0-\U0001F1FF'     # flags
+                                r'\U00002702-\U000027B0'     # dingbats
+                                r'\U0000FE00-\U0000FE0F'     # variation selectors
+                                r'\U0000200D'                # zero-width joiner
+                                r'\U00002600-\U000026FF'     # misc symbols
+                                r'\U0000231A-\U0000231B'     # watch/hourglass
+                                r'\U00002934-\U00002935'     # arrows
+                                r'\U000025AA-\U000025FE'     # geometric shapes
+                                r'\U00002B05-\U00002B07'     # arrows
+                                r'\U00002B1B-\U00002B1C'     # squares
+                                r'\U00002B50'                # star
+                                r'\U00002B55'                # circle
+                                r'\U0001F900-\U0001F9FF'     # supplemental symbols
+                                r'\U0001FA00-\U0001FA6F'     # chess symbols
+                                r'\U0001FA70-\U0001FAFF'     # symbols extended-A
+                                r'\s]+$'                     # allow whitespace between emojis
+                            )
+                            if not is_greeting and emoji_pattern.match(message.strip()):
+                                is_greeting = True
                             has_history = len(pydantic_messages) > 0
 
                             if not is_greeting:
