@@ -99,6 +99,33 @@ async def verify_auth_token(request: Request):
 # SSE (Server-Sent Events) ENDPOINTS
 # =================================
 
+def _prepare_sse_proxy_headers(request: Request) -> dict:
+    """Prepare headers for SSE proxy requests to internal services.
+
+    Strips hop-by-hop headers and encoding headers that break SSE proxying:
+    - Accept-Encoding: prevents compressed responses that proxy can't decompress
+    - Connection/Keep-Alive: hop-by-hop headers not meant for proxy-to-backend
+    - Host/Cookie: internal routing headers
+    """
+    headers = dict(request.headers)
+    # Strip headers that break SSE proxying
+    for h in ["host", "cookie", "accept-encoding", "connection", "keep-alive",
+              "transfer-encoding", "upgrade", "sec-websocket-key",
+              "sec-websocket-version", "sec-websocket-extensions"]:
+        headers.pop(h, None)
+    # Force identity encoding (no compression) for SSE
+    headers["accept-encoding"] = "identity"
+
+    # Forward auth context if available
+    if hasattr(request.state, 'user'):
+        headers['X-User-UID'] = request.state.user.get('uid', '')
+        headers['X-User-Email'] = request.state.user.get('email', '')
+        headers['X-User-Name'] = request.state.user.get('name', '')
+        headers['X-User-Role'] = request.state.user.get('role', '')
+
+    return headers
+
+
 @router.get("/configuration/admin/events")
 async def proxy_admin_events_sse(request: Request):
     """
@@ -112,35 +139,32 @@ async def proxy_admin_events_sse(request: Request):
 
         logger.info(f"🔄 Proxying SSE stream to: {full_url}")
 
-        # Prepare headers - DO NOT forward cookies to internal services
-        headers = dict(request.headers)
-        headers.pop("host", None)
-        headers.pop("cookie", None)  # Remove cookie - we'll use X-User-* headers instead
-
-        # Extract user from request.state (set by auth middleware) and forward as headers
+        headers = _prepare_sse_proxy_headers(request)
         if hasattr(request.state, 'user'):
-            headers['X-User-UID'] = request.state.user.get('uid', '')
-            headers['X-User-Email'] = request.state.user.get('email', '')
-            headers['X-User-Name'] = request.state.user.get('name', '')
-            headers['X-User-Role'] = request.state.user.get('role', '')
             logger.info(f"✅ Forwarding user headers for SSE: {request.state.user.get('email')}")
         else:
             logger.warning("⚠️ No user found in request.state - authentication may fail")
 
-        # Create streaming client with NO timeout for SSE
+        # Connection timeout 10s, but no read timeout (SSE streams indefinitely)
+        sse_timeout = httpx.Timeout(connect=10.0, read=None, write=None, pool=None)
+
         async def event_stream():
             try:
                 logger.info(f"📡 Starting httpx stream for admin SSE")
-                async with httpx.AsyncClient(timeout=None) as client:
+                async with httpx.AsyncClient(timeout=sse_timeout) as client:
                     async with client.stream("GET", full_url, headers=headers) as response:
                         logger.info(f"📡 httpx stream connected, status: {response.status_code}")
                         async for chunk in response.aiter_bytes():
-                            logger.info(f"📦 Received chunk ({len(chunk)} bytes) for admin SSE")
                             yield chunk
                         logger.info(f"📡 httpx stream ended for admin SSE")
+            except httpx.ConnectError as e:
+                logger.error(f"❌ Cannot connect to config service for admin SSE: {e}")
+                yield f"event: error\ndata: Connection to backend failed\n\n".encode()
+            except httpx.ConnectTimeout as e:
+                logger.error(f"❌ Connection timeout for admin SSE: {e}")
+                yield f"event: error\ndata: Backend connection timeout\n\n".encode()
             except Exception as e:
                 logger.error(f"❌ Error in SSE stream: {e}")
-                # Send error event to client
                 yield f"event: error\ndata: {str(e)}\n\n".encode()
 
         return StreamingResponse(
@@ -171,30 +195,26 @@ async def proxy_customer_events_sse(request: Request, session_id: str = Query(..
 
         logger.info(f"🔄 Proxying customer SSE stream to: {full_url} (session: {session_id})")
 
-        # Prepare headers
-        headers = dict(request.headers)
-        headers.pop("host", None)
+        headers = _prepare_sse_proxy_headers(request)
 
-        # Extract user from request.state (set by auth middleware) and forward as headers
-        # Customer SSE may not require auth, so this is optional
-        if hasattr(request.state, 'user'):
-            headers['X-User-UID'] = request.state.user.get('uid', '')
-            headers['X-User-Email'] = request.state.user.get('email', '')
-            headers['X-User-Name'] = request.state.user.get('name', '')
-            headers['X-User-Role'] = request.state.user.get('role', '')
-            logger.info(f"✅ Forwarding user headers for customer SSE: {request.state.user.get('email')}")
+        # Connection timeout 10s, but no read timeout (SSE streams indefinitely)
+        sse_timeout = httpx.Timeout(connect=10.0, read=None, write=None, pool=None)
 
-        # Create streaming client with NO timeout for SSE
         async def event_stream():
             try:
                 logger.info(f"📡 Starting httpx stream for session {session_id}")
-                async with httpx.AsyncClient(timeout=None) as client:
+                async with httpx.AsyncClient(timeout=sse_timeout) as client:
                     async with client.stream("GET", full_url, headers=headers) as response:
                         logger.info(f"📡 httpx stream connected, status: {response.status_code}")
                         async for chunk in response.aiter_bytes():
-                            logger.info(f"📦 Received chunk ({len(chunk)} bytes) for session {session_id}")
                             yield chunk
                         logger.info(f"📡 httpx stream ended for session {session_id}")
+            except httpx.ConnectError as e:
+                logger.error(f"❌ Cannot connect to config service for customer SSE ({session_id}): {e}")
+                yield f"event: error\ndata: Connection to backend failed\n\n".encode()
+            except httpx.ConnectTimeout as e:
+                logger.error(f"❌ Connection timeout for customer SSE ({session_id}): {e}")
+                yield f"event: error\ndata: Backend connection timeout\n\n".encode()
             except Exception as e:
                 logger.error(f"❌ Error in customer SSE stream: {e}")
                 yield f"event: error\ndata: {str(e)}\n\n".encode()
