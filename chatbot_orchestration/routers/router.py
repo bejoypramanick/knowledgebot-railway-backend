@@ -85,7 +85,6 @@ async def chat_with_agent_stream(request: Request):
             # Then stream the actual response
             async for chunk in agent_service.stream_agent_response(message, session_id):
                 yield chunk
-                yield chunk
 
         return StreamingResponse(
             generate_response_with_session(),
