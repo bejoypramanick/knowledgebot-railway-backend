@@ -83,7 +83,10 @@ async def chat_with_agent_stream(request: Request):
                 logger.info(f"📋 Sent session_created event with UUID: {session_id}")
             
             # Then stream the actual response
+            chunk_counter = 0
             async for chunk in agent_service.stream_agent_response(message, session_id):
+                chunk_counter += 1
+                logger.info(f"🔍 [YIELD-DEBUG] Yielding chunk #{chunk_counter} for session {session_id}")
                 yield chunk
 
         return StreamingResponse(
