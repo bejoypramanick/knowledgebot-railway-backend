@@ -1203,30 +1203,36 @@ async def get_admin_chat_sessions(
 async def send_customer_message(request: Request):
     """Send a message from a customer to an assigned agent (no AI processing)
 
+    Session ID comes from httpOnly cookie (chatbot_session_id).
     Request body: {
-        session_id: int (numeric session ID),
-        text: str (message text),
-        session_uuid?: str (optional UUID for broadcast, defaults to string of numeric ID)
+        text: str (message text)
     }
     """
     try:
         body = await request.json()
-        session_id = body.get("session_id")
         text = body.get("text", "")
-
-        if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required in request body")
-
-        try:
-            numeric_session_id = int(session_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
-
-        # Use provided UUID or fall back to string of numeric ID
-        session_uuid = body.get("session_uuid", str(numeric_session_id))
 
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
+
+        # Get session UUID from cookie
+        session_uuid = request.cookies.get("chatbot_session_id")
+        if not session_uuid:
+            raise HTTPException(status_code=400, detail="No session cookie found. Please start a chat session first.")
+
+        # Resolve UUID to numeric ID
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text as sql_text
+        
+        async with get_db_session() as db_session:
+            result = await db_session.execute(
+                sql_text("SELECT id FROM chat_sessions WHERE session_id = :session_uuid"),
+                {"session_uuid": session_uuid}
+            )
+            row = result.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"Session not found: {session_uuid}")
+            numeric_session_id = row[0]
 
         # Check if agent is assigned
         from shared.redis_pubsub_manager import get_pubsub_redis
@@ -1281,8 +1287,6 @@ async def send_customer_message(request: Request):
     except Exception as e:
         logger.error(f"Error sending customer message: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.post("/admin/chat-sessions/messages")
 async def send_agent_message(request: Request):
     """Send a message from an agent or customer in a chat session
