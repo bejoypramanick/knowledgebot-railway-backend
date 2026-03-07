@@ -45,7 +45,18 @@ class NotificationsService:
     async def create_notification(self, notification_data: Dict[str, Any]) -> int:
         """Create a new notification"""
         try:
-            return await self._notifications_dao.create_notification(notification_data)
+            # Extract parameters from notification_data dict
+            title = notification_data.get('title', 'Notification')
+            message = notification_data.get('message', '')
+            notification_type = notification_data.get('type', 'info')
+            user_email = notification_data.get('user_email', None)
+            
+            return await self._notifications_dao.create_notification(
+                title=title,
+                message=message,
+                notification_type=notification_type,
+                user_email=user_email
+            )
         except Exception as e:
             logger.error(f"Error creating notification: {e}")
             raise
