@@ -169,12 +169,13 @@ class SessionStateManager:
                                 logger.debug(f"No agent assigned to session {session_id}")
                         
                         # Broadcast to session channel (customer) and agent channel (if assigned)
+                        # CRITICAL: Use correct event type - bot messages should NOT be "agent_message"
                         event_data = {
-                            "type": "customer_message" if role == "user" else "agent_message",
+                            "type": "customer_message" if role == "user" else "bot_message",  # Changed from "agent_message"
                             "message_id": str(record["id"]),
                             "session_id": session_id,
                             "text": content,
-                            "sender": "customer" if role == "user" else "assistant",
+                            "sender": "customer" if role == "user" else "bot",  # Changed from "assistant"
                             "timestamp": record["created_at"].isoformat() if record["created_at"] else None
                         }
                         
