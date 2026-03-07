@@ -299,14 +299,14 @@ class PerformanceDAO:
                 logger.log_db_query(query, None, rows)
                 return [
                     {
-                        "day": row["month"],
-                        "month": row["month"],
-                        "positive": row["thumbs_up"],
-                        "thumbs_up": row["thumbs_up"],
-                        "negative": row["thumbs_down"],
-                        "thumbs_down": row["thumbs_down"],
-                        "score": round(row["satisfaction_score"] or 0, 2),
-                        "satisfaction_score": round(row["satisfaction_score"] or 0, 2)
+                        "day": row._mapping["month"],
+                        "month": row._mapping["month"],
+                        "positive": int(row._mapping["thumbs_up"]),
+                        "thumbs_up": int(row._mapping["thumbs_up"]),
+                        "negative": int(row._mapping["thumbs_down"]),
+                        "thumbs_down": int(row._mapping["thumbs_down"]),
+                        "score": round(float(row._mapping["satisfaction_score"]) if row._mapping["satisfaction_score"] else 0, 2),
+                        "satisfaction_score": round(float(row._mapping["satisfaction_score"]) if row._mapping["satisfaction_score"] else 0, 2)
                     }
                     for row in rows
                 ]
