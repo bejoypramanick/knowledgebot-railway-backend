@@ -1421,7 +1421,7 @@ async def end_agent_session(request: Request):
         logger.info(f"🔍 End-agent endpoint: session_id={numeric_session_id}")
 
         # Get session UUID for broadcasting
-        session_data = await chat_log_service.dao.get_session_by_id(numeric_session_id)
+        session_data = await chat_log_service.dao.get_session_by_id_with_messages(numeric_session_id)
         if not session_data:
             raise HTTPException(status_code=404, detail=f"Session {numeric_session_id} not found")
 
