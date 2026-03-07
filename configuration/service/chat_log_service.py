@@ -348,22 +348,10 @@ class ChatLogService:
         return await self.dao.get_session_messages(session_id)
 
     async def send_agent_message(self, session_id: int, agent_email: str, text: str):
-        """Send a message from an agent to a customer using numeric ID only."""
+        """Send a message from an agent to a customer using numeric ID only.
+        Broadcasting to customer SSE is handled by the router after this call."""
         message_id = await self.dao.create_message(session_id, 'agent', text)
         await self.dao.increment_message_count(session_id)
-
-        if self.connection_manager:
-            message_data = {
-                "type": "agent_message",
-                "message_id": message_id,
-                "text": text,
-                "sender": "agent",
-                "session_id": str(session_id),
-                "timestamp": datetime.utcnow().isoformat(),
-                "agent_email": agent_email
-            }
-            await self.connection_manager.broadcast_to_session(message_data, str(session_id))
-
         return message_id
 
 
