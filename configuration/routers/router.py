@@ -1218,11 +1218,17 @@ async def send_customer_message(request: Request):
         text = body.get("text", "")
         session_uuid = body.get("session_id", "")
 
+        logger.info(f"📨 Customer message request - session_id type: {type(session_uuid)}, value: {session_uuid}")
+
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
 
         if not session_uuid:
             raise HTTPException(status_code=400, detail="session_id is required")
+
+        # Ensure session_uuid is a string
+        session_uuid = str(session_uuid)
+        logger.info(f"📨 After str() conversion - session_id type: {type(session_uuid)}, value: {session_uuid}")
 
         # Resolve UUID to numeric ID
         from shared.sqlalchemy_db import get_db_session
@@ -1237,6 +1243,7 @@ async def send_customer_message(request: Request):
             if not row:
                 raise HTTPException(status_code=404, detail=f"Session not found: {session_uuid}")
             numeric_session_id = row[0]
+            logger.info(f"✅ Resolved UUID {session_uuid} to numeric ID {numeric_session_id}")
 
         # Check if agent is assigned
         from shared.redis_pubsub_manager import get_pubsub_redis
