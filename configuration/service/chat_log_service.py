@@ -89,7 +89,8 @@ class ChatLogService:
             # CRITICAL: Broadcast to BOTH agent AND customer
             assignment_event = {
                 "type": "chat_assigned",
-                "session_id": str(session_db_id),
+                "session_id": session_uuid,  # CRITICAL: Use UUID for SSE channel matching
+                "numeric_session_id": str(session_db_id),  # Include numeric ID for reference
                 "agent_email": agent_email,
                 "assignee_type": assignee_type,
                 "status": "active",
