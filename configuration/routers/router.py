@@ -765,10 +765,10 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
 
             try:
                 async def heartbeat_loop(queue):
-                    """Send keep-alive heartbeat to queue every 15 seconds"""
+                    """Send keep-alive heartbeat to queue every 10 seconds"""
                     try:
                         while True:
-                            await asyncio.sleep(15)
+                            await asyncio.sleep(10)  # Reduced from 15 to 10 seconds
                             try:
                                 await queue.put({"type": "heartbeat", "timestamp": int(time.time())})
                             except Exception as e:
@@ -806,7 +806,7 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
 
                 # Send initial connection established event immediately
                 # This ensures the browser receives a response and the SSE connection is established
-                yield f": connected\n\n"
+                yield f"data: {json.dumps({'type': 'connected', 'agent_email': user_email, 'role': user_role, 'timestamp': int(time.time())})}\n\n"
 
                 # Yield messages from queue
                 try:
