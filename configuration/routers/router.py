@@ -680,10 +680,10 @@ async def create_notification(request: Request):
         if "user_email" not in body and user_email:
             body["user_email"] = user_email
             
-        result = await notifications_service.create_notification(body)
+        notification_id = await notifications_service.create_notification(body)
         return {
             "success": True,
-            "notification_id": str(result.get("notification_id", ""))
+            "notification_id": str(notification_id) if notification_id else ""
         }
     except Exception as e:
         logger.error(f"Error creating notification: {e}")
