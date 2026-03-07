@@ -358,11 +358,11 @@ class ChatLogService:
                 "message_id": message_id,
                 "text": text,
                 "sender": "agent",
-                "session_id": str(session_db_id),
+                "session_id": str(session_id),
                 "timestamp": datetime.utcnow().isoformat(),
                 "agent_email": agent_email
             }
-            await self.connection_manager.broadcast_to_session(message_data, str(session_db_id))
+            await self.connection_manager.broadcast_to_session(message_data, str(session_id))
 
         return message_id
 
