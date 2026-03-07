@@ -1203,22 +1203,21 @@ async def get_admin_chat_sessions(
 async def send_customer_message(request: Request):
     """Send a message from a customer to an assigned agent (no AI processing)
 
-    Session ID comes from httpOnly cookie (chatbot_session_id).
     Request body: {
+        session_id: str (session UUID),
         text: str (message text)
     }
     """
     try:
         body = await request.json()
         text = body.get("text", "")
+        session_uuid = body.get("session_id", "")
 
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
 
-        # Get session UUID from cookie
-        session_uuid = request.cookies.get("chatbot_session_id")
         if not session_uuid:
-            raise HTTPException(status_code=400, detail="No session cookie found. Please start a chat session first.")
+            raise HTTPException(status_code=400, detail="session_id is required")
 
         # Resolve UUID to numeric ID
         from shared.sqlalchemy_db import get_db_session

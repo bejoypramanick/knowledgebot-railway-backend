@@ -43,6 +43,7 @@ async def chat_with_agent_stream(request: Request):
             raise HTTPException(status_code=400, detail="Message is required")
 
         # If no session_id provided, create one in database on first message
+        is_new_session = not session_id
         if not session_id:
             # Generate UUID for new session (same format as /set-current endpoint)
             import time
@@ -54,21 +55,17 @@ async def chat_with_agent_stream(request: Request):
 
             logger.info(f"✅ Generated new session UUID for first message: {session_id}")
 
-            # CRITICAL: Save session to database BEFORE returning response
-            # This ensures API Gateway can resolve UUID → numeric ID for subsequent requests
-            try:
-                from chatbot_orchestration.dao.session_persistence_dao import SessionPersistenceDAO
-                session_dao = SessionPersistenceDAO()
-                session_db_id = await session_dao.get_or_create_session(session_id)
-                logger.info(f"✅ Session {session_id} created in database with ID {session_db_id}")
-            except Exception as e:
-                logger.error(f"⚠️ Failed to create session in database: {e}")
-                # Continue anyway - session will be created when first message is saved
-
-        # Stream response (tools are configured internally in agent_manager)
-        async def generate_response():
-            async for chunk in agent_service.stream_agent_response(message, session_id):
-                yield chunk
+        # CRITICAL: Save session to database BEFORE returning response
+        # This ensures API Gateway can resolve UUID → numeric ID for subsequent requests
+        # Use get_or_create to handle both new and existing sessions
+        try:
+            from chatbot_orchestration.dao.session_persistence_dao import SessionPersistenceDAO
+            session_dao = SessionPersistenceDAO()
+            session_db_id = await session_dao.get_or_create_session(session_id)
+            logger.info(f"✅ Session {session_id} ready in database with ID {session_db_id}")
+        except Exception as e:
+            logger.error(f"⚠️ Failed to ensure session in database: {e}")
+            # Continue anyway - session will be created when first message is saved
 
         # Build response headers
         response_headers = {
@@ -76,14 +73,22 @@ async def chat_with_agent_stream(request: Request):
             "X-Accel-Buffering": "no"
         }
 
-        # Return session UUID in internal header for API Gateway to set cookie
-        # This header will be filtered out by API Gateway before sending to client
-        if not body.get("session_id"):  # Only include on first message (new session)
-            response_headers["X-Internal-Session-UUID"] = session_id
-            logger.info(f"📋 Including session UUID in internal response header for API Gateway: {session_id}")
+        # For new sessions, prepend session UUID in first SSE event
+        async def generate_response_with_session():
+            # If new session, send session UUID as first event
+            if is_new_session:
+                import json
+                session_event = json.dumps({"type": "session_created", "session_id": session_id})
+                yield f"data: {session_event}\n\n"
+                logger.info(f"📋 Sent session_created event with UUID: {session_id}")
+            
+            # Then stream the actual response
+            async for chunk in agent_service.stream_agent_response(message, session_id):
+                yield chunk
+                yield chunk
 
         return StreamingResponse(
-            generate_response(),
+            generate_response_with_session(),
             media_type="text/event-stream",
             headers=response_headers
         )

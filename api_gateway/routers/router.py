@@ -534,9 +534,6 @@ async def public_chat_stream(request: Request):
 
             logger.info(f"✅ [{correlation_id}] Chat stream response: {response.status_code}")
 
-            # Extract session UUID from internal header (if new session)
-            session_uuid_from_response = response.headers.get("X-Internal-Session-UUID") or response.headers.get("x-internal-session-uuid")
-
             # Filter response headers to prevent internal URL leakage
             response_headers = {}
             blocked_headers = [
@@ -546,44 +543,23 @@ async def public_chat_stream(request: Request):
                 'content-location',
                 'host',
                 'server',
-                'x-internal-session-uuid',  # Remove internal headers from response
             ]
             for key, value in response.headers.items():
                 if key.lower() not in blocked_headers:
                     response_headers[key] = value
 
-            # If new session, add X-Session-UUID header for client to read
-            if session_uuid_from_response:
-                response_headers['X-Session-UUID'] = session_uuid_from_response
-                logger.info(f"📤 Adding X-Session-UUID header to response: {session_uuid_from_response}")
-
-            # Return streaming response
+            # Return streaming response (session UUID is in SSE stream, not header/cookie)
             from fastapi.responses import StreamingResponse
 
             async def stream_response():
                 async for chunk in response.aiter_bytes():
                     yield chunk
 
-            response_obj = StreamingResponse(
+            return StreamingResponse(
                 stream_response(),
                 status_code=response.status_code,
                 headers=response_headers
             )
-
-            # If this is a new session, set httpOnly cookie
-            # UUID is provided by chatbot service in internal header
-            if session_uuid_from_response:
-                logger.info(f"🍪 Setting httpOnly cookie for new session: {session_uuid_from_response}")
-                response_obj.set_cookie(
-                    key="chatbot_session_id",
-                    value=session_uuid_from_response,
-                    httponly=True,
-                    secure=True,
-                    samesite="Strict",
-                    max_age=60 * 60 * 24 * 7  # 7 days
-                )
-
-            return response_obj
 
     except HTTPException:
         raise
@@ -841,12 +817,19 @@ async def generic_proxy_handler(request: Request, path: str):
                                 body_data["session_id"] = numeric_id
                                 logger.info(f"🔄 Converted UUID to numeric in body: {client_session_id} → {numeric_id}")
                             else:
-                                # Conversion failed - reject request
-                                logger.error(f"❌ Failed to resolve session UUID {client_session_id} for {backend_path}")
-                                raise HTTPException(
-                                    status_code=400,
-                                    detail=f"Invalid session: UUID could not be resolved. Session may not exist or may have expired."
-                                )
+                                # Conversion failed - check if this is a session creation endpoint
+                                # For chatbot stream, allow UUID to pass through so backend can create session
+                                # This handles race conditions where backend generated UUID but session not yet in DB
+                                if "chatbot/chat/stream" in full_url:
+                                    logger.info(f"✅ Allowing UUID to pass through for chatbot stream: {client_session_id}")
+                                    # Keep the UUID in body - backend will create the session
+                                else:
+                                    # For other endpoints, reject if UUID not found
+                                    logger.error(f"❌ Failed to resolve session UUID {client_session_id} for {backend_path}")
+                                    raise HTTPException(
+                                        status_code=400,
+                                        detail=f"Invalid session: UUID could not be resolved. Session may not exist or may have expired."
+                                    )
                         # else: already numeric or other format - assume it's valid
                     else:
                         # No session_id in body - try to inject from cookie if available
