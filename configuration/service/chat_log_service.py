@@ -391,7 +391,12 @@ class ChatLogService:
 
         await self.dao.update_chat_session_metadata(session_id, metadata)
 
-        if status == 'closed' and not assigned_agent:
+        # Broadcast session_ended event to customer when session is closed (REGARDLESS of who ended it)
+        # Previously only sent if not assigned_agent, which meant:
+        # - Agent closing session: NOT sent to customer ❌
+        # - Customer closing session: sent to customer ✅
+        # Now ALWAYS send to customer, regardless of assignment status
+        if status == 'closed':
             if self.connection_manager:
                 roles = await self.dao.check_user_role(user_email)
                 ended_by = 'human agent' if (roles["is_admin"] or roles["is_agent"]) else 'customer'
@@ -403,6 +408,7 @@ class ChatLogService:
                     "ended_by": ended_by,
                     "timestamp": datetime.utcnow().isoformat()
                 }
+                logger.info(f"📤 Broadcasting session_ended event to customer (session {session_id}, ended by {ended_by})")
                 await self.connection_manager.broadcast_to_session(session_ended_message, str(session_id))
         return True
 

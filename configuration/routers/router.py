@@ -1390,9 +1390,18 @@ async def send_agent_message(request: Request):
         else:
             # Agent sent message → Notify customer, this agent, AND all admins
             # CRITICAL: Use UUID session_id for customer SSE channel (not numeric ID)
-            await broadcast_event_to_session(session_uuid, event_data)
-            await broadcast_event_to_agent(sender_id, event_data)  # Also notify the sending agent
-            await broadcast_event_to_all_agents(event_data)
+            logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to customer on channel: sse/session/{session_uuid}")
+            customer_result = await broadcast_event_to_session(session_uuid, event_data)
+            logger.info(f"📤 [AGENT_MESSAGE] Customer broadcast result: {customer_result}")
+
+            logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to agent {sender_id}")
+            agent_result = await broadcast_event_to_agent(sender_id, event_data)  # Also notify the sending agent
+            logger.info(f"📤 [AGENT_MESSAGE] Agent broadcast result: {agent_result}")
+
+            logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to all admins")
+            admin_result = await broadcast_event_to_all_agents(event_data)
+            logger.info(f"📤 [AGENT_MESSAGE] Admin broadcast result: {admin_result}")
+
             logger.info(f"📤 Agent message sent to customer, agent {sender_id}, and all admins (session UUID: {session_uuid}, numeric: {numeric_session_id})")
 
         return {
@@ -1441,22 +1450,29 @@ async def end_agent_session(request: Request):
         )
 
         # Broadcast session_ended event with feedback prompt to customer
+        # This ensures customer receives notification and can provide feedback
         from shared.redis_pubsub_manager import broadcast_event_to_session
         import datetime
 
         event_data = {
             "type": "session_ended",
-            "session_id": numeric_session_id,
+            "session_id": session_uuid,      # Use UUID for SSE channel matching
+            "numeric_session_id": numeric_session_id,
             "ended_by": "agent",
+            "agent_email": user_email,
             "show_feedback": True,  # Trigger feedback UI for customer
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
-        await broadcast_event_to_session(session_uuid, event_data)
+
+        logger.info(f"📤 [END_AGENT] Broadcasting session_ended event: session_uuid={session_uuid}, numeric={numeric_session_id}, agent={user_email}")
+        result = await broadcast_event_to_session(session_uuid, event_data)
+        logger.info(f"📤 [END_AGENT] Broadcast result: {result}")
 
         return {
             "success": True,
             "message": "Session ended by agent",
-            "session_id": numeric_session_id
+            "session_id": numeric_session_id,
+            "session_uuid": session_uuid
         }
     except HTTPException:
         raise
