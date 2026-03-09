@@ -830,6 +830,7 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                             else:
                                 # Real event data - update last_activity
                                 last_activity = time.time()
+                                logger.info(f"🔌 [SSE] Yielding message to {user_email}: {msg.get('type')} for session {msg.get('session_id', 'N/A')}")
                                 yield f"data: {json.dumps(msg)}\n\n"
 
                                 # Check if session ended - close connection immediately
@@ -1306,24 +1307,37 @@ async def send_customer_message(request: Request):
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
 
+        logger.info(f"📨 Preparing to broadcast customer message from session {session_uuid}: {event_data}")
+
         # Smart broadcast: avoid duplicate messages for admins
-        from shared.redis_pubsub_manager import broadcast_event_to_agent, broadcast_event_to_all_agents
+        from shared.redis_pubsub_manager import broadcast_event_to_agent, broadcast_event_to_all_agents, broadcast_event_to_session
 
         # Check if assigned agent is an admin or human agent
         admin_emails = await chat_log_service.dao.get_all_admins()
         is_assigned_admin = assigned_agent in admin_emails
 
+        logger.info(f"🔍 Agent assignment check: {assigned_agent} is_admin={is_assigned_admin}, admin_list={admin_emails}")
+
+        # CRITICAL: Always broadcast to the session channel so customer can see their own message
+        await broadcast_event_to_session(session_uuid, event_data)
+        logger.info(f"📤 Customer message broadcasted to session channel {session_uuid}")
+
         if is_assigned_admin:
             # Assigned agent is an ADMIN - send ONLY via broadcast channel to avoid duplicates
             # Admin listens to broadcast channel, so they'll get it once
-            await broadcast_event_to_all_agents(event_data)
-            logger.info(f"📤 Customer message sent via broadcast (assigned agent is admin {assigned_agent}): {session_uuid}")
+            logger.info(f"📤 Broadcasting to all agents (admin {assigned_agent})")
+            broadcast_result = await broadcast_event_to_all_agents(event_data)
+            logger.info(f"📤 Broadcast result for admin: {broadcast_result}")
         else:
             # Assigned agent is HUMAN AGENT - send to their personal channel
             # And also broadcast to all admins
-            await broadcast_event_to_agent(assigned_agent, event_data)
-            await broadcast_event_to_all_agents(event_data)
-            logger.info(f"📤 Customer message sent to human agent {assigned_agent} and all admins: {session_uuid}")
+            logger.info(f"📤 Broadcasting to human agent {assigned_agent}")
+            agent_result = await broadcast_event_to_agent(assigned_agent, event_data)
+            logger.info(f"📤 Broadcast result for human agent {assigned_agent}: {agent_result}")
+
+            logger.info(f"📤 Also broadcasting to all admins")
+            admin_result = await broadcast_event_to_all_agents(event_data)
+            logger.info(f"📤 Broadcast result for admins: {admin_result}")
 
         return {
             "success": True,
