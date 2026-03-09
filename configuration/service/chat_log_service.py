@@ -274,7 +274,7 @@ class ChatLogService:
 
             # Include all messages for the session (needed for chat detail view)
             from ..schemas.chat_log_schemas import ChatMessageResponse
-            all_session_messages = await self.dao.get_messages_for_session(session_db_id)
+            all_session_messages = await self.dao.get_session_messages(session_db_id)
             messages = [
                 ChatMessageResponse(
                     id=str(msg['id']),
