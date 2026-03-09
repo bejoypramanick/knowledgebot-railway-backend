@@ -344,18 +344,18 @@ class AgentEventSubscriber:
             
             # Create async pubsub instance
             self.pubsub = self.redis_client.pubsub()
-            
-            # Subscribe to agent-specific channel (async, non-blocking)
-            agent_channel = f"agent:events:{self.agent_email}"
-            await self.pubsub.subscribe(agent_channel)
 
-            logger.info(f"🔌 Agent {self.agent_email} subscribed to channel: {agent_channel}")
-
-            # Admins also subscribe to broadcast channel
+            # Subscribe based on role
             if self.role == 'admin':
+                # Admins ONLY subscribe to broadcast channel (all chats, view-only if not assigned)
                 broadcast_channel = "agent:events:broadcast"
                 await self.pubsub.subscribe(broadcast_channel)
-                logger.info(f"🔌 Admin {self.agent_email} subscribed to channel: {broadcast_channel}")
+                logger.info(f"🔌 Admin {self.agent_email} subscribed to broadcast channel: {broadcast_channel}")
+            else:
+                # Human agents subscribe to personal channel (only their assigned chats)
+                agent_channel = f"agent:events:{self.agent_email}"
+                await self.pubsub.subscribe(agent_channel)
+                logger.info(f"🔌 Human agent {self.agent_email} subscribed to personal channel: {agent_channel}")
 
             # Send initial connection event
             yield {
