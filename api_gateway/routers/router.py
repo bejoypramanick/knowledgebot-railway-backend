@@ -278,21 +278,24 @@ async def proxy_agent_message(request: Request):
         # Update body with numeric ID
         body["session_id"] = numeric_session_id
 
-        # CRITICAL: Set agent_id from X-User-Email header (NOT from body)
+        # CRITICAL: Set agent_id from authenticated user (NOT from body)
+        # Read from request.state (set by SessionAuthMiddleware after Firebase verification)
         # This ensures the actual sender's email is used for authorization
-        user_email = request.headers.get("X-User-Email", "")
+        user_email = getattr(request.state, "user_email", "")
         if user_email:
             body["agent_id"] = user_email
-            logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Set agent_id from X-User-Email header: {user_email}")
+            logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Set agent_id from authenticated user: {user_email}")
+        else:
+            logger.warning(f"⚠️ [AGENT_MESSAGE_PROXY] No authenticated user email found in request state")
 
-        # Forward to configuration service
+        # Forward to configuration service with authenticated user info
         async with AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{config_service_url}/api/v1/configuration/admin/chat-sessions/messages",
                 json=body,
                 headers={
                     "X-User-Email": user_email,
-                    "X-User-Role": request.headers.get("X-User-Role", ""),
+                    "X-User-Role": getattr(request.state, "user_role", ""),
                     "Content-Type": "application/json"
                 }
             )
