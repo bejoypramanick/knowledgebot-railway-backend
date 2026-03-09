@@ -385,7 +385,22 @@ class StreamingService:
                                         logger.info(f"📢 Broadcast result: {broadcast_result}")
                                         logger.info(f"📤 Session data includes {len(messages)} messages")
                                     
-                                    # Send confirmation to customer
+                                    # Send chat_assigned event to customer via SSE
+                                    # This will trigger the UI to show the End Session button
+                                    chat_assigned_event = {
+                                        "type": "chat_assigned",
+                                        "session_id": session_id,
+                                        "agent_email": assigned_agent,
+                                        "message": "A human agent has been assigned to your chat"
+                                    }
+                                    
+                                    # Broadcast to customer's SSE channel
+                                    from shared.redis_pubsub_manager import broadcast_event_to_session
+                                    customer_broadcast_result = await broadcast_event_to_session(session_id, chat_assigned_event)
+                                    logger.info(f"📤 Sent chat_assigned event to customer on channel customer:events:{session_id}")
+                                    logger.info(f"📤 Customer broadcast result: {customer_broadcast_result}")
+                                    
+                                    # Send confirmation to customer (this will be filtered out by frontend)
                                     confirmation_msg = f"Connected to human agent\n"
                                     
                                     # Save AI confirmation message
@@ -400,7 +415,7 @@ class StreamingService:
                                     yield f"data: {json.dumps({'type': 'chunk', 'content': confirmation_msg})}\n\n"
                                     await asyncio.sleep(0.01)  # Small delay to ensure message is sent
                                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
-                                    logger.info(f"✅ Agent assigned and customer notified")
+                                    logger.info(f"✅ Agent assigned and customer notified via SSE")
                                     return
                                     
                                 elif response.status_code == 503:
