@@ -1371,7 +1371,43 @@ async def send_agent_message(request: Request):
         # Smart broadcasting based on sender
         from shared.redis_pubsub_manager import broadcast_event_to_session, broadcast_event_to_agent, broadcast_event_to_all_agents
         
-        if sender_type == "user":
+        if sender_type == "agent":
+            # AGENT sent message - Verify authorization
+            # Only the ASSIGNED agent can send messages
+            # Get assigned agent for this session
+            redis_client = await get_pubsub_redis()
+            cache_key = f"session:assigned_agent:{session_uuid}"
+            cached_agent = await redis_client.get(cache_key)
+
+            if cached_agent:
+                assigned_agent = cached_agent.decode('utf-8')
+                logger.info(f"✅ Found cached agent assignment: {numeric_session_id} → {assigned_agent}")
+            else:
+                # Cache MISS - query database
+                session = await chat_log_service.dao.get_session_by_id(numeric_session_id)
+                assigned_agent = session.get('assigned_agent') if session else None
+                if assigned_agent:
+                    await redis_client.set(cache_key, assigned_agent, ex=3600)
+                    logger.info(f"💾 Cached agent assignment: {numeric_session_id} → {assigned_agent}")
+
+            # Check if sender is the assigned agent
+            if sender_id != assigned_agent:
+                # Sender is NOT the assigned agent - check if they're an admin trying to reply
+                admin_emails = await chat_log_service.dao.get_all_admins()
+                is_sender_admin = sender_id in admin_emails
+
+                if is_sender_admin:
+                    # Admin trying to reply but NOT assigned - reject with 403
+                    logger.warning(f"⚠️ Admin {sender_id} attempted to reply to session {numeric_session_id} assigned to {assigned_agent}")
+                    raise HTTPException(status_code=403, detail=f"Only the assigned agent ({assigned_agent}) can reply to this chat. You can view messages as read-only.")
+                else:
+                    # Neither assigned agent nor admin - reject
+                    logger.warning(f"⚠️ {sender_id} attempted to send message to session {numeric_session_id} assigned to {assigned_agent}")
+                    raise HTTPException(status_code=403, detail="Only the assigned agent can send messages to this chat")
+
+            logger.info(f"✅ Authorization check passed: {sender_id} is assigned to session {numeric_session_id}")
+
+        elif sender_type == "user":
             # Customer sent message → Notify assigned agent AND all admins
             # Try Redis cache first (should be set when agent is assigned)
             redis_client = await get_pubsub_redis()
