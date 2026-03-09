@@ -308,14 +308,17 @@ class ChatLogDAO:
         # Handle 'all' status - return all sessions regardless of archive status
         if archive_status.lower() == 'all':
             query = """
-                SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email
-                FROM chat_sessions cs
-                LEFT JOIN session_assignments sa ON cs.id = sa.session_id
-                LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-                LEFT JOIN users u ON urm.user_id = u.id
-                WHERE sa.user_role_id = :user_role_id
-                  AND (cs.message_count > 0 OR cs.message_count IS NULL)
-                ORDER BY cs.id, cs.last_activity_at DESC
+                SELECT * FROM (
+                    SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email
+                    FROM chat_sessions cs
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                    LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                    LEFT JOIN users u ON urm.user_id = u.id
+                    WHERE sa.user_role_id = :user_role_id
+                      AND (cs.message_count > 0 OR cs.message_count IS NULL)
+                    ORDER BY cs.id
+                ) deduped
+                ORDER BY deduped.last_activity_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
             """
             try:
@@ -331,15 +334,18 @@ class ChatLogDAO:
                 return []
         else:
             query = """
-                SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email
-                FROM chat_sessions cs
-                LEFT JOIN session_assignments sa ON cs.id = sa.session_id
-                LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-                LEFT JOIN users u ON urm.user_id = u.id
-                WHERE sa.user_role_id = :user_role_id 
-                  AND cs.archive_status = :archive_status
-                  AND (cs.message_count > 0 OR cs.message_count IS NULL)
-                ORDER BY cs.id, cs.last_activity_at DESC
+                SELECT * FROM (
+                    SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email
+                    FROM chat_sessions cs
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
+                    LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                    LEFT JOIN users u ON urm.user_id = u.id
+                    WHERE sa.user_role_id = :user_role_id
+                      AND cs.archive_status = :archive_status
+                      AND (cs.message_count > 0 OR cs.message_count IS NULL)
+                    ORDER BY cs.id
+                ) deduped
+                ORDER BY deduped.last_activity_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
             """
             try:
@@ -406,13 +412,16 @@ class ChatLogDAO:
         # Exclude sessions with no messages (abandoned/test sessions)
         if archive_status.lower() == 'all':
             query = """
-                SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email
-                FROM chat_sessions cs
-                LEFT JOIN session_assignments sa ON cs.id = sa.session_id AND sa.status = 'active'
-                LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-                LEFT JOIN users u ON urm.user_id = u.id
-                WHERE (cs.message_count > 0 OR cs.message_count IS NULL)
-                ORDER BY cs.id, cs.last_activity_at DESC
+                SELECT * FROM (
+                    SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email
+                    FROM chat_sessions cs
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id AND sa.status = 'active'
+                    LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                    LEFT JOIN users u ON urm.user_id = u.id
+                    WHERE (cs.message_count > 0 OR cs.message_count IS NULL)
+                    ORDER BY cs.id
+                ) deduped
+                ORDER BY deduped.last_activity_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
             """
             explain_query = f"EXPLAIN ANALYZE {query}"
@@ -446,14 +455,17 @@ class ChatLogDAO:
                 return []
         else:
             query = """
-                SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email
-                FROM chat_sessions cs
-                LEFT JOIN session_assignments sa ON cs.id = sa.session_id AND sa.status = 'active'
-                LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-                LEFT JOIN users u ON urm.user_id = u.id
-                WHERE cs.archive_status = :archive_status
-                  AND (cs.message_count > 0 OR cs.message_count IS NULL)
-                ORDER BY cs.id, cs.last_activity_at DESC
+                SELECT * FROM (
+                    SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email
+                    FROM chat_sessions cs
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id AND sa.status = 'active'
+                    LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                    LEFT JOIN users u ON urm.user_id = u.id
+                    WHERE cs.archive_status = :archive_status
+                      AND (cs.message_count > 0 OR cs.message_count IS NULL)
+                    ORDER BY cs.id
+                ) deduped
+                ORDER BY deduped.last_activity_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
             """
             explain_query = f"EXPLAIN ANALYZE {query}"
