@@ -759,16 +759,41 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
             Generator that yields SSE events from Redis Pub/Sub with heartbeat.
             Heartbeat (every 15s) keeps connection alive to prevent CDN/gateway timeouts.
             Includes inactivity timeout (5 minutes) to clean up stale connections.
+            Also maintains agent online presence in Redis.
             """
             import asyncio
             import time
 
             heartbeat_task = None
             redis_task = None
+            presence_task = None
             last_activity = time.time()
             channel_name = f"agent:events:{user_email}"
 
             try:
+                # Set initial presence key in Redis
+                from shared.redis_pubsub_manager import get_pubsub_redis
+                redis_client = await get_pubsub_redis()
+                presence_key = f"agent:online:{user_email}"
+                await redis_client.set(presence_key, "1", ex=60)  # 60 second TTL
+                logger.info(f"✅ Set online presence for agent {user_email}")
+
+                async def presence_loop():
+                    """Refresh agent presence key every 30 seconds"""
+                    try:
+                        while True:
+                            await asyncio.sleep(30)
+                            try:
+                                await redis_client.set(presence_key, "1", ex=60)
+                                logger.debug(f"🔄 Refreshed online presence for agent {user_email}")
+                            except Exception as e:
+                                logger.warning(f"Failed to refresh presence: {e}")
+                                break
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        logger.error(f"❌ Presence loop error: {e}")
+
                 async def heartbeat_loop(queue):
                     """Send keep-alive heartbeat to queue every 10 seconds"""
                     try:
@@ -787,6 +812,7 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                 # Create a queue for both heartbeat and Redis events
                 message_queue = asyncio.Queue()
                 heartbeat_task = asyncio.create_task(heartbeat_loop(message_queue))
+                presence_task = asyncio.create_task(presence_loop())
 
                 # Task to forward Redis events to queue
                 async def forward_redis_events():
@@ -865,16 +891,26 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                     heartbeat_task.cancel()
                 if redis_task and not redis_task.done():
                     redis_task.cancel()
+                if presence_task and not presence_task.done():
+                    presence_task.cancel()
 
                 # Give tasks a moment to clean up
                 try:
                     await asyncio.gather(
                         heartbeat_task if heartbeat_task and not heartbeat_task.done() else asyncio.sleep(0),
                         redis_task if redis_task and not redis_task.done() else asyncio.sleep(0),
+                        presence_task if presence_task and not presence_task.done() else asyncio.sleep(0),
                         return_exceptions=True
                     )
                 except Exception:
                     pass
+
+                # Remove presence key when disconnecting
+                try:
+                    await redis_client.delete(presence_key)
+                    logger.info(f"🗑️ Removed online presence for agent {user_email}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove presence key: {e}")
 
                 logger.info(f"🔌 Agent {user_email} disconnected from Redis Pub/Sub SSE stream")
 

@@ -112,8 +112,25 @@ class ChatLogService:
             raise
 
     async def get_agent_online_status(self, email: str) -> bool:
-        """Check if agent is online"""
-        return True 
+        """
+        Check if agent is online by checking Redis presence key.
+        Agent is considered online if they have an active SSE connection.
+        The presence key is set when agent connects and has a TTL of 60 seconds.
+        """
+        try:
+            from shared.redis_pubsub_manager import get_pubsub_redis
+            redis_client = await get_pubsub_redis()
+            
+            # Check if agent has an active presence key
+            presence_key = f"agent:online:{email}"
+            is_online = await redis_client.exists(presence_key)
+            
+            logger.info(f"🔍 [ONLINE_CHECK] Agent {email} online status: {bool(is_online)}")
+            return bool(is_online)
+        except Exception as e:
+            logger.error(f"❌ Error checking agent online status for {email}: {e}")
+            # If Redis check fails, assume agent is offline (fail-safe)
+            return False 
 
     async def get_agent_chat_count(self, agent_email: str) -> int:
         """Get the number of active chats assigned to an agent."""
