@@ -277,14 +277,21 @@ async def proxy_agent_message(request: Request):
         
         # Update body with numeric ID
         body["session_id"] = numeric_session_id
-        
+
+        # CRITICAL: Set agent_id from X-User-Email header (NOT from body)
+        # This ensures the actual sender's email is used for authorization
+        user_email = request.headers.get("X-User-Email", "")
+        if user_email:
+            body["agent_id"] = user_email
+            logger.info(f"🔍 [AGENT_MESSAGE_PROXY] Set agent_id from X-User-Email header: {user_email}")
+
         # Forward to configuration service
         async with AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{config_service_url}/api/v1/configuration/admin/chat-sessions/messages",
                 json=body,
                 headers={
-                    "X-User-Email": request.headers.get("X-User-Email", ""),
+                    "X-User-Email": user_email,
                     "X-User-Role": request.headers.get("X-User-Role", ""),
                     "Content-Type": "application/json"
                 }
