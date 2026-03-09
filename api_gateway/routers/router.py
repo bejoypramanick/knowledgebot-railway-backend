@@ -791,11 +791,14 @@ async def generic_proxy_handler(request: Request, path: str):
             # CRITICAL: Ensure numeric session_id in request body for internal services
             # API Gateway extracts UUID from cookie and converts to numeric ID
             # Internal services ONLY accept numeric session_id (never UUID)
-            # EXCEPTION: set-current endpoints intentionally accept UUIDs - don't convert those
+            # EXCEPTIONS:
+            # - set-current endpoints intentionally accept UUIDs
+            # - customer/sessions/messages needs UUID preserved (it resolves UUID→numeric itself)
             should_ensure_session_id = (
                 request_body and
                 request.method in ["POST", "PUT", "PATCH"] and
-                "set-current" not in full_url  # Exclude set-current endpoints
+                "set-current" not in full_url and
+                "customer/sessions/messages" not in full_url  # Customer message endpoint needs UUID
             )
 
             if should_ensure_session_id:

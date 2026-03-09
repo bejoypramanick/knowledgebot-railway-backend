@@ -1233,13 +1233,6 @@ async def send_customer_message(request: Request):
 
         # Ensure session_uuid is a string
         session_uuid = str(session_uuid)
-
-        # CRITICAL: Frontend must ONLY send session UUIDs (from httpOnly cookie)
-        # Numeric IDs are internal only - API Gateway handles UUID→numeric conversion
-        if session_uuid.isdigit():
-            logger.error(f"❌ SECURITY: Frontend sent numeric session ID instead of UUID: {session_uuid}")
-            raise HTTPException(status_code=400, detail="Invalid session_id format. Must be session UUID, not numeric ID")
-
         logger.info(f"📨 Session UUID: {session_uuid}")
 
         # Resolve UUID to numeric ID
