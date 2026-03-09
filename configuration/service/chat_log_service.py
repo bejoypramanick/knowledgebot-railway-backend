@@ -272,20 +272,19 @@ class ChatLogService:
             else:
                 metadata = {}
 
-            # Only include latest message in list view (full conversation loaded on click)
+            # Include all messages for the session (needed for chat detail view)
             from ..schemas.chat_log_schemas import ChatMessageResponse
-            latest_msg = latest_messages.get(session_db_id)
-            messages = []
-            if latest_msg:
-                messages = [
-                    ChatMessageResponse(
-                        id=str(latest_msg['id']),
-                        text=latest_msg['content'],
-                        sender=latest_msg['role'],
-                        timestamp=latest_msg['created_at'].isoformat() if latest_msg['created_at'] else datetime.utcnow().isoformat(),
-                        session_id=session_id
-                    )
-                ]
+            all_session_messages = await self.dao.get_messages_for_session(session_db_id)
+            messages = [
+                ChatMessageResponse(
+                    id=str(msg['id']),
+                    text=msg['content'],
+                    sender=msg['role'],
+                    timestamp=msg['created_at'].isoformat() if msg['created_at'] else datetime.utcnow().isoformat(),
+                    session_id=session_id
+                )
+                for msg in (all_session_messages or [])
+            ]
 
             assigned_agent = metadata.get('assigned_agent')
             if not assigned_agent and 'agent_email' in session_row and session_row['agent_email']:
