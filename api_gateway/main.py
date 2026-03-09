@@ -34,7 +34,8 @@ from api_gateway.utils.middleware import (add_security_headers_middleware,
                                           log_requests_middleware)
 from api_gateway.core.utils import (register_fastapi_exception_handlers,
                           setup_global_exception_logging)
-from shared.sqlalchemy_db import init_database, validate_database, close_database, health_check as db_health_check
+from shared.sqlalchemy_db import close_database, health_check as db_health_check
+from shared.db_retry import initialize_database_with_retry
 
 setup_global_exception_logging("api_gateway")
 
@@ -48,28 +49,10 @@ async def lifespan(app: FastAPI):
         logger.info(f"🚀 API Gateway starting up...")
         logger.info(f"({settings.service_identity})")
 
-        # Initialize SQLAlchemy database
+        # Initialize SQLAlchemy database with centralized retry logic
+        # Uses shared db_retry module for consistent Railway-ready retry behavior
         database_url = os.getenv("DATABASE_URL")
-        logger.info("💾 Initializing SQLAlchemy database...")
-        try:
-            if database_url:
-                await init_database(database_url)
-                logger.info("✅ SQLAlchemy engine initialized")
-
-                is_valid = await validate_database()
-                if is_valid:
-                    logger.info("✅ Database schema validated successfully")
-                else:
-                    logger.warning("⚠️ Database schema validation returned False")
-            else:
-                logger.warning("⚠️ DATABASE_URL not set - database will not be available")
-        except Exception as e:
-            logger.error(f"❌ Error initializing database: {e}")
-            logger.error(f"   Error type: {type(e).__name__}")
-            import traceback
-            logger.error(f"   Traceback: {traceback.format_exc()}")
-            # Re-raise to prevent startup if DB is critical
-            raise RuntimeError(f"Failed to initialize database: {e}") from e
+        await initialize_database_with_retry(database_url, service_name="api-gateway")
 
         # Initialize Gemini FileSearch Store (create if doesn't exist)
         logger.info("📂 Initializing Gemini FileSearch store...")

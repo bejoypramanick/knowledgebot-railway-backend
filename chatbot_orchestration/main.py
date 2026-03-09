@@ -8,7 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 # Configure Shared Telemetry
 import logging
 from shared.telemetry import setup_telemetry, instrument_fastapi
-from shared.sqlalchemy_db import init_database, validate_database, close_database, health_check as db_health_check
+from shared.sqlalchemy_db import close_database, health_check as db_health_check
+from shared.db_retry import initialize_database_with_retry
 
 # Initialize Telemetry
 # Use default behavior (span exporter disabled by default via env var)
@@ -35,23 +36,10 @@ async def lifespan(app: FastAPI):
     await pydantic_ai_service.initialize()
     logger.info("🤖 Pydantic AI Service initialized")
 
-    # Initialize SQLAlchemy database
+    # Initialize SQLAlchemy database with centralized retry logic
+    # Uses shared db_retry module for consistent Railway-ready retry behavior
     database_url = os.getenv("DATABASE_URL")
-    logger.info("💾 Initializing SQLAlchemy database...")
-    try:
-        if database_url:
-            await init_database(database_url)
-            logger.info("✅ SQLAlchemy engine initialized")
-
-            is_valid = await validate_database()
-            if is_valid:
-                logger.info("✅ Database schema validated successfully")
-            else:
-                logger.warning("⚠️ Database schema validation returned False")
-        else:
-            logger.warning("⚠️ DATABASE_URL not set - database will not be available")
-    except Exception as e:
-        logger.warning(f"⚠️ Database initialization failed: {e}")
+    await initialize_database_with_retry(database_url, service_name="chatbot-orchestration")
 
     logger.info("✅ Chatbot Orchestration Service fully ready")
     yield
