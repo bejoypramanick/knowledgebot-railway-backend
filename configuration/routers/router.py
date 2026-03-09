@@ -1214,42 +1214,48 @@ async def send_customer_message(request: Request):
     """Send a message from a customer to an assigned agent (no AI processing)
 
     Request body: {
-        session_id: str (session UUID only - from httpOnly cookie),
+        session_id: int (numeric session ID - converted by API Gateway from UUID),
         text: str (message text)
     }
+
+    NOTE: API Gateway converts UUID→numeric before forwarding here.
+    This endpoint uses numeric ID for all DB operations and looks up
+    the UUID only for Redis channel broadcasting.
     """
     try:
         body = await request.json()
         text = body.get("text", "")
-        session_uuid = body.get("session_id", "")
+        session_id_raw = body.get("session_id", "")
 
-        logger.info(f"📨 Customer message request - session_uuid: {session_uuid}")
+        logger.info(f"📨 Customer message request - session_id: {session_id_raw} (type: {type(session_id_raw).__name__})")
 
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
 
-        if not session_uuid:
+        if not session_id_raw:
             raise HTTPException(status_code=400, detail="session_id is required")
 
-        # Ensure session_uuid is a string
-        session_uuid = str(session_uuid)
-        logger.info(f"📨 Session UUID: {session_uuid}")
-
-        # Resolve UUID to numeric ID
+        # API Gateway sends numeric ID (converted from UUID)
+        # Use numeric ID for all DB operations
         from shared.sqlalchemy_db import get_db_session
         from sqlalchemy import text as sql_text
 
+        try:
+            numeric_session_id = int(session_id_raw)
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail=f"session_id must be numeric (API Gateway converts UUID). Got: {session_id_raw}")
+
+        # Look up the UUID for Redis channel broadcasting
         async with get_db_session() as db_session:
-            # Look up numeric ID from UUID
             result = await db_session.execute(
-                sql_text("SELECT id FROM chat_sessions WHERE session_id = :session_uuid"),
-                {"session_uuid": session_uuid}
+                sql_text("SELECT session_id FROM chat_sessions WHERE id = :id"),
+                {"id": numeric_session_id}
             )
             row = result.fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail=f"Session not found: {session_uuid}")
-            numeric_session_id = row[0]
-            logger.info(f"✅ Resolved UUID {session_uuid} to numeric ID {numeric_session_id}")
+                raise HTTPException(status_code=404, detail=f"Session not found: {numeric_session_id}")
+            session_uuid = row[0]
+            logger.info(f"✅ Numeric ID {numeric_session_id} → UUID {session_uuid}")
 
         # Check if agent is assigned
         from shared.redis_pubsub_manager import get_pubsub_redis
@@ -1259,9 +1265,8 @@ async def send_customer_message(request: Request):
         cached_agent = await redis_client.get(assigned_agent_key)
 
         if cached_agent:
-            assigned_agent = cached_agent  # Already decoded by Redis client (decode_responses=True)
+            assigned_agent = cached_agent
         else:
-            # Query database for assignment
             session = await chat_log_service.dao.get_session_by_id(numeric_session_id)
             assigned_agent = session.get('assigned_agent') if session else None
             if assigned_agent:
@@ -1270,22 +1275,22 @@ async def send_customer_message(request: Request):
         if not assigned_agent:
             raise HTTPException(status_code=400, detail="No agent assigned to this session. Use chatbot API instead.")
 
-        # Save message to database
+        # Save message to database using numeric ID
         message_id = await chat_log_service.dao.create_message(numeric_session_id, 'user', text)
         await chat_log_service.dao.increment_message_count(numeric_session_id)
 
-        # Prepare event data
+        # Prepare event data - use UUID for Redis channel matching
         import datetime
         event_data = {
             "type": "customer_message",
-            "session_id": session_uuid,  # CRITICAL: Use UUID for SSE channel matching
+            "session_id": session_uuid,  # UUID for SSE channel matching
             "message_id": str(message_id),
             "text": text,
             "sender": "customer",
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
 
-        logger.info(f"📨 Preparing to broadcast customer message from session {session_uuid}: {event_data}")
+        logger.info(f"📨 Broadcasting customer message: numeric={numeric_session_id}, uuid={session_uuid}")
 
         # Smart broadcast: avoid duplicate messages for admins
         from shared.redis_pubsub_manager import broadcast_event_to_agent, broadcast_event_to_all_agents, broadcast_event_to_session
