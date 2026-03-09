@@ -1267,10 +1267,11 @@ async def send_customer_message(request: Request):
         if cached_agent:
             assigned_agent = cached_agent
         else:
-            session = await chat_log_service.dao.get_session_by_id(numeric_session_id)
-            assigned_agent = session.get('assigned_agent') if session else None
+            # Cache MISS - query session_assignments table via DAO
+            assigned_agent = await chat_log_service.dao.get_assigned_agent_email(numeric_session_id)
             if assigned_agent:
                 await redis_client.set(assigned_agent_key, assigned_agent, ex=3600)
+                logger.info(f"✅ Cached assigned agent {assigned_agent} for session {session_uuid}")
 
         if not assigned_agent:
             raise HTTPException(status_code=400, detail="No agent assigned to this session. Use chatbot API instead.")
@@ -1404,9 +1405,8 @@ async def send_agent_message(request: Request):
                 assigned_agent = cached_agent  # Already decoded by Redis client (decode_responses=True)
                 logger.info(f"✅ Found cached agent assignment: {numeric_session_id} → {assigned_agent}")
             else:
-                # Cache MISS - query database
-                session = await chat_log_service.dao.get_session_by_id(numeric_session_id)
-                assigned_agent = session.get('assigned_agent') if session else None
+                # Cache MISS - query session_assignments table via DAO
+                assigned_agent = await chat_log_service.dao.get_assigned_agent_email(numeric_session_id)
                 if assigned_agent:
                     await redis_client.set(cache_key, assigned_agent, ex=3600)
                     logger.info(f"💾 Cached agent assignment: {numeric_session_id} → {assigned_agent}")
@@ -1467,9 +1467,8 @@ async def send_agent_message(request: Request):
                 assigned_agent = cached_agent  # Already decoded by Redis client (decode_responses=True)
                 logger.info(f"✅ Found cached agent assignment: {numeric_session_id} → {assigned_agent}")
             else:
-                # Cache MISS - query database
-                session = await chat_log_service.dao.get_session_by_id(numeric_session_id)
-                assigned_agent = session.get('assigned_agent') if session else None
+                # Cache MISS - query session_assignments table via DAO
+                assigned_agent = await chat_log_service.dao.get_assigned_agent_email(numeric_session_id)
                 # Cache for future messages (1 hour TTL)
                 if assigned_agent:
                     await redis_client.set(cache_key, assigned_agent, ex=3600)

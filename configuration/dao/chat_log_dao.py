@@ -794,7 +794,7 @@ class ChatLogDAO:
             return False
 
 
-    async def get_session_by_id_with_messages(self, session_id: int) -> Optional[Dict[str, Any]]:
+    async def get_session_by_id(self, session_id: int) -> Optional[Dict[str, Any]]:
         """Get session by numeric ID only."""
         try:
             query = "SELECT * FROM chat_sessions WHERE id = :id"
@@ -813,6 +813,38 @@ class ChatLogDAO:
                     return None
         except Exception as e:
             logger.error(f"❌ Database error fetching session {session_id}: {e}", exc_info=True)
+            logger.log_db_query(query, {"session_id": session_id}, error=e)
+            return None
+
+    # Alias for backward compatibility
+    async def get_session_by_id_with_messages(self, session_id: int) -> Optional[Dict[str, Any]]:
+        return await self.get_session_by_id(session_id)
+
+    async def get_assigned_agent_email(self, session_id: int) -> Optional[str]:
+        """Get the assigned agent's email for a session from session_assignments table."""
+        query = """
+            SELECT u.email
+            FROM session_assignments sa
+            JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+            JOIN users u ON urm.user_id = u.id
+            WHERE sa.session_id = :session_id AND sa.status = 'active'
+            ORDER BY sa.assigned_at DESC
+            LIMIT 1
+        """
+        try:
+            params = {"session_id": session_id}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                if row:
+                    logger.log_db_query(query, params, row)
+                    return row[0]
+                else:
+                    logger.log_db_query(query, params, None)
+                    return None
+        except Exception as e:
+            logger.error(f"❌ Error fetching assigned agent for session {session_id}: {e}", exc_info=True)
             logger.log_db_query(query, {"session_id": session_id}, error=e)
             return None
 
