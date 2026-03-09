@@ -1282,11 +1282,24 @@ async def send_customer_message(request: Request):
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
 
-        # Broadcast to assigned agent AND all admins
+        # Smart broadcast: avoid duplicate messages for admins
         from shared.redis_pubsub_manager import broadcast_event_to_agent, broadcast_event_to_all_agents
-        await broadcast_event_to_agent(assigned_agent, event_data)
-        await broadcast_event_to_all_agents(event_data)
-        logger.info(f"📤 Customer message sent to agent {assigned_agent} and all admins (session: {session_uuid})")
+
+        # Check if assigned agent is an admin or human agent
+        admin_emails = await chat_log_service.dao.get_all_admins()
+        is_assigned_admin = assigned_agent in admin_emails
+
+        if is_assigned_admin:
+            # Assigned agent is an ADMIN - send ONLY via broadcast channel to avoid duplicates
+            # Admin listens to broadcast channel, so they'll get it once
+            await broadcast_event_to_all_agents(event_data)
+            logger.info(f"📤 Customer message sent via broadcast (assigned agent is admin {assigned_agent}): {session_uuid}")
+        else:
+            # Assigned agent is HUMAN AGENT - send to their personal channel
+            # And also broadcast to all admins
+            await broadcast_event_to_agent(assigned_agent, event_data)
+            await broadcast_event_to_all_agents(event_data)
+            logger.info(f"📤 Customer message sent to human agent {assigned_agent} and all admins: {session_uuid}")
 
         return {
             "success": True,
@@ -1378,31 +1391,52 @@ async def send_agent_message(request: Request):
                     logger.info(f"💾 Cached agent assignment: {numeric_session_id} → {assigned_agent} (TTL: 1h)")
 
             if assigned_agent:
-                # Notify assigned agent and all admins
-                await broadcast_event_to_agent(assigned_agent, event_data)
-                await broadcast_event_to_all_agents(event_data)
-                logger.info(f"📤 Customer message sent to agent {assigned_agent} and all admins")
+                # Smart broadcast: avoid duplicate messages for admins
+                admin_emails = await chat_log_service.dao.get_all_admins()
+                is_assigned_admin = assigned_agent in admin_emails
+
+                if is_assigned_admin:
+                    # Assigned agent is an ADMIN - send ONLY via broadcast to avoid duplicates
+                    await broadcast_event_to_all_agents(event_data)
+                    logger.info(f"📤 Customer message sent via broadcast (assigned agent is admin {assigned_agent})")
+                else:
+                    # Assigned agent is HUMAN AGENT - send to personal channel + broadcast to admins
+                    await broadcast_event_to_agent(assigned_agent, event_data)
+                    await broadcast_event_to_all_agents(event_data)
+                    logger.info(f"📤 Customer message sent to human agent {assigned_agent} and all admins")
             else:
                 # No agent assigned - notify all admins (for assignment)
                 await broadcast_event_to_all_agents(event_data)
                 logger.info(f"📤 Customer message sent to admins (no agent assigned)")
         
         else:
-            # Agent sent message → Notify customer, this agent, AND all admins
+            # Agent sent message → Notify customer and sending agent
             # CRITICAL: Use UUID session_id for customer SSE channel (not numeric ID)
             logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to customer on channel: sse/session/{session_uuid}")
             customer_result = await broadcast_event_to_session(session_uuid, event_data)
             logger.info(f"📤 [AGENT_MESSAGE] Customer broadcast result: {customer_result}")
 
-            logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to agent {sender_id}")
-            agent_result = await broadcast_event_to_agent(sender_id, event_data)  # Also notify the sending agent
-            logger.info(f"📤 [AGENT_MESSAGE] Agent broadcast result: {agent_result}")
+            # Smart broadcast: avoid duplicate messages for admins
+            admin_emails = await chat_log_service.dao.get_all_admins()
+            is_sender_admin = sender_id in admin_emails
 
-            logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to all admins")
-            admin_result = await broadcast_event_to_all_agents(event_data)
-            logger.info(f"📤 [AGENT_MESSAGE] Admin broadcast result: {admin_result}")
+            if is_sender_admin:
+                # Sending agent is an ADMIN - send ONLY via broadcast to avoid duplicates
+                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to all admins (sender {sender_id} is admin)")
+                admin_result = await broadcast_event_to_all_agents(event_data)
+                logger.info(f"📤 [AGENT_MESSAGE] Admin broadcast result: {admin_result}")
+                logger.info(f"📤 Agent (admin {sender_id}) message sent to customer and all admins (session: {session_uuid})")
+            else:
+                # Sending agent is HUMAN AGENT - send to their personal channel + broadcast to admins
+                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to human agent {sender_id}")
+                agent_result = await broadcast_event_to_agent(sender_id, event_data)
+                logger.info(f"📤 [AGENT_MESSAGE] Agent broadcast result: {agent_result}")
 
-            logger.info(f"📤 Agent message sent to customer, agent {sender_id}, and all admins (session UUID: {session_uuid}, numeric: {numeric_session_id})")
+                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to all admins")
+                admin_result = await broadcast_event_to_all_agents(event_data)
+                logger.info(f"📤 [AGENT_MESSAGE] Admin broadcast result: {admin_result}")
+
+                logger.info(f"📤 Agent message sent to customer, agent {sender_id}, and all admins (session: {session_uuid})")
 
         return {
             "success": True,
