@@ -1149,12 +1149,16 @@ async def get_admin_chat_sessions(
 ):
     """Get chat sessions for admin with messages included for reactive UI"""
     try:
-        # Get user email from request headers
-        user_email = request.headers.get("X-User-Email", "admin@example.com")
-        
+        # Get user email from request.state (set by SessionAuthMiddleware after Firebase verification)
+        # Falls back to header for backward compatibility
+        user_email = getattr(request.state, "user_email", None) or request.headers.get("X-User-Email", "")
+
+        if not user_email:
+            raise HTTPException(status_code=401, detail="User email not found in request")
+
         logger.info(f"🔍 GET /admin/chat-sessions called")
         logger.info(f"🔍 Parameters: agent_id={agent_id}, role={role}, status={status}, page={page}, limit={limit}")
-        logger.info(f"🔍 User email from headers: {user_email}")
+        logger.info(f"🔍 User email: {user_email} (role={role})")
 
         # Use chat_log_service to get sessions from real database
         sessions, total_count = await chat_log_service.get_chat_sessions(
