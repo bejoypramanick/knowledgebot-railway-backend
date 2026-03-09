@@ -1253,10 +1253,7 @@ async def send_customer_message(request: Request):
         cached_agent = await redis_client.get(assigned_agent_key)
 
         if cached_agent:
-            if isinstance(cached_agent, bytes):
-                assigned_agent = cached_agent.decode('utf-8')
-            else:
-                assigned_agent = str(cached_agent)
+            assigned_agent = cached_agent  # Already decoded by Redis client (decode_responses=True)
         else:
             # Query database for assignment
             session = await chat_log_service.dao.get_session_by_id(numeric_session_id)
@@ -1380,7 +1377,7 @@ async def send_agent_message(request: Request):
             cached_agent = await redis_client.get(cache_key)
 
             if cached_agent:
-                assigned_agent = cached_agent.decode('utf-8')
+                assigned_agent = cached_agent  # Already decoded by Redis client (decode_responses=True)
                 logger.info(f"✅ Found cached agent assignment: {numeric_session_id} → {assigned_agent}")
             else:
                 # Cache MISS - query database
@@ -1415,7 +1412,7 @@ async def send_agent_message(request: Request):
             cached_agent = await redis_client.get(cache_key)
 
             if cached_agent:
-                assigned_agent = cached_agent.decode('utf-8')  # Cache HIT
+                assigned_agent = cached_agent  # Already decoded by Redis client (decode_responses=True)
                 logger.info(f"✅ Found cached agent assignment: {numeric_session_id} → {assigned_agent}")
             else:
                 # Cache MISS - query database
