@@ -1404,6 +1404,34 @@ async def send_agent_message(request: Request):
 
             logger.info(f"✅ Authorization check passed: {sender_id} is assigned to session {numeric_session_id}")
 
+            # Agent sent message → Broadcast to customer and other agents
+            # CRITICAL: Use UUID session_id for customer SSE channel (not numeric ID)
+            logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to customer on channel: session:{session_uuid}")
+            customer_result = await broadcast_event_to_session(session_uuid, event_data)
+            logger.info(f"📤 [AGENT_MESSAGE] Customer broadcast result: {customer_result}")
+
+            # Also broadcast to admins and the sending agent
+            admin_emails = await chat_log_service.dao.get_all_admins()
+            is_sender_admin = sender_id in admin_emails
+
+            if is_sender_admin:
+                # Sending agent is an ADMIN - send ONLY via broadcast to avoid duplicates
+                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to all admins (sender {sender_id} is admin)")
+                admin_result = await broadcast_event_to_all_agents(event_data)
+                logger.info(f"📤 [AGENT_MESSAGE] Admin broadcast result: {admin_result}")
+                logger.info(f"📤 Agent (admin {sender_id}) message sent to customer and all admins (session: {session_uuid})")
+            else:
+                # Sending agent is HUMAN AGENT - send to their personal channel + broadcast to admins
+                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to human agent {sender_id}")
+                agent_result = await broadcast_event_to_agent(sender_id, event_data)
+                logger.info(f"📤 [AGENT_MESSAGE] Agent broadcast result: {agent_result}")
+
+                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to all admins")
+                admin_result = await broadcast_event_to_all_agents(event_data)
+                logger.info(f"📤 [AGENT_MESSAGE] Admin broadcast result: {admin_result}")
+
+                logger.info(f"📤 Agent message sent to customer, agent {sender_id}, and all admins (session: {session_uuid})")
+
         elif sender_type == "user":
             # Customer sent message → Notify assigned agent AND all admins
             # Try Redis cache first (should be set when agent is assigned)
@@ -1442,34 +1470,6 @@ async def send_agent_message(request: Request):
                 await broadcast_event_to_all_agents(event_data)
                 logger.info(f"📤 Customer message sent to admins (no agent assigned)")
         
-        else:
-            # Agent sent message → Notify customer and sending agent
-            # CRITICAL: Use UUID session_id for customer SSE channel (not numeric ID)
-            logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to customer on channel: sse/session/{session_uuid}")
-            customer_result = await broadcast_event_to_session(session_uuid, event_data)
-            logger.info(f"📤 [AGENT_MESSAGE] Customer broadcast result: {customer_result}")
-
-            # Smart broadcast: avoid duplicate messages for admins
-            admin_emails = await chat_log_service.dao.get_all_admins()
-            is_sender_admin = sender_id in admin_emails
-
-            if is_sender_admin:
-                # Sending agent is an ADMIN - send ONLY via broadcast to avoid duplicates
-                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to all admins (sender {sender_id} is admin)")
-                admin_result = await broadcast_event_to_all_agents(event_data)
-                logger.info(f"📤 [AGENT_MESSAGE] Admin broadcast result: {admin_result}")
-                logger.info(f"📤 Agent (admin {sender_id}) message sent to customer and all admins (session: {session_uuid})")
-            else:
-                # Sending agent is HUMAN AGENT - send to their personal channel + broadcast to admins
-                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to human agent {sender_id}")
-                agent_result = await broadcast_event_to_agent(sender_id, event_data)
-                logger.info(f"📤 [AGENT_MESSAGE] Agent broadcast result: {agent_result}")
-
-                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to all admins")
-                admin_result = await broadcast_event_to_all_agents(event_data)
-                logger.info(f"📤 [AGENT_MESSAGE] Admin broadcast result: {admin_result}")
-
-                logger.info(f"📤 Agent message sent to customer, agent {sender_id}, and all admins (session: {session_uuid})")
 
         return {
             "success": True,
