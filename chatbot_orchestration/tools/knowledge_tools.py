@@ -610,7 +610,7 @@ async def request_human_agent_connection(
                 assigned_agent = row['assigned_agent_email']
                 logger.info(f"✅ Agent already assigned: {assigned_agent} - skipping duplicate assignment")
                 clear_workflow()
-                return f"👋 You're already connected to a human agent ({assigned_agent}). They will respond shortly. 💪\n"
+                return f"Connected to human agent\n"
     except Exception as e:
         logger.warning(f"⚠️ Could not check existing agent assignment: {e}")
         # Continue with assignment attempt if check fails
@@ -745,7 +745,7 @@ async def request_human_agent_connection(
                     logger.error(f"❌ Failed to broadcast session to agent: {e}", exc_info=True)
 
                 clear_workflow()
-                return f"👋 I've connected you to a human agent ({assigned_agent}). They will join the conversation shortly and can see your full chat history. The chat has been opened in their chat log. 💪\n"
+                return f"Connected to human agent\n"
             elif response.status_code == 503:
                 error_detail = response.json().get('detail', 'No agents available')
                 logger.warning(f"⚠️ Human agent request failed: {error_detail}")

@@ -386,7 +386,7 @@ class StreamingService:
                                         logger.info(f"📤 Session data includes {len(messages)} messages")
                                     
                                     # Send confirmation to customer
-                                    confirmation_msg = f"👋 I've connected you to a human agent ({assigned_agent}). They will join the conversation shortly and can see your full chat history. 💪\n"
+                                    confirmation_msg = f"Connected to human agent\n"
                                     
                                     # Save AI confirmation message
                                     await session_state_manager.save_message(
