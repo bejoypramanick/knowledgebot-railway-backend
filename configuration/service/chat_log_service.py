@@ -172,12 +172,16 @@ class ChatLogService:
             # Step 4: Sort by chat count and assign to least busy agent
             agent_loads.sort(key=lambda x: x['chat_count'])
             assigned_agent = agent_loads[0]['email']
+            assigned_is_admin = assigned_agent in (await self.dao.get_all_admins()) if agent_loads else False
+
             logger.info(f"✅ [LOAD_BALANCE] Selected agent {assigned_agent} with {agent_loads[0]['chat_count']} chats")
+            logger.info(f"🔍 [LOAD_BALANCE] Agent type: {'ADMIN' if assigned_is_admin else 'HUMAN_AGENT'}")
             logger.info(f"🔍 [LOAD_BALANCE] All available agents: {agent_loads}")
-            
+            logger.info(f"📊 [LOAD_BALANCE] Assignment details: human_agents_found={len(agent_emails)}, admins_found={len(admin_emails) if 'admin_emails' in locals() else 'N/A'}, selected={assigned_agent}")
+
             # Step 5: Assign the chat
             await self.assign_chat_to_agent(session_id, assigned_agent)
-            logger.info(f"✅ [LOAD_BALANCE] Successfully assigned session {session_id} to {assigned_agent}")
+            logger.info(f"✅ [LOAD_BALANCE] Successfully assigned session {session_id} to {assigned_agent} ({'ADMIN' if assigned_is_admin else 'HUMAN_AGENT'})")
             
             return assigned_agent
         except Exception as e:
