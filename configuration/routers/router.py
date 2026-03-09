@@ -1213,41 +1213,64 @@ async def send_customer_message(request: Request):
     """Send a message from a customer to an assigned agent (no AI processing)
 
     Request body: {
-        session_id: str (session UUID),
+        session_id: str (session UUID or numeric ID),
         text: str (message text)
     }
     """
     try:
         body = await request.json()
         text = body.get("text", "")
-        session_uuid = body.get("session_id", "")
+        session_id_param = body.get("session_id", "")
 
-        logger.info(f"📨 Customer message request - session_id type: {type(session_uuid)}, value: {session_uuid}")
+        logger.info(f"📨 Customer message request - session_id type: {type(session_id_param)}, value: {session_id_param}")
 
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
 
-        if not session_uuid:
+        if not session_id_param:
             raise HTTPException(status_code=400, detail="session_id is required")
 
-        # Ensure session_uuid is a string
-        session_uuid = str(session_uuid)
-        logger.info(f"📨 After str() conversion - session_id type: {type(session_uuid)}, value: {session_uuid}")
+        # Ensure session_id_param is a string
+        session_id_param = str(session_id_param)
+        logger.info(f"📨 After str() conversion - session_id type: {type(session_id_param)}, value: {session_id_param}")
 
-        # Resolve UUID to numeric ID
+        # Resolve to numeric ID - accept both UUID and numeric ID
         from shared.sqlalchemy_db import get_db_session
         from sqlalchemy import text as sql_text
-        
+
         async with get_db_session() as db_session:
-            result = await db_session.execute(
-                sql_text("SELECT id FROM chat_sessions WHERE session_id = :session_uuid"),
-                {"session_uuid": session_uuid}
-            )
-            row = result.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail=f"Session not found: {session_uuid}")
-            numeric_session_id = row[0]
-            logger.info(f"✅ Resolved UUID {session_uuid} to numeric ID {numeric_session_id}")
+            numeric_session_id = None
+            session_uuid = None
+
+            # Check if it's a numeric ID (all digits)
+            if session_id_param.isdigit():
+                # It's a numeric ID - use directly
+                numeric_session_id = int(session_id_param)
+                logger.info(f"📨 Received numeric session ID: {numeric_session_id}")
+
+                # Verify it exists
+                verify_result = await db_session.execute(
+                    sql_text("SELECT session_id FROM chat_sessions WHERE id = :id"),
+                    {"id": numeric_session_id}
+                )
+                verify_row = verify_result.fetchone()
+                if verify_row:
+                    session_uuid = verify_row[0]
+                    logger.info(f"✅ Verified numeric ID {numeric_session_id} maps to UUID {session_uuid}")
+                else:
+                    raise HTTPException(status_code=404, detail=f"Session not found: {numeric_session_id}")
+            else:
+                # It's a UUID - look it up
+                result = await db_session.execute(
+                    sql_text("SELECT id FROM chat_sessions WHERE session_id = :session_uuid"),
+                    {"session_uuid": session_id_param}
+                )
+                row = result.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail=f"Session not found: {session_id_param}")
+                numeric_session_id = row[0]
+                session_uuid = session_id_param
+                logger.info(f"✅ Resolved UUID {session_uuid} to numeric ID {numeric_session_id}")
 
         # Check if agent is assigned
         from shared.redis_pubsub_manager import get_pubsub_redis
