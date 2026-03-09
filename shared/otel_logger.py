@@ -18,6 +18,9 @@ admin_session_id_ctx_var: ContextVar[Optional[str]] = ContextVar("admin_session_
 admin_email_ctx_var: ContextVar[Optional[str]] = ContextVar("admin_email", default=None)
 admin_role_ctx_var: ContextVar[Optional[str]] = ContextVar("admin_role", default=None)
 
+# Workflow context variable for tracing feature workflows (e.g., human-agent-workflow)
+workflow_ctx_var: ContextVar[Optional[str]] = ContextVar("workflow", default=None)
+
 def set_task_id(task_id: str) -> None:
     """Set the task ID for the current context (will appear in all logs)"""
     task_id_ctx_var.set(task_id)
@@ -62,6 +65,22 @@ def clear_admin_context() -> None:
     admin_email_ctx_var.set(None)
     admin_role_ctx_var.set(None)
 
+def set_workflow(workflow: str) -> None:
+    """Set the current workflow being executed for tracing (e.g., 'human-agent-workflow')
+
+    This allows you to trace complete workflows across multiple function calls and requests.
+    Example: set_workflow("human-agent-workflow") will add [human-agent-workflow] to all logs
+    """
+    workflow_ctx_var.set(workflow)
+
+def get_workflow() -> Optional[str]:
+    """Get current workflow from context"""
+    return workflow_ctx_var.get()
+
+def clear_workflow() -> None:
+    """Clear workflow context at end of operation"""
+    workflow_ctx_var.set(None)
+
 def get_calling_file_info() -> Dict[str, str]:
     """Get complete file info of calling code (3 levels up the stack)"""
     try:
@@ -94,17 +113,22 @@ class OpenTelemetryLogger:
         self.tracer = trace.get_tracer(f"{service_name}.{name}")
         
     def _format_message(self, message: str) -> str:
-        """Add admin/task/session context prefix to message if available"""
+        """Add admin/task/session/workflow context prefix to message if available"""
         admin_session_id = get_admin_session_id()
         admin_email = get_admin_email()
         admin_role = get_admin_role()
         task_id = get_task_id()
         session_id = get_session_id()
+        workflow = get_workflow()
 
-        # Build context prefix: admin context (highest priority), then chat session, then task
+        # Build context prefix: workflow (if present), admin context, then chat session, then task
         context_parts = []
 
-        # Admin context - highest priority when present
+        # Workflow context - highest priority when present (user-focused feature tracking)
+        if workflow:
+            context_parts.append(f"workflow:{workflow}")
+
+        # Admin context - high priority when present
         if admin_email:
             admin_str = f"admin:{admin_email}"
             if admin_role:
@@ -140,13 +164,18 @@ class OpenTelemetryLogger:
         file_prefix = f"[{file_info['full_info']}]"
         full_message = f"{file_prefix} {formatted_message}"
 
-        # Add admin, task, and session context to extra fields
+        # Add admin, task, session, and workflow context to extra fields
         extra = extra or {}
         admin_session_id = get_admin_session_id()
         admin_email = get_admin_email()
         admin_role = get_admin_role()
         task_id = get_task_id()
         session_id = get_session_id()
+        workflow = get_workflow()
+
+        # Add workflow context (highest priority)
+        if workflow:
+            extra['workflow'] = workflow
 
         # Add admin context
         if admin_session_id:
@@ -199,7 +228,11 @@ class OpenTelemetryLogger:
                 "file.method": file_info['method_name'],
             }
 
-            # Add optional admin context (highest priority)
+            # Add workflow context (highest priority for feature tracking)
+            if workflow:
+                span_attributes["workflow"] = workflow
+
+            # Add optional admin context
             if admin_email:
                 span_attributes["admin_email"] = admin_email
             if admin_role:

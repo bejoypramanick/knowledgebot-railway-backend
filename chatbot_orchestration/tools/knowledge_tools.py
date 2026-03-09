@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 from pydantic_ai import RunContext
 
 from google.genai import types
-from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger, set_workflow, clear_workflow
 
 from ..core.ai import get_genai_client
 from ..core.dependencies import ChatSessionDeps
@@ -579,6 +579,9 @@ async def request_human_agent_connection(
     This will assign the chat to an available human agent and the chat will appear in their chat log.
     The agent will see the FULL chat history including all previous AI conversations.
     """
+    # Set workflow context for tracing human-agent-workflow through all logs
+    set_workflow("human-agent-workflow")
+
     # Get numeric session ID from ChatSessionDeps
     # ctx.deps.session_id is the UUID from frontend/cookie
     # ctx.deps.numeric_session_id is the numeric ID from database (created on first message)
@@ -587,6 +590,7 @@ async def request_human_agent_connection(
 
     if not session_numeric_id:
         logger.error(f"❌ No numeric session ID available for session {session_uuid}")
+        clear_workflow()
         return "I encountered an error: Session not properly initialized. Please try again."
 
     logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_uuid} (numeric: {session_numeric_id}) with reason: {reason}")
@@ -605,6 +609,7 @@ async def request_human_agent_connection(
             if row and row.get('assigned_agent_email'):
                 assigned_agent = row['assigned_agent_email']
                 logger.info(f"✅ Agent already assigned: {assigned_agent} - skipping duplicate assignment")
+                clear_workflow()
                 return f"👋 You're already connected to a human agent ({assigned_agent}). They will respond shortly. 💪\n"
     except Exception as e:
         logger.warning(f"⚠️ Could not check existing agent assignment: {e}")
@@ -739,20 +744,25 @@ async def request_human_agent_connection(
                 except Exception as e:
                     logger.error(f"❌ Failed to broadcast session to agent: {e}", exc_info=True)
 
+                clear_workflow()
                 return f"👋 I've connected you to a human agent ({assigned_agent}). They will join the conversation shortly and can see your full chat history. The chat has been opened in their chat log. 💪\n"
             elif response.status_code == 503:
                 error_detail = response.json().get('detail', 'No agents available')
                 logger.warning(f"⚠️ Human agent request failed: {error_detail}")
+                clear_workflow()
                 return f"I'm sorry, but {error_detail.lower()}. Please try again later or continue chatting with me."
             else:
                 error_detail = response.json().get('detail', 'Failed to connect to human agent')
                 logger.error(f"❌ Human agent request failed with status {response.status_code}: {error_detail}")
                 logger.error(f"❌ Response body: {response.text}")
+                clear_workflow()
                 return f"I encountered an error while trying to connect you to a human agent: {error_detail}. Please try again later."
 
     except httpx.TimeoutException:
         logger.error("⏱️ Timeout while requesting human agent connection")
+        clear_workflow()
         return "The request to connect to a human agent timed out. Please try again."
     except Exception as e:
         logger.error(f"❌ Tool failed: request_human_agent_connection - {e}", exc_info=True)
+        clear_workflow()
         return f"I encountered an error while trying to connect you to a human agent. Please try again later."
