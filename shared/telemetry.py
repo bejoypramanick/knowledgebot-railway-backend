@@ -135,9 +135,16 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     stream_handler.emit = emit_with_flush
     root_logger.addHandler(stream_handler)
     
+    # Uninstrument first to avoid duplicate instrumentation
+    try:
+        LoggingInstrumentor().uninstrument()
+    except Exception:
+        pass
+    
     # Instrument standard logging AFTER all filters and handlers are in place
     # This ensures otelTraceID and otelSpanID are available in log records
-    LoggingInstrumentor().instrument(set_logging_format=False)
+    # Note: set_logging_format=False preserves our custom formatter
+    LoggingInstrumentor().instrument(set_logging_format=False, log_level=logging.INFO)
     
     # Instrument HTTPX Clients (The Glue for Outgoing Requests)
     # This automatically injects the 'traceparent' header into outgoing httpx calls
