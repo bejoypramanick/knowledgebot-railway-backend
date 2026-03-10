@@ -29,13 +29,8 @@ def setup_railway_logging(service_name: str, level: str = "INFO") -> logging.Log
     numeric_level = getattr(logging, level.upper(), logging.INFO)
     
     # Configure root logger - this is crucial for Railway
-    # logging.basicConfig - using OTel formatter instead - using OTel formatter instead(
-        level=numeric_level,
-        format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S',
-        stream=sys.stdout,  # Force output to stdout for Railway
-        force=True  # Override any existing configuration
-    )
+    # OTel formatter is set up by setup_telemetry() in main.py
+    # Do NOT use logging.basicConfig here as it overrides OTel formatter
     
     # Get service-specific logger
     logger = logging.getLogger(service_name)
@@ -152,11 +147,8 @@ def auto_configure_logging(service_name: str) -> logging.Logger:
         logger.info(f"🚂 Railway environment detected - logging configured for deployment")
     else:
         # Local development - use standard logging
-        # logging.basicConfig - using OTel formatter instead - using OTel formatter instead(
-            level=getattr(logging, log_level, logging.INFO),
-            format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
+        # OTel formatter is set up by setup_telemetry()
+        # Do NOT use logging.basicConfig here as it overrides OTel formatter
         logger = logging.getLogger(service_name)
         logger.info(f"💻 Local development environment detected")
     
