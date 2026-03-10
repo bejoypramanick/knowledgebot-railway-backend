@@ -15,10 +15,11 @@ Usage:
 
 import asyncio
 import logging
+from shared.otel_logger import get_otel_logger
 from typing import Optional
 from shared.sqlalchemy_db import init_database, validate_database
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "shared")
 
 
 async def initialize_database_with_retry(

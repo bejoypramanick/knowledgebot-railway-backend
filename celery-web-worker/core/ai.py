@@ -1,12 +1,13 @@
 """Gemini AI client initialization for celery-web-worker."""
 import os
 import logging
+from shared.otel_logger import get_otel_logger
 
 from google import genai
 
 from core.config import settings
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "celery-web-worker")
 
 # Global clients - initialized lazily
 genai_client = None

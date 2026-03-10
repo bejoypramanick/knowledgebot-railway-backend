@@ -2,10 +2,11 @@ import hashlib
 import os
 import tempfile
 import logging
+from shared.otel_logger import get_otel_logger
 
 from fastapi import UploadFile
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "knowledgebase_ingestion")
 
 def calculate_sha256(file_path: str) -> str:
     """Calculate SHA256 hash of a file."""

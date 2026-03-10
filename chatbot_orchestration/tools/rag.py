@@ -1,5 +1,7 @@
 import os
 import logging
+from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from typing import Annotated, List
 
 from google.genai import types
@@ -7,7 +9,7 @@ from google.genai import types
 from ..core.ai import get_genai_client
 from ..schemas.models import SearchResult
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "chatbot-orchestration")
 
 async def search_knowledge_base(query: Annotated[str, "The search query to find relevant information in uploaded documents"]) -> List[SearchResult]:
     """

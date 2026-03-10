@@ -6,10 +6,12 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import logging
+from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from chatbot_orchestration.service.token_service import TokenService
 from chatbot_orchestration.core.token_metrics import track_token_metrics
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "chatbot-orchestration")
 
 @dataclass
 class TokenUsageData:

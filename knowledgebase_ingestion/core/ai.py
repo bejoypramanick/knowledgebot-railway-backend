@@ -1,11 +1,12 @@
 import os
 import logging
+from shared.otel_logger import get_otel_logger
 
 from google import genai
 
 from knowledgebase_ingestion.core.config import settings
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "knowledgebase_ingestion")
 
 # Global clients - initialized lazily
 genai_client = None

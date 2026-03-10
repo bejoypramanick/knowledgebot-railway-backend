@@ -9,6 +9,7 @@ and extracts only the meaningful content:
 """
 import json
 import logging
+from shared.otel_logger import get_otel_logger
 
 logger = logging.getLogger("docling_content_converter")
 

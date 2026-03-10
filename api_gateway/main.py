@@ -15,6 +15,7 @@ load_dotenv()
 # Configure Railway-compatible logging
 # Configure Shared Telemetry
 import logging
+from shared.otel_logger import get_otel_logger
 from shared.telemetry import setup_telemetry, instrument_fastapi
 from shared.otel_logger import get_otel_logger
 

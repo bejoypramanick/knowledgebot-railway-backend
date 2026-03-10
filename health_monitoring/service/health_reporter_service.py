@@ -1,11 +1,12 @@
 """Health Reporting Service for generating reports."""
 import logging
+from shared.otel_logger import get_otel_logger
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
 from health_monitoring.dao.health_dao import HealthDAO
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "health_monitoring")
 
 
 class HealthReporterService:

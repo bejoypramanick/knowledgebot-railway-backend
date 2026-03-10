@@ -1,9 +1,10 @@
 import time
 import logging
+from shared.otel_logger import get_otel_logger
 
 from fastapi import Request
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "knowledgebase_ingestion")
 
 async def log_requests_middleware(request: Request, call_next):
     """Middleware to log all incoming requests with timing and status information."""

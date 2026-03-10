@@ -1,6 +1,7 @@
 """Health Monitoring Service - Microservice for tracking system health."""
 import os
 import logging
+from shared.otel_logger import get_otel_logger
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,7 +15,7 @@ from health_monitoring.scheduler.health_checker import get_scheduler
 
 # Setup logging
 setup_otel_logging("health-monitoring")
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "health_monitoring")
 
 
 @asynccontextmanager

@@ -3,6 +3,7 @@ Unified OpenTelemetry Logging Utilities
 Provides structured logging with OTel span context integration for all services
 """
 import logging
+from shared.otel_logger import get_otel_logger
 import inspect
 from typing import Dict, Any, Optional
 from contextvars import ContextVar

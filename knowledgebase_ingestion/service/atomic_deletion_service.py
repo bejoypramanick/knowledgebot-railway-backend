@@ -10,6 +10,7 @@ Handles complete cleanup in a single atomic transaction:
 import asyncio
 import json
 import logging
+from shared.otel_logger import get_otel_logger
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 

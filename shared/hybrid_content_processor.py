@@ -8,6 +8,7 @@ Hybrid content processing for web HTML:
 CRITICAL: Both trafilatura and docling receive the SAME HTML input
 """
 import logging
+from shared.otel_logger import get_otel_logger
 import hashlib
 from typing import Tuple, Optional
 

@@ -1,4 +1,5 @@
 import logging
+from shared.otel_logger import get_otel_logger
 import os
 from contextvars import ContextVar
 from typing import Optional

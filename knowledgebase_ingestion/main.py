@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 # Configure OpenTelemetry for Railway
 # Configure Shared Telemetry
 import logging
+from shared.otel_logger import get_otel_logger
 from shared.telemetry import setup_telemetry, instrument_fastapi
 
 # Initialize Telemetry

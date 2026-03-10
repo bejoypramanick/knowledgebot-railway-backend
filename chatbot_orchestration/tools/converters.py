@@ -7,10 +7,12 @@ per Gemini API: "CachedContent can not be used with GenerateContent request sett
 
 import inspect
 import logging
+from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from typing import Any, Callable, List, get_args, get_origin, get_type_hints
 from google.genai import types
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "chatbot-orchestration")
 
 
 def convert_python_type_to_json_schema_type(python_type: Any) -> str:

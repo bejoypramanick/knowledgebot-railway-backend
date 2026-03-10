@@ -1,12 +1,13 @@
 """Background scheduler for health monitoring checks."""
 import asyncio
 import logging
+from shared.otel_logger import get_otel_logger
 from typing import Optional
 
 from health_monitoring.core.config import settings
 from health_monitoring.service.health_monitoring_service import HealthMonitoringService
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "health_monitoring")
 
 
 class HealthCheckerScheduler:

@@ -1,5 +1,6 @@
 """API Router for health monitoring endpoints."""
 import logging
+from shared.otel_logger import get_otel_logger
 from datetime import datetime
 from typing import Optional
 
@@ -8,7 +9,7 @@ from fastapi import APIRouter, Query
 from health_monitoring.service.health_monitoring_service import HealthMonitoringService
 from health_monitoring.service.health_reporter_service import HealthReporterService
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "health_monitoring")
 
 router = APIRouter()
 

@@ -1,7 +1,9 @@
 from typing import Optional, Dict, Any
 import logging
+from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "chatbot-orchestration")
 
 def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> str:
     """Generate dynamic system prompt with intelligent data source routing."""

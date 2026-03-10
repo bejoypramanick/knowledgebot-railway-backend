@@ -6,11 +6,12 @@ Simplifies SSE architecture by replacing in-memory queues
 import redis.asyncio as redis
 import json
 import logging
+from shared.otel_logger import get_otel_logger
 import os
 from typing import Dict, Any, Optional, AsyncIterator
 import asyncio
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "shared")
 
 # Global Redis client for Pub/Sub (database 4)
 _pubsub_redis_client: Optional[redis.Redis] = None

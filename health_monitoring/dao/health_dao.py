@@ -1,6 +1,7 @@
 """Data Access Object for health monitoring operations."""
 import json
 import logging
+from shared.otel_logger import get_otel_logger
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 

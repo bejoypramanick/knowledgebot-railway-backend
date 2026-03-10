@@ -1,12 +1,14 @@
 import os
 import logging
+from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 
 from google import genai
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 
 from chatbot_orchestration.core.config import settings
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "chatbot-orchestration")
 
 # Global clients - initialized lazily
 genai_client = None

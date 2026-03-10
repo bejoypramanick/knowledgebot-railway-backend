@@ -3,6 +3,7 @@ Railway-compatible logging configuration
 Ensures logs are properly formatted and visible in Railway deployment
 """
 import logging
+from shared.otel_logger import get_otel_logger
 import os
 import sys
 

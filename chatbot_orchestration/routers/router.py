@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from typing import Dict, List, Any, Optional
 import logging
+from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 import time
 
 from ..service.chat_service import ChatService
@@ -14,7 +16,7 @@ from ..service.agent_service import PydanticAIGatewayService
 from ..schemas.models import ChatRequest
 from ..dao.session_persistence_dao import SessionPersistenceDAO
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "chatbot-orchestration")
 from ..core.utils import log_endpoint_request
 
 router = APIRouter()

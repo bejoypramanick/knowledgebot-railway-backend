@@ -9,8 +9,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import logging
+from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "chatbot-orchestration")
 
 @dataclass
 class TokenMetrics:

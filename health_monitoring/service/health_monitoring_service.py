@@ -1,6 +1,7 @@
 """Health Monitoring Service for checking all microservices."""
 import asyncio
 import logging
+from shared.otel_logger import get_otel_logger
 import time
 from typing import Dict, Any, Tuple
 from datetime import datetime
@@ -10,7 +11,7 @@ import httpx
 from health_monitoring.core.config import settings
 from health_monitoring.dao.health_dao import HealthDAO
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "health_monitoring")
 
 
 class HealthMonitoringService:

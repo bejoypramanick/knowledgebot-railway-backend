@@ -2,6 +2,8 @@
 import asyncio
 import faulthandler
 import logging
+from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 import os
 import signal
 import sys
@@ -18,7 +20,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from shared.correlation_id import get_correlation_id, add_correlation_id_headers
 
-logger = logging.getLogger(__name__)
+logger = get_otel_logger(__name__, "chatbot-orchestration")
 
 # Enhanced retry configuration for Railway network issues
 class RetryConfig:

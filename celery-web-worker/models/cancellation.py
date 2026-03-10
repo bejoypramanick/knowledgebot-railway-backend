@@ -9,6 +9,7 @@ import asyncio
 from dataclasses import dataclass
 from typing import Optional
 import logging
+from shared.otel_logger import get_otel_logger
 import redis
 
 from shared.otel_logger import get_otel_logger
