@@ -5,6 +5,7 @@ Handles session creation, logout, and user info with:
 - Dependency injection for testability
 - Enhanced security (CSRF, strict validation)
 - Performance optimizations (connection pooling, write-back throttling)
+- OpenTelemetry tracing for complete request flow
 """
 from fastapi import APIRouter, HTTPException, Response, Request, Depends
 from pydantic import BaseModel
@@ -16,6 +17,7 @@ from api_gateway.core.session_store import get_session_store
 from api_gateway.core.config import get_settings
 from api_gateway.services.profile_service import get_profile_service, ProfileService
 from api_gateway.services.session_service import get_session_service, SessionService
+from shared.tracing_decorator import trace_router
 
 logger = get_railway_logger(__name__)
 router = APIRouter()
@@ -40,6 +42,7 @@ def get_profile_service_dep() -> ProfileService:
 
 
 @router.post("/auth/session")
+@trace_router(span_name="POST /auth/session")
 async def create_session_endpoint(
     request: CreateSessionRequest,
     response: Response,

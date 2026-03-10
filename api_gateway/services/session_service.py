@@ -5,12 +5,14 @@ Manages session lifecycle with:
 - Enhanced security validation
 - Write-back throttling for performance
 - CSRF protection
+- OpenTelemetry tracing
 """
 import secrets
 import time
 from typing import Dict, Any, Optional
 
 from api_gateway.core.logging_config import get_railway_logger
+from shared.tracing_decorator import trace_service
 
 logger = get_railway_logger(__name__)
 
@@ -33,6 +35,7 @@ class SessionService:
         self.store = session_store
         logger.info("✅ SessionService initialized")
     
+    @trace_service(span_name="service.SessionService.create_session")
     def create_session(
         self,
         user_data: Dict[str, Any],
@@ -81,6 +84,7 @@ class SessionService:
         
         return session_id
     
+    @trace_service(span_name="service.SessionService.get_session")
     def get_session(
         self,
         session_id: str,

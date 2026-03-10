@@ -5,6 +5,7 @@ Handles fetching user profiles from the configuration service with:
 - Retry logic with exponential backoff
 - Circuit breaker pattern
 - Fallback mechanisms
+- OpenTelemetry tracing
 """
 import httpx
 from typing import Dict, Any, Optional
@@ -12,6 +13,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 from api_gateway.core.config import get_settings
 from api_gateway.core.logging_config import get_railway_logger
+from shared.tracing_decorator import trace_service
 
 logger = get_railway_logger(__name__)
 
@@ -39,6 +41,7 @@ class ProfileService:
         await self.client.aclose()
         logger.info("✅ ProfileService HTTP client closed")
     
+    @trace_service(span_name="service.ProfileService.fetch_user_profile")
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=5),
