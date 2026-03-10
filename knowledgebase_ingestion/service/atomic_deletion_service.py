@@ -10,7 +10,6 @@ Handles complete cleanup in a single atomic transaction:
 import asyncio
 import json
 import logging
-from shared.otel_logger import get_otel_logger
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 
@@ -105,11 +104,11 @@ class AtomicDeletionService:
                     """), {"id": file_id})
                     await session.commit()
                         
-                        logger.info(f"✅ [ATOMIC_DELETE] File {file_id} deleted successfully")
-                        logger.info(f"   Gemini deleted: {gemini_deleted}")
-                        logger.info(f"   S3 deleted: {s3_deleted}")
+                    logger.info(f"✅ [ATOMIC_DELETE] File {file_id} deleted successfully")
+                    logger.info(f"   Gemini deleted: {gemini_deleted}")
+                    logger.info(f"   S3 deleted: {s3_deleted}")
                         
-                        return {
+                    return {
                             "success": True,
                             "message": "File deleted atomically with complete cleanup",
                             "file_id": str(file_id),

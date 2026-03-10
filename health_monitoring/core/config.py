@@ -40,7 +40,7 @@ class Settings(BaseSettings):
         super().__init__(**data)
         # Log service URLs on startup
         import logging
-from shared.otel_logger import get_otel_logger
+        from shared.otel_logger import get_otel_logger
         logger = get_otel_logger(__name__, "health_monitoring")
         logger.info(f"⚙️  Health Monitor Configuration:")
         logger.info(f"   - HEALTH_MONITOR_ENABLED: {self.health_monitor_enabled}")
