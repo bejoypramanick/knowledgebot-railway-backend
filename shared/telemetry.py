@@ -1,5 +1,7 @@
 import logging
 import os
+from contextvars import ContextVar
+from typing import Optional
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
@@ -8,13 +10,21 @@ from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
+# Context variables for email and request mapping (persisted across services via HTTPX headers)
+user_email_ctx_var: ContextVar[Optional[str]] = ContextVar("user_email", default=None)
+request_mapping_ctx_var: ContextVar[Optional[str]] = ContextVar("request_mapping", default=None)
+
+# Context variables for email and request mapping
+user_email_ctx_var: ContextVar[Optional[str]] = ContextVar("user_email", default=None)
+request_mapping_ctx_var: ContextVar[Optional[str]] = ContextVar("request_mapping", default=None)
+
 def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_exporter=None):
     """
     Configures OpenTelemetry for the service (Tracing + Logging).
     
     1. Sets up the TracerProvider with optional Console Exporter.
-    2. Configures standard Python logging to include Trace ID and Span ID.
-    3. Uses the format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] - Message
+    2. Configures standard Python logging to include Trace ID, Span ID, User Email, and Request Mapping.
+    3. Uses the format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] [Email] [RequestMapping] - Message
     
     Args:
         service_name: Name of the service
@@ -22,6 +32,8 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
         enable_span_exporter: Whether to enable the ConsoleSpanExporter (detailed span output).
                           If None, defaults to OTEL_SPAN_EXPORTER_ENABLED env var or False.
     """
+    from contextvars import ContextVar
+    from typing import Optional
     
     # Determine if span exporter should be enabled
     if enable_span_exporter is None:
@@ -57,6 +69,10 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
                 record.otelTraceID = '0'
             if not hasattr(record, 'otelSpanID'):
                 record.otelSpanID = '0'
+            if not hasattr(record, 'otelUserEmail'):
+                record.otelUserEmail = ''
+            if not hasattr(record, 'otelRequestMapping'):
+                record.otelRequestMapping = ''
             return super().format(record)
     
     # Add a global filter to ensure otelTraceID and otelSpanID always exist
@@ -68,6 +84,10 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
                 record.otelTraceID = '0'
             if not hasattr(record, 'otelSpanID'):
                 record.otelSpanID = '0'
+            if not hasattr(record, 'otelUserEmail'):
+                record.otelUserEmail = ''
+            if not hasattr(record, 'otelRequestMapping'):
+                record.otelRequestMapping = ''
             return True
     
     # Create the global filter instance
@@ -80,8 +100,8 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # Add the filter to root logger BEFORE any other setup
     root_logger.addFilter(global_filter)
     
-    # Format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] - Message
-    log_format = f"%(asctime)s [%(levelname)s] [{service_name}] [%(otelTraceID)s] [%(otelSpanID)s] - %(message)s"
+    # Format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] [Email] [RequestMapping] - Message
+    log_format = f"%(asctime)s [%(levelname)s] [{service_name}] [%(otelTraceID)s] [%(otelSpanID)s] [%(otelUserEmail)s] [%(otelRequestMapping)s] - %(message)s"
     formatter = SafeOTelFormatter(log_format)
     
     # Remove existing handlers to avoid duplicate logs
@@ -103,6 +123,10 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
             record.otelTraceID = '0'
         if not hasattr(record, 'otelSpanID'):
             record.otelSpanID = '0'
+        if not hasattr(record, 'otelUserEmail'):
+            record.otelUserEmail = ''
+        if not hasattr(record, 'otelRequestMapping'):
+            record.otelRequestMapping = ''
         original_emit(record)
         # Flush immediately so logs appear in real-time during streaming/async operations
         if stream_handler.stream:
@@ -117,6 +141,40 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # Instrument HTTPX Clients (The Glue for Outgoing Requests)
     # This automatically injects the 'traceparent' header into outgoing httpx calls
     HTTPXClientInstrumentor().instrument()
+    
+    # Add custom HTTPX instrumentation to propagate user email and request mapping
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor as BaseHTTPXInstrumentor
+    
+    # Store original request method
+    original_request = BaseHTTPXInstrumentor._instrument_request
+    
+    def instrumented_request(instrumentor, method, request, context):
+        """Instrumented request that propagates user email and request mapping"""
+        # Get current context values
+        user_email = user_email_ctx_var.get()
+        request_mapping = request_mapping_ctx_var.get()
+        
+        # Add to headers if present
+        headers = dict(request.headers)
+        if user_email:
+            headers['X-User-Email'] = user_email
+        if request_mapping:
+            headers['X-Request-Mapping'] = request_mapping
+        
+        # Create new request with updated headers
+        from httpx import Request
+        new_request = Request(
+            method=request.method,
+            url=request.url,
+            headers=headers,
+            content=request.content,
+            extensions=request.extensions
+        )
+        
+        return original_request(instrumentor, method, new_request, context)
+    
+    # Apply instrumentation
+    BaseHTTPXInstrumentor._instrument_request = instrumented_request
     
     logging.info(f"🔭 OpenTelemetry initialized for {service_name} (span_exporter={'enabled' if enable_span_exporter else 'disabled'})")
     
@@ -165,11 +223,18 @@ def instrument_fastapi(app, service_name):
             trace_id = format(span_context.trace_id, '032x') if span_context.trace_id else '0'
             span_id = format(span_context.span_id, '016x') if span_context.span_id else '0'
             
+            # Extract user email and request mapping from headers
+            user_email = request.headers.get('X-User-Email', '')
+            request_mapping = request.headers.get('X-Request-Mapping', '')
+            
+            # Set context variables for logging
+            user_email_ctx_var.set(user_email)
+            request_mapping_ctx_var.set(request_mapping)
+            
             # Log the route with trace context in the format requested
-            # Format: [ROUTE] [TraceID] [SpanID] message
+            # Format: [ROUTE] [TraceID] [SpanID] [Email] [RequestMapping] message
             logger = logging.getLogger(service_name)
-            # Use a simple format without the file path prefix
-            route_log = f"[{request.method} {route_path}] [{trace_id}] [{span_id}] Request started"
+            route_log = f"[{request.method} {route_path}] [{trace_id}] [{span_id}] [{user_email}] [{request_mapping}] Request started"
             
             # Log directly to avoid otel_logger formatting
             logger.info(route_log)

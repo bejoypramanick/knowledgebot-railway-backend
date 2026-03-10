@@ -160,9 +160,9 @@ class OpenTelemetryLogger:
         # Add task ID and session ID to message
         formatted_message = self._format_message(message)
 
-        # Add file info at the end: [file:line] message
-        file_suffix = f"[{file_info['file_path']}:{file_info['line_number']}]"
-        full_message = f"{file_suffix} {formatted_message}"
+        # File path and line number are NOT persisted across services
+        # They are only used for span attributes (local debugging)
+        full_message = formatted_message
 
         # Add admin, task, session, and workflow context to extra fields
         extra = extra or {}
@@ -201,15 +201,6 @@ class OpenTelemetryLogger:
         exc_info = kwargs.pop('exc_info', None)
         exc_text = kwargs.pop('exc_text', None)
         stack_info = kwargs.pop('stack_info', None)
-
-        # Prepare logger.log kwargs
-        log_kwargs = {'extra': extra}
-        if exc_info is not None:
-            log_kwargs['exc_info'] = exc_info
-        if exc_text is not None:
-            log_kwargs['exc_text'] = exc_text
-        if stack_info is not None:
-            log_kwargs['stack_info'] = stack_info
 
         # Standard logger automatically includes otelTraceID and otelSpanID
         # from shared/telemetry.py LoggingInstrumentor
