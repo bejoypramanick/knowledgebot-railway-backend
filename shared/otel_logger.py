@@ -280,9 +280,9 @@ class OpenTelemetryLogger:
             if params:
                 span.set_attribute("db.params", str(params))
         
-        # Also log to console
+        # Log to console at DEBUG level
         param_str = f" | Params: {params}" if params else ""
-        self.info(f"🔍 DB Executing: {query}{param_str}")
+        self.debug(f"🔍 DB Executing: {query}{param_str}")
 
     def log_db_query(self, query: str, params: Any = None, result: Any = None, error: Exception = None):
         """Log database query AFTER execution with result or error"""
@@ -302,7 +302,7 @@ class OpenTelemetryLogger:
                 span.set_status(Status(StatusCode.ERROR, str(error)))
                 span.record_exception(error)
 
-        # Also log to console
+        # Log to console at DEBUG level (errors still at ERROR level)
         if error:
             # Safely convert error to string, handling generator and other async exceptions
             try:
@@ -312,7 +312,7 @@ class OpenTelemetryLogger:
             self.error(f"❌ DB Query Error: {query} | Error: {error_msg}")
         else:
             rows = len(result) if result is not None and hasattr(result, '__len__') and not isinstance(result, (str, bytes)) else 'N/A'
-            self.info(f"✅ DB Query Success: {query} | Rows/Result: {rows}")
+            self.debug(f"✅ DB Query Success: {query} | Rows/Result: {rows}")
 
     def log_file_search_operation(self, operation: str, **kwargs):
         """Log FileSearch store operations"""
