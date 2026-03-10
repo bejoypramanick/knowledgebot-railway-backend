@@ -59,19 +59,21 @@ async def track_token_usage(session_id: str, message_id: str, provider: str, mod
     Returns:
         bool: True if tracking succeeded, False otherwise
     """
+    logger.info(f"🔍 track_token_usage called - session: {session_id}, total_tokens: {total_tokens}")
+    
     if not all(isinstance(x, int) and x >= 0 for x in [prompt_tokens, completion_tokens, total_tokens]):
         await log_async("Invalid token counts: must be non-negative integers", "error")
         raise ValueError("Invalid token counts: must be non-negative integers")
         
     try:
         token_service = get_token_service()  # Use pooled service instance
-        await token_service.track_token_usage(
+        result = await token_service.track_token_usage(
             session_id, message_id, provider, model,
             prompt_tokens, completion_tokens, total_tokens,
             api_call_type, request_metadata
         )
-        await log_async(f"Token usage tracked for session {session_id}: {total_tokens} tokens")
-        return True
+        logger.info(f"✅ track_token_usage completed - result: {result}")
+        return result
     except ConnectionError as e:
         await log_async(f"Database connection error tracking token usage: {e}", "error")
         raise
@@ -193,7 +195,8 @@ async def track_gemini_usage_from_response(usage_obj: Any, session_id: Optional[
     Returns:
         bool: True if tracking succeeded, False otherwise
     """
-    await log_async(f"Token tracking called for Gemini - session: {session_id}, message: {message_id}, type: {api_call_type}, model: {model}")
+    logger.info(f"🔍 track_gemini_usage_from_response called - session: {session_id}, model: {model}")
+    logger.info(f"🔍 usage_obj type: {type(usage_obj)}, has attributes: {dir(usage_obj) if usage_obj else 'None'}")
 
     if not usage_obj:
         await log_async("Gemini usage object is None or empty", "warning")

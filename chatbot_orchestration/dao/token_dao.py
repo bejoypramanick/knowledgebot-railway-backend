@@ -18,6 +18,7 @@ class TokenDAO:
 
     async def update_llm_usage(self, provider: str, total_tokens: int, default_limit: int = 20000):
         """Update LLM token usage for a provider."""
+        logger.info(f"🔍 update_llm_usage called - provider: {provider}, total_tokens: {total_tokens}")
         query = """
             INSERT INTO llm_providers (provider_name, token_used, token_limit, is_active)
             VALUES (:provider, :total_tokens, :default_limit, true)
@@ -32,6 +33,7 @@ class TokenDAO:
                 await session.execute(text(query), params)
                 await session.commit()
                 logger.log_db_query(query, params, None)
+                logger.info(f"✅ update_llm_usage completed - provider: {provider}, total_tokens: {total_tokens}")
         except Exception as e:
             logger.log_db_query(query, params, error=e)
             raise
@@ -40,6 +42,7 @@ class TokenDAO:
                                prompt_tokens: int, completion_tokens: int, total_tokens: int,
                                api_call_type: str = None, request_metadata: dict = None) -> bool:
         """Save token usage record and update llm_providers table"""
+        logger.info(f"🔍 save_token_usage called - session: {session_id}, total_tokens: {total_tokens}")
         session_query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
         try:
             async with get_db_session() as session:
@@ -50,6 +53,7 @@ class TokenDAO:
                 integer_session_id = session_record.id if session_record else None
                 integer_message_id = None
 
+                logger.info(f"🔍 Updating llm_providers - provider: {provider}, total_tokens: {total_tokens}")
                 # First, update the llm_providers table with total tokens
                 await self.update_llm_usage(provider, total_tokens)
 
@@ -77,10 +81,11 @@ class TokenDAO:
                 await session.execute(text(query), params)
                 await session.commit()
                 logger.log_db_query(query, params, "INSERT 1")
+                logger.info(f"✅ save_token_usage completed - session: {session_id}, total_tokens: {total_tokens}")
                 return True
 
         except Exception as e:
-            logger.error(f"❌ Error saving token usage: {e}")
+            logger.error(f"❌ Error saving token usage: {e}", exc_info=True)
             return False
 
     async def get_token_usage(self, session_id: str) -> List[Dict[str, Any]]:

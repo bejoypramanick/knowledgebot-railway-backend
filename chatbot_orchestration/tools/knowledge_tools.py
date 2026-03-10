@@ -295,11 +295,14 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
             session_id = get_session_id() or "unknown"
             message_id = None  # Will be generated if needed
             
+            logger.info(f"🔍 Checking for usage_metadata in Gemini response")
+            
             # Extract usage metadata from response
             if hasattr(response, 'candidates') and response.candidates:
                 for candidate in response.candidates:
                     if hasattr(candidate, 'usage_metadata'):
                         usage_metadata = candidate.usage_metadata
+                        logger.info(f"🔍 Found usage_metadata: {usage_metadata}")
                         await track_gemini_usage_from_response(
                             usage_metadata,
                             session_id=session_id,
@@ -309,8 +312,12 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                         )
                         logger.info(f"✅ Token usage tracked from Gemini response")
                         break
+                    else:
+                        logger.info(f"🔍 Candidate {candidate} has no usage_metadata")
+            else:
+                logger.info(f"🔍 Response has no candidates")
         except Exception as token_error:
-            logger.error(f"❌ Error tracking token usage: {token_error}")
+            logger.error(f"❌ Error tracking token usage: {token_error}", exc_info=True)
         
         logger.info("=" * 80)
         logger.info("🔍 DEBUG: QUERY vs RESPONSE VALIDATION")
