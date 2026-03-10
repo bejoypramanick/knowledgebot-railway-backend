@@ -18,9 +18,10 @@ from contextlib import asynccontextmanager
 from shared.telemetry import setup_telemetry, instrument_fastapi
 from shared.otel_logger import get_otel_logger
 
-# Initialize Telemetry
+# Initialize Telemetry FIRST - before creating any loggers
 # Use default behavior (span exporter disabled by default via env var)
 setup_telemetry("configuration")
+
 logger = get_otel_logger("configuration", "configuration")
 
 print("✅ RAILWAY TELEMETRY CONFIGURED SUCCESSFULLY")

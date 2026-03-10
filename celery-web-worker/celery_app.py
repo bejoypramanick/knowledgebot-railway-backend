@@ -5,9 +5,13 @@ Handles async website scraping and crawling tasks
 
 from celery import Celery
 from celery.signals import before_task_publish, task_prerun, task_postrun, task_failure, task_retry, worker_process_init
+from shared.telemetry import setup_telemetry
 from shared.otel_logger import get_otel_logger
 import os
 import redis
+
+# Initialize telemetry BEFORE creating any loggers
+setup_telemetry("celery-web-worker")
 
 logger = get_otel_logger("celery_app", "celery-web-worker")
 
