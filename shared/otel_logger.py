@@ -213,6 +213,14 @@ class OpenTelemetryLogger:
 
         # Standard logger automatically includes otelTraceID and otelSpanID
         # from shared/telemetry.py LoggingInstrumentor
+        # But we also set them explicitly to ensure they're captured
+        span = trace.get_current_span()
+        span_context = span.get_span_context() if span else None
+        if span_context and span_context.trace_id:
+            log_kwargs['extra']['otelTraceID'] = format(span_context.trace_id, '032x')
+        if span_context and span_context.span_id:
+            log_kwargs['extra']['otelSpanID'] = format(span_context.span_id, '016x')
+        
         self.logger.log(level, full_message, **log_kwargs)
 
         # Add span attributes if span exists
