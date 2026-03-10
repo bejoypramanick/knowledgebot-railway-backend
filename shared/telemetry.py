@@ -66,12 +66,10 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
                 record.otelTraceID = '0'
             if not hasattr(record, 'otelSpanID'):
                 record.otelSpanID = '0'
-            if not hasattr(record, 'otelUserEmail'):
-                # Try to get from context variable if not already set
-                record.otelUserEmail = user_email_ctx_var.get() or ''
-            if not hasattr(record, 'otelRequestMapping'):
-                # Try to get from context variable if not already set
-                record.otelRequestMapping = request_mapping_ctx_var.get() or ''
+            # Always read from context variables to ensure we have the latest values
+            # This overrides any values set by LoggingInstrumentor
+            record.otelUserEmail = user_email_ctx_var.get() or ''
+            record.otelRequestMapping = request_mapping_ctx_var.get() or ''
             return super().format(record)
     
     # Add a global filter to ensure otelTraceID and otelSpanID always exist
@@ -83,10 +81,9 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
                 record.otelTraceID = '0'
             if not hasattr(record, 'otelSpanID'):
                 record.otelSpanID = '0'
-            if not hasattr(record, 'otelUserEmail'):
-                record.otelUserEmail = ''
-            if not hasattr(record, 'otelRequestMapping'):
-                record.otelRequestMapping = ''
+            # Always read from context variables to ensure we have the latest values
+            record.otelUserEmail = user_email_ctx_var.get() or ''
+            record.otelRequestMapping = request_mapping_ctx_var.get() or ''
             return True
     
     # Create the global filter instance
@@ -122,10 +119,9 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
             record.otelTraceID = '0'
         if not hasattr(record, 'otelSpanID'):
             record.otelSpanID = '0'
-        if not hasattr(record, 'otelUserEmail'):
-            record.otelUserEmail = ''
-        if not hasattr(record, 'otelRequestMapping'):
-            record.otelRequestMapping = ''
+        # Always read from context variables to ensure we have the latest values
+        record.otelUserEmail = user_email_ctx_var.get() or ''
+        record.otelRequestMapping = request_mapping_ctx_var.get() or ''
         original_emit(record)
         # Flush immediately so logs appear in real-time during streaming/async operations
         if stream_handler.stream:
