@@ -94,14 +94,14 @@ def get_calling_file_info() -> Dict[str, str]:
             'file_path': frame.filename,
             'line_number': str(frame.lineno),
             'method_name': frame.function,
-            'full_info': f"{frame.filename}:{frame.lineno} in {frame.function}()"
+            'full_info': f"{frame.filename}:{frame.lineno}"  # Simplified: just file:line
         }
     except (IndexError, AttributeError):
         return {
             'file_path': 'unknown_file',
             'line_number': 'unknown',
             'method_name': 'unknown',
-            'full_info': 'unknown_file:unknown in unknown()'
+            'full_info': 'unknown_file:unknown'
         }
 
 class OpenTelemetryLogger:
