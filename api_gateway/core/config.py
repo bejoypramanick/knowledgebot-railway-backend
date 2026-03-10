@@ -43,6 +43,21 @@ class Settings(BaseSettings):
     # Logging Configuration
     log_level: str = "INFO"
     
+    # Session Configuration
+    session_cookie_name: str = "session"
+    session_max_age: int = 60 * 60 * 24 * 7  # 7 days
+    session_domain: str = ".globistaan.com"
+    strict_session_check: bool = True  # Enforce IP/User-Agent validation
+    
+    # CSRF Protection - Allowed Origins
+    allowed_origins: list = [
+        "https://digibot-dev.globistaan.com",
+        "https://digibot.globistaan.com",
+        "https://dailogue.globistaan.com",
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
+    
     model_config = {
         'env_file': ".env",
         'case_sensitive': False

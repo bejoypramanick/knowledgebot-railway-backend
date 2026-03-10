@@ -1,309 +1,123 @@
 """
-Authentication Router
-Handles session creation, logout, and user info with httpOnly cookies
-Sessions stored in Redis (or in-memory fallback)
-User data remains in Postgres database
+Authentication Router (Refactored)
+Handles session creation, logout, and user info with:
+- Service layer separation (ProfileService, SessionService)
+- Dependency injection for testability
+- Enhanced security (CSRF, strict validation)
+- Performance optimizations (connection pooling, write-back throttling)
 """
-from fastapi import APIRouter, HTTPException, Response, Request
+from fastapi import APIRouter, HTTPException, Response, Request, Depends
 from pydantic import BaseModel
-import secrets
-import time
-from typing import Optional, Dict, Any
-import os
+from typing import Optional
 
 from api_gateway.core.firebase_auth import verify_firebase_token
 from api_gateway.core.logging_config import get_railway_logger
 from api_gateway.core.session_store import get_session_store
+from api_gateway.core.config import get_settings
+from api_gateway.services.profile_service import get_profile_service, ProfileService
+from api_gateway.services.session_service import get_session_service, SessionService
 
 logger = get_railway_logger(__name__)
 router = APIRouter()
-
-# Session configuration
-SESSION_COOKIE_NAME = "session"
-SESSION_MAX_AGE = 60 * 60 * 24 * 7  # 7 days in seconds
-SESSION_DOMAIN = ".globistaan.com"  # Works for all *.globistaan.com subdomains
 
 
 class CreateSessionRequest(BaseModel):
     """Request body for creating a session from Firebase ID token"""
     idToken: str
-    context: Optional[str] = "admin"  # "admin" or "widget" - determines cookie SameSite policy
+    context: Optional[str] = "admin"  # "admin" or "widget"
 
 
-def get_session(session_id: str, ip_address: str = None, user_agent: str = None, 
-                validate_security: bool = True) -> Optional[Dict[str, Any]]:
-    """
-    Get session data by session ID with security validation
-    
-    Args:
-        session_id: Session ID from cookie
-        ip_address: Client IP address for validation
-        user_agent: Client User-Agent for validation
-        validate_security: Whether to validate IP and User-Agent (default: True)
-    
-    Returns:
-        Session data if valid, None if invalid/expired/hijacked
-    """
-    # Get session store
+# Dependency injection helpers
+def get_session_service_dep() -> SessionService:
+    """Dependency for SessionService"""
     store = get_session_store()
-    
-    # Get session data from Redis/memory
-    session_data = store.get(session_id)
-    
-    if not session_data:
-        return None
-    
-    # Check if session expired (Redis handles this automatically, but check for in-memory)
-    if session_data.get("expires_at") and session_data["expires_at"] < int(time.time()):
-        # Session expired, delete it
-        store.delete(session_id)
-        logger.info(f"⏰ Session expired for {session_data.get('email')}")
-        return None
-    
-    # Security validation (detect session hijacking)
-    if validate_security:
-        # Check IP address match (with flexibility for mobile networks and Railway internal IPs)
-        if ip_address and session_data.get("ip_address"):
-            if ip_address != session_data["ip_address"]:
-                # Check if both IPs are Railway internal IPs (100.64.0.0/10)
-                is_railway_internal = (
-                    ip_address.startswith("100.64.") and 
-                    session_data["ip_address"].startswith("100.64.")
-                )
-                
-                if is_railway_internal:
-                    # Railway internal IPs can change due to load balancing - just log, don't block
-                    logger.debug(
-                        f"ℹ️ Railway internal IP change for {session_data.get('email')}: "
-                        f"{session_data['ip_address']} → {ip_address} (allowed)"
-                    )
-                else:
-                    # External IP mismatch - potential hijacking
-                    logger.warning(
-                        f"🚨 IP address mismatch for {session_data.get('email')}: "
-                        f"expected {session_data['ip_address']}, got {ip_address}"
-                    )
-                    # For now, just log warning (don't invalidate)
-                    # In production, you might want to invalidate or require re-auth
-                    # Uncomment below to enforce strict IP binding:
-                    # store.delete(session_id)
-                    # return None
-        
-        # Check User-Agent match (detect browser/device change)
-        if user_agent and session_data.get("user_agent"):
-            if user_agent != session_data["user_agent"]:
-                logger.warning(
-                    f"🚨 User-Agent mismatch for {session_data.get('email')}: "
-                    f"session created with different browser/device"
-                )
-                # For now, just log warning
-                # Uncomment below to enforce strict User-Agent binding:
-                # store.delete(session_id)
-                # return None
-    
-    # Update request tracking
-    session_data["request_count"] = session_data.get("request_count", 0) + 1
-    session_data["last_request_time"] = int(time.time())
-    
-    # Update session in store (for request tracking)
-    store.create(session_id, session_data, SESSION_MAX_AGE)
-    
-    # Detect unusual activity (too many requests)
-    if session_data["request_count"] > 10000:  # Adjust threshold as needed
-        logger.warning(
-            f"🚨 Unusual activity detected for {session_data.get('email')}: "
-            f"{session_data['request_count']} requests"
-        )
-    
-    return session_data
+    return get_session_service(store)
 
 
-def create_session(user_data: Dict[str, Any], ip_address: str = None, user_agent: str = None) -> str:
-    """Create a new session and return session ID"""
-    # Generate secure random session ID
-    session_id = secrets.token_urlsafe(32)
-    
-    # Get session store
-    store = get_session_store()
-    
-    # Prepare session data with security metadata
-    session_data = {
-        "uid": user_data.get("uid"),
-        "email": user_data.get("email"),
-        "name": user_data.get("name", user_data.get("email")),
-        "picture": user_data.get("picture"),
-        "role": user_data.get("role", "user"),  # Store user role
-        "roles": user_data.get("roles", ["user"]),  # Store all roles
-        "created_at": int(time.time()),
-        "expires_at": int(time.time()) + SESSION_MAX_AGE,
-        # Security: Bind session to IP and User Agent
-        "ip_address": ip_address,
-        "user_agent": user_agent,
-        "request_count": 0,
-        "last_request_time": int(time.time())
-    }
-    
-    # Store session in Redis/memory with TTL
-    store.create(session_id, session_data, SESSION_MAX_AGE)
-    
-    logger.info(f"✅ Session created for user {user_data.get('email')} (role={user_data.get('role')}) from IP {ip_address} (expires in {SESSION_MAX_AGE}s)")
-    
-    return session_id
-
-
-def delete_session(session_id: str) -> bool:
-    """Delete a session"""
-    store = get_session_store()
-    result = store.delete(session_id)
-    
-    if result:
-        logger.info(f"✅ Session {session_id[:8]}... deleted")
-    
-    return result
+def get_profile_service_dep() -> ProfileService:
+    """Dependency for ProfileService"""
+    return get_profile_service()
 
 
 @router.post("/auth/session")
 async def create_session_endpoint(
     request: CreateSessionRequest,
     response: Response,
-    req: Request
+    req: Request,
+    session_service: SessionService = Depends(get_session_service_dep),
+    profile_service: ProfileService = Depends(get_profile_service_dep)
 ):
     """
     Create a session cookie from Firebase ID token.
     
     Flow:
-    1. Frontend gets Firebase ID token after Google sign-in
-    2. Frontend calls this endpoint with the token and context
-    3. Backend verifies token with Firebase Admin SDK
-    4. Backend fetches user role from database
-    5. Backend creates session and sets httpOnly, secure cookie
-    6. Frontend uses cookie for all subsequent requests (automatic)
-    
-    Context-aware cookie configuration:
-    - Admin/Agent screens: SameSite=Lax (same-site only, more secure)
-    - Chat widget (iframe): SameSite=None (cross-site, required for iframes)
+    1. Verify Firebase ID token
+    2. Fetch user profile (role) from configuration service
+    3. Create session with security binding
+    4. Set httpOnly, secure cookie
     
     Security:
-    - Binds session to IP address and User-Agent
-    - Detects session hijacking attempts
+    - CSRF protection via Origin validation
+    - Session binding to IP and User-Agent
+    - Context-aware SameSite policy
     
     Args:
         request.idToken: Firebase ID token
-        request.context: "admin" (default) or "widget"
+        request.context: "admin" (SameSite=Lax) or "widget" (SameSite=None)
     
     Returns:
-        User data (uid, email, name, picture, role)
+        User data (uid, email, name, picture)
     """
+    settings = get_settings()
+    
     try:
-        logger.info(f"🔐 [SESSION_CREATE] Received session creation request")
-        logger.info(f"🔐 [SESSION_CREATE] Context: {request.context}")
-        logger.info(f"🔐 [SESSION_CREATE] Origin: {req.headers.get('origin')}")
-        logger.info(f"🔐 [SESSION_CREATE] Referer: {req.headers.get('referer')}")
+        # CSRF Protection: Validate Origin header for state-changing requests
+        origin = req.headers.get("origin")
+        if origin and not _is_allowed_origin(origin, settings.allowed_origins):
+            logger.warning(f"🚨 CSRF: Rejected request from origin {origin}")
+            raise HTTPException(status_code=403, detail="Invalid origin")
         
-        # Verify Firebase ID token
+        # Step 1: Verify Firebase ID token
         user_data = verify_firebase_token(request.idToken)
-        
         if not user_data:
-            logger.warning("❌ Invalid Firebase ID token provided")
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid Firebase ID token"
-            )
+            raise HTTPException(status_code=401, detail="Invalid Firebase ID token")
         
-        logger.info(f"✅ [SESSION_CREATE] Firebase token verified for user: {user_data.get('email')}")
+        logger.info(f"✅ Firebase token verified for {user_data.get('email')}")
         
-        # Fetch user role from database via configuration service
+        # Step 2: Fetch user profile (role) from configuration service
         try:
-            import httpx
-            import os
-            
-            # Call configuration service directly (not through API Gateway)
-            config_service_internal_url = os.getenv(
-                'CONFIGURATION_SERVICE_URL',
-                'http://configuration.railway.internal:8080'
-            )
-            # Direct call to configuration service (no /api/v1/gateway prefix)
-            profile_endpoint = f"{config_service_internal_url}/api/v1/configuration/users/profile"
-            
-            logger.info(f"🔍 [SESSION_CREATE] Fetching user profile from: {profile_endpoint}")
-            logger.info(f"🔍 [SESSION_CREATE] Email: {user_data.get('email')}")
-            
-            # Pass user data in headers (configuration service accepts headers from API Gateway)
-            headers = {
-                'X-User-UID': user_data.get('uid', ''),
-                'X-User-Email': user_data.get('email', ''),
-                'X-User-Name': user_data.get('name', user_data.get('email', '')),
-            }
-            
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                profile_response = await client.get(
-                    profile_endpoint,
-                    headers=headers
-                )
-                
-                logger.info(f"🔍 [SESSION_CREATE] Profile endpoint response status: {profile_response.status_code}")
-                
-                if profile_response.status_code == 200:
-                    profile_result = profile_response.json()
-                    logger.info(f"🔍 [SESSION_CREATE] Profile response: {profile_result}")
-                    
-                    profile_data = profile_result.get('data', {})
-                    roles = profile_data.get('roles', [])
-                    primary_role = profile_data.get('role', 'user')
-                    
-                    user_data['role'] = primary_role
-                    user_data['roles'] = roles
-                    logger.info(f"✅ [SESSION_CREATE] User role fetched: {primary_role} (all roles: {roles})")
-                else:
-                    logger.warning(f"⚠️ [SESSION_CREATE] Failed to fetch user profile: {profile_response.status_code}")
-                    logger.warning(f"⚠️ [SESSION_CREATE] Response body: {profile_response.text}")
-                    user_data['role'] = 'user'
-                    user_data['roles'] = ['user']
-                
+            profile = await profile_service.fetch_user_profile(user_data)
+            user_data.update(profile)
+            logger.info(f"✅ Profile fetched: role={profile['role']}, roles={profile['roles']}")
         except Exception as e:
-            logger.error(f"❌ [SESSION_CREATE] Exception while fetching user profile: {e}")
-            logger.error(f"❌ [SESSION_CREATE] Exception type: {type(e).__name__}")
-            import traceback
-            logger.error(f"❌ [SESSION_CREATE] Traceback: {traceback.format_exc()}")
-            user_data['role'] = 'user'  # Default to user if role fetch fails
-            user_data['roles'] = ['user']
+            logger.error(f"❌ Profile fetch failed: {e}")
+            # Use fallback profile (role=user)
+            user_data.update({'role': 'user', 'roles': ['user']})
         
-        # Get client IP and User-Agent for session binding
+        # Step 3: Create session with security metadata
         ip_address = req.client.host if req.client else None
         user_agent = req.headers.get("user-agent")
         
-        # Create session with security metadata
-        session_id = create_session(user_data, ip_address, user_agent)
-        logger.info(f"✅ [SESSION_CREATE] Session created with ID: {session_id[:16]}...")
+        session_id = session_service.create_session(user_data, ip_address, user_agent)
         
-        # Determine SameSite policy based on context
+        # Step 4: Set cookie with context-appropriate SameSite policy
         context = request.context or "admin"
-        if context == "widget":
-            # Widget embedded in iframe on different domains
-            # MUST use SameSite=None for cross-site cookies
-            samesite_policy = "none"
-            logger.info(f"🔧 Using SameSite=None for widget context (cross-site iframe)")
-        else:
-            # Admin/Agent screens on same domain
-            # Use SameSite=Lax for better security
-            samesite_policy = "lax"
-            logger.info(f"🔧 Using SameSite=Lax for admin context (same-site)")
+        samesite_policy = "none" if context == "widget" else "lax"
         
-        # Set httpOnly, secure cookie with context-appropriate SameSite policy
         response.set_cookie(
-            key=SESSION_COOKIE_NAME,
+            key=settings.session_cookie_name,
             value=session_id,
-            max_age=SESSION_MAX_AGE,
-            httponly=True,   # JavaScript cannot access (XSS protection)
-            secure=True,     # Only sent over HTTPS (MITM protection) - REQUIRED for SameSite=None
-            samesite=samesite_policy,  # Context-aware: "lax" for admin, "none" for widget
-            domain=SESSION_DOMAIN,  # Works for all *.globistaan.com subdomains
-            path="/"         # Cookie sent for all paths
+            max_age=settings.session_max_age,
+            httponly=True,   # XSS protection
+            secure=True,     # HTTPS only (required for SameSite=None)
+            samesite=samesite_policy,
+            domain=settings.session_domain,
+            path="/"
         )
         
         logger.info(
-            f"✅ [SESSION_CREATE] Session cookie set for user {user_data.get('email')} "
-            f"from IP {ip_address} (context={context}, samesite={samesite_policy}, domain={SESSION_DOMAIN})"
+            f"✅ Session created for {user_data.get('email')} "
+            f"(context={context}, samesite={samesite_policy})"
         )
         
         return {
@@ -319,82 +133,79 @@ async def create_session_endpoint(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ [SESSION_CREATE] Error creating session: {e}")
-        import traceback
-        logger.error(f"❌ [SESSION_CREATE] Traceback: {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to create session"
-        )
+        logger.error(f"❌ Session creation failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create session")
 
 
 @router.post("/auth/logout")
-async def logout(request: Request, response: Response):
+async def logout(
+    request: Request,
+    response: Response,
+    session_service: SessionService = Depends(get_session_service_dep)
+):
     """
     Logout and clear session cookie.
     
     Deletes the session from storage and clears the cookie.
     """
+    settings = get_settings()
+    
     try:
         # Get session ID from cookie
-        session_id = request.cookies.get(SESSION_COOKIE_NAME)
+        session_id = request.cookies.get(settings.session_cookie_name)
         
         if session_id:
-            # Delete session from storage
-            delete_session(session_id)
+            session_service.delete_session(session_id)
         
-        # Clear cookie (set expired cookie)
+        # Clear cookie
         response.delete_cookie(
-            key=SESSION_COOKIE_NAME,
-            domain=SESSION_DOMAIN,
+            key=settings.session_cookie_name,
+            domain=settings.session_domain,
             path="/"
         )
         
-        logger.info("✅ User logged out successfully")
+        logger.info("✅ User logged out")
         
-        return {
-            "success": True,
-            "message": "Logged out successfully"
-        }
+        return {"success": True, "message": "Logged out successfully"}
         
     except Exception as e:
-        logger.error(f"❌ Error during logout: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to logout"
-        )
+        logger.error(f"❌ Logout failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to logout")
 
 
 @router.get("/auth/me")
-async def get_current_user(request: Request):
+async def get_current_user(
+    request: Request,
+    session_service: SessionService = Depends(get_session_service_dep)
+):
     """
     Get current user from session cookie.
     
     Returns user data if session is valid, 401 if not authenticated.
     Validates IP and User-Agent to detect session hijacking.
     """
+    settings = get_settings()
+    
     try:
         # Get session ID from cookie
-        session_id = request.cookies.get(SESSION_COOKIE_NAME)
+        session_id = request.cookies.get(settings.session_cookie_name)
         
         if not session_id:
-            raise HTTPException(
-                status_code=401,
-                detail="Not authenticated"
-            )
+            raise HTTPException(status_code=401, detail="Not authenticated")
         
-        # Get client IP and User-Agent for validation
+        # Get session with security validation
         ip_address = request.client.host if request.client else None
         user_agent = request.headers.get("user-agent")
         
-        # Get session data with security validation
-        session_data = get_session(session_id, ip_address, user_agent, validate_security=True)
+        session_data = session_service.get_session(
+            session_id,
+            ip_address,
+            user_agent,
+            validate_security=True
+        )
         
         if not session_data:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid or expired session"
-            )
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
         
         return {
             "success": True,
@@ -409,74 +220,68 @@ async def get_current_user(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Error getting current user: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to get user"
-        )
+        logger.error(f"❌ Get current user failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get user")
 
 
 @router.post("/auth/refresh")
-async def refresh_session(request: Request, response: Response):
+async def refresh_session(
+    request: Request,
+    response: Response,
+    session_service: SessionService = Depends(get_session_service_dep)
+):
     """
     Refresh session cookie to extend expiration.
     
     Call this periodically (e.g., every 30 minutes) to keep user logged in.
     """
+    settings = get_settings()
+    
     try:
         # Get session ID from cookie
-        session_id = request.cookies.get(SESSION_COOKIE_NAME)
+        session_id = request.cookies.get(settings.session_cookie_name)
         
         if not session_id:
-            raise HTTPException(
-                status_code=401,
-                detail="Not authenticated"
-            )
+            raise HTTPException(status_code=401, detail="Not authenticated")
         
-        # Get session data
-        session_data = get_session(session_id)
+        # Refresh session
+        success = session_service.refresh_session(session_id)
         
-        if not session_data:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid or expired session"
-            )
-        
-        # Get session store
-        store = get_session_store()
-        
-        # Extend session expiration
-        session_data["expires_at"] = int(time.time()) + SESSION_MAX_AGE
-        store.update_ttl(session_id, SESSION_MAX_AGE)
+        if not success:
+            raise HTTPException(status_code=401, detail="Invalid or expired session")
         
         # Reset cookie with new expiration
         response.set_cookie(
-            key=SESSION_COOKIE_NAME,
+            key=settings.session_cookie_name,
             value=session_id,
-            max_age=SESSION_MAX_AGE,
+            max_age=settings.session_max_age,
             httponly=True,
             secure=True,
             samesite="lax",
-            domain=SESSION_DOMAIN,
+            domain=settings.session_domain,
             path="/"
         )
         
-        logger.info(f"✅ Session refreshed for user {session_data['email']}")
+        logger.info("✅ Session refreshed")
         
-        return {
-            "success": True,
-            "message": "Session refreshed"
-        }
+        return {"success": True, "message": "Session refreshed"}
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Error refreshing session: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to refresh session"
-        )
+        logger.error(f"❌ Session refresh failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to refresh session")
 
 
-# Export session functions for use in middleware
-__all__ = ['router', 'get_session', 'SESSION_COOKIE_NAME']
+def _is_allowed_origin(origin: str, allowed_origins: list) -> bool:
+    """
+    Check if origin is in allowed list.
+    
+    Args:
+        origin: Origin header from request
+        allowed_origins: List of allowed origins
+    
+    Returns:
+        True if allowed, False otherwise
+    """
+    return origin in allowed_origins

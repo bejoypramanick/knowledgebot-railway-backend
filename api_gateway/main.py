@@ -54,6 +54,12 @@ async def lifespan(app: FastAPI):
         database_url = os.getenv("DATABASE_URL")
         await initialize_database_with_retry(database_url, service_name="api-gateway")
 
+        # Initialize ProfileService (connection pooling for configuration service)
+        logger.info("🔧 Initializing ProfileService...")
+        from api_gateway.services.profile_service import init_profile_service
+        init_profile_service()
+        logger.info("✅ ProfileService initialized with connection pooling")
+
         # Initialize Gemini FileSearch Store (create if doesn't exist)
         logger.info("📂 Initializing Gemini FileSearch store...")
         try:
@@ -137,6 +143,14 @@ async def lifespan(app: FastAPI):
         yield
         # Shutdown
         logger.info("🛑 API Gateway shutting down")
+
+        # Close ProfileService HTTP client
+        try:
+            from api_gateway.services.profile_service import close_profile_service
+            await close_profile_service()
+            logger.info("✅ ProfileService closed")
+        except Exception as e:
+            logger.error(f"❌ Error closing ProfileService: {e}")
 
         # Close database
         try:
