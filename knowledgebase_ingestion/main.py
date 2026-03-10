@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 # Configure Shared Telemetry
 import logging
 from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from shared.telemetry import setup_telemetry, instrument_fastapi
 
 # Initialize Telemetry
@@ -20,7 +21,7 @@ if not hasattr(logging, '_otel_initialized_for_kb'):
     setup_telemetry("knowledgebase-ingestion")
     logging._otel_initialized_for_kb = True
 
-logger = logging.getLogger("knowledgebase_ingestion")
+logger = get_otel_logger("knowledgebase_ingestion", "knowledgebase-ingestion")
 
 from knowledgebase_ingestion.core.ai import get_genai_client
 from knowledgebase_ingestion.routers import fileupload_router, webcrawl_router

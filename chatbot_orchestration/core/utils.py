@@ -189,7 +189,7 @@ def setup_global_exception_logging(service_name: str) -> None:
     - SIGTERM / SIGINT handlers that dump python tracebacks for diagnostics
     """
     # Use standard logger with OpenTelemetry integration
-    svc_logger = logging.getLogger(service_name)
+    svc_logger = get_otel_logger(service_name, service_name)
 
     def _excepthook(exc_type, exc_value, exc_tb):
         # Log an uncaught exception with full traceback
@@ -258,7 +258,7 @@ def register_fastapi_exception_handlers(app: FastAPI, service_name: str) -> None
 
     Use this to ensure request-scoped exceptions are logged with stack traces.
     """
-    svc_logger = logging.getLogger(service_name)
+    svc_logger = get_otel_logger(service_name, service_name)
 
     @app.exception_handler(Exception)
     async def _global_exc_handler(request: Request, exc: Exception):
@@ -279,7 +279,7 @@ def log_system_metrics(service_name: str) -> None:
     Args:
         service_name: Name of the service for logging context.
     """
-    svc_logger = logging.getLogger(service_name)
+    svc_logger = get_otel_logger(service_name, service_name)
     try:
         memory = psutil.virtual_memory()
         cpu = psutil.cpu_percent(interval=None)
@@ -298,7 +298,7 @@ def log_endpoint_request(service_name: str, endpoint_type: str, request: Request
         endpoint_type: Type of endpoint (e.g., 'health', 'ready').
         request: FastAPI Request object.
     """
-    svc_logger = logging.getLogger(service_name)
+    svc_logger = get_otel_logger(service_name, service_name)
     url = str(request.url)
     svc_logger.info(f"🔍 {endpoint_type.capitalize()} check invoked: {url}")
 

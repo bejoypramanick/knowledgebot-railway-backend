@@ -200,7 +200,8 @@ def instrument_fastapi(app, service_name):
             
             # Log the route with trace context in the format requested
             # Format: [ROUTE] [TraceID] [SpanID] [Email] [RequestMapping] message
-            logger = logging.getLogger(service_name)
+            from shared.otel_logger import get_otel_logger
+            logger = get_otel_logger(service_name, service_name)
             route_log = f"[{request.method} {route_path}] [{trace_id}] [{span_id}] [{user_email}] [{request_mapping}] Request started"
             
             # Log directly to avoid otel_logger formatting

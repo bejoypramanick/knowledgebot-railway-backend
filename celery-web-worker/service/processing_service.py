@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, AsyncGenerator, Tuple
 import logging
 from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from urllib.parse import urljoin, urlparse
 
 from shared.otel_logger import get_otel_logger

@@ -10,8 +10,9 @@ and extracts only the meaningful content:
 import json
 import logging
 from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 
-logger = logging.getLogger("docling_content_converter")
+logger = get_otel_logger("docling_content_converter", "shared")
 
 
 def convert_docling_to_markdown(json_content: str, include_tables: bool = True) -> str:

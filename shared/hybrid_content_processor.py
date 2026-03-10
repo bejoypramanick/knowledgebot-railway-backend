@@ -9,10 +9,11 @@ CRITICAL: Both trafilatura and docling receive the SAME HTML input
 """
 import logging
 from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 import hashlib
 from typing import Tuple, Optional
 
-logger = logging.getLogger("hybrid_content_processor")
+logger = get_otel_logger("hybrid_content_processor", "shared")
 
 
 async def process_html_hybrid(

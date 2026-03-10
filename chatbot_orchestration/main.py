@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 # Configure Shared Telemetry
 import logging
 from shared.otel_logger import get_otel_logger
+from shared.otel_logger import get_otel_logger
 from shared.telemetry import setup_telemetry, instrument_fastapi
 from shared.sqlalchemy_db import close_database, health_check as db_health_check
 from shared.db_retry import initialize_database_with_retry
@@ -15,7 +16,7 @@ from shared.db_retry import initialize_database_with_retry
 # Initialize Telemetry
 # Use default behavior (span exporter disabled by default via env var)
 setup_telemetry("chatbot-orchestration")
-logger = logging.getLogger("chatbot_orchestration")
+logger = get_otel_logger("chatbot_orchestration", "chatbot-orchestration")
 
 from chatbot_orchestration.routers import router
 from chatbot_orchestration.service.agent_service import PydanticAIGatewayService
