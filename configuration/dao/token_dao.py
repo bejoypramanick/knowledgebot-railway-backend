@@ -14,49 +14,6 @@ class TokenDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
-    async def update_llm_usage(self, provider: str, total_tokens: int, default_limit: int = 20000):
-        """Update LLM token usage for a provider."""
-        query = """
-            INSERT INTO llm_providers (provider_name, token_used, token_limit, is_active)
-            VALUES (:provider, :total_tokens, :default_limit, true)
-            ON CONFLICT (provider_name) DO UPDATE SET
-            token_used = llm_providers.token_used + EXCLUDED.token_used,
-            updated_at = NOW()
-        """
-        params = {"provider": provider, "total_tokens": total_tokens, "default_limit": default_limit}
-        try:
-            logger.log_db_operation(query, params)
-            async with get_db_session() as session:
-                await session.execute(text(query), params)
-                await session.commit()
-                logger.log_db_query(query, params, None)
-        except Exception as e:
-            logger.log_db_query(query, params, error=e)
-            raise
-
-    async def log_token_usage(self, session_id: str, message_id: str, provider: str, model: str,
-                             prompt_tokens: int, completion_tokens: int, total_tokens: int,
-                             api_call_type: str, request_metadata: Optional[dict] = None):
-        """Log detailed token usage for a specific API call."""
-        query = """
-            INSERT INTO token_usage_log
-            (session_id, message_id, provider, model, prompt_tokens, completion_tokens,
-             total_tokens, api_call_type, request_metadata, created_at)
-            VALUES (:session_id, :message_id, :provider, :model, :prompt_tokens,
-                    :completion_tokens, :total_tokens, :api_call_type, :request_metadata, NOW())
-        """
-        params = {"session_id": session_id, "message_id": message_id, "provider": provider, "model": model, "prompt_tokens": prompt_tokens,
-                  "completion_tokens": completion_tokens, "total_tokens": total_tokens, "api_call_type": api_call_type, "request_metadata": request_metadata}
-        try:
-            logger.log_db_operation(query, params)
-            async with get_db_session() as session:
-                await session.execute(text(query), params)
-                await session.commit()
-                logger.log_db_query(query, params, None)
-        except Exception as e:
-            logger.log_db_query(query, params, error=e)
-            raise
-
     async def get_gemini_usage(self) -> dict:
         """Get Gemini API token usage by calculating totals from token_usage_log table."""
         query = """

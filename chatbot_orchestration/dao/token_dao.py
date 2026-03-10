@@ -16,10 +16,30 @@ class TokenDAO:
     def __init__(self):
         pass  # No connection parameter - DAO manages its own connection
 
+    async def update_llm_usage(self, provider: str, total_tokens: int, default_limit: int = 20000):
+        """Update LLM token usage for a provider."""
+        query = """
+            INSERT INTO llm_providers (provider_name, token_used, token_limit, is_active)
+            VALUES (:provider, :total_tokens, :default_limit, true)
+            ON CONFLICT (provider_name) DO UPDATE SET
+            token_used = llm_providers.token_used + EXCLUDED.token_used,
+            updated_at = NOW()
+        """
+        params = {"provider": provider, "total_tokens": total_tokens, "default_limit": default_limit}
+        try:
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                await session.execute(text(query), params)
+                await session.commit()
+                logger.log_db_query(query, params, None)
+        except Exception as e:
+            logger.log_db_query(query, params, error=e)
+            raise
+
     async def save_token_usage(self, session_id: str, message_id: str, provider: str, model: str,
                                prompt_tokens: int, completion_tokens: int, total_tokens: int,
                                api_call_type: str = None, request_metadata: dict = None) -> bool:
-        """Save token usage record"""
+        """Save token usage record and update llm_providers table"""
         session_query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
         try:
             async with get_db_session() as session:
@@ -30,6 +50,10 @@ class TokenDAO:
                 integer_session_id = session_record.id if session_record else None
                 integer_message_id = None
 
+                # First, update the llm_providers table with total tokens
+                await self.update_llm_usage(provider, total_tokens)
+
+                # Then, log the detailed token usage
                 query = """
                     INSERT INTO token_usage_log (
                         session_id, message_id, provider, model, prompt_tokens,

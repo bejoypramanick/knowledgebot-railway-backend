@@ -37,16 +37,15 @@ class TokenUsageService:
             logger.error(f"Error getting token summary: {e}")
             raise
 
-    async def record_token_usage(
+    async def get_detailed_token_usage(
         self,
-        provider: str,
-        tokens_used: int,
-        session_id: Optional[str] = None
-    ) -> bool:
-        """Record token usage"""
+        limit: int = 100,
+        provider: Optional[str] = None,
+        api_call_type: Optional[str] = None
+    ) -> List[Dict]:
+        """Get detailed token usage log"""
         try:
-            await self._token_dao.record_token_usage(provider, tokens_used, session_id)
-            return True
+            return await self._token_dao.get_detailed_token_usage(limit, provider, api_call_type)
         except Exception as e:
-            logger.error(f"Error recording token usage: {e}")
+            logger.error(f"Error getting detailed token usage: {e}")
             raise
