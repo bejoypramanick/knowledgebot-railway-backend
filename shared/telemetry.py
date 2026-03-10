@@ -142,40 +142,6 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # This automatically injects the 'traceparent' header into outgoing httpx calls
     HTTPXClientInstrumentor().instrument()
     
-    # Add custom HTTPX instrumentation to propagate user email and request mapping
-    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor as BaseHTTPXInstrumentor
-    
-    # Store original request method
-    original_request = BaseHTTPXInstrumentor._instrument_request
-    
-    def instrumented_request(instrumentor, method, request, context):
-        """Instrumented request that propagates user email and request mapping"""
-        # Get current context values
-        user_email = user_email_ctx_var.get()
-        request_mapping = request_mapping_ctx_var.get()
-        
-        # Add to headers if present
-        headers = dict(request.headers)
-        if user_email:
-            headers['X-User-Email'] = user_email
-        if request_mapping:
-            headers['X-Request-Mapping'] = request_mapping
-        
-        # Create new request with updated headers
-        from httpx import Request
-        new_request = Request(
-            method=request.method,
-            url=request.url,
-            headers=headers,
-            content=request.content,
-            extensions=request.extensions
-        )
-        
-        return original_request(instrumentor, method, new_request, context)
-    
-    # Apply instrumentation
-    BaseHTTPXInstrumentor._instrument_request = instrumented_request
-    
     logging.info(f"🔭 OpenTelemetry initialized for {service_name} (span_exporter={'enabled' if enable_span_exporter else 'disabled'})")
     
     return trace.get_tracer(service_name)

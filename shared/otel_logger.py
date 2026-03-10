@@ -202,6 +202,15 @@ class OpenTelemetryLogger:
         exc_text = kwargs.pop('exc_text', None)
         stack_info = kwargs.pop('stack_info', None)
 
+        # Prepare logger.log kwargs
+        log_kwargs = {'extra': extra}
+        if exc_info is not None:
+            log_kwargs['exc_info'] = exc_info
+        if exc_text is not None:
+            log_kwargs['exc_text'] = exc_text
+        if stack_info is not None:
+            log_kwargs['stack_info'] = stack_info
+
         # Standard logger automatically includes otelTraceID and otelSpanID
         # from shared/telemetry.py LoggingInstrumentor
         self.logger.log(level, full_message, **log_kwargs)
