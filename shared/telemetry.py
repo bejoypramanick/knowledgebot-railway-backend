@@ -155,13 +155,24 @@ def instrument_fastapi(app, service_name):
             span.set_attribute("http.route", route_path)
             span.set_attribute("http.method", request.method)
             span.set_attribute("http.url", str(request.url))
+            span.set_attribute("http.target", request.url.path)
             
             # Update span name to include route
             span.update_name(f"{request.method} {route_path}")
             
-            # Log the route for easy searching
+            # Get trace context for logging
+            span_context = span.get_span_context()
+            trace_id = format(span_context.trace_id, '032x') if span_context.trace_id else '0'
+            span_id = format(span_context.span_id, '016x') if span_context.span_id else '0'
+            
+            # Log the route with trace context
             logger = logging.getLogger(service_name)
-            logger.debug(f"📍 Route: {request.method} {route_path}")
+            logger.info(
+                f"🔀 ROUTE: {request.method} {route_path} | "
+                f"Path: {request.url.path} | "
+                f"TraceID: {trace_id} | "
+                f"SpanID: {span_id}"
+            )
         
         response = await call_next(request)
         return response
