@@ -160,9 +160,9 @@ class OpenTelemetryLogger:
         # Add task ID and session ID to message
         formatted_message = self._format_message(message)
 
-        # Add file info to message for debugging
-        file_prefix = f"[{file_info['full_info']}]"
-        full_message = f"{file_prefix} {formatted_message}"
+        # Add file info at the end: [file:line] message
+        file_suffix = f"[{file_info['file_path']}:{file_info['line_number']}]"
+        full_message = f"{file_suffix} {formatted_message}"
 
         # Add admin, task, session, and workflow context to extra fields
         extra = extra or {}

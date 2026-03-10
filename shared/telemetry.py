@@ -165,14 +165,14 @@ def instrument_fastapi(app, service_name):
             trace_id = format(span_context.trace_id, '032x') if span_context.trace_id else '0'
             span_id = format(span_context.span_id, '016x') if span_context.span_id else '0'
             
-            # Log the route with trace context
+            # Log the route with trace context in the format requested
+            # Format: [ROUTE] [TraceID] [SpanID] message
             logger = logging.getLogger(service_name)
-            logger.info(
-                f"🔀 ROUTE: {request.method} {route_path} | "
-                f"Path: {request.url.path} | "
-                f"TraceID: {trace_id} | "
-                f"SpanID: {span_id}"
-            )
+            # Use a simple format without the file path prefix
+            route_log = f"[{request.method} {route_path}] [{trace_id}] [{span_id}] Request started"
+            
+            # Log directly to avoid otel_logger formatting
+            logger.info(route_log)
         
         response = await call_next(request)
         return response
