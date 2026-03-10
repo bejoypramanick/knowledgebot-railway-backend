@@ -9,12 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from health_monitoring.core.config import settings
 from shared.sqlalchemy_db import init_database, validate_database, close_database, health_check as db_health_check
-from shared.otel_logger import setup_otel_logging
+from shared.telemetry import setup_telemetry
 from health_monitoring.routers.router import router
 from health_monitoring.scheduler.health_checker import get_scheduler
 
 # Setup logging
-setup_otel_logging("health-monitoring")
+setup_telemetry("health-monitoring")
 logger = get_otel_logger(__name__, "health_monitoring")
 
 

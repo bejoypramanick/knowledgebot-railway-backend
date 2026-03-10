@@ -15,10 +15,6 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 user_email_ctx_var: ContextVar[Optional[str]] = ContextVar("user_email", default=None)
 request_mapping_ctx_var: ContextVar[Optional[str]] = ContextVar("request_mapping", default=None)
 
-# Context variables for email and request mapping
-user_email_ctx_var: ContextVar[Optional[str]] = ContextVar("user_email", default=None)
-request_mapping_ctx_var: ContextVar[Optional[str]] = ContextVar("request_mapping", default=None)
-
 def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_exporter=None):
     """
     Configures OpenTelemetry for the service (Tracing + Logging).
@@ -71,9 +67,11 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
             if not hasattr(record, 'otelSpanID'):
                 record.otelSpanID = '0'
             if not hasattr(record, 'otelUserEmail'):
-                record.otelUserEmail = ''
+                # Try to get from context variable if not already set
+                record.otelUserEmail = user_email_ctx_var.get() or ''
             if not hasattr(record, 'otelRequestMapping'):
-                record.otelRequestMapping = ''
+                # Try to get from context variable if not already set
+                record.otelRequestMapping = request_mapping_ctx_var.get() or ''
             return super().format(record)
     
     # Add a global filter to ensure otelTraceID and otelSpanID always exist

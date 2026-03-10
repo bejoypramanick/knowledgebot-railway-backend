@@ -286,6 +286,32 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
 
         response_text = response.text if hasattr(response, 'text') else str(response)
         logger.info(f"✅ Generated response: {len(response_text)} characters")
+        
+        # Track token usage from Gemini API response
+        try:
+            from ..core.token_tracker import track_gemini_usage_from_response
+            from shared.otel_logger import get_session_id
+            
+            session_id = get_session_id() or "unknown"
+            message_id = None  # Will be generated if needed
+            
+            # Extract usage metadata from response
+            if hasattr(response, 'candidates') and response.candidates:
+                for candidate in response.candidates:
+                    if hasattr(candidate, 'usage_metadata'):
+                        usage_metadata = candidate.usage_metadata
+                        await track_gemini_usage_from_response(
+                            usage_metadata,
+                            session_id=session_id,
+                            message_id=message_id,
+                            api_call_type='rag',
+                            model='gemini-2.5-flash'
+                        )
+                        logger.info(f"✅ Token usage tracked from Gemini response")
+                        break
+        except Exception as token_error:
+            logger.error(f"❌ Error tracking token usage: {token_error}")
+        
         logger.info("=" * 80)
         logger.info("🔍 DEBUG: QUERY vs RESPONSE VALIDATION")
         logger.info(f"   Input Query: {query}")

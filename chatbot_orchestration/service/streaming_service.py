@@ -878,6 +878,12 @@ class StreamingService:
             logger.info(f"📊 Total chunks sent: {chunk_count}")
             logger.info(f"📝 Total response length: {len(full_response)} characters")
 
+            # Track token usage after streaming completes
+            try:
+                await self._track_token_usage(session_id, user_email, full_response, tool_call_count)
+            except Exception as token_error:
+                logger.error(f"❌ Error tracking token usage: {token_error}")
+
         except Exception as e:
             logger.error(f"❌ Critical error in stream_agent_response: {e}", exc_info=True)
             
@@ -894,6 +900,41 @@ class StreamingService:
             # Always reset streaming state
             session_state_manager.set_streaming_state(session_id, False)
             logger.info(f"🔄 Streaming state reset for session: {session_id}")
+
+    async def _track_token_usage(self, session_id: str, user_email: str, response_text: str, tool_call_count: int):
+        """Track token usage after agent response completes."""
+        try:
+            from ..core.token_tracker import track_gemini_usage
+            import os
+
+            model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+
+            # Estimate token usage based on response length
+            # Gemini token estimation: ~4 chars = 1 token (rough estimate)
+            response_chars = len(response_text)
+            estimated_completion_tokens = max(1, response_chars // 4)
+            
+            # Estimate prompt tokens based on conversation history
+            estimated_prompt_tokens = 500  # Default estimate for conversation history
+            
+            # Total tokens = prompt + completion
+            total_tokens = estimated_prompt_tokens + estimated_completion_tokens
+
+            success = await track_gemini_usage(
+                prompt_tokens=estimated_prompt_tokens,
+                candidates_tokens=estimated_completion_tokens,
+                session_id=session_id,
+                api_call_type='agent_stream',
+                model=model_name
+            )
+
+            if success:
+                logger.info(f"✅ Tracked {total_tokens} tokens for session {session_id[:8]}... (prompt: {estimated_prompt_tokens}, completion: {estimated_completion_tokens})")
+            else:
+                logger.error(f"❌ Failed to track token usage for session {session_id}")
+
+        except Exception as e:
+            logger.error(f"❌ Error tracking token usage: {e}", exc_info=True)
 
 # Global streaming service instance
 streaming_service = StreamingService()

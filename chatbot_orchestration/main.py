@@ -8,7 +8,6 @@ from fastapi.middleware.cors import CORSMiddleware
 # Configure Shared Telemetry
 import logging
 from shared.otel_logger import get_otel_logger
-from shared.otel_logger import get_otel_logger
 from shared.telemetry import setup_telemetry, instrument_fastapi
 from shared.sqlalchemy_db import close_database, health_check as db_health_check
 from shared.db_retry import initialize_database_with_retry
