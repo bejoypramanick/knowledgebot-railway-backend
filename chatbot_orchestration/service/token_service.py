@@ -27,8 +27,9 @@ class TokenService:
         request_metadata: dict = None
     ) -> bool:
         """Track token usage using the TokenDAO"""
+        logger.info(f"🔍 TokenService.track_token_usage called - session: {session_id}, total_tokens: {total_tokens}")
         try:
-            return await self._token_dao.save_token_usage(
+            result = await self._token_dao.save_token_usage(
                 session_id=session_id,
                 message_id=message_id,
                 provider=provider,
@@ -39,6 +40,8 @@ class TokenService:
                 api_call_type=api_call_type,
                 request_metadata=request_metadata
             )
+            logger.info(f"✅ TokenService.track_token_usage completed - result: {result}")
+            return result
         except Exception as e:
-            logger.error(f"❌ Error tracking token usage: {e}")
+            logger.error(f"❌ Error tracking token usage: {e}", exc_info=True)
             return False
