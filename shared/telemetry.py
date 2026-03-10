@@ -126,5 +126,45 @@ def instrument_fastapi(app, service_name):
     """
     Instruments a FastAPI application for context propagation.
     Injects trace_id into headers on requests and extracts on receipt.
+    Also adds route path to spans for easier tracing.
     """
+    from fastapi import Request
+    from opentelemetry import trace
+    
+    # Instrument FastAPI with OpenTelemetry
     FastAPIInstrumentor.instrument_app(app)
+    
+    # Add middleware to enrich spans with route information
+    @app.middleware("http")
+    async def add_route_to_span(request: Request, call_next):
+        """Add route path to current span and log it"""
+        # Get current span
+        span = trace.get_current_span()
+        
+        if span and span.is_recording():
+            # Get route path (e.g., /api/v1/gateway/auth/session)
+            route_path = request.url.path
+            
+            # Try to get the matched route pattern (e.g., /api/v1/gateway/auth/{action})
+            if hasattr(request, "scope") and "route" in request.scope:
+                route = request.scope.get("route")
+                if route and hasattr(route, "path"):
+                    route_path = route.path
+            
+            # Add route as span attribute
+            span.set_attribute("http.route", route_path)
+            span.set_attribute("http.method", request.method)
+            span.set_attribute("http.url", str(request.url))
+            
+            # Update span name to include route
+            span.update_name(f"{request.method} {route_path}")
+            
+            # Log the route for easy searching
+            logger = logging.getLogger(service_name)
+            logger.debug(f"📍 Route: {request.method} {route_path}")
+        
+        response = await call_next(request)
+        return response
+    
+    logging.info(f"✅ FastAPI instrumented with route path logging for {service_name}")
+
