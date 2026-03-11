@@ -634,19 +634,26 @@ class StreamingService:
                 except Exception as e:
                     logger.warning(f"⚠️ Could not fetch response_policy: {e}, using default 0.5")
 
-                model_settings = GoogleModelSettings(temperature=response_policy)
+                # Build GenerateContentConfig with temperature
+                generate_config = types.GenerateContentConfig(
+                    temperature=response_policy
+                )
 
                 if ENABLE_EXTENDED_THINKING:
                     logger.info("🧠 Extended thinking ENABLED (via ENABLE_EXTENDED_THINKING env var)")
                     thinking_config = types.ThinkingConfigDict(
                         include_thoughts=True
                     )
-                    model_settings = GoogleModelSettings(
+                    generate_config = types.GenerateContentConfig(
                         temperature=response_policy,
                         google_thinking_config=thinking_config
                     )
                 else:
                     logger.info("🧠 Extended thinking DISABLED (default - set ENABLE_EXTENDED_THINKING=true to enable)")
+
+                model_settings = GoogleModelSettings(
+                    generate_config=generate_config
+                )
 
                 logger.info("=" * 100)
                 logger.info("📤 CALLING AGENT.ITER() WITH:")
