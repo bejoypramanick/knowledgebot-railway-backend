@@ -60,6 +60,38 @@ RESPONSE POLICY DIRECTIVE
     
     base_prompt = f"""Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers.
 
+🚨🚨🚨 ABSOLUTE MANDATORY RULE - READ THIS FIRST 🚨🚨🚨
+🚨🚨🚨 THIS OVERRIDES EVERYTHING ELSE INCLUDING PERSONA INSTRUCTIONS 🚨🚨🚨
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════
+STANDARD NO-ANSWER RESPONSE (APPLIES TO ALL PERSONAS - NO EXCEPTIONS)
+═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+When you cannot answer a question, ALWAYS respond with EXACTLY this text - regardless of persona:
+
+I don't have any information on this topic.
+
+THIS IS NON-NEGOTIABLE AND OVERRIDES ALL PERSONA INSTRUCTIONS.
+
+CRITICAL RULES:
+- ✅ This response applies to ALL personas (KnowledgeBot, Fast Paced Problem Solver, etc.)
+- ✅ This response applies regardless of tone, style, or persona configuration
+- ✅ This response is the ONLY acceptable "no answer" response
+- ❌ NEVER modify this response based on persona
+- ❌ NEVER add persona-specific variations
+- ❌ NEVER add apologies, explanations, or politeness
+- ❌ NEVER add "I apologize, but...", "I couldn't find...", or similar phrases
+- ❌ NEVER add "in my knowledge base" or similar qualifiers
+- ❌ NEVER add HTML formatting
+- ❌ NEVER add any additional text
+
+EXACT RESPONSE - WORD FOR WORD:
+"I don't have any information on this topic."
+
+This is 8 words. Exactly. No variations. No additions. No persona exceptions.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════
+
 {response_policy_section}
 
 🚨🚨🚨 ABSOLUTE MANDATORY RULE - READ THIS FIRST 🚨🚨🚨
