@@ -42,7 +42,10 @@ class TokenDAO:
                                prompt_tokens: int, completion_tokens: int, total_tokens: int,
                                api_call_type: str = None, request_metadata: dict = None) -> bool:
         """Save token usage record and update llm_providers table"""
+        import json
         logger.info(f"🔍 save_token_usage called - session: {session_id}, total_tokens: {total_tokens}")
+        logger.info(f"[PARAM] request_metadata type: {type(request_metadata)}, value: {request_metadata}")
+        
         session_query = "SELECT id FROM chat_sessions WHERE session_id = :session_id"
         try:
             async with get_db_session() as session:
@@ -65,6 +68,11 @@ class TokenDAO:
                     ) VALUES (:session_id, :message_id, :provider, :model, :prompt_tokens,
                               :completion_tokens, :total_tokens, :api_call_type, :request_metadata)
                 """
+                
+                # Convert request_metadata dict to JSON string for PostgreSQL
+                metadata_json = json.dumps(request_metadata) if request_metadata else None
+                logger.info(f"[TRANSFORM] request_metadata converted to JSON: {metadata_json}")
+                
                 params = {
                     "session_id": integer_session_id,
                     "message_id": integer_message_id,
@@ -74,7 +82,7 @@ class TokenDAO:
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,
                     "api_call_type": api_call_type,
-                    "request_metadata": request_metadata
+                    "request_metadata": metadata_json
                 }
 
                 logger.log_db_operation(query, params)
