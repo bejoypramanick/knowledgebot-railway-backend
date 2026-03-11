@@ -947,7 +947,7 @@ class StreamingService:
                         logger.info(f"✅ Filtered response to exact message: {full_response}")
                     else:
                         # Fallback: just use the exact message
-                        full_response = "Human Agent support is currently not available!"
+                        full_response = "Human Agent support is currently not available."
                         logger.warning(f"⚠️ Could not find exact match, using fallback: {full_response}")
 
                 # Break response into chunks for streaming (500 chars per chunk for smooth experience)
