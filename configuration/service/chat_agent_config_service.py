@@ -182,25 +182,17 @@ class ChatAgentConfigService:
                         persona_name = persona_data['selected_persona']
                         system_prompt = persona_data.get('system_prompt', f"You are {persona_name}, a helpful AI assistant. Your role is to assist users with their questions and provide accurate, helpful responses.")
                         
-                        # If it's a custom persona, create/update it with the custom system prompt
-                        if persona_name == 'Custom':
-                            # For custom personas, we need to handle them specially
-                            # Create or update the custom persona with the provided system prompt
-                            await self._chatAgent_dao.update_persona(
-                                persona_name='Custom',
-                                system_prompt=system_prompt,
-                                is_active=True
-                            )
-                        else:
-                            # For predefined personas, just activate them with default system prompt
-                            default_system_prompt = f"You are {persona_name}, a helpful AI assistant. Your role is to assist users with their questions and provide accurate, helpful responses."
-                            await self._chatAgent_dao.update_persona(
-                                persona_name=persona_name,
-                                system_prompt=default_system_prompt,
-                                is_active=True
-                            )
+                        # For both custom and predefined personas, use the provided system prompt
+                        # This allows users to customize prompts for any persona
+                        await self._chatAgent_dao.update_persona(
+                            persona_name=persona_name,
+                            system_prompt=system_prompt,
+                            is_active=True
+                        )
                         
                         logger.info(f"✅ Successfully updated persona: {persona_name}")
+                        logger.info(f"   System prompt length: {len(system_prompt)} characters")
+                        logger.info(f"   Preview: {system_prompt[:100]}...")
             
             logger.info("✅ Chatbot config saved successfully")
             
