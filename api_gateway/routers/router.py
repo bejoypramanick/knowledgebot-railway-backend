@@ -939,6 +939,13 @@ async def generic_proxy_handler(request: Request, path: str):
                 headers=response_headers
             )
 
+            # CRITICAL: Handle Set-Cookie headers separately (can have multiple)
+            # httpx response.headers.get_list() returns all values for a header
+            set_cookie_headers = response.headers.get_list('set-cookie')
+            for cookie_header in set_cookie_headers:
+                logger.info(f"🍪 Forwarding Set-Cookie header from backend: {cookie_header[:50]}...")
+                response_obj.headers.append('set-cookie', cookie_header)
+
             # If response contains session UUID, set httpOnly cookie
             if session_uuid_from_response:
                 logger.info(f"🍪 Setting httpOnly cookie for session UUID: {session_uuid_from_response}")
