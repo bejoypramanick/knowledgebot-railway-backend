@@ -939,11 +939,20 @@ class StreamingService:
                 # 🚨 CRITICAL: Filter out elaboration from tool responses
                 # If response contains "Human Agent support is currently not available" with elaboration,
                 # extract ONLY the core message
-                if "Human Agent support is currently not available" in full_response:
+                if "Human Agent support is currently not available" in full_response or \
+                   "human agent support is currently" in full_response.lower():
                     logger.warning("🚨 Detected HIL unavailable message with elaboration - filtering...")
                     # Extract only the exact message, remove all elaboration
-                    full_response = "Human Agent support is currently not available"
-                    logger.info(f"✅ Filtered response to exact message: {full_response}")
+                    # Look for the exact phrase and extract just that
+                    import re
+                    match = re.search(r'Human Agent support is currently not available[!.]?', full_response, re.IGNORECASE)
+                    if match:
+                        full_response = match.group(0)
+                        logger.info(f"✅ Filtered response to exact message: {full_response}")
+                    else:
+                        # Fallback: just use the exact message
+                        full_response = "Human Agent support is currently not available!"
+                        logger.warning(f"⚠️ Could not find exact match, using fallback: {full_response}")
 
                 # Break response into chunks for streaming (500 chars per chunk for smooth experience)
                 chunk_size = 500
