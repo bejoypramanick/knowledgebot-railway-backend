@@ -27,6 +27,15 @@ async def log_requests_middleware(request: Request, call_next):
 
     try:
         response = await call_next(request)
+        
+        # Set OTEL admin context if user is authenticated
+        if hasattr(request.state, 'user_email'):
+            from shared.otel_logger import set_admin_context
+            user_email = request.state.user_email
+            user_role = request.state.user.get('role', 'user') if hasattr(request.state, 'user') else 'user'
+            # Use request_id as session_id for logging context
+            set_admin_context(request_id, user_email, user_role)
+        
         duration = time.time() - start_time
         
         if response.status_code >= 400:
