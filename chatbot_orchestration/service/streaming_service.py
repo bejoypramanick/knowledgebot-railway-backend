@@ -210,9 +210,11 @@ class StreamingService:
                 logger.info("Solution: Prepend system prompt as first message in history")
                 logger.info("=" * 100)
 
-                # Get system prompt from agent
-                from ..agent.prompt import get_system_prompt
-                system_prompt_text = get_system_prompt(custom_prompt=None, response_policy=None)
+                # Get system prompt from agent (which already has the custom prompt built in)
+                # The agent's system_prompt is set during agent creation with the current configuration
+                system_prompt_text = agent.system_prompt
+                logger.info(f"✅ Using agent's system prompt: {len(system_prompt_text)} characters")
+                logger.info(f"   Preview: {system_prompt_text[:150]}...")
 
                 # Create SystemPromptPart message
                 system_prompt_msg = ModelRequest(parts=[SystemPromptPart(content=system_prompt_text)])

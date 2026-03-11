@@ -31,23 +31,56 @@ class AgentManager:
             self.genai_client = get_genai_client()
 
     async def _fetch_persona_config(self) -> Dict[str, Any]:
-        """Fetch persona configuration for the agent."""
+        """Fetch persona configuration from the configuration service."""
         try:
-            # For now, return default persona
-            # In the future, this could fetch from database or config service
-            return {
-                "persona_name": "Knowledge Bot",
-                "persona_description": "A helpful AI assistant that can search knowledge bases and answer questions",
-                "system_instructions": "You are a helpful AI assistant. Always provide accurate, well-formatted responses using HTML tags."
-            }
+            # Fetch from configuration service
+            import httpx
+            from ..core.config import get_settings
+            
+            settings = get_settings()
+            config_service_url = settings.configuration_service_url
+            
+            logger.info(f"🔍 Fetching persona config from: {config_service_url}")
+            
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get(
+                    f"{config_service_url}/api/v1/configuration/chatAgentConfig",
+                    timeout=5.0
+                )
+                
+                if response.status_code == 200:
+                    config_data = response.json().get('data', {})
+                    
+                    # Extract persona information
+                    persona_data = config_data.get('persona', {})
+                    system_prompt = persona_data.get('system_prompt', '')
+                    selected_persona = persona_data.get('selected_persona', 'KnowledgeBot')
+                    
+                    logger.info(f"✅ Fetched persona config: {selected_persona}")
+                    logger.info(f"   System prompt length: {len(system_prompt)} characters")
+                    
+                    return {
+                        "persona_name": selected_persona,
+                        "persona_description": f"Persona: {selected_persona}",
+                        "system_instructions": system_prompt  # This is the custom prompt from the UI
+                    }
+                else:
+                    logger.warning(f"⚠️ Configuration service returned status {response.status_code}")
+                    # Fall back to default
+                    return self._get_default_persona_config()
+                    
         except Exception as e:
-            logger.error(f"❌ Failed to fetch persona config: {e}")
+            logger.error(f"❌ Failed to fetch persona config from configuration service: {e}")
             # Return fallback persona
-            return {
-                "persona_name": "Assistant",
-                "persona_description": "AI Assistant",
-                "system_instructions": "You are a helpful AI assistant."
-            }
+            return self._get_default_persona_config()
+    
+    def _get_default_persona_config(self) -> Dict[str, Any]:
+        """Return default persona configuration."""
+        return {
+            "persona_name": "Knowledge Bot",
+            "persona_description": "A helpful AI assistant that can search knowledge bases and answer questions",
+            "system_instructions": "You are a helpful AI assistant. Always provide accurate, well-formatted responses using HTML tags."
+        }
 
     async def _build_system_prompt(self, persona_config: Dict[str, Any]) -> str:
         """Build system prompt from persona configuration."""
@@ -84,9 +117,16 @@ class AgentManager:
             logger.info(f"🗑️ Cleared cached agent for session: {session_id}")
 
     async def create_agent(self, session_id: str, user_email: str = "anonymous@example.com", force_new: bool = False) -> Agent:
-        """Create or retrieve cached agent instance with PydanticAI's built-in caching."""
+        """Create or retrieve cached agent instance with PydanticAI's built-in caching.
+        
+        Args:
+            session_id: The session ID
+            user_email: The user's email
+            force_new: If True, always create a fresh agent (ignoring cache). Use this when persona changes.
+        """
         logger.info("="*80)
         logger.info(f"🚀 CREATE_AGENT - Session: {session_id}")
+        logger.info(f"   force_new: {force_new}")
         logger.info("="*80)
 
         # Check if we already have a cached agent for this session
