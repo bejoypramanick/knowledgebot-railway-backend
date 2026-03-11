@@ -931,6 +931,15 @@ class StreamingService:
                 logger.info(f"🔍 DEBUG: full_response length = {len(full_response)} chars")
                 logger.info(f"🔍 DEBUG: full_response preview = {full_response[:100]}...")
 
+                # 🚨 CRITICAL: Filter out elaboration from tool responses
+                # If response contains "Human Agent support is currently disabled" with elaboration,
+                # extract ONLY the core message
+                if "Human Agent support is currently disabled" in full_response:
+                    logger.warning("🚨 Detected HIL disabled message with elaboration - filtering...")
+                    # Extract only the exact message, remove all elaboration
+                    full_response = "Human Agent support is currently disabled"
+                    logger.info(f"✅ Filtered response to exact message: {full_response}")
+
                 # Break response into chunks for streaming (500 chars per chunk for smooth experience)
                 chunk_size = 500
                 chunks = [full_response[i:i+chunk_size] for i in range(0, len(full_response), chunk_size)]
