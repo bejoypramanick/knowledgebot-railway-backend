@@ -778,10 +778,6 @@ class StreamingService:
                                 logger.error("❌ CRITICAL: Tool response not found in any messages!")
                                 logger.error(f"❌ Tool was called but response could not be extracted")
                                 logger.error(f"❌ This will cause model to generate its own response instead of using tool response")
-                                                    logger.info(f"🚨 Using short TextPart as tool response")
-                                                    break
-                                    if tool_response_found:
-                                        break
                         
                         # Extract assistant response and tool calls (SKIP if tool response was found)
                         if not tool_response_found:
