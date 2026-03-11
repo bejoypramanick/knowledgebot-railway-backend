@@ -71,41 +71,59 @@ async def create_session_endpoint(
     Returns:
         User data (uid, email, name, picture)
     """
+    import time
+    start_time = time.time()
+    logger.info("[ENTRY] POST /auth/session endpoint")
+    logger.info(f"[PARAM] context={request.context}")
+    
     settings = get_settings()
     
     try:
         # CSRF Protection: Validate Origin header for state-changing requests
+        logger.info("[FLOW] Step 1: CSRF validation")
         origin = req.headers.get("origin")
+        logger.info(f"[PARAM] origin={origin}")
+        
         if origin and not _is_allowed_origin(origin, settings.allowed_origins):
-            logger.warning(f"🚨 CSRF: Rejected request from origin {origin}")
+            logger.warning(f"[SECURITY] CSRF: Rejected request from origin {origin}")
             raise HTTPException(status_code=403, detail="Invalid origin")
+        logger.info("[RESULT] CSRF validation passed")
         
         # Step 1: Verify Firebase ID token
+        logger.info("[FLOW] Step 2: Firebase token verification")
         user_data = verify_firebase_token(request.idToken)
         if not user_data:
+            logger.error("[ERROR] Firebase token verification failed")
             raise HTTPException(status_code=401, detail="Invalid Firebase ID token")
         
-        logger.info(f"✅ Firebase token verified for {user_data.get('email')}")
+        logger.info(f"[RESULT] Firebase token verified for {user_data.get('email')}")
         
         # Step 2: Fetch user profile (role) from configuration service
+        logger.info("[FLOW] Step 3: Fetch user profile from configuration service")
         try:
             profile = await profile_service.fetch_user_profile(user_data)
             user_data.update(profile)
-            logger.info(f"✅ Profile fetched: role={profile['role']}, roles={profile['roles']}")
+            logger.info(f"[RESULT] Profile fetched: role={profile['role']}, roles={profile['roles']}")
         except Exception as e:
-            logger.error(f"❌ Profile fetch failed: {e}")
+            logger.error(f"[WARNING] Profile fetch failed: {e}")
             # Use fallback profile (role=user)
             user_data.update({'role': 'user', 'roles': ['user']})
+            logger.info("[RESULT] Using fallback profile (role=user)")
         
         # Step 3: Create session with security metadata
+        logger.info("[FLOW] Step 4: Create session with security metadata")
         ip_address = req.client.host if req.client else None
         user_agent = req.headers.get("user-agent")
+        logger.info(f"[PARAM] ip_address={ip_address}, user_agent={user_agent}")
         
         session_id = session_service.create_session(user_data, ip_address, user_agent)
+        logger.info(f"[RESULT] Session created: {session_id}")
         
         # Step 4: Set cookie with context-appropriate SameSite policy
+        logger.info("[FLOW] Step 5: Set session cookie")
         context = request.context or "admin"
         samesite_policy = "none" if context == "widget" else "lax"
+        logger.info(f"[PARAM] samesite_policy={samesite_policy}")
         
         response.set_cookie(
             key=settings.session_cookie_name,
@@ -118,10 +136,9 @@ async def create_session_endpoint(
             path="/"
         )
         
-        logger.info(
-            f"✅ Session created for {user_data.get('email')} "
-            f"(context={context}, samesite={samesite_policy})"
-        )
+        elapsed_time = time.time() - start_time
+        logger.info(f"[EXIT] POST /auth/session - Success (elapsed: {elapsed_time:.3f}s)")
+        logger.info(f"[RETURN] User: {user_data.get('email')}, Role: {user_data.get('role')}")
         
         return {
             "success": True,
@@ -134,9 +151,13 @@ async def create_session_endpoint(
         }
         
     except HTTPException:
+        elapsed_time = time.time() - start_time
+        logger.error(f"[EXIT] POST /auth/session - HTTPException (elapsed: {elapsed_time:.3f}s)")
         raise
     except Exception as e:
-        logger.error(f"❌ Session creation failed: {e}")
+        elapsed_time = time.time() - start_time
+        logger.error(f"[EXIT] POST /auth/session - Error (elapsed: {elapsed_time:.3f}s)")
+        logger.error(f"[ERROR] Exception type: {type(e).__name__}, Message: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to create session")
 
 

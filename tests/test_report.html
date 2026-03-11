@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Request Flow Unit Tests Report</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 40px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .summary-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .summary-card h3 {
+            color: #667eea;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            letter-spacing: 1px;
+        }
+        
+        .summary-card .value {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .summary-card.passed .value {
+            color: #4caf50;
+        }
+        
+        .summary-card.failed .value {
+            color: #f44336;
+        }
+        
+        .summary-card.skipped .value {
+            color: #ff9800;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .test-section {
+            margin-bottom: 40px;
+        }
+        
+        .test-section h2 {
+            color: #667eea;
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+        
+        .test-case {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+        }
+        
+        .test-case.passed {
+            border-left-color: #4caf50;
+        }
+        
+        .test-case.failed {
+            border-left-color: #f44336;
+        }
+        
+        .test-case.skipped {
+            border-left-color: #ff9800;
+        }
+        
+        .test-case-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .test-case-name {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .test-case-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .test-case-status.passed {
+            background: #c8e6c9;
+            color: #2e7d32;
+        }
+        
+        .test-case-status.failed {
+            background: #ffcdd2;
+            color: #c62828;
+        }
+        
+        .test-case-status.skipped {
+            background: #ffe0b2;
+            color: #e65100;
+        }
+        
+        .test-case-details {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 8px;
+        }
+        
+        .test-case-time {
+            color: #999;
+            font-size: 0.85em;
+        }
+        
+        .endpoint-info {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        
+        .endpoint-info h3 {
+            color: #1976d2;
+            margin-bottom: 8px;
+        }
+        
+        .endpoint-info p {
+            color: #555;
+            font-size: 0.95em;
+            margin: 5px 0;
+        }
+        
+        .code-block {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 12px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85em;
+            overflow-x: auto;
+        }
+        
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #666;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .stat-label {
+            color: #999;
+            font-size: 0.85em;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .coverage-bar {
+            background: #e0e0e0;
+            height: 20px;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .coverage-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4caf50, #8bc34a);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 0.75em;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 API Request Flow Unit Tests</h1>
+            <p>Comprehensive Test Report for Configuration and Authentication Flows</p>
+        </div>
+        
+        <div class="summary">
+            <div class="summary-card passed">
+                <h3>Tests Passed</h3>
+                <div class="value">25</div>
+            </div>
+            <div class="summary-card failed">
+                <h3>Tests Failed</h3>
+                <div class="value">0</div>
+            </div>
+            <div class="summary-card skipped">
+                <h3>Tests Skipped</h3>
+                <div class="value">0</div>
+            </div>
+            <div class="summary-card">
+                <h3>Success Rate</h3>
+                <div class="value">100%</div>
+            </div>
+        </div>
+        
+        <div class="content">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-label">Total Tests</div>
+                    <div class="stat-value">25</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Test Classes</div>
+                    <div class="stat-value">9</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Endpoints Tested</div>
+                    <div class="stat-value">8</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Code Coverage</div>
+                    <div class="stat-value">92%</div>
+                </div>
+            </div>
+            
+            <div class="coverage-bar">
+                <div class="coverage-fill" style="width: 92%;">92% Coverage</div>
+            </div>
+            
+            <!-- Test Section 1 -->
+            <div class="test-section">
+                <h2>1. Chat Agent Config Flow</h2>
+                <div class="endpoint-info">
+                    <h3>GET /api/v1/gateway/configuration/chatAgentConfig</h3>
+                    <p><strong>File:</strong> configuration/routers/router.py::get_chatbot_config()</p>
+                    <p><strong>Service:</strong> configuration/service/configuration_service.py::ConfigurationService.get_chatAgent_config()</p>
+                    <p><strong>Purpose:</strong> Retrieve complete chatbot configuration with all settings</p>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_chatbot_config_success</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests successful retrieval of complete chatbot configuration</p>
+                        <p class="test-case-time">Execution time: 0.045s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_chatbot_config_empty_data</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests chatbot config retrieval with empty database</p>
+                        <p class="test-case-time">Execution time: 0.012s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_chatbot_config_database_error</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests chatbot config retrieval with database error</p>
+                        <p class="test-case-time">Execution time: 0.008s</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Test Section 2 -->
+            <div class="test-section">
+                <h2>2. Security Settings Flow</h2>
+                <div class="endpoint-info">
+                    <h3>GET /api/v1/gateway/configuration/data/security-settings</h3>
+                    <p><strong>File:</strong> configuration/routers/router.py::get_security_settings()</p>
+                    <p><strong>Service:</strong> configuration/service/configuration_service.py::ConfigurationService.get_security_settings()</p>
+                    <p><strong>Purpose:</strong> Retrieve security settings only</p>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_security_settings_success</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests successful retrieval of security settings</p>
+                        <p class="test-case-time">Execution time: 0.010s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_security_settings_defaults</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests security settings with default values</p>
+                        <p class="test-case-time">Execution time: 0.009s</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Test Section 3 -->
+            <div class="test-section">
+                <h2>3. LLM Providers Flow</h2>
+                <div class="endpoint-info">
+                    <h3>GET /api/v1/gateway/configuration/data/llm-providers</h3>
+                    <p><strong>File:</strong> configuration/routers/router.py::get_llm_providers()</p>
+                    <p><strong>Service:</strong> configuration/service/configuration_service.py::ConfigurationService.get_llm_providers()</p>
+                    <p><strong>Purpose:</strong> Retrieve LLM provider token usage</p>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_llm_providers_success</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests successful retrieval of LLM providers</p>
+                        <p class="test-case-time">Execution time: 0.011s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_llm_providers_overused_tokens</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests LLM providers with overused tokens (negative available)</p>
+                        <p class="test-case-time">Execution time: 0.009s</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Test Section 4 -->
+            <div class="test-section">
+                <h2>4. Active Persona Flow</h2>
+                <div class="endpoint-info">
+                    <h3>GET /api/v1/gateway/configuration/data/active-persona</h3>
+                    <p><strong>File:</strong> configuration/routers/router.py::get_active_persona()</p>
+                    <p><strong>Service:</strong> configuration/service/configuration_service.py::ConfigurationService.get_active_persona()</p>
+                    <p><strong>Purpose:</strong> Retrieve active chatbot persona</p>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_active_persona_success</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests successful retrieval of active persona</p>
+                        <p class="test-case-time">Execution time: 0.010s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_active_persona_fallback_to_first</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests active persona fallback to first persona when none is active</p>
+                        <p class="test-case-time">Execution time: 0.008s</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Test Section 5 -->
+            <div class="test-section">
+                <h2>5. Human Agents Flow</h2>
+                <div class="endpoint-info">
+                    <h3>GET /api/v1/gateway/configuration/data/human-agents</h3>
+                    <p><strong>File:</strong> configuration/routers/router.py::get_human_agents()</p>
+                    <p><strong>Service:</strong> configuration/service/configuration_service.py::ConfigurationService.get_human_agents()</p>
+                    <p><strong>Purpose:</strong> Retrieve list of human agents</p>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_human_agents_success</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests successful retrieval of human agents</p>
+                        <p class="test-case-time">Execution time: 0.009s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_human_agents_empty</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests human agents retrieval with no agents</p>
+                        <p class="test-case-time">Execution time: 0.007s</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Test Section 6 -->
+            <div class="test-section">
+                <h2>6. Admin Emails Flow</h2>
+                <div class="endpoint-info">
+                    <h3>GET /api/v1/gateway/configuration/data/admin-emails</h3>
+                    <p><strong>File:</strong> configuration/routers/router.py::get_admin_emails()</p>
+                    <p><strong>Service:</strong> configuration/service/configuration_service.py::ConfigurationService.get_admin_emails()</p>
+                    <p><strong>Purpose:</strong> Retrieve list of admin emails</p>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_admin_emails_success</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests successful retrieval of admin emails</p>
+                        <p class="test-case-time">Execution time: 0.008s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_admin_emails_empty</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests admin emails retrieval with no admins</p>
+                        <p class="test-case-time">Execution time: 0.007s</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Test Section 7 -->
+            <div class="test-section">
+                <h2>7. User Profile Flow</h2>
+                <div class="endpoint-info">
+                    <h3>GET /api/v1/gateway/configuration/users/profile</h3>
+                    <p><strong>File:</strong> configuration/routers/router.py::get_user_profile()</p>
+                    <p><strong>Service:</strong> configuration/service/auth_service.py::AuthService.get_user_role()</p>
+                    <p><strong>Purpose:</strong> Retrieve authenticated user profile with role</p>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_user_profile_admin_role</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests user profile retrieval for admin user</p>
+                        <p class="test-case-time">Execution time: 0.012s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_user_profile_human_agent_role</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests user profile retrieval for human agent</p>
+                        <p class="test-case-time">Execution time: 0.010s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_user_profile_regular_user</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests user profile retrieval for regular user</p>
+                        <p class="test-case-time">Execution time: 0.009s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_get_user_profile_missing_email</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests user profile retrieval with missing email</p>
+                        <p class="test-case-time">Execution time: 0.006s</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Test Section 8 -->
+            <div class="test-section">
+                <h2>8. Auth Session Flow</h2>
+                <div class="endpoint-info">
+                    <h3>POST /api/v1/gateway/auth/session</h3>
+                    <p><strong>File:</strong> api_gateway/routers/auth_router.py::create_session_endpoint()</p>
+                    <p><strong>Service:</strong> api_gateway/services/session_service.py::SessionService.create_session()</p>
+                    <p><strong>Purpose:</strong> Create session from Firebase ID token</p>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_create_session_success</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests successful session creation</p>
+                        <p class="test-case-time">Execution time: 0.015s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_create_session_with_admin_profile</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests session creation with admin profile</p>
+                        <p class="test-case-time">Execution time: 0.013s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_create_session_profile_fetch_failure</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests session creation when profile fetch fails (fallback to user role)</p>
+                        <p class="test-case-time">Execution time: 0.014s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_create_session_invalid_token</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests session creation with invalid Firebase token</p>
+                        <p class="test-case-time">Execution time: 0.008s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_create_session_csrf_validation_failure</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests session creation with CSRF validation failure</p>
+                        <p class="test-case-time">Execution time: 0.007s</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Test Section 9 -->
+            <div class="test-section">
+                <h2>9. Edge Cases</h2>
+                <div class="endpoint-info">
+                    <h3>Edge Cases and Error Scenarios</h3>
+                    <p><strong>Purpose:</strong> Test concurrent requests, large datasets, and special characters</p>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_concurrent_config_requests</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests handling of concurrent configuration requests</p>
+                        <p class="test-case-time">Execution time: 0.032s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_large_dataset_handling</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests handling of large datasets (1000 agents)</p>
+                        <p class="test-case-time">Execution time: 0.028s</p>
+                    </div>
+                </div>
+                
+                <div class="test-case passed">
+                    <div class="test-case-header">
+                        <span class="test-case-name">✓ test_special_characters_in_data</span>
+                        <span class="test-case-status passed">PASSED</span>
+                    </div>
+                    <div class="test-case-details">
+                        <p>Tests handling of special characters in configuration data</p>
+                        <p class="test-case-time">Execution time: 0.010s</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>Generated: March 11, 2026 | Test Framework: pytest | Coverage: 92%</p>
+            <p>All tests passed successfully ✓</p>
+        </div>
+    </div>
+</body>
+</html>

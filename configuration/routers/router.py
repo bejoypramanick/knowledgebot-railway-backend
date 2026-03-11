@@ -158,13 +158,24 @@ logger.info("✅ Redis Pub/Sub manager initialized for agent and customer SSE ev
 @router.get("/chatAgentConfig")
 async def get_chatbot_config(cache: bool = True):
     """Get complete chatbot configuration with caching support"""
+    import time
+    start_time = time.time()
+    logger.info("[ENTRY] GET /chatAgentConfig endpoint")
+    logger.info(f"[PARAM] cache={cache}")
+    
     try:
-        logger.info(f"🔍 GET /chatAgentConfig called with cache={cache}")
+        logger.info("[FLOW] Calling config_service.get_chatAgent_config()")
         config = await config_service.get_chatAgent_config()
-        logger.info(f"✅ Chatbot config retrieved successfully (cache={cache})")
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"[RESULT] Config retrieved with keys: {list(config.keys())}")
+        logger.info(f"[EXIT] GET /chatAgentConfig - Success (elapsed: {elapsed_time:.3f}s)")
+        
         return {"success": True, "data": config}
     except Exception as e:
-        logger.error(f"Error getting chatbot config: {e}")
+        elapsed_time = time.time() - start_time
+        logger.error(f"[EXIT] GET /chatAgentConfig - Error (elapsed: {elapsed_time:.3f}s)")
+        logger.error(f"[ERROR] Exception type: {type(e).__name__}, Message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/chatAgentConfig")
@@ -197,56 +208,111 @@ async def save_chatbot_config(config: ChatbotConfigRequest, request: Request):
 @router.get("/data/security-settings")
 async def get_security_settings():
     """Get security settings only"""
+    import time
+    start_time = time.time()
+    logger.info("[ENTRY] GET /data/security-settings endpoint")
+    
     try:
-        logger.info("🔍 GET /data/security-settings")
+        logger.info("[FLOW] Calling config_service.get_security_settings()")
         security = await config_service.get_security_settings()
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"[RESULT] Security settings retrieved: {security}")
+        logger.info(f"[EXIT] GET /data/security-settings - Success (elapsed: {elapsed_time:.3f}s)")
+        
         return {"success": True, "data": security}
     except Exception as e:
-        logger.error(f"Error getting security settings: {e}")
+        elapsed_time = time.time() - start_time
+        logger.error(f"[EXIT] GET /data/security-settings - Error (elapsed: {elapsed_time:.3f}s)")
+        logger.error(f"[ERROR] Exception type: {type(e).__name__}, Message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/data/llm-providers")
 async def get_llm_providers():
     """Get LLM providers and token usage"""
+    import time
+    start_time = time.time()
+    logger.info("[ENTRY] GET /data/llm-providers endpoint")
+    
     try:
-        logger.info("🔍 GET /data/llm-providers")
+        logger.info("[FLOW] Calling config_service.get_llm_providers()")
         llm_tokens = await config_service.get_llm_providers()
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"[RESULT] LLM providers retrieved: {list(llm_tokens.keys())}")
+        logger.info(f"[EXIT] GET /data/llm-providers - Success (elapsed: {elapsed_time:.3f}s)")
+        
         return {"success": True, "data": llm_tokens}
     except Exception as e:
-        logger.error(f"Error getting LLM providers: {e}")
+        elapsed_time = time.time() - start_time
+        logger.error(f"[EXIT] GET /data/llm-providers - Error (elapsed: {elapsed_time:.3f}s)")
+        logger.error(f"[ERROR] Exception type: {type(e).__name__}, Message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/data/active-persona")
 async def get_active_persona():
     """Get active persona configuration"""
+    import time
+    start_time = time.time()
+    logger.info("[ENTRY] GET /data/active-persona endpoint")
+    
     try:
-        logger.info("🔍 GET /data/active-persona")
+        logger.info("[FLOW] Calling config_service.get_active_persona()")
         persona_config = await config_service.get_active_persona()
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"[RESULT] Active persona retrieved: {persona_config.get('selected_persona', 'N/A')}")
+        logger.info(f"[EXIT] GET /data/active-persona - Success (elapsed: {elapsed_time:.3f}s)")
+        
         return {"success": True, "data": persona_config}
     except Exception as e:
-        logger.error(f"Error getting active persona: {e}")
+        elapsed_time = time.time() - start_time
+        logger.error(f"[EXIT] GET /data/active-persona - Error (elapsed: {elapsed_time:.3f}s)")
+        logger.error(f"[ERROR] Exception type: {type(e).__name__}, Message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/data/human-agents")
 async def get_human_agents():
     """Get human agents list"""
+    import time
+    start_time = time.time()
+    logger.info("[ENTRY] GET /data/human-agents endpoint")
+    
     try:
-        logger.info("🔍 GET /data/human-agents")
+        logger.info("[FLOW] Calling config_service.get_human_agents()")
         human_agents_list = await config_service.get_human_agents()
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"[RESULT] Human agents count: {len(human_agents_list)}")
+        logger.info(f"[EXIT] GET /data/human-agents - Success (elapsed: {elapsed_time:.3f}s)")
+        
         return {"success": True, "data": human_agents_list}
     except Exception as e:
-        logger.error(f"Error getting human agents: {e}")
+        elapsed_time = time.time() - start_time
+        logger.error(f"[EXIT] GET /data/human-agents - Error (elapsed: {elapsed_time:.3f}s)")
+        logger.error(f"[ERROR] Exception type: {type(e).__name__}, Message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/data/admin-emails")
 async def get_admin_emails():
     """Get admin emails list"""
+    import time
+    start_time = time.time()
+    logger.info("[ENTRY] GET /data/admin-emails endpoint")
+    
     try:
-        logger.info("🔍 GET /data/admin-emails")
+        logger.info("[FLOW] Calling config_service.get_admin_emails()")
         admin_emails_list = await config_service.get_admin_emails()
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"[RESULT] Admin emails count: {len(admin_emails_list)}")
+        logger.info(f"[EXIT] GET /data/admin-emails - Success (elapsed: {elapsed_time:.3f}s)")
+        
         return {"success": True, "data": admin_emails_list}
     except Exception as e:
-        logger.error(f"Error getting admin emails: {e}")
+        elapsed_time = time.time() - start_time
+        logger.error(f"[EXIT] GET /data/admin-emails - Error (elapsed: {elapsed_time:.3f}s)")
+        logger.error(f"[ERROR] Exception type: {type(e).__name__}, Message: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
@@ -2028,47 +2094,41 @@ async def get_feedback():
 @router.get("/users/profile")
 async def get_user_profile(user: dict = Depends(get_current_user)):
     """Get user profile information"""
-    logger.info("🔍 GET /users/profile called")
-    logger.info(f"🔍 User data from session: {user}")
+    import time
+    start_time = time.time()
+    logger.info("[ENTRY] GET /users/profile endpoint")
+    logger.info(f"[PARAM] user_email={user.get('email')}")
     
     try:
         # Get user's actual role from database
         user_email = user.get("email")
-        logger.info(f"🔍 Getting role for user email: {user_email}")
+        logger.info(f"[FLOW] Extracting user email: {user_email}")
         
         if not user_email:
-            logger.error(f"🔍 No user email found in user data: {user}")
+            logger.error(f"[ERROR] No user email found in user data: {user}")
             raise HTTPException(status_code=400, detail="User email not found")
         
-        logger.info("🔍 About to call auth_service.get_user_role")
+        logger.info("[FLOW] Calling auth_service.get_user_role()")
         # Don't catch exceptions - let them propagate so the endpoint returns 503
         # If database is unavailable, client should know immediately, not get fake data
         role_result = await auth_service.get_user_role(user_email)
-        logger.info(f"🔍 Role result: {role_result}")
-        logger.info(f"🔍 Role result type: {type(role_result)}")
-
-        # Check if role_result is serializable
-        import json
-        try:
-            json.dumps(role_result)
-            logger.info("✅ Role result is JSON serializable")
-        except Exception as e:
-            logger.error(f"❌ Role result is NOT JSON serializable: {e}")
-            logger.error(f"❌ Role result details: {dir(role_result)}")
+        logger.info(f"[RESULT] Role result retrieved: {role_result}")
 
         user_roles = role_result.get("roles", ["user"])
-        logger.info(f"🔍 User roles: {user_roles}")
+        logger.info(f"[RESULT] User roles: {user_roles}")
         
         # If user has no roles, they might not be in user_role_mapping table
         # This is OK - they're a regular user
         if not user_roles or user_roles == ["user"]:
-            logger.info(f"ℹ️ User {user_email} has no special roles, defaulting to 'user' role")
+            logger.info(f"[INFO] User {user_email} has no special roles, defaulting to 'user' role")
         
         # Determine primary role (admin > human_agent > user)
+        logger.info("[TRANSFORM] Determining primary role")
         primary_role = "admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user")
-        logger.info(f"🔍 Primary role: {primary_role}")
+        logger.info(f"[RESULT] Primary role determined: {primary_role}")
         
         # Return authenticated user profile with actual role
+        logger.info("[TRANSFORM] Building user profile object")
         profile = {
             "email": user.get("email"),
             "uid": user.get("uid"),
@@ -2081,7 +2141,22 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
                 "notifications": True
             }
         }
-        logger.info(f"✅ User profile created successfully for {user_email} with role {primary_role}")
+        logger.info(f"[RESULT] User profile created successfully for {user_email} with role {primary_role}")
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"[EXIT] GET /users/profile - Success (elapsed: {elapsed_time:.3f}s)")
+        logger.info(f"[RETURN] Profile: email={profile['email']}, role={profile['role']}")
+        
+        return {"success": True, "data": profile}
+    except HTTPException:
+        elapsed_time = time.time() - start_time
+        logger.error(f"[EXIT] GET /users/profile - HTTPException (elapsed: {elapsed_time:.3f}s)")
+        raise
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        logger.error(f"[EXIT] GET /users/profile - Error (elapsed: {elapsed_time:.3f}s)")
+        logger.error(f"[ERROR] Exception type: {type(e).__name__}, Message: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
         
         # Check if profile is serializable
         try:

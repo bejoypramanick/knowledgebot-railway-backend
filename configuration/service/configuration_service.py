@@ -20,22 +20,46 @@ class ConfigurationService:
 
     async def get_chatAgent_config(self) -> Dict[str, Any]:
         """Get complete chat agent configuration"""
+        import time
+        start_time = time.time()
+        logger.info("[ENTRY] ConfigurationService.get_chatAgent_config()")
+        
         try:
             # Get all data from appropriate DAOs
+            logger.info("[FLOW] Fetching widget_config from DAO")
             widget_config = await self._widget_dao.get_widget_config()
+            logger.info(f"[RESULT] widget_config retrieved: {bool(widget_config)}")
+            
+            logger.info("[FLOW] Fetching security_settings from DAO")
             security_rows = await self._chat_agent_dao.get_security_settings()
+            logger.info(f"[RESULT] security_rows count: {len(security_rows)}")
+            
+            logger.info("[FLOW] Fetching llm_providers from DAO")
             llm_rows = await self._chat_agent_dao.get_llm_providers()
+            logger.info(f"[RESULT] llm_rows count: {len(llm_rows)}")
+            
+            logger.info("[FLOW] Fetching active_persona from DAO")
             persona = await self._chat_agent_dao.get_active_persona()
+            logger.info(f"[RESULT] persona retrieved: {bool(persona)}")
+            
+            logger.info("[FLOW] Fetching human_agents from DAO")
             human_agents_list = await self._chat_agent_dao.get_human_agents()
+            logger.info(f"[RESULT] human_agents count: {len(human_agents_list)}")
+            
+            logger.info("[FLOW] Fetching admin_emails from DAO")
             admin_emails_list = await self._chat_agent_dao.get_admins()
+            logger.info(f"[RESULT] admin_emails count: {len(admin_emails_list)}")
 
             # Build security settings dict
+            logger.info("[TRANSFORM] Building security settings dict")
             security = {"response_timeout": 30}
             for row in security_rows:
                 if row['setting_name'] == 'response_timeout':
                     security['response_timeout'] = int(row['setting_value']) if row['setting_type'] == 'integer' else 30
+            logger.info(f"[RESULT] security dict: {security}")
 
             # Build metadata from widget config (HIL settings stored there)
+            logger.info("[TRANSFORM] Building metadata from widget_config")
             metadata = {}
             if widget_config:
                 metadata = {
@@ -43,15 +67,18 @@ class ConfigurationService:
                     "response_policy": widget_config.get('response_policy', 30),
                     "hil_disabled_message": widget_config.get('hil_disabled_message', '')
                 }
+            logger.info(f"[RESULT] metadata dict: {metadata}")
 
             # Build LLM tokens dict
+            logger.info("[TRANSFORM] Building llm_tokens dict")
             llm_tokens = {}
             for row in llm_rows:
                 provider = row['provider_name']
                 token_limit = row['token_limit']
                 llm_tokens[provider] = token_limit
+            logger.info(f"[RESULT] llm_tokens dict keys: {list(llm_tokens.keys())}")
 
-            return {
+            result = {
                 "llm_tokens": llm_tokens,
                 "security": security,
                 "persona": persona,
@@ -59,9 +86,16 @@ class ConfigurationService:
                 "admin_emails": admin_emails_list,
                 "metadata": metadata
             }
+            
+            elapsed_time = time.time() - start_time
+            logger.info(f"[EXIT] ConfigurationService.get_chatAgent_config() - Success (elapsed: {elapsed_time:.3f}s)")
+            logger.info(f"[RETURN] Result keys: {list(result.keys())}")
+            return result
 
         except Exception as e:
-            logger.error(f"Error getting chat agent config: {e}")
+            elapsed_time = time.time() - start_time
+            logger.error(f"[EXIT] ConfigurationService.get_chatAgent_config() - Error (elapsed: {elapsed_time:.3f}s)")
+            logger.error(f"[ERROR] Exception type: {type(e).__name__}, Message: {str(e)}")
             raise
 
     async def save_chatbot_config(self, config: Dict[str, Any]) -> bool:

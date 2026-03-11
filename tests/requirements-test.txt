@@ -1,8 +1,7 @@
-# Test Requirements for Configuration Service
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
-pytest-mock>=3.11.1
-
-# Required for mocking async functions
-unittest-mock>=1.5.0
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+pytest-html==4.1.1
+sqlalchemy==2.0.23
+aiosqlite==3.14.0
+httpx==0.25.2
