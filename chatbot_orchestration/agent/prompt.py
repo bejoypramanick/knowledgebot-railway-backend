@@ -28,13 +28,20 @@ def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Opti
     response_policy_guidance = ""
     if response_policy is not None:
         if response_policy < 0.25:
-            response_policy_guidance = "STRICT MODE: Keep responses very closely tied to the knowledge base. Minimize creative interpretation. Prioritize accuracy over elaboration."
+            response_policy_guidance = """STRICT MODE (0-0.25): 
+🚨 CRITICAL ENFORCEMENT - ZERO TOLERANCE FOR TRAINING DATA 🚨
+- EVERY answer MUST come from RAG search results ONLY
+- NEVER use training data, general knowledge, or reasoning
+- NEVER supplement RAG results with your knowledge
+- If RAG returns no results, tell user "Not in knowledge base"
+- NEVER answer general questions - ONLY answer from knowledge base
+- This is ABSOLUTE - no exceptions, no flexibility"""
         elif response_policy < 0.5:
-            response_policy_guidance = "BALANCED-STRICT MODE: Maintain strong adherence to knowledge base while allowing minimal creative interpretation for clarity."
+            response_policy_guidance = "BALANCED-STRICT MODE (0.25-0.5): Maintain strong adherence to knowledge base while allowing minimal creative interpretation for clarity."
         elif response_policy < 0.75:
-            response_policy_guidance = "BALANCED-FLEXI MODE: Balance knowledge base adherence with reasonable creative interpretation for better user experience."
+            response_policy_guidance = "BALANCED-FLEXI MODE (0.5-0.75): Balance knowledge base adherence with reasonable creative interpretation for better user experience."
         else:
-            response_policy_guidance = "FLEXI MODE: Allow more creative responses while still grounding them in the knowledge base. Prioritize user experience and clarity."
+            response_policy_guidance = "FLEXI MODE (0.75-1): Allow more creative responses while still grounding them in the knowledge base. Prioritize user experience and clarity."
         
         logger.info(f"📊 Response Policy Guidance: {response_policy_guidance}")
 

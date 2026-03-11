@@ -624,7 +624,17 @@ class StreamingService:
                 from google.genai import types
                 from pydantic_ai.models.google import GoogleModelSettings
 
-                model_settings = GoogleModelSettings()
+                # Get response_policy (temperature) from agent manager
+                response_policy = 0.5  # Default balanced
+                try:
+                    # Fetch persona config to get response_policy
+                    persona_config = await agent_manager._fetch_persona_config()
+                    response_policy = persona_config.get('response_policy', 0.5)
+                    logger.info(f"🌡️ Response Policy (Temperature): {response_policy} (0=Strict, 1=Flexi)")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not fetch response_policy: {e}, using default 0.5")
+
+                model_settings = GoogleModelSettings(temperature=response_policy)
 
                 if ENABLE_EXTENDED_THINKING:
                     logger.info("🧠 Extended thinking ENABLED (via ENABLE_EXTENDED_THINKING env var)")
@@ -632,6 +642,7 @@ class StreamingService:
                         include_thoughts=True
                     )
                     model_settings = GoogleModelSettings(
+                        temperature=response_policy,
                         google_thinking_config=thinking_config
                     )
                 else:
