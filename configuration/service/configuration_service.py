@@ -207,7 +207,7 @@ class ConfigurationService:
             security_rows = await self._chat_agent_dao.get_security_settings()
             security = {
                 "response_timeout": 30,
-                "response_policy": 15,
+                "response_policy": 0.5,
                 "hil_enabled": False,
                 "hil_disabled_message": ""
             }
@@ -218,8 +218,8 @@ class ConfigurationService:
 
                 if setting_name == 'response_timeout' and setting_type == 'integer':
                     security['response_timeout'] = int(setting_value)
-                elif setting_name == 'response_policy' and setting_type == 'integer':
-                    security['response_policy'] = int(setting_value)
+                elif setting_name == 'response_policy' and setting_type in ('integer', 'float'):
+                    security['response_policy'] = float(setting_value)
                 elif setting_name == 'hil_enabled' and setting_type == 'boolean':
                     security['hil_enabled'] = setting_value.lower() in ('true', '1', 't', 'yes')
                 elif setting_name == 'hil_disabled_message' and setting_type == 'string':
