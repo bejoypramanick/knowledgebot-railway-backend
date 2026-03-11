@@ -318,6 +318,81 @@ class StreamingService:
             user_wants_agent = self._detect_agent_request(message)
             
             if user_wants_agent:
+                logger.info(f"🧑 User explicitly requesting human agent - checking if HIL is enabled...")
+                
+                # Check if human agent support is enabled
+                try:
+                    from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
+                    from shared.sqlalchemy_db import get_db_session
+                    
+                    dao = ChatAgentConfigDAO()
+                    config = await dao.get_chat_agent_config()
+                    
+                    hil_enabled = config.get('hil_enabled', False)
+                    hil_disabled_message = config.get('hil_disabled_message', 'I apologize, but human agent support is currently unavailable.')
+                    
+                    logger.info(f"📋 HIL Status: {'ENABLED ✅' if hil_enabled else 'DISABLED ❌'}")
+                    
+                    if not hil_enabled:
+                        logger.warning(f"⚠️ User requested agent but HIL is disabled")
+                        logger.info(f"📝 Returning standard reply: {hil_disabled_message}")
+                        
+                        # Save user message to database
+                        try:
+                            await session_state_manager.save_message(
+                                session_id=session_id,
+                                role="user",
+                                content=message,
+                                metadata={"user_email": user_email}
+                            )
+                            logger.info("✅ User message saved to database")
+                        except Exception as db_error:
+                            logger.error(f"❌ Failed to save user message: {db_error}")
+                        
+                        # Stream the standard reply
+                        response_data = {
+                            "type": "chunk",
+                            "content": hil_disabled_message,
+                            "session_id": session_id
+                        }
+                        json_response = json.dumps(response_data, ensure_ascii=False)
+                        yield f"data: {json_response}\n\n"
+                        
+                        # Save assistant response to database
+                        try:
+                            await session_state_manager.save_message(
+                                session_id=session_id,
+                                role="assistant",
+                                content=hil_disabled_message,
+                                metadata={
+                                    "user_email": user_email,
+                                    "hil_disabled": True,
+                                    "response_type": "hil_disabled_message"
+                                }
+                            )
+                            logger.info(f"✅ HIL disabled message saved to database")
+                        except Exception as db_error:
+                            logger.error(f"❌ Failed to save HIL disabled message: {db_error}")
+                        
+                        # Send completion signal
+                        completion_data = {
+                            "type": "complete",
+                            "session_id": session_id,
+                            "total_chunks": 1,
+                            "total_length": len(hil_disabled_message),
+                            "tool_calls": 0,
+                            "completion_status": "hil_disabled"
+                        }
+                        json_response = json.dumps(completion_data, ensure_ascii=False)
+                        yield f"data: {json_response}\n\n"
+                        
+                        logger.info(f"✅ HIL disabled response completed for session: {session_id}")
+                        return
+                    
+                except Exception as config_error:
+                    logger.error(f"❌ Error checking HIL configuration: {config_error}")
+                    logger.warning(f"⚠️ Proceeding with agent assignment attempt (config check failed)")
+                
                 logger.info(f"🧑 User explicitly requesting human agent - assigning before AI responds")
                 # Assign agent immediately using the tool logic
                 try:
