@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 from shared.otel_logger import get_otel_logger
+from shared.sqlalchemy_db import get_db_session
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 from enum import Enum
