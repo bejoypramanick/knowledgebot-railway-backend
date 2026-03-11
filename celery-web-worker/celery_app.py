@@ -49,7 +49,11 @@ except Exception as e:
     logger.error(f"❌ [REDIS] Unexpected error during connection test: {e}")
 
 # Get concurrency from environment variable with default of 10 for gevent pool
-worker_concurrency = int(os.getenv('CELERY_WEB_CONCURRENCY', '10'))
+try:
+    worker_concurrency = int(os.getenv('CELERY_WEB_CONCURRENCY', '10'))
+except (ValueError, TypeError):
+    worker_concurrency = 10
+    logger.warning(f"⚠️  [CELERY_APP] Invalid CELERY_WEB_CONCURRENCY value, using default: {worker_concurrency}")
 
 celery_app.conf.update(
     broker_url=redis_url,
@@ -85,11 +89,19 @@ logger.info(f"   Task timeout: 6 hours")
 logger.info(f"   Queue: 'web_crawling'")
 
 # Import tasks module to register task definitions
+# This is done lazily to avoid circular imports
+# The tasks will be registered when the worker starts
 try:
     import tasks  # noqa: F401
     logger.info("✅ [CELERY_APP] Tasks module loaded successfully")
 except ImportError as e:
     logger.error(f"❌ [CELERY_APP] Failed to load tasks module: {e}")
+    import traceback
+    logger.error(f"   Traceback: {traceback.format_exc()}")
+except Exception as e:
+    logger.error(f"❌ [CELERY_APP] Unexpected error loading tasks module: {e}")
+    import traceback
+    logger.error(f"   Traceback: {traceback.format_exc()}")
 
 
 # Signal handlers for task lifecycle monitoring
