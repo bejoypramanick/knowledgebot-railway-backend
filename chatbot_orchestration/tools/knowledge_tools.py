@@ -142,7 +142,11 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
     try:
         from ..service.session_manager import session_state_manager
         chat_history = await session_state_manager.get_chat_history(session_id)
-        logger.info(f"📚 Retrieved {len(chat_history)} messages from session history")
+        if chat_history:
+            logger.info(f"📚 Retrieved {len(chat_history)} messages from session history")
+        else:
+            logger.info(f"📚 No chat history found for session")
+            chat_history = []
 
         # Format chat history per Gemini API specification
         conversation_history = []
