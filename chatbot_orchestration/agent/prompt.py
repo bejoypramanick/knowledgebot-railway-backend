@@ -787,4 +787,20 @@ REMEMBER: Rules 1-3 are CRITICAL and apply to EVERY response. Rules 4-10 are sup
 Now process the user's message following these rules in order of priority.
 """
 
-    return base_prompt
+    # INJECT CUSTOM PROMPT AT THE TOP (HIGHEST PRIORITY)
+    if custom_prompt and custom_prompt.strip():
+        logger.info(f"✅ Injecting custom prompt ({len(custom_prompt)} chars) at TOP of system prompt")
+        logger.info(f"   Custom prompt preview: {custom_prompt[:100]}...")
+        
+        # Custom prompt goes FIRST so it overrides all other rules
+        final_prompt = f"""🚨🚨🚨 CUSTOM INSTRUCTIONS (HIGHEST PRIORITY - FOLLOW THESE FIRST) 🚨🚨🚨
+
+{custom_prompt}
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════
+
+{base_prompt}"""
+        return final_prompt
+    else:
+        logger.info(f"ℹ️ No custom prompt provided - using base system prompt only")
+        return base_prompt
