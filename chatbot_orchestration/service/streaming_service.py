@@ -634,9 +634,21 @@ class StreamingService:
                 except Exception as e:
                     logger.warning(f"⚠️ Could not fetch response_policy: {e}, using default 0.5")
 
-                # Build GenerateContentConfig with temperature
+                # 🚨 CRITICAL FIX: Force tool calling with Gemini's tool_config
+                # Gemini models do NOT autonomously call tools unless explicitly forced
+                # Solution: Use tool_config with function_calling_config mode='ANY'
+                # This ensures the model MUST call at least one tool for non-greeting queries
+                logger.info("🔧 Configuring tool forcing: mode='ANY' to ensure tool calls")
+                tool_config = types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(
+                        mode='ANY'  # Force model to call at least one tool
+                    )
+                )
+
+                # Build GenerateContentConfig with temperature and tool forcing
                 generate_config = types.GenerateContentConfig(
-                    temperature=response_policy
+                    temperature=response_policy,
+                    tool_config=tool_config  # 🚨 CRITICAL: Force tool calling
                 )
 
                 if ENABLE_EXTENDED_THINKING:
@@ -646,6 +658,7 @@ class StreamingService:
                     )
                     generate_config = types.GenerateContentConfig(
                         temperature=response_policy,
+                        tool_config=tool_config,  # 🚨 CRITICAL: Force tool calling
                         google_thinking_config=thinking_config
                     )
                 else:
