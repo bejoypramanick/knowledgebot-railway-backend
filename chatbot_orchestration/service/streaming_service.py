@@ -711,97 +711,128 @@ class StreamingService:
 
                         # 🚨 CRITICAL: Check if request_human_agent_connection was called
                         # If so, bypass model response and stream tool response directly
+                        tool_response_found = False
                         if 'request_human_agent_connection' in tool_calls_made:
                             logger.warning("🚨 DETECTED: request_human_agent_connection tool was called")
                             logger.warning("🚨 BYPASSING model response - streaming tool response directly")
                             
                             # Extract tool result from all_messages
-                            # In Pydantic AI, tool results appear as TextPart in messages after the tool call
+                            # In Pydantic AI, tool results appear in messages after the tool call
+                            logger.info("🔍 Searching for tool response in all_messages...")
+                            
+                            # First pass: Look for exact tool response messages
                             for i, msg in enumerate(all_messages):
+                                logger.info(f"   Message {i}: {type(msg).__name__}")
                                 if hasattr(msg, 'parts'):
                                     for j, part in enumerate(msg.parts):
+                                        part_type = type(part).__name__
+                                        logger.info(f"     Part {j}: {part_type}")
+                                        
                                         # Check if this is a text part that contains the tool result
-                                        # Tool results are typically TextPart with the return value
                                         if isinstance(part, TextPart):
                                             text_content = getattr(part, 'content', '')
+                                            logger.info(f"       TextPart content: {text_content[:100]}...")
+                                            
                                             # Check if this looks like a tool result (not model elaboration)
                                             # Tool results from request_human_agent_connection are short and specific
                                             if text_content and ('Human Agent support is currently not available' in text_content or 
                                                                'Connected to human agent' in text_content):
                                                 logger.info(f"✅ Extracted tool response: {text_content[:100]}...")
                                                 full_response = text_content
+                                                tool_response_found = True
                                                 logger.info(f"🚨 Using tool response directly, bypassing model elaboration")
                                                 break
+                                if tool_response_found:
+                                    break
+                            
+                            # Second pass: If not found, look for short TextParts (likely tool responses)
+                            if not tool_response_found:
+                                logger.warning("⚠️ Exact tool response not found, looking for short TextParts...")
+                                for i, msg in enumerate(all_messages):
+                                    if hasattr(msg, 'parts'):
+                                        for j, part in enumerate(msg.parts):
+                                            if isinstance(part, TextPart):
+                                                text_content = getattr(part, 'content', '')
+                                                # Tool responses are typically short (< 200 chars)
+                                                if text_content and len(text_content) < 200 and len(text_content) > 10:
+                                                    logger.info(f"✅ Found short TextPart (likely tool response): {text_content[:100]}...")
+                                                    full_response = text_content
+                                                    tool_response_found = True
+                                                    logger.info(f"🚨 Using short TextPart as tool response")
+                                                    break
+                                    if tool_response_found:
+                                        break
                         
-                        # Extract assistant response and tool calls
-                        for i, msg in enumerate(all_messages):
-                            msg_type = type(msg).__name__
-                            logger.info(f"📌 Message {i}: {msg_type}")
+                        # Extract assistant response and tool calls (SKIP if tool response was found)
+                        if not tool_response_found:
+                            for i, msg in enumerate(all_messages):
+                                msg_type = type(msg).__name__
+                                logger.info(f"📌 Message {i}: {msg_type}")
 
-                            if hasattr(msg, 'parts'):
-                                text_parts = [p for p in msg.parts if isinstance(p, TextPart)]
-                                total_parts = len(msg.parts)
-                                logger.info(f"   Has {total_parts} total parts ({len(text_parts)} TextParts)")
+                                if hasattr(msg, 'parts'):
+                                    text_parts = [p for p in msg.parts if isinstance(p, TextPart)]
+                                    total_parts = len(msg.parts)
+                                    logger.info(f"   Has {total_parts} total parts ({len(text_parts)} TextParts)")
 
-                                for j, part in enumerate(msg.parts):
-                                    part_type = type(part).__name__
-                                    logger.info(f"     Part {j}/{total_parts - 1}: {part_type}")
+                                    for j, part in enumerate(msg.parts):
+                                        part_type = type(part).__name__
+                                        logger.info(f"     Part {j}/{total_parts - 1}: {part_type}")
 
-                                    # 🧠 LOG EXTENDED THINKING (if present)
-                                    if part_type == 'ThinkingPart':
-                                        thinking_content = getattr(part, 'content', '')
-                                        logger.info("=" * 100)
-                                        logger.info("🧠 MODEL EXTENDED THINKING (Reasoning Process)")
-                                        logger.info("=" * 100)
-                                        logger.info(thinking_content)
-                                        logger.info("=" * 100)
+                                        # 🧠 LOG EXTENDED THINKING (if present)
+                                        if part_type == 'ThinkingPart':
+                                            thinking_content = getattr(part, 'content', '')
+                                            logger.info("=" * 100)
+                                            logger.info("🧠 MODEL EXTENDED THINKING (Reasoning Process)")
+                                            logger.info("=" * 100)
+                                            logger.info(thinking_content)
+                                            logger.info("=" * 100)
 
-                                    # Extract text from TextPart
-                                    if isinstance(part, TextPart):
-                                        text_content = getattr(part, 'content', '')
-                                        text_part_index = [p for p in msg.parts[:j+1] if isinstance(p, TextPart)].__len__()
-                                        is_last_text_part = text_part_index == len(text_parts)
+                                        # Extract text from TextPart
+                                        if isinstance(part, TextPart):
+                                            text_content = getattr(part, 'content', '')
+                                            text_part_index = [p for p in msg.parts[:j+1] if isinstance(p, TextPart)].__len__()
+                                            is_last_text_part = text_part_index == len(text_parts)
 
-                                        logger.info(f"     🔍 TextPart {text_part_index}/{len(text_parts)}: {len(text_content)} chars")
-                                        logger.info(f"        Preview: {text_content[:80]}...")
+                                            logger.info(f"     🔍 TextPart {text_part_index}/{len(text_parts)}: {len(text_content)} chars")
+                                            logger.info(f"        Preview: {text_content[:80]}...")
 
-                                        if text_content:
-                                            # Skip if we already have tool response
-                                            if 'request_human_agent_connection' in tool_calls_made and full_response:
-                                                logger.info(f"     ⏭️ Skipping TextPart (using tool response instead)")
-                                                continue
+                                            if text_content:
+                                                # Skip if we already have tool response
+                                                if 'request_human_agent_connection' in tool_calls_made and full_response:
+                                                    logger.info(f"     ⏭️ Skipping TextPart (using tool response instead)")
+                                                    continue
+                                                
+                                                if full_response == "":
+                                                    logger.info(f"     ✅ [TextPart #{text_part_index}] Setting as full_response (FIRST TextPart)")
+                                                    chunk_count = 1
+                                                    full_response = text_content
+                                                else:
+                                                    # CRITICAL FIX: Use LAST TextPart, not first
+                                                    # If agent generates multiple responses (e.g., cached then correct),
+                                                    # the last one is most likely the correct/intended response
+                                                    logger.warning(f"     ⚠️ MULTIPLE TextParts detected!")
+                                                    logger.warning(f"     ⚠️ [TextPart #{text_part_index}/{len(text_parts)}] New response: {len(text_content)} chars")
+                                                    logger.warning(f"     ⚠️ Previous response was: {len(full_response)} chars")
+                                                    logger.warning(f"     ⚠️ Using LAST TextPart (replacing previous)")
+                                                    logger.warning(f"     ⚠️ Is this the LAST TextPart? {is_last_text_part}")
+                                                    full_response = text_content  # ← KEY FIX: Use the latest response
+                                                    chunk_count += 1
+
+                                        # Track tool calls with detailed logging
+                                        elif hasattr(part, 'tool_name'):
+                                            tool_name = getattr(part, 'tool_name', 'unknown')
+                                            tool_args = getattr(part, 'args', {})
+                                            tool_call_count += 1
                                             
-                                            if full_response == "":
-                                                logger.info(f"     ✅ [TextPart #{text_part_index}] Setting as full_response (FIRST TextPart)")
-                                                chunk_count = 1
-                                                full_response = text_content
-                                            else:
-                                                # CRITICAL FIX: Use LAST TextPart, not first
-                                                # If agent generates multiple responses (e.g., cached then correct),
-                                                # the last one is most likely the correct/intended response
-                                                logger.warning(f"     ⚠️ MULTIPLE TextParts detected!")
-                                                logger.warning(f"     ⚠️ [TextPart #{text_part_index}/{len(text_parts)}] New response: {len(text_content)} chars")
-                                                logger.warning(f"     ⚠️ Previous response was: {len(full_response)} chars")
-                                                logger.warning(f"     ⚠️ Using LAST TextPart (replacing previous)")
-                                                logger.warning(f"     ⚠️ Is this the LAST TextPart? {is_last_text_part}")
-                                                full_response = text_content  # ← KEY FIX: Use the latest response
-                                                chunk_count += 1
-
-                                    # Track tool calls with detailed logging
-                                    elif hasattr(part, 'tool_name'):
-                                        tool_name = getattr(part, 'tool_name', 'unknown')
-                                        tool_args = getattr(part, 'args', {})
-                                        tool_call_count += 1
-                                        
-                                        # Comprehensive tool invocation logging
-                                        logger.info("=" * 80)
-                                        logger.info("🔧 TOOL INVOCATION DETECTED")
-                                        logger.info(f"   Tool Name: {tool_name}")
-                                        logger.info(f"   Tool Arguments: {json.dumps(tool_args, indent=2, ensure_ascii=False)}")
-                                        logger.info(f"   Tool Call #{tool_call_count} in this response")
-                                        logger.info(f"   Session ID: {session_id}")
-                                        logger.info(f"   User Email: {user_email}")
-                                        logger.info("=" * 80)
+                                            # Comprehensive tool invocation logging
+                                            logger.info("=" * 80)
+                                            logger.info("🔧 TOOL INVOCATION DETECTED")
+                                            logger.info(f"   Tool Name: {tool_name}")
+                                            logger.info(f"   Tool Arguments: {json.dumps(tool_args, indent=2, ensure_ascii=False)}")
+                                            logger.info(f"   Tool Call #{tool_call_count} in this response")
+                                            logger.info(f"   Session ID: {session_id}")
+                                            logger.info(f"   User Email: {user_email}")
+                                            logger.info("=" * 80)
 
                         logger.info(f"✅ Agent completed with {tool_call_count} tool calls")
 
