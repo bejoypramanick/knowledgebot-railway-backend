@@ -163,6 +163,41 @@ async def get_user_sessions():
         raise HTTPException(status_code=500, detail=str(e))
 
 # =================================
+# INTERNAL ENDPOINTS (ADMIN ONLY)
+# =================================
+
+@router.post("/internal/clear-agent-cache")
+async def clear_agent_cache(request: Request):
+    """Clear agent cache when configuration changes.
+
+    Called by configuration service when chatbot config is saved.
+    This ensures the next message will use the updated configuration.
+    """
+    try:
+        from ..service.agent_manager import agent_manager
+
+        # Get optional session_id from query params
+        session_id = request.query_params.get("session_id", None)
+
+        if session_id:
+            logger.info(f"🔄 Clearing agent cache for session: {session_id}")
+            agent_manager.clear_agent_cache(session_id)
+            return {
+                "success": True,
+                "message": f"Agent cache cleared for session: {session_id}"
+            }
+        else:
+            logger.info("🔄 Clearing all agent caches")
+            agent_manager.clear_agent_cache()  # Clear all
+            return {
+                "success": True,
+                "message": "All agent caches cleared"
+            }
+    except Exception as e:
+        logger.error(f"❌ Error clearing agent cache: {e}")
+        raise HTTPException(status_code=500, detail=f"Error clearing agent cache: {str(e)}")
+
+# =================================
 # HEALTH ENDPOINTS
 # =================================
 

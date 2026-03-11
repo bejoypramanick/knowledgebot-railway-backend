@@ -110,11 +110,21 @@ class AgentManager:
         """Get cached agent for a session if it exists."""
         return self.agent_cache.get(session_id)
 
-    def clear_agent_cache(self, session_id: str):
-        """Clear cached agent for a session."""
-        if session_id in self.agent_cache:
-            del self.agent_cache[session_id]
-            logger.info(f"🗑️ Cleared cached agent for session: {session_id}")
+    def clear_agent_cache(self, session_id: str = None):
+        """Clear cached agent for a session or all sessions.
+        
+        Args:
+            session_id: If provided, clear only this session's cache. If None, clear all caches.
+        """
+        if session_id:
+            if session_id in self.agent_cache:
+                del self.agent_cache[session_id]
+                logger.info(f"🗑️ Cleared cached agent for session: {session_id}")
+        else:
+            # Clear all cached agents
+            cache_size = len(self.agent_cache)
+            self.agent_cache.clear()
+            logger.info(f"🗑️ Cleared all cached agents ({cache_size} sessions)")
 
     async def create_agent(self, session_id: str, user_email: str = "anonymous@example.com", force_new: bool = False) -> Agent:
         """Create or retrieve cached agent instance with PydanticAI's built-in caching.
