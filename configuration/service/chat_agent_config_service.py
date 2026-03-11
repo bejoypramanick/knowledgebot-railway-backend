@@ -41,7 +41,7 @@ class ChatAgentConfigService:
             if widget_config:
                 metadata = {
                     "hil_enabled": widget_config.get('hil_enabled', False),
-                    "response_policy": widget_config.get('response_policy', 30),
+                    "response_policy": widget_config.get('response_policy', 0.5),
                     "hil_disabled_message": widget_config.get('hil_disabled_message', '')
                 }
                

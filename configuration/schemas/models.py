@@ -34,12 +34,12 @@ class DataManagementUpdate(BaseModel):
 
 class MetadataUpdate(BaseModel):
     hil_enabled: bool
-    response_policy: int = Field(..., ge=15, le=300, description="Response policy timeout in seconds (15-300)")
+    response_policy: float = Field(..., ge=0, le=1, description="Response policy value between 0 (Strict) and 1 (Flexi)")
 
     @validator('response_policy')
     def validate_response_policy(cls, v):
-        if v < 15 or v > 300:
-            raise ValueError('Response policy must be between 15 and 300 seconds')
+        if v < 0 or v > 1:
+            raise ValueError('Response policy must be between 0 (Strict) and 1 (Flexi)')
         return v
 
 class PersonaUpdate(BaseModel):

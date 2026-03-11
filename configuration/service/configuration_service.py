@@ -64,7 +64,7 @@ class ConfigurationService:
             if widget_config:
                 metadata = {
                     "hil_enabled": widget_config.get('hil_enabled', False),
-                    "response_policy": widget_config.get('response_policy', 30),
+                    "response_policy": widget_config.get('response_policy', 0.5),
                     "hil_disabled_message": widget_config.get('hil_disabled_message', '')
                 }
             logger.info(f"[RESULT] metadata dict: {metadata}")
@@ -120,7 +120,7 @@ class ConfigurationService:
             admin_emails = config.get('admin_emails', [])
             human_agents = config.get('human_agents', [])
             response_timeout = 30
-            response_policy = 30  # HIL response policy (15-300)
+            response_policy = 0.5  # Response policy (0=Strict, 1=Flexi, default=Balanced)
             hil_enabled = False
             hil_disabled_message = ""
             persona_name = 'KnowledgeBot'
@@ -132,7 +132,7 @@ class ConfigurationService:
 
             if 'metadata' in config:
                 metadata = config['metadata']
-                response_policy = metadata.get('response_policy', 30)  # HIL response policy (15-300)
+                response_policy = metadata.get('response_policy', 0.5)  # Response policy (0-1 range)
                 hil_enabled = metadata.get('hil_enabled', False)  # HIL enabled (chat agent setting)
                 hil_disabled_message = metadata.get('hil_disabled_message', '')  # HIL message (chat agent setting)
 
