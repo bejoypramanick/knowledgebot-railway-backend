@@ -644,6 +644,7 @@ async def request_human_agent_connection(
             logger.warning(f"⚠️ User requested agent but HIL is disabled")
             clear_workflow()
             # Return EXACT message - model must pass through without modification
+            # Use special marker to indicate this is a final response
             return 'Human Agent support is currently disabled'
     except Exception as config_error:
         logger.error(f"❌ Error checking HIL configuration: {config_error}")
