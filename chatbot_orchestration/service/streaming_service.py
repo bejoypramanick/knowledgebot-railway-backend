@@ -10,7 +10,7 @@ import re
 import time
 from typing import Any, Dict, List, AsyncGenerator
 import sys
-from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart, ToolResultPart
+from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart
 from shared.otel_logger import get_otel_logger, set_session_id
 
 from ..core.dependencies import ChatSessionDeps
@@ -716,15 +716,20 @@ class StreamingService:
                             logger.warning("🚨 BYPASSING model response - streaming tool response directly")
                             
                             # Extract tool result from all_messages
+                            # In Pydantic AI, tool results appear as TextPart in messages after the tool call
                             for i, msg in enumerate(all_messages):
                                 if hasattr(msg, 'parts'):
                                     for j, part in enumerate(msg.parts):
-                                        # Look for ToolResultPart with the tool response
-                                        if isinstance(part, ToolResultPart):
-                                            tool_response = getattr(part, 'content', '')
-                                            if tool_response:
-                                                logger.info(f"✅ Extracted tool response: {tool_response[:100]}...")
-                                                full_response = tool_response
+                                        # Check if this is a text part that contains the tool result
+                                        # Tool results are typically TextPart with the return value
+                                        if isinstance(part, TextPart):
+                                            text_content = getattr(part, 'content', '')
+                                            # Check if this looks like a tool result (not model elaboration)
+                                            # Tool results from request_human_agent_connection are short and specific
+                                            if text_content and ('Human Agent support is currently not available' in text_content or 
+                                                               'Connected to human agent' in text_content):
+                                                logger.info(f"✅ Extracted tool response: {text_content[:100]}...")
+                                                full_response = text_content
                                                 logger.info(f"🚨 Using tool response directly, bypassing model elaboration")
                                                 break
                         
