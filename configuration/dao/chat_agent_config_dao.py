@@ -413,7 +413,7 @@ class ChatAgentConfigDAO:
             raise
 
     async def save_chat_agent_config(self, admin_emails: List[str], human_agents: List[str],
-                                     response_timeout: int, response_policy: int,
+                                     response_timeout: int, response_policy: float,
                                      hil_enabled: bool, hil_disabled_message: str,
                                      persona_name: str, system_prompt: str,
                                      llm_tokens: Dict[str, Dict[str, int]]) -> bool:

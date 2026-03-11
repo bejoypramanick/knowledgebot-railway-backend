@@ -45,7 +45,7 @@ class ChatRequest(BaseModel):
     use_rag: bool = True
     max_results: int = 5
     system_prompt: Optional[str] = None  # Custom system prompt (will be appended to default)
-    response_policy: Optional[int] = None  # 0-100: 0=flexible, 100=strict
+    response_policy: Optional[float] = None  # 0-1: 0=Strict, 1=Flexi
 
 
 class ChatSessionResponse(BaseModel):

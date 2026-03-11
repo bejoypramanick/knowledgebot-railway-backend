@@ -92,7 +92,7 @@ class WidgetConfigDAO:
                 "profile_position": dict,
                 "chat_icon_position": dict,
                 "hil_enabled": bool,
-                "response_policy": int,
+                "response_policy": float,
                 "hil_disabled_message": str
             }
 
