@@ -216,9 +216,11 @@ def instrument_fastapi(app, service_name):
             trace_id = format(span_context.trace_id, '032x') if span_context.trace_id else '0'
             span_id = format(span_context.span_id, '016x') if span_context.span_id else '0'
             
-            # Extract user email and request mapping from headers
+            # Extract user email from headers
             user_email = request.headers.get('X-User-Email', '')
-            request_mapping = request.headers.get('X-Request-Mapping', '')
+            
+            # Generate request mapping from method + route path (e.g., "POST /api/v1/gateway/auth/session")
+            request_mapping = f"{request.method} {route_path}"
             
             # Set context variables for logging
             user_email_ctx_var.set(user_email)
