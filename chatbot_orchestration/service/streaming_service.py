@@ -97,6 +97,53 @@ class StreamingService:
         
         return False
 
+    def _prune_message_history_safe(self, messages: List[Any], max_messages: int = 50) -> List[Any]:
+        """
+        Safely prune message history while protecting the system prompt at index 0.
+        
+        IMPORTANT: If message_history has been injected with a system prompt at index 0,
+        this method ensures it's NEVER pruned. Only conversation messages (index 1+) are pruned.
+        
+        Args:
+            messages: List of Pydantic AI messages
+            max_messages: Maximum number of messages to keep (including system prompt)
+        
+        Returns:
+            Pruned message list with system prompt protected at index 0
+        """
+        if len(messages) <= max_messages:
+            return messages
+        
+        # Check if first message is a system prompt
+        has_system_prompt = (
+            len(messages) > 0 and 
+            hasattr(messages[0], 'parts') and 
+            any(isinstance(part, SystemPromptPart) for part in messages[0].parts)
+        )
+        
+        if has_system_prompt:
+            # Keep system prompt at index 0, prune from the middle of conversation history
+            # This preserves recent context while protecting the system prompt
+            system_prompt = messages[0]
+            conversation = messages[1:]
+            
+            # Keep only the most recent messages
+            pruned_conversation = conversation[-(max_messages - 1):]
+            
+            logger.info(f"🔄 Pruned message history (protected system prompt at index 0)")
+            logger.info(f"   Original: {len(messages)} messages")
+            logger.info(f"   Pruned: {len(pruned_conversation) + 1} messages")
+            logger.info(f"   System prompt: PROTECTED at index 0")
+            
+            return [system_prompt] + pruned_conversation
+        else:
+            # No system prompt, prune normally from the end
+            pruned = messages[-max_messages:]
+            logger.info(f"🔄 Pruned message history (no system prompt)")
+            logger.info(f"   Original: {len(messages)} messages")
+            logger.info(f"   Pruned: {len(pruned)} messages")
+            return pruned
+
     async def stream_agent_response(
         self,
         agent,
@@ -202,6 +249,12 @@ class StreamingService:
             # 🚨 PRE-FLIGHT SYSTEM PROMPT INJECTION 🚨
             # Fix for Pydantic AI gotcha: when message_history is provided, system_prompt is discarded
             # Solution: Prepend system prompt to message_history so it's included in model context
+            # 
+            # IMPORTANT SAFEGUARDS:
+            # 1. System prompt MUST be at index 0 (never prune it when sliding window is used)
+            # 2. Only ONE system message allowed (Pydantic AI + Gemini requirement)
+            # 3. This workaround is compatible with Pydantic AI's current implementation
+            #    but may need adjustment if they add native system message handling
             if pydantic_messages:
                 logger.info("=" * 100)
                 logger.info("🚨 PRE-FLIGHT SYSTEM PROMPT INJECTION (Pydantic AI Gotcha Fix)")
@@ -220,12 +273,22 @@ class StreamingService:
                     # Create SystemPromptPart message
                     system_prompt_msg = ModelRequest(parts=[SystemPromptPart(content=system_prompt_text)])
 
-                    # Prepend to message history (CRITICAL: must be first message)
+                    # Prepend to message history (CRITICAL: must be first message at index 0)
                     pydantic_messages.insert(0, system_prompt_msg)
                     logger.info(f"✅ System prompt prepended to message_history")
                     logger.info(f"   Now message_history has {len(pydantic_messages)} messages (including system prompt)")
-                    logger.info(f"   Message 0: System Prompt")
+                    logger.info(f"   Message 0: System Prompt (PROTECTED - DO NOT PRUNE)")
                     logger.info(f"   Message 1+: Conversation history")
+                    
+                    # SAFEGUARD: Validate only one system message exists
+                    system_msg_count = sum(1 for msg in pydantic_messages 
+                                          if hasattr(msg, 'parts') and 
+                                          any(isinstance(part, SystemPromptPart) for part in msg.parts))
+                    if system_msg_count > 1:
+                        logger.warning(f"⚠️ WARNING: Found {system_msg_count} system messages (expected 1)")
+                        logger.warning("⚠️ This may cause issues with Pydantic AI or Gemini API")
+                    else:
+                        logger.info(f"✅ System message count validated: {system_msg_count} (correct)")
                 else:
                     logger.warning(f"⚠️ System prompt not found in cache for session {session_id}")
                 logger.info("=" * 100)
@@ -237,7 +300,9 @@ class StreamingService:
                 logger.info("=" * 100)
                 for i, msg in enumerate(pydantic_messages):
                     msg_type = type(msg).__name__
-                    logger.info(f"Message {i}: {msg_type}")
+                    # Mark system prompt as protected
+                    protection_marker = " [PROTECTED - DO NOT PRUNE]" if i == 0 and hasattr(msg, 'parts') and any(isinstance(part, SystemPromptPart) for part in msg.parts) else ""
+                    logger.info(f"Message {i}: {msg_type}{protection_marker}")
                     if hasattr(msg, 'parts'):
                         for j, part in enumerate(msg.parts):
                             part_type = type(part).__name__
