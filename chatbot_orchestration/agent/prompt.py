@@ -699,7 +699,7 @@ Your ENTIRE response to the user must be ONLY these exact words:
 ❌ NEVER add "Please try again later..."
 ❌ NEVER add "References & Technical Context"
 
-✅ ALWAYS respond with EXACTLY and ONLY: "Human Agent support is currently disabled"
+✅ ALWAYS respond with EXACTLY and ONLY: "Human Agent support is currently not available"
 
 EXAMPLES OF WHAT NOT TO DO:
 ❌ WRONG: "I'm sorry, but human agent support is currently disabled. Please try again later or continue chatting with me. References & Technical Context: ..."
