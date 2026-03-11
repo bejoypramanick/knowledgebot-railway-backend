@@ -163,9 +163,16 @@ async def proxy_admin_events_sse(request: Request):
             except httpx.ConnectTimeout as e:
                 logger.error(f"❌ Connection timeout for admin SSE: {e}")
                 yield f"event: error\ndata: Backend connection timeout\n\n".encode()
+            except (BrokenPipeError, ConnectionResetError, RuntimeError) as e:
+                # Client disconnected - this is expected and normal, log at debug level
+                logger.debug(f"🔌 Client disconnected from admin SSE stream: {type(e).__name__}")
             except Exception as e:
-                logger.error(f"❌ Error in SSE stream: {e}")
-                yield f"event: error\ndata: {str(e)}\n\n".encode()
+                # Only log unexpected errors
+                error_msg = str(e)
+                if "peer closed connection" not in error_msg.lower() and "incomplete chunked read" not in error_msg.lower():
+                    logger.error(f"❌ Error in SSE stream: {e}")
+                else:
+                    logger.debug(f"🔌 Client disconnection during SSE stream: {e}")
 
         return StreamingResponse(
             event_stream(),
@@ -215,9 +222,16 @@ async def proxy_customer_events_sse(request: Request, session_id: str = Query(..
             except httpx.ConnectTimeout as e:
                 logger.error(f"❌ Connection timeout for customer SSE ({session_id}): {e}")
                 yield f"event: error\ndata: Backend connection timeout\n\n".encode()
+            except (BrokenPipeError, ConnectionResetError, RuntimeError) as e:
+                # Client disconnected - this is expected and normal, log at debug level
+                logger.debug(f"🔌 Client disconnected from customer SSE stream (session {session_id}): {type(e).__name__}")
             except Exception as e:
-                logger.error(f"❌ Error in customer SSE stream: {e}")
-                yield f"event: error\ndata: {str(e)}\n\n".encode()
+                # Only log unexpected errors
+                error_msg = str(e)
+                if "peer closed connection" not in error_msg.lower() and "incomplete chunked read" not in error_msg.lower():
+                    logger.error(f"❌ Error in customer SSE stream: {e}")
+                else:
+                    logger.debug(f"🔌 Client disconnection during customer SSE stream (session {session_id}): {e}")
 
         return StreamingResponse(
             event_stream(),

@@ -154,6 +154,14 @@ class OpenTelemetryLogger:
         
     def _log_with_context(self, level: int, message: str, extra: Dict[str, Any] = None, **kwargs):
         """Log message with OpenTelemetry context using standard logging"""
+        # Reserved LogRecord attributes that cannot be overwritten in extra dict
+        RESERVED_LOGRECORD_ATTRS = {
+            'name', 'msg', 'args', 'created', 'filename', 'funcName', 'levelname', 'levelno',
+            'lineno', 'module', 'msecs', 'message', 'pathname', 'process', 'processName',
+            'relativeCreated', 'thread', 'threadName', 'exc_info', 'exc_text', 'stack_info',
+            'getMessage', 'asctime', 'taskName'
+        }
+        
         # Get calling file info automatically
         file_info = get_calling_file_info()
 
@@ -191,6 +199,7 @@ class OpenTelemetryLogger:
         if session_id:
             extra['session_id'] = session_id
 
+        # Add custom attributes with safe names (avoid reserved LogRecord attributes)
         extra.update({
             'file_path': file_info['file_path'],
             'line_number': file_info['line_number'],
@@ -214,6 +223,10 @@ class OpenTelemetryLogger:
         exc_info = kwargs.pop('exc_info', None)
         exc_text = kwargs.pop('exc_text', None)
         stack_info = kwargs.pop('stack_info', None)
+
+        # Remove any reserved attributes from extra dict to prevent KeyError
+        for reserved_attr in RESERVED_LOGRECORD_ATTRS:
+            extra.pop(reserved_attr, None)
 
         # Prepare logger.log kwargs
         log_kwargs = {'extra': extra}

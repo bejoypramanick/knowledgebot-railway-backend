@@ -960,21 +960,36 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                             logger.error(f"❌ Invalid JSON in message: {e}")
                             # Continue listening, don't break
                             continue
+                        except (BrokenPipeError, ConnectionResetError, RuntimeError) as e:
+                            # Client disconnected - expected and normal
+                            logger.debug(f"🔌 Client {user_email} disconnected (yield error on channel {channel_name}): {type(e).__name__}")
+                            break
                         except Exception as e:
-                            logger.error(f"❌ Error yielding message to {user_email}: {e}")
-                            # Yield failed = client disconnected. Close connection and cleanup.
-                            logger.info(f"🔌 Client {user_email} disconnected (yield error on channel {channel_name}) - closing connection")
+                            # Check if it's a client disconnection error
+                            error_msg = str(e)
+                            if "peer closed connection" in error_msg.lower() or "incomplete chunked read" in error_msg.lower():
+                                logger.debug(f"🔌 Client {user_email} disconnected (yield error on channel {channel_name}): {e}")
+                            else:
+                                logger.error(f"❌ Error yielding message to {user_email}: {e}")
                             break
 
                 except asyncio.CancelledError:
-                    logger.info(f"🔌 SSE connection cancelled for {user_email}")
+                    logger.debug(f"🔌 SSE connection cancelled for {user_email}")
                 except Exception as e:
-                    logger.error(f"❌ Error in SSE generator for {user_email}: {e}")
+                    error_msg = str(e)
+                    if "peer closed connection" not in error_msg.lower() and "incomplete chunked read" not in error_msg.lower():
+                        logger.error(f"❌ Error in SSE generator for {user_email}: {e}")
+                    else:
+                        logger.debug(f"🔌 Client disconnection in SSE generator for {user_email}: {e}")
 
             except asyncio.CancelledError:
-                logger.info(f"🔌 SSE connection cancelled for {user_email}")
+                logger.debug(f"🔌 SSE connection cancelled for {user_email}")
             except Exception as e:
-                logger.error(f"❌ Error in SSE generator for {user_email}: {e}")
+                error_msg = str(e)
+                if "peer closed connection" not in error_msg.lower() and "incomplete chunked read" not in error_msg.lower():
+                    logger.error(f"❌ Error in SSE generator for {user_email}: {e}")
+                else:
+                    logger.debug(f"🔌 Client disconnection in SSE generator for {user_email}: {e}")
             finally:
                 # Cancel tasks and wait for cleanup
                 if heartbeat_task and not heartbeat_task.done():
@@ -1215,21 +1230,36 @@ async def customer_events_stream(request: Request, session_id: str = Query(..., 
                             logger.error(f"❌ Invalid JSON in message for session {session_id}: {e}")
                             # Continue listening, don't break
                             continue
+                        except (BrokenPipeError, ConnectionResetError, RuntimeError) as e:
+                            # Client disconnected - expected and normal
+                            logger.debug(f"🔌 Client on session {session_id} disconnected (yield error on channel {channel_name}): {type(e).__name__}")
+                            break
                         except Exception as e:
-                            logger.error(f"❌ Error yielding message to session {session_id}: {e}")
-                            # Yield failed = client disconnected. Close connection and cleanup.
-                            logger.info(f"🔌 Client on session {session_id} disconnected (yield error on channel {channel_name}) - closing connection")
+                            # Check if it's a client disconnection error
+                            error_msg = str(e)
+                            if "peer closed connection" in error_msg.lower() or "incomplete chunked read" in error_msg.lower():
+                                logger.debug(f"🔌 Client on session {session_id} disconnected (yield error on channel {channel_name}): {e}")
+                            else:
+                                logger.error(f"❌ Error yielding message to session {session_id}: {e}")
                             break
 
                 except asyncio.CancelledError:
-                    logger.info(f"🔌 SSE connection cancelled for session {session_id}")
+                    logger.debug(f"🔌 SSE connection cancelled for session {session_id}")
                 except Exception as e:
-                    logger.error(f"❌ Error in SSE generator for session {session_id}: {e}")
+                    error_msg = str(e)
+                    if "peer closed connection" not in error_msg.lower() and "incomplete chunked read" not in error_msg.lower():
+                        logger.error(f"❌ Error in SSE generator for session {session_id}: {e}")
+                    else:
+                        logger.debug(f"🔌 Client disconnection in SSE generator for session {session_id}: {e}")
 
             except asyncio.CancelledError:
-                logger.info(f"🔌 SSE connection cancelled for session {session_id}")
+                logger.debug(f"🔌 SSE connection cancelled for session {session_id}")
             except Exception as e:
-                logger.error(f"❌ Error in SSE generator for session {session_id}: {e}")
+                error_msg = str(e)
+                if "peer closed connection" not in error_msg.lower() and "incomplete chunked read" not in error_msg.lower():
+                    logger.error(f"❌ Error in SSE generator for session {session_id}: {e}")
+                else:
+                    logger.debug(f"🔌 Client disconnection in SSE generator for session {session_id}: {e}")
             finally:
                 # Cancel tasks and wait for cleanup
                 if heartbeat_task and not heartbeat_task.done():
