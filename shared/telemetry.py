@@ -61,13 +61,8 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     class SafeOTelFormatter(logging.Formatter):
         """Formatter that safely handles missing otelTraceID and otelSpanID fields"""
         def format(self, record):
-            # Ensure OTel fields exist before formatting - this is the critical fix
-            if not hasattr(record, 'otelTraceID'):
-                record.otelTraceID = '0'
-            if not hasattr(record, 'otelSpanID'):
-                record.otelSpanID = '0'
-            # Always read from context variables to ensure we have the latest values
-            # This overrides any values set by LoggingInstrumentor
+            # Don't set otelTraceID and otelSpanID here - they're already set by the filter
+            # Just ensure context variables are set for email and request mapping
             record.otelUserEmail = user_email_ctx_var.get() or ''
             record.otelRequestMapping = request_mapping_ctx_var.get() or ''
             # Ensure filename and lineno are set
@@ -130,22 +125,8 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # Override emit to flush immediately after each log (ensures real-time output during streaming)
     original_emit = stream_handler.emit
     def emit_with_flush(record):
-        # Get current span to extract trace and span IDs
-        span = trace.get_current_span()
-        
-        if span and span.is_recording():
-            span_context = span.get_span_context()
-            # Format trace ID and span ID as hex strings
-            trace_id = format(span_context.trace_id, '032x') if span_context.trace_id else '0'
-            span_id = format(span_context.span_id, '016x') if span_context.span_id else '0'
-            record.otelTraceID = trace_id
-            record.otelSpanID = span_id
-        else:
-            # No active span - use placeholder values
-            record.otelTraceID = '0'
-            record.otelSpanID = '0'
-        
-        # Always read from context variables to ensure we have the latest values
+        # otelTraceID and otelSpanID are already set by the filter
+        # Just ensure context variables are set for email and request mapping
         record.otelUserEmail = user_email_ctx_var.get() or ''
         record.otelRequestMapping = request_mapping_ctx_var.get() or ''
         original_emit(record)
