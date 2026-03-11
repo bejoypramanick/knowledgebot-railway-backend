@@ -950,6 +950,11 @@ class StreamingService:
                 logger.info(f"🔍 DEBUG: full_response length = {len(full_response)} chars")
                 logger.info(f"🔍 DEBUG: full_response preview = {full_response[:100]}...")
 
+                # 🚨 CRITICAL: Remove metadata that model may have added
+                # Strip out [Time-to-Solve: X mins] or similar timing information
+                full_response = re.sub(r'\[Time-to-Solve:.*?\]', '', full_response).strip()
+                logger.info(f"✅ Removed Time-to-Solve metadata if present")
+
                 # 🚨 CRITICAL: Filter out elaboration from tool responses
                 # If response contains "Human Agent support is currently not available" with elaboration,
                 # extract ONLY the core message
