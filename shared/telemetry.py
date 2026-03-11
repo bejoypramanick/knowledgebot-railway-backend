@@ -70,6 +70,11 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
             # This overrides any values set by LoggingInstrumentor
             record.otelUserEmail = user_email_ctx_var.get() or ''
             record.otelRequestMapping = request_mapping_ctx_var.get() or ''
+            # Ensure filename and lineno are set
+            if not hasattr(record, 'filename'):
+                record.filename = 'unknown'
+            if not hasattr(record, 'lineno'):
+                record.lineno = 0
             return super().format(record)
     
     # Add a global filter to ensure otelTraceID and otelSpanID always exist
@@ -154,6 +159,11 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # This ensures otelTraceID and otelSpanID are available in log records
     # Note: set_logging_format=False preserves our custom formatter
     LoggingInstrumentor().instrument(set_logging_format=False)
+    
+    # Re-apply formatter to all handlers after LoggingInstrumentor
+    # This ensures our custom format with file:line is used
+    for handler in root_logger.handlers:
+        handler.setFormatter(formatter)
     
     # Instrument HTTPX Clients (The Glue for Outgoing Requests)
     # This automatically injects the 'traceparent' header into outgoing httpx calls
