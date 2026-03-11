@@ -630,6 +630,24 @@ async def request_human_agent_connection(
     logger.info(f"🧑 Tool called: request_human_agent_connection for session {session_uuid} (numeric: {session_numeric_id}) with reason: {reason}")
     logger.info(f"📍 Tool execution starting - session_numeric_id={session_numeric_id}, session_uuid={session_uuid}")
 
+    # Check if HIL is enabled before attempting to connect
+    try:
+        from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
+        
+        dao = ChatAgentConfigDAO()
+        config = await dao.get_chat_agent_config()
+        hil_enabled = config.get('hil_enabled', False)
+        
+        logger.info(f"📋 HIL Status: {'ENABLED ✅' if hil_enabled else 'DISABLED ❌'}")
+        
+        if not hil_enabled:
+            logger.warning(f"⚠️ User requested agent but HIL is disabled")
+            clear_workflow()
+            return 'Human Agent support is currently disabled'
+    except Exception as config_error:
+        logger.error(f"❌ Error checking HIL configuration: {config_error}")
+        logger.warning(f"⚠️ Proceeding with agent assignment attempt (config check failed)")
+
     # Check if agent is already assigned (prevents duplicate calls)
     try:
         from shared.sqlalchemy_db import get_db_session
