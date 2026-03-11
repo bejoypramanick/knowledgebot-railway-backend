@@ -212,7 +212,8 @@ class StreamingService:
 
                 # Get system prompt from agent (which already has the custom prompt built in)
                 # The agent's system_prompt is set during agent creation with the current configuration
-                system_prompt_text = agent.system_prompt
+                # Note: system_prompt() is a method in Pydantic AI's Agent class
+                system_prompt_text = agent.system_prompt()
                 logger.info(f"✅ Using agent's system prompt: {len(system_prompt_text)} characters")
                 logger.info(f"   Preview: {system_prompt_text[:150]}...")
 
