@@ -1,0 +1,20 @@
+
+1. write extensive loggers for the below flows so that it is easy to understand these flows via logs:
+
+
+
+2. use otel logger for writing logs (already implemented) 
+3.log time of extecution of each method, entry , exit of each method in the flow , return values if any in the flow. Be carefult ot use logger.error, logger.debud, and logger.info- make sure all logs use the otel logger- 
+
+4.please write unit test cases using pytest for the request flows above
+5. Try to avoid mocks wherever possible - use mocks only  where abosolutely necessary to mock external sources like database, models, etc. try to run the actual functions with the test case as much as possible.
+
+6. execute each unit test before you write the next one and fix any error in the code required for a successful unit test run
+7. make sure you cover all edge cases and list down any code changes you made to make this request execution better in performacne and less error prone.
+8. list down in a tables and  all function and files involved in this request flow. 
+9. write meaningful logs in teh exitign code to track the entrie request flow easily
+10. in the comments of the unit test mention which file which function is that unit test covering
+11. create/update the html test reports for the unti test run results.
+12. remove all .md files and text files created for tests
+13. commit and push changes 
+14. make sure we have 100% test coverage for above endpoints

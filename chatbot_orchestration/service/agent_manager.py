@@ -36,10 +36,13 @@ class AgentManager:
         try:
             # Fetch from configuration service
             import httpx
-            from ..core.config import get_settings
+            import os
             
-            settings = get_settings()
-            config_service_url = settings.configuration_service_url
+            # Get configuration service URL from environment or use default
+            config_service_url = os.getenv(
+                'CONFIGURATION_SERVICE_URL',
+                'http://configuration.railway.internal:8080'
+            )
             
             logger.info(f"🔍 Fetching persona config from: {config_service_url}")
             
