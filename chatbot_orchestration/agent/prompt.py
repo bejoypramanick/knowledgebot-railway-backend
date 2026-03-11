@@ -5,22 +5,49 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 
-def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Optional[int] = None) -> str:
-    """Generate dynamic system prompt with intelligent data source routing."""
+def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Optional[float] = None) -> str:
+    """Generate dynamic system prompt with intelligent data source routing.
+    
+    Args:
+        custom_prompt: Custom system prompt to inject at the top
+        response_policy: Response policy value between 0 (Strict) and 1 (Flexi)
+                        0 = Strict (responses closely tied to knowledge base)
+                        1 = Flexi (more creative responses allowed)
+    """
     logger.info(f"🚀 Generating system prompt:")
     logger.info(f"  - custom_prompt: '{custom_prompt[:50] if custom_prompt else 'None'}...' (truncated)")
-    logger.info(f"  - response_policy: {response_policy}")
+    logger.info(f"  - response_policy: {response_policy} (0=Strict, 1=Flexi)")
 
     # Build prompt components for potential caching (currently disabled)
     prompt_components = {
         'custom_prompt': custom_prompt,
         'response_policy': response_policy
     }
+    
+    # Generate response policy guidance based on the value
+    response_policy_guidance = ""
+    if response_policy is not None:
+        if response_policy < 0.25:
+            response_policy_guidance = "STRICT MODE: Keep responses very closely tied to the knowledge base. Minimize creative interpretation. Prioritize accuracy over elaboration."
+        elif response_policy < 0.5:
+            response_policy_guidance = "BALANCED-STRICT MODE: Maintain strong adherence to knowledge base while allowing minimal creative interpretation for clarity."
+        elif response_policy < 0.75:
+            response_policy_guidance = "BALANCED-FLEXI MODE: Balance knowledge base adherence with reasonable creative interpretation for better user experience."
+        else:
+            response_policy_guidance = "FLEXI MODE: Allow more creative responses while still grounding them in the knowledge base. Prioritize user experience and clarity."
+        
+        logger.info(f"📊 Response Policy Guidance: {response_policy_guidance}")
 
     # Application caching disabled - rely on Gemini model caching only
     # This ensures consistent HTML formatting through Gemini's caching system
     # Comprehensive system prompt designed for Gemini context caching (32,768+ tokens minimum)
-    base_prompt = """Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers.
+    base_prompt = f"""Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers.
+
+{f'═══════════════════════════════════════════════════════════════════════════════════════════════════
+RESPONSE POLICY DIRECTIVE
+═══════════════════════════════════════════════════════════════════════════════════════════════════
+{response_policy_guidance}
+═══════════════════════════════════════════════════════════════════════════════════════════════════' if response_policy_guidance else ''}
 
 🚨🚨🚨 CRITICAL OVERRIDE RULE - EVALUATE THIS FIRST BEFORE ANYTHING ELSE 🚨🚨🚨
 🚨🚨🚨 DO NOT SKIP THIS - IT OVERRIDES ALL OTHER RULES 🚨🚨🚨

@@ -32,13 +32,13 @@ class AgentManager:
             self.genai_client = get_genai_client()
 
     async def _fetch_persona_config(self) -> Dict[str, Any]:
-        """Fetch persona configuration from the database at runtime."""
+        """Fetch persona configuration and response policy from the database at runtime."""
         try:
             # Query the database directly for the active persona and its system prompt
             from shared.sqlalchemy_db import get_db_session
             from sqlalchemy import text
             
-            logger.info(f"🔍 Fetching active persona from database...")
+            logger.info(f"🔍 Fetching active persona and response policy from database...")
             
             async with get_db_session() as db_session:
                 # Query for the active persona configuration
@@ -51,17 +51,41 @@ class AgentManager:
                 result = await db_session.execute(text(query))
                 row = result.mappings().first()
                 
+                # Query for response policy from security settings
+                policy_query = """
+                    SELECT value 
+                    FROM security_settings 
+                    WHERE key = 'response_policy' 
+                    LIMIT 1
+                """
+                policy_result = await db_session.execute(text(policy_query))
+                policy_row = policy_result.mappings().first()
+                
+                # Parse response policy (convert from string to float, default to 0.5)
+                response_policy = 0.5
+                if policy_row:
+                    try:
+                        policy_value = float(policy_row['value'])
+                        response_policy = policy_value
+                        logger.info(f"✅ Fetched response_policy from database: {response_policy}")
+                    except (ValueError, TypeError):
+                        logger.warning(f"⚠️ Could not parse response_policy value: {policy_row['value']}, using default 0.5")
+                else:
+                    logger.info(f"ℹ️ No response_policy found in database, using default: 0.5")
+                
                 if row:
                     persona_name = row['persona_name']
                     system_prompt = row['system_prompt'] or ''
                     
                     logger.info(f"✅ Fetched active persona from database: {persona_name}")
                     logger.info(f"   System prompt length: {len(system_prompt)} characters")
+                    logger.info(f"   Response policy: {response_policy}")
                     
                     return {
                         "persona_name": persona_name,
                         "persona_description": f"Persona: {persona_name}",
-                        "system_instructions": system_prompt  # This is the custom prompt from the database
+                        "system_instructions": system_prompt,  # This is the custom prompt from the database
+                        "response_policy": response_policy  # Response policy (0-1 range)
                     }
                 else:
                     logger.warning(f"⚠️ No active persona found in database")
@@ -78,7 +102,8 @@ class AgentManager:
         return {
             "persona_name": "Knowledge Bot",
             "persona_description": "A helpful AI assistant that can search knowledge bases and answer questions",
-            "system_instructions": "You are a helpful AI assistant. Always provide accurate, well-formatted responses using HTML tags."
+            "system_instructions": "You are a helpful AI assistant. Always provide accurate, well-formatted responses using HTML tags.",
+            "response_policy": 0.5  # Default to balanced (0.5 on 0-1 scale)
         }
 
     async def _build_system_prompt(self, persona_config: Dict[str, Any]) -> str:
@@ -89,10 +114,14 @@ class AgentManager:
 
             # Extract custom prompt from persona config if available
             custom_prompt = persona_config.get('system_instructions', None)
+            
+            # Extract response policy (0-1 range, default to 0.5)
+            response_policy = persona_config.get('response_policy', 0.5)
+            logger.info(f"📊 Using response_policy: {response_policy}")
 
             # Get the comprehensive system prompt
             # This includes all RAG enforcement rules (critical enforcement at top of prompt)
-            base_prompt = get_system_prompt(custom_prompt=custom_prompt, response_policy=None)
+            base_prompt = get_system_prompt(custom_prompt=custom_prompt, response_policy=response_policy)
 
             # No additional overrides - prompt.py handles all critical rules
             # Single source of truth prevents inconsistency and maintenance burden
