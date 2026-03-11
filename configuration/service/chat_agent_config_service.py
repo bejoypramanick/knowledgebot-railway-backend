@@ -203,6 +203,33 @@ class ChatAgentConfigService:
                         logger.info(f"✅ Successfully updated persona: {persona_name}")
             
             logger.info("✅ Chatbot config saved successfully")
+            
+            # Clear agent cache in chatbot-orchestration service
+            # This ensures the next message will use the updated configuration
+            try:
+                logger.info("🔄 Clearing agent cache in chatbot-orchestration service...")
+                import httpx
+                import os
+                
+                # Get chatbot orchestration service URL from environment
+                chatbot_service_url = os.getenv(
+                    'CHATBOT_ORCHESTRATION_URL',
+                    'http://chatbot-orchestration.railway.internal:8080'
+                )
+                
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    response = await client.post(
+                        f"{chatbot_service_url}/internal/clear-agent-cache",
+                        timeout=5.0
+                    )
+                    
+                    if response.status_code == 200:
+                        logger.info("✅ Agent cache cleared successfully")
+                    else:
+                        logger.warning(f"⚠️ Failed to clear agent cache: {response.status_code}")
+            except Exception as cache_error:
+                logger.warning(f"⚠️ Could not clear agent cache: {cache_error}")
+                # Don't fail the request if cache clearing fails
 
         except Exception as e:
             logger.error(f"❌ Error saving chatbot config: {e}")
