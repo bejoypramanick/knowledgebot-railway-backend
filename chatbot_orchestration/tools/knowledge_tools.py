@@ -636,10 +636,10 @@ async def request_human_agent_connection(
         from sqlalchemy import text
         
         async with get_db_session() as db_session:
-            # Query widget_config table for HIL enabled status
+            # Query widget_configuration table for HIL enabled status
             hil_query = """
                 SELECT hil_enabled 
-                FROM widget_config 
+                FROM widget_configuration 
                 WHERE id = 1 
                 LIMIT 1
             """
