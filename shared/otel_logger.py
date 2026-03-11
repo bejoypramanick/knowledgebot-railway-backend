@@ -155,11 +155,12 @@ class OpenTelemetryLogger:
     def _log_with_context(self, level: int, message: str, extra: Dict[str, Any] = None, **kwargs):
         """Log message with OpenTelemetry context using standard logging"""
         # Reserved LogRecord attributes that cannot be overwritten in extra dict
+        # This includes standard Python logging attributes and any custom ones added by formatters
         RESERVED_LOGRECORD_ATTRS = {
             'name', 'msg', 'args', 'created', 'filename', 'funcName', 'levelname', 'levelno',
             'lineno', 'module', 'msecs', 'message', 'pathname', 'process', 'processName',
             'relativeCreated', 'thread', 'threadName', 'exc_info', 'exc_text', 'stack_info',
-            'getMessage', 'asctime', 'taskName'
+            'getMessage', 'asctime', 'taskName', 'otelTraceID', 'otelSpanID'
         }
         
         # Get calling file info automatically
@@ -206,18 +207,14 @@ class OpenTelemetryLogger:
             'method_name': file_info['method_name']
         })
         
-        # Get current span and extract trace/span IDs
+        # Get current span and extract trace/span IDs (for span attributes only, not LogRecord)
         span = trace.get_current_span()
+        trace_id = None
+        span_id = None
         if span and span.is_recording():
             span_context = span.get_span_context()
             trace_id = format(span_context.trace_id, '032x') if span_context.trace_id else '0'
             span_id = format(span_context.span_id, '016x') if span_context.span_id else '0'
-            extra['otelTraceID'] = trace_id
-            extra['otelSpanID'] = span_id
-        else:
-            # No active span - use placeholder values
-            extra['otelTraceID'] = '0'
-            extra['otelSpanID'] = '0'
 
         # Extract reserved LogRecord attributes from kwargs (these can't go in extra dict)
         exc_info = kwargs.pop('exc_info', None)
@@ -251,6 +248,12 @@ class OpenTelemetryLogger:
                 "file.line": file_info['line_number'],
                 "file.method": file_info['method_name'],
             }
+
+            # Add trace/span IDs to span attributes (not LogRecord)
+            if trace_id:
+                span_attributes["otelTraceID"] = trace_id
+            if span_id:
+                span_attributes["otelSpanID"] = span_id
 
             # Add workflow context (highest priority for feature tracking)
             if workflow:
