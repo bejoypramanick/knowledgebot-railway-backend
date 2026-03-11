@@ -53,9 +53,9 @@ class AgentManager:
                 
                 # Query for response policy from security settings
                 policy_query = """
-                    SELECT value 
+                    SELECT setting_value 
                     FROM security_settings 
-                    WHERE key = 'response_policy' 
+                    WHERE setting_name = 'response_policy' 
                     LIMIT 1
                 """
                 policy_result = await db_session.execute(text(policy_query))
@@ -65,11 +65,11 @@ class AgentManager:
                 response_policy = 0.5
                 if policy_row:
                     try:
-                        policy_value = float(policy_row['value'])
+                        policy_value = float(policy_row['setting_value'])
                         response_policy = policy_value
                         logger.info(f"✅ Fetched response_policy from database: {response_policy}")
                     except (ValueError, TypeError):
-                        logger.warning(f"⚠️ Could not parse response_policy value: {policy_row['value']}, using default 0.5")
+                        logger.warning(f"⚠️ Could not parse response_policy value: {policy_row['setting_value']}, using default 0.5")
                 else:
                     logger.info(f"ℹ️ No response_policy found in database, using default: 0.5")
                 

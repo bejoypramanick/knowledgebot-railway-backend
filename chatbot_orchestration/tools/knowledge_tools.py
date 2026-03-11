@@ -632,20 +632,32 @@ async def request_human_agent_connection(
 
     # Check if HIL is enabled before attempting to connect
     try:
-        from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text
         
-        dao = ChatAgentConfigDAO()
-        config = await dao.get_chat_agent_config()
-        hil_enabled = config.get('hil_enabled', False)
-        
-        logger.info(f"📋 HIL Status: {'ENABLED ✅' if hil_enabled else 'DISABLED ❌'}")
-        
-        if not hil_enabled:
-            logger.warning(f"⚠️ User requested agent but HIL is disabled")
-            clear_workflow()
-            # Return EXACT message - model must pass through without modification
-            # Use special marker to indicate this is a final response
-            return 'Human Agent support is currently not available'
+        async with get_db_session() as db_session:
+            # Query widget_config table for HIL enabled status
+            hil_query = """
+                SELECT hil_enabled 
+                FROM widget_config 
+                WHERE id = 1 
+                LIMIT 1
+            """
+            hil_result = await db_session.execute(text(hil_query))
+            hil_row = hil_result.mappings().first()
+            
+            hil_enabled = False
+            if hil_row:
+                hil_enabled = hil_row.get('hil_enabled', False)
+            
+            logger.info(f"📋 HIL Status: {'ENABLED ✅' if hil_enabled else 'DISABLED ❌'}")
+            
+            if not hil_enabled:
+                logger.warning(f"⚠️ User requested agent but HIL is disabled")
+                clear_workflow()
+                # Return EXACT message - model must pass through without modification
+                # Use special marker to indicate this is a final response
+                return 'Human Agent support is currently not available'
     except Exception as config_error:
         logger.error(f"❌ Error checking HIL configuration: {config_error}")
         logger.warning(f"⚠️ Proceeding with agent assignment attempt (config check failed)")

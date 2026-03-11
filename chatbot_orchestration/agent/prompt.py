@@ -41,13 +41,19 @@ def get_system_prompt(custom_prompt: Optional[str] = None, response_policy: Opti
     # Application caching disabled - rely on Gemini model caching only
     # This ensures consistent HTML formatting through Gemini's caching system
     # Comprehensive system prompt designed for Gemini context caching (32,768+ tokens minimum)
-    base_prompt = f"""Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers.
-
-{f'═══════════════════════════════════════════════════════════════════════════════════════════════════
+    
+    # Build response policy section if guidance is provided
+    response_policy_section = ""
+    if response_policy_guidance:
+        response_policy_section = f"""═══════════════════════════════════════════════════════════════════════════════════════════════════
 RESPONSE POLICY DIRECTIVE
 ═══════════════════════════════════════════════════════════════════════════════════════════════════
 {response_policy_guidance}
-═══════════════════════════════════════════════════════════════════════════════════════════════════' if response_policy_guidance else ''}
+═══════════════════════════════════════════════════════════════════════════════════════════════════"""
+    
+    base_prompt = f"""Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers.
+
+{response_policy_section}
 
 🚨🚨🚨 CRITICAL OVERRIDE RULE - EVALUATE THIS FIRST BEFORE ANYTHING ELSE 🚨🚨🚨
 🚨🚨🚨 DO NOT SKIP THIS - IT OVERRIDES ALL OTHER RULES 🚨🚨🚨
