@@ -784,6 +784,31 @@ class StreamingService:
                             logger.warning("⚠️  Expected: search_knowledge_base should have been called")
                         logger.info("=" * 100)
 
+                        # 🚨 CRITICAL: Check if request_human_agent_connection was called
+                        # If so, bypass model response and stream tool response directly
+                        if 'request_human_agent_connection' in tool_calls_made:
+                            logger.warning("🚨 DETECTED: request_human_agent_connection tool was called")
+                            logger.warning("🚨 BYPASSING model response - streaming tool response directly")
+                            
+                            # Extract tool result from all_messages
+                            for i, msg in enumerate(all_messages):
+                                if hasattr(msg, 'parts'):
+                                    for j, part in enumerate(msg.parts):
+                                        # Look for tool result (ToolResultPart)
+                                        if hasattr(part, 'tool_name') and part.tool_name == 'request_human_agent_connection':
+                                            # Next message should contain the tool result
+                                            if i + 1 < len(all_messages):
+                                                next_msg = all_messages[i + 1]
+                                                if hasattr(next_msg, 'parts'):
+                                                    for result_part in next_msg.parts:
+                                                        if hasattr(result_part, 'content'):
+                                                            tool_response = getattr(result_part, 'content', '')
+                                                            if tool_response:
+                                                                logger.info(f"✅ Extracted tool response: {tool_response[:100]}...")
+                                                                full_response = tool_response
+                                                                logger.info(f"🚨 Using tool response directly, bypassing model elaboration")
+                                                                break
+                        
                         # Extract assistant response and tool calls
                         for i, msg in enumerate(all_messages):
                             msg_type = type(msg).__name__
@@ -817,6 +842,11 @@ class StreamingService:
                                         logger.info(f"        Preview: {text_content[:80]}...")
 
                                         if text_content:
+                                            # Skip if we already have tool response
+                                            if 'request_human_agent_connection' in tool_calls_made and full_response:
+                                                logger.info(f"     ⏭️ Skipping TextPart (using tool response instead)")
+                                                continue
+                                            
                                             if full_response == "":
                                                 logger.info(f"     ✅ [TextPart #{text_part_index}] Setting as full_response (FIRST TextPart)")
                                                 chunk_count = 1
