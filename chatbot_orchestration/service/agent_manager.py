@@ -32,49 +32,44 @@ class AgentManager:
             self.genai_client = get_genai_client()
 
     async def _fetch_persona_config(self) -> Dict[str, Any]:
-        """Fetch persona configuration from the configuration service."""
+        """Fetch persona configuration from the database at runtime."""
         try:
-            # Fetch from configuration service
-            import httpx
-            import os
+            # Query the database directly for the active persona and its system prompt
+            from shared.sqlalchemy_db import get_db_session
+            from sqlalchemy import text
             
-            # Get configuration service URL from environment or use default
-            config_service_url = os.getenv(
-                'CONFIGURATION_SERVICE_URL',
-                'http://configuration.railway.internal:8080'
-            )
+            logger.info(f"🔍 Fetching active persona from database...")
             
-            logger.info(f"🔍 Fetching persona config from: {config_service_url}")
-            
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(
-                    f"{config_service_url}/api/v1/configuration/chatAgentConfig",
-                    timeout=5.0
-                )
+            async with get_db_session() as db_session:
+                # Query for the active persona configuration
+                query = """
+                    SELECT persona_name, system_prompt 
+                    FROM persona_configurations 
+                    WHERE is_active = true 
+                    LIMIT 1
+                """
+                result = await db_session.execute(text(query))
+                row = result.mappings().first()
                 
-                if response.status_code == 200:
-                    config_data = response.json().get('data', {})
+                if row:
+                    persona_name = row['persona_name']
+                    system_prompt = row['system_prompt'] or ''
                     
-                    # Extract persona information
-                    persona_data = config_data.get('persona', {})
-                    system_prompt = persona_data.get('system_prompt', '')
-                    selected_persona = persona_data.get('selected_persona', 'KnowledgeBot')
-                    
-                    logger.info(f"✅ Fetched persona config: {selected_persona}")
+                    logger.info(f"✅ Fetched active persona from database: {persona_name}")
                     logger.info(f"   System prompt length: {len(system_prompt)} characters")
                     
                     return {
-                        "persona_name": selected_persona,
-                        "persona_description": f"Persona: {selected_persona}",
-                        "system_instructions": system_prompt  # This is the custom prompt from the UI
+                        "persona_name": persona_name,
+                        "persona_description": f"Persona: {persona_name}",
+                        "system_instructions": system_prompt  # This is the custom prompt from the database
                     }
                 else:
-                    logger.warning(f"⚠️ Configuration service returned status {response.status_code}")
+                    logger.warning(f"⚠️ No active persona found in database")
                     # Fall back to default
                     return self._get_default_persona_config()
                     
         except Exception as e:
-            logger.error(f"❌ Failed to fetch persona config from configuration service: {e}")
+            logger.error(f"❌ Failed to fetch persona config from database: {e}")
             # Return fallback persona
             return self._get_default_persona_config()
     
