@@ -942,6 +942,20 @@ class StreamingService:
 
             # ================================================================
             # ================================================================
+            # FALLBACK RESPONSE: If model couldn't answer even after tool calls
+            # ================================================================
+            # Check if response is empty or indicates model couldn't find information
+            if not full_response or not full_response.strip():
+                logger.warning("⚠️ Model returned empty response after tool calls")
+                logger.warning(f"   Tool calls made: {tool_call_count}")
+                logger.warning(f"   Response length: {len(full_response)} chars")
+                
+                # Use fallback response
+                full_response = "I don't have any information on this topic."
+                logger.info(f"✅ Using fallback response: {full_response}")
+            
+            # ================================================================
+            # ================================================================
             # STREAM THE RESPONSE IN CHUNKS (after enforcement check)
             # ================================================================
             # Now that enforcement has been applied (if needed), stream the response in chunks
