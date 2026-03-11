@@ -329,12 +329,12 @@ class StreamingService:
                     config = await dao.get_chat_agent_config()
                     
                     hil_enabled = config.get('hil_enabled', False)
-                    hil_disabled_message = config.get('hil_disabled_message', 'I apologize, but human agent support is currently unavailable.')
                     
                     logger.info(f"📋 HIL Status: {'ENABLED ✅' if hil_enabled else 'DISABLED ❌'}")
                     
                     if not hil_enabled:
                         logger.warning(f"⚠️ User requested agent but HIL is disabled")
+                        hil_disabled_message = 'Human Agent support is currently disabled'
                         logger.info(f"📝 Returning standard reply: {hil_disabled_message}")
                         
                         # Save user message to database
