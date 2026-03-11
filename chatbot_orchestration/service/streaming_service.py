@@ -199,8 +199,36 @@ class StreamingService:
             pydantic_messages = self._convert_db_messages_to_pydantic_ai(chat_history)
             logger.info(f"✅ Converted {len(pydantic_messages)} messages to Pydantic AI format")
 
-            # Note: Pydantic AI handles system_prompt automatically when passed during Agent creation
-            # No need to manually inject it into message history
+            # 🚨 PRE-FLIGHT SYSTEM PROMPT INJECTION 🚨
+            # Fix for Pydantic AI gotcha: when message_history is provided, system_prompt is discarded
+            # Solution: Prepend system prompt to message_history so it's included in model context
+            if pydantic_messages:
+                logger.info("=" * 100)
+                logger.info("🚨 PRE-FLIGHT SYSTEM PROMPT INJECTION (Pydantic AI Gotcha Fix)")
+                logger.info("=" * 100)
+                logger.info("Issue: Pydantic AI discards Agent.system_prompt when message_history exists")
+                logger.info("Solution: Prepend system prompt as first message in history")
+                logger.info("=" * 100)
+
+                # Get system prompt from agent manager cache
+                system_prompt_text = agent_manager.get_cached_system_prompt(session_id)
+                
+                if system_prompt_text:
+                    logger.info(f"✅ Using agent's system prompt: {len(system_prompt_text)} characters")
+                    logger.info(f"   Preview: {system_prompt_text[:150]}...")
+
+                    # Create SystemPromptPart message
+                    system_prompt_msg = ModelRequest(parts=[SystemPromptPart(content=system_prompt_text)])
+
+                    # Prepend to message history (CRITICAL: must be first message)
+                    pydantic_messages.insert(0, system_prompt_msg)
+                    logger.info(f"✅ System prompt prepended to message_history")
+                    logger.info(f"   Now message_history has {len(pydantic_messages)} messages (including system prompt)")
+                    logger.info(f"   Message 0: System Prompt")
+                    logger.info(f"   Message 1+: Conversation history")
+                else:
+                    logger.warning(f"⚠️ System prompt not found in cache for session {session_id}")
+                logger.info("=" * 100)
 
             # 🔍 DEBUG: Log actual message history content
             if pydantic_messages:

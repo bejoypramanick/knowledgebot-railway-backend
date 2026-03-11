@@ -24,6 +24,7 @@ class AgentManager:
     def __init__(self):
         self.genai_client = None
         self.agent_cache: Dict[str, Agent] = {}  # Cache agents by session_id
+        self.system_prompt_cache: Dict[str, str] = {}  # Cache system prompts by session_id
 
     async def initialize(self):
         """Initialize the agent manager."""
@@ -110,6 +111,10 @@ class AgentManager:
         """Get cached agent for a session if it exists."""
         return self.agent_cache.get(session_id)
 
+    def get_cached_system_prompt(self, session_id: str) -> Optional[str]:
+        """Get cached system prompt for a session if it exists."""
+        return self.system_prompt_cache.get(session_id)
+
     def clear_agent_cache(self, session_id: str = None):
         """Clear cached agent for a session or all sessions.
         
@@ -120,11 +125,15 @@ class AgentManager:
             if session_id in self.agent_cache:
                 del self.agent_cache[session_id]
                 logger.info(f"🗑️ Cleared cached agent for session: {session_id}")
+            if session_id in self.system_prompt_cache:
+                del self.system_prompt_cache[session_id]
+                logger.info(f"🗑️ Cleared cached system prompt for session: {session_id}")
         else:
-            # Clear all cached agents
+            # Clear all cached agents and prompts
             cache_size = len(self.agent_cache)
             self.agent_cache.clear()
-            logger.info(f"🗑️ Cleared all cached agents ({cache_size} sessions)")
+            self.system_prompt_cache.clear()
+            logger.info(f"🗑️ Cleared all cached agents and prompts ({cache_size} sessions)")
 
     async def create_agent(self, session_id: str, user_email: str = "anonymous@example.com", force_new: bool = False) -> Agent:
         """Create or retrieve cached agent instance with PydanticAI's built-in caching.
@@ -208,7 +217,9 @@ class AgentManager:
 
         # Cache the agent instance for this session
         self.agent_cache[session_id] = agent
+        self.system_prompt_cache[session_id] = system_prompt
         logger.info(f"✅ Agent cached for session: {session_id}")
+        logger.info(f"✅ System prompt cached for session: {session_id}")
 
         logger.info("="*80)
         logger.info(f"✅ CREATE_AGENT COMPLETED - Session: {session_id}")
