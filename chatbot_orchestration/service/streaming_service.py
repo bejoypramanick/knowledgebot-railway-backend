@@ -625,11 +625,11 @@ class StreamingService:
                 from pydantic_ai.models.google import GoogleModelSettings
 
                 # Get response_policy (temperature) from agent manager
-                response_policy = 0.5  # Default balanced
+                response_policy = 0.3  # Default to strict but not completely rigid
                 try:
                     # Fetch persona config to get response_policy
                     persona_config = await agent_manager._fetch_persona_config()
-                    response_policy = persona_config.get('response_policy', 0.5)
+                    response_policy = persona_config.get('response_policy', 0.3)
                     logger.info(f"🌡️ Response Policy (Temperature): {response_policy} (0=Strict, 1=Flexi)")
                 except Exception as e:
                     logger.warning(f"⚠️ Could not fetch response_policy: {e}, using default 0.5")

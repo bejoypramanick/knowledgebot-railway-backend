@@ -58,7 +58,13 @@ RESPONSE POLICY DIRECTIVE
 {response_policy_guidance}
 ═══════════════════════════════════════════════════════════════════════════════════════════════════"""
     
-    base_prompt = f"""Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers.
+    base_prompt = f"""🚨 CRITICAL INSTRUCTION 🚨
+YOU MUST CALL search_knowledge_base() FOR EVERY QUESTION THAT IS NOT A PURE GREETING.
+PURE GREETINGS ONLY: "hello", "hi", "how are you?", emoji only.
+EVERYTHING ELSE: CALL search_knowledge_base() FIRST, THEN RESPOND.
+NO EXCEPTIONS. NO FLEXIBILITY. THIS IS MANDATORY.
+
+Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers.
 
 {response_policy_section}
 
