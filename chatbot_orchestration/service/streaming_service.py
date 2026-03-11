@@ -334,7 +334,7 @@ class StreamingService:
                     
                     if not hil_enabled:
                         logger.warning(f"⚠️ User requested agent but HIL is disabled")
-                        hil_disabled_message = 'Human Agent support is currently disabled'
+                        hil_disabled_message = 'Human Agent support is currently not available'
                         logger.info(f"📝 Returning standard reply: {hil_disabled_message}")
                         
                         # Save user message to database
@@ -962,12 +962,12 @@ class StreamingService:
                 logger.info(f"🔍 DEBUG: full_response preview = {full_response[:100]}...")
 
                 # 🚨 CRITICAL: Filter out elaboration from tool responses
-                # If response contains "Human Agent support is currently disabled" with elaboration,
+                # If response contains "Human Agent support is currently not available" with elaboration,
                 # extract ONLY the core message
-                if "Human Agent support is currently disabled" in full_response:
-                    logger.warning("🚨 Detected HIL disabled message with elaboration - filtering...")
+                if "Human Agent support is currently not available" in full_response:
+                    logger.warning("🚨 Detected HIL unavailable message with elaboration - filtering...")
                     # Extract only the exact message, remove all elaboration
-                    full_response = "Human Agent support is currently disabled"
+                    full_response = "Human Agent support is currently not available"
                     logger.info(f"✅ Filtered response to exact message: {full_response}")
 
                 # Break response into chunks for streaming (500 chars per chunk for smooth experience)
