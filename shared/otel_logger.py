@@ -197,9 +197,18 @@ class OpenTelemetryLogger:
             'method_name': file_info['method_name']
         })
         
-        # Remove otel fields that might be set by LoggingInstrumentor to avoid KeyError
-        extra.pop('otelTraceID', None)
-        extra.pop('otelSpanID', None)
+        # Get current span and extract trace/span IDs
+        span = trace.get_current_span()
+        if span and span.is_recording():
+            span_context = span.get_span_context()
+            trace_id = format(span_context.trace_id, '032x') if span_context.trace_id else '0'
+            span_id = format(span_context.span_id, '016x') if span_context.span_id else '0'
+            extra['otelTraceID'] = trace_id
+            extra['otelSpanID'] = span_id
+        else:
+            # No active span - use placeholder values
+            extra['otelTraceID'] = '0'
+            extra['otelSpanID'] = '0'
 
         # Extract reserved LogRecord attributes from kwargs (these can't go in extra dict)
         exc_info = kwargs.pop('exc_info', None)
@@ -215,13 +224,10 @@ class OpenTelemetryLogger:
         if stack_info is not None:
             log_kwargs['stack_info'] = stack_info
 
-        # Standard logger automatically includes otelTraceID and otelSpanID
-        # from shared/telemetry.py LoggingInstrumentor
-        # The LoggingInstrumentor sets these fields, so we don't need to set them again
+        # Log with all context
         self.logger.log(level, full_message, **log_kwargs)
 
         # Add span attributes if span exists
-        span = trace.get_current_span()
         if span and span.is_recording():
             span_attributes = {
                 "log.level": logging.getLevelName(level),

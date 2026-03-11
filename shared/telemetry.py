@@ -76,11 +76,22 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # This catches ALL log records across ALL loggers
     class OTelFieldFilter(logging.Filter):
         def filter(self, record):
-            # Ensure these fields always exist, even if LoggingInstrumentor didn't set them
-            if not hasattr(record, 'otelTraceID'):
+            # Get current span to extract trace and span IDs
+            from opentelemetry import trace
+            span = trace.get_current_span()
+            
+            if span and span.is_recording():
+                span_context = span.get_span_context()
+                # Format trace ID and span ID as hex strings
+                trace_id = format(span_context.trace_id, '032x') if span_context.trace_id else '0'
+                span_id = format(span_context.span_id, '016x') if span_context.span_id else '0'
+                record.otelTraceID = trace_id
+                record.otelSpanID = span_id
+            else:
+                # No active span - use placeholder values
                 record.otelTraceID = '0'
-            if not hasattr(record, 'otelSpanID'):
                 record.otelSpanID = '0'
+            
             # Always read from context variables to ensure we have the latest values
             record.otelUserEmail = user_email_ctx_var.get() or ''
             record.otelRequestMapping = request_mapping_ctx_var.get() or ''
@@ -96,8 +107,8 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # Add the filter to root logger BEFORE any other setup
     root_logger.addFilter(global_filter)
     
-    # Format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] [Email] [RequestMapping] - Message
-    log_format = f"%(asctime)s [%(levelname)s] [{service_name}] [%(otelTraceID)s] [%(otelSpanID)s] [%(otelUserEmail)s] [%(otelRequestMapping)s] - %(message)s"
+    # Format: [Timestamp] [Level] [Service-Name] [TraceID] [SpanID] [Email] [RequestMapping] [File:Line] - Message
+    log_format = f"%(asctime)s [%(levelname)s] [{service_name}] [%(otelTraceID)s] [%(otelSpanID)s] [%(otelUserEmail)s] [%(otelRequestMapping)s] [%(filename)s:%(lineno)d] - %(message)s"
     formatter = SafeOTelFormatter(log_format)
     
     # Remove existing handlers to avoid duplicate logs
@@ -114,11 +125,21 @@ def setup_telemetry(service_name: str, log_level=logging.INFO, enable_span_expor
     # Override emit to flush immediately after each log (ensures real-time output during streaming)
     original_emit = stream_handler.emit
     def emit_with_flush(record):
-        # Ensure fields exist right before emit as final safety check
-        if not hasattr(record, 'otelTraceID'):
+        # Get current span to extract trace and span IDs
+        span = trace.get_current_span()
+        
+        if span and span.is_recording():
+            span_context = span.get_span_context()
+            # Format trace ID and span ID as hex strings
+            trace_id = format(span_context.trace_id, '032x') if span_context.trace_id else '0'
+            span_id = format(span_context.span_id, '016x') if span_context.span_id else '0'
+            record.otelTraceID = trace_id
+            record.otelSpanID = span_id
+        else:
+            # No active span - use placeholder values
             record.otelTraceID = '0'
-        if not hasattr(record, 'otelSpanID'):
             record.otelSpanID = '0'
+        
         # Always read from context variables to ensure we have the latest values
         record.otelUserEmail = user_email_ctx_var.get() or ''
         record.otelRequestMapping = request_mapping_ctx_var.get() or ''
