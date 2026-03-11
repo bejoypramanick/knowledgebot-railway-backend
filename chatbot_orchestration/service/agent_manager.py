@@ -61,17 +61,17 @@ class AgentManager:
                 policy_result = await db_session.execute(text(policy_query))
                 policy_row = policy_result.mappings().first()
                 
-                # Parse response policy (convert from string to float, default to 0.3 - strict but not rigid)
-                response_policy = 0.3
+                # Parse response policy (convert from string to float, default to 0.5)
+                response_policy = 0.5
                 if policy_row:
                     try:
                         policy_value = float(policy_row['setting_value'])
                         response_policy = policy_value
                         logger.info(f"✅ Fetched response_policy from database: {response_policy}")
                     except (ValueError, TypeError):
-                        logger.warning(f"⚠️ Could not parse response_policy value: {policy_row['setting_value']}, using default 0.3")
+                        logger.warning(f"⚠️ Could not parse response_policy value: {policy_row['setting_value']}, using default 0.5")
                 else:
-                    logger.info(f"ℹ️ No response_policy found in database, using default: 0.3")
+                    logger.info(f"ℹ️ No response_policy found in database, using default: 0.5")
                 
                 if row:
                     persona_name = row['persona_name']
