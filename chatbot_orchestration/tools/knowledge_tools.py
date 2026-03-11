@@ -656,12 +656,21 @@ async def request_human_agent_connection(
         from sqlalchemy import text
         
         async with get_db_session() as db_session:
-            check_query = "SELECT assigned_agent_email FROM chat_sessions WHERE id = :id LIMIT 1"
+            # Query session_assignments table to check for existing assignment
+            # Join through user_role_mapping and users to get agent email
+            check_query = """
+                SELECT u.email as agent_email
+                FROM session_assignments sa
+                JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                JOIN users u ON urm.user_id = u.id
+                WHERE sa.session_id = :id AND sa.status = 'active'
+                LIMIT 1
+            """
             result = await db_session.execute(text(check_query), {"id": session_numeric_id})
             row = result.mappings().first()
             
-            if row and row.get('assigned_agent_email'):
-                assigned_agent = row['assigned_agent_email']
+            if row and row.get('agent_email'):
+                assigned_agent = row['agent_email']
                 logger.info(f"✅ Agent already assigned: {assigned_agent} - skipping duplicate assignment")
                 clear_workflow()
                 return f"Connected to human agent\n"

@@ -940,7 +940,6 @@ class StreamingService:
                     logger.warning("🚨 Detected HIL unavailable message with elaboration - filtering...")
                     # Extract only the exact message, remove all elaboration
                     # Look for the exact phrase and extract just that
-                    import re
                     match = re.search(r'Human Agent support is currently not available[!.]?', full_response, re.IGNORECASE)
                     if match:
                         full_response = match.group(0)
