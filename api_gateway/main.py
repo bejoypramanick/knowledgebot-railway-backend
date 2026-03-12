@@ -201,6 +201,7 @@ app.add_middleware(
         "/api/v1/gateway/auth/logout",   # Logout endpoint
         "/api/v1/gateway/chatbot/chat/stream",  # Public chat widget endpoint
         "/api/v1/gateway/widget",  # Public widget HTML endpoint
+        "/api/v1/gateway/configuration/widgetConfig",  # Public widget configuration endpoint
         "/chat",  # Confusion detector endpoint
     ]
 )
