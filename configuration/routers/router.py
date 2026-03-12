@@ -473,40 +473,78 @@ async def update_widget_config(
 
 @router.post("/widget/embed-script")
 async def generate_widget_embed_script(request: Request):
-    """Generate widget embed script based on configuration"""
+    """Generate widget embed script that dynamically fetches configuration"""
     try:
         body = await request.json()
         embed_type = body.get("embedType", "bubble")
-        theme = body.get("theme", "light")
-        primary_color = body.get("primaryColor", "#3b82f6")
-        position = body.get("position", "bottom-right")
-        widget_url = body.get("widgetUrl", "https://your-widget-url.com")
+        base_url = body.get("baseUrl", "https://your-widget-url.com")
 
         if embed_type == "iframe":
+            # For iframe, generate a simple embed
             script = f'''<!-- Knowledgebot Widget - Iframe Embed -->
 <iframe
-    src="{widget_url}"
-    style="position: fixed; {position.replace('-', ': 20px; ')}; width: 400px; height: 600px; border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 9999;"
+    src="{base_url}/widget?widgetMode=true"
+    style="width: 100%; height: 600px; border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"
     title="Chat Widget"
+    allow="microphone"
+    allowfullscreen
 ></iframe>'''
         else:
-            # Bubble embed (default)
-            script = f'''<!-- Knowledgebot Widget - Bubble Embed -->
+            # Bubble embed - dynamic script that fetches config from API
+            script = f'''<!-- Knowledgebot Widget - Bubble Embed (Dynamic) -->
 <script>
 (function() {{
-    var w = window;
-    var d = document;
-    var s = d.createElement('script');
-    s.src = '{widget_url}/widget.js';
-    s.async = true;
-    s.onload = function() {{
-        w.KnowledgeBot.init({{
-            theme: '{theme}',
-            primaryColor: '{primary_color}',
-            position: '{position}'
-        }});
-    }};
-    d.head.appendChild(s);
+    const baseUrl = '{base_url}';
+    const apiUrl = baseUrl + '/api/v1/gateway/configuration/widgetConfig';
+    
+    // Fetch latest widget configuration
+    async function loadWidgetConfig() {{
+        try {{
+            const response = await fetch(apiUrl, {{
+                method: 'GET',
+                credentials: 'include',
+                headers: {{
+                    'Accept': 'application/json'
+                }}
+            }});
+            
+            if (!response.ok) {{
+                console.warn('Failed to fetch widget config, using defaults');
+                return null;
+            }}
+            
+            const data = await response.json();
+            return data.data || null;
+        }} catch (error) {{
+            console.warn('Error fetching widget config:', error);
+            return null;
+        }}
+    }}
+    
+    // Initialize widget with fetched config
+    async function initWidget() {{
+        const config = await loadWidgetConfig();
+        
+        // Store config in localStorage for the widget to use
+        if (config) {{
+            localStorage.setItem('widgetConfig', JSON.stringify(config));
+            // Dispatch event to notify widget of config update
+            window.dispatchEvent(new CustomEvent('widget-config-updated', {{ detail: config }}));
+        }}
+        
+        // Load the widget script
+        const script = document.createElement('script');
+        script.src = baseUrl + '/widget-script.js';
+        script.async = true;
+        document.head.appendChild(script);
+    }}
+    
+    // Initialize when DOM is ready
+    if (document.readyState === 'loading') {{
+        document.addEventListener('DOMContentLoaded', initWidget);
+    }} else {{
+        initWidget();
+    }}
 }})();
 </script>'''
 
