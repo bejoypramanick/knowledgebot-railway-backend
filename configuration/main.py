@@ -188,8 +188,8 @@ app.add_middleware(
 @app.middleware("http")
 async def check_database_ready(request: Request, call_next):
     """Check if database is ready before processing requests."""
-    # Skip database check for health endpoint
-    if request.url.path == "/health":
+    # Skip database check for health endpoint and public widget config endpoint
+    if request.url.path == "/health" or request.url.path == "/api/v1/configuration/widgetConfig":
         response = await call_next(request)
     else:
         # Check if database is ready for other endpoints
