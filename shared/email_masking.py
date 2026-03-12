@@ -1,6 +1,6 @@
 """
 Email Masking Utility
-Masks email addresses to show only first letter and domain
+Masks email addresses to show only first letter and domain for display purposes
 """
 
 def mask_email(email: str) -> str:
@@ -38,7 +38,7 @@ def mask_email(email: str) -> str:
 
 def mask_emails_list(emails: list) -> list:
     """
-    Mask a list of email addresses.
+    Mask a list of email addresses for display.
     
     Args:
         emails: List of email addresses
@@ -52,34 +52,31 @@ def mask_emails_list(emails: list) -> list:
     return [mask_email(email) for email in emails]
 
 
-def is_masked_email(email: str) -> bool:
+def create_masked_email_map(emails: list) -> dict:
     """
-    Check if an email is masked (contains *** pattern).
+    Create a mapping of masked emails to original emails.
+    This allows the frontend to work with masked emails while preserving original data.
     
     Args:
-        email: The email address to check
+        emails: List of original email addresses
         
     Returns:
-        True if email is masked, False otherwise
-    """
-    if not email or not isinstance(email, str):
-        return False
-    
-    return '***' in email
-
-
-def filter_unmasked_emails(emails: list) -> list:
-    """
-    Filter out masked emails from a list, keeping only unmasked (new) emails.
-    This is used when saving to prevent storing masked emails.
-    
-    Args:
-        emails: List of email addresses (may contain masked and unmasked)
+        Dictionary mapping masked email -> original email
         
-    Returns:
-        List of only unmasked email addresses
+    Example:
+        Input: ['john@example.com', 'jane@example.com']
+        Output: {
+            'j***@example.com': 'john@example.com',
+            'j***@example.com': 'jane@example.com'  # Note: collision possible
+        }
     """
     if not isinstance(emails, list):
-        return []
+        return {}
     
-    return [email for email in emails if email and not is_masked_email(email)]
+    email_map = {}
+    for email in emails:
+        if email:
+            masked = mask_email(email)
+            email_map[masked] = email
+    
+    return email_map
