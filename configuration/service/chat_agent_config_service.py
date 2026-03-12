@@ -5,6 +5,7 @@ Provides business logic layer for chat agent configuration operations
 from typing import Any, Dict, List, Optional
 
 from shared.otel_logger import get_otel_logger
+from shared.email_masking import mask_emails_list, filter_unmasked_emails
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
 
 logger = get_otel_logger("chat_agent_config_service", "configuration")
@@ -85,8 +86,8 @@ class ChatAgentConfigService:
 
             # Build response
             response = {
-                "admin_emails": admin_emails_list,
-                "human_agents": human_agents_list,
+                "admin_emails": mask_emails_list(admin_emails_list),
+                "human_agents": mask_emails_list(human_agents_list),
                 "security": security,
                 "llm_tokens": llm_tokens,
                 "persona": persona_config,
@@ -152,16 +153,30 @@ class ChatAgentConfigService:
                         )
             
             # Save admin emails if provided
+            # Filter out masked emails - only save new unmasked emails
             if 'admin_emails' in config_data:
                 admin_emails = config_data['admin_emails']
                 if isinstance(admin_emails, list):
-                    await self._chatAgent_dao.sync_admin_emails(admin_emails)
+                    # Only save unmasked emails (new entries)
+                    unmasked_emails = filter_unmasked_emails(admin_emails)
+                    if unmasked_emails:
+                        logger.info(f"💾 Saving admin emails: {unmasked_emails}")
+                        await self._chatAgent_dao.sync_admin_emails(unmasked_emails)
+                    else:
+                        logger.info("ℹ️ No new admin emails to save (all were masked)")
             
             # Save human agents if provided
+            # Filter out masked emails - only save new unmasked emails
             if 'human_agents' in config_data:
                 human_agents = config_data['human_agents']
                 if isinstance(human_agents, list):
-                    await self._chatAgent_dao.sync_human_agent_emails(human_agents)
+                    # Only save unmasked emails (new entries)
+                    unmasked_agents = filter_unmasked_emails(human_agents)
+                    if unmasked_agents:
+                        logger.info(f"💾 Saving human agents: {unmasked_agents}")
+                        await self._chatAgent_dao.sync_human_agent_emails(unmasked_agents)
+                    else:
+                        logger.info("ℹ️ No new human agents to save (all were masked)")
             
             # Update LLM tokens if provided
             if 'llm_tokens' in config_data:
@@ -291,17 +306,19 @@ class ChatAgentConfigService:
             raise
 
     async def get_human_agents(self) -> List[str]:
-        """Get human agents list"""
+        """Get human agents list with masked emails"""
         try:
-            return await self._chatAgent_dao.get_human_agents()
+            agents = await self._chatAgent_dao.get_human_agents()
+            return mask_emails_list(agents)
         except Exception as e:
             logger.error(f"Error getting human agents: {e}")
             raise
 
     async def get_admin_emails(self) -> List[str]:
-        """Get admin emails list"""
+        """Get admin emails list with masked emails"""
         try:
-            return await self._chatAgent_dao.get_admins()
+            emails = await self._chatAgent_dao.get_admins()
+            return mask_emails_list(emails)
         except Exception as e:
             logger.error(f"Error getting admin emails: {e}")
             raise
