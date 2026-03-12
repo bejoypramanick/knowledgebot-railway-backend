@@ -262,8 +262,16 @@ async def chat_confusion_detector(request: Request):
 # Include Routers
 app.include_router(auth_router, prefix="/api/v1/gateway")  # Auth endpoints at gateway prefix
 app.include_router(api_router, prefix="/api/v1/gateway")  
+
+# Also include routers at /api/v1 prefix for backward compatibility
+# This allows requests without /gateway prefix to still work
+app.include_router(auth_router, prefix="/api/v1")
+app.include_router(api_router, prefix="/api/v1")
+
 logger.info(f"🔧 Auth router included at /api/v1/gateway prefix")
 logger.info(f"🔧 API Gateway router included with /api/v1/gateway prefix")
+logger.info(f"🔧 Auth router also included at /api/v1 prefix (backward compatibility)")
+logger.info(f"🔧 API Gateway router also included at /api/v1 prefix (backward compatibility)")
 logger.info("📋 Note: Service endpoints will be proxied via HTTP calls to separate containers") 
 
 # Add app-level endpoints
