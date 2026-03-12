@@ -490,63 +490,10 @@ async def generate_widget_embed_script(request: Request):
     allowfullscreen
 ></iframe>'''
         else:
-            # Bubble embed - dynamic script that fetches config from API
-            script = f'''<!-- Knowledgebot Widget - Bubble Embed (Dynamic) -->
-<script>
-(function() {{
-    const baseUrl = '{base_url}';
-    const apiUrl = baseUrl + '/api/v1/gateway/configuration/widgetConfig';
-    
-    // Fetch latest widget configuration
-    async function loadWidgetConfig() {{
-        try {{
-            const response = await fetch(apiUrl, {{
-                method: 'GET',
-                credentials: 'include',
-                headers: {{
-                    'Accept': 'application/json'
-                }}
-            }});
-            
-            if (!response.ok) {{
-                console.warn('Failed to fetch widget config, using defaults');
-                return null;
-            }}
-            
-            const data = await response.json();
-            return data.data || null;
-        }} catch (error) {{
-            console.warn('Error fetching widget config:', error);
-            return null;
-        }}
-    }}
-    
-    // Initialize widget with fetched config
-    async function initWidget() {{
-        const config = await loadWidgetConfig();
-        
-        // Store config in localStorage for the widget to use
-        if (config) {{
-            localStorage.setItem('widgetConfig', JSON.stringify(config));
-            // Dispatch event to notify widget of config update
-            window.dispatchEvent(new CustomEvent('widget-config-updated', {{ detail: config }}));
-        }}
-        
-        // Load the widget script
-        const script = document.createElement('script');
-        script.src = baseUrl + '/widget-script.js';
-        script.async = true;
-        document.head.appendChild(script);
-    }}
-    
-    // Initialize when DOM is ready
-    if (document.readyState === 'loading') {{
-        document.addEventListener('DOMContentLoaded', initWidget);
-    }} else {{
-        initWidget();
-    }}
-}})();
-</script>'''
+            # Bubble embed - reference the global embed script
+            script = f'''<!-- Knowledgebot Widget - Bubble Embed -->
+<!-- This script loads the chat bubble widget dynamically -->
+<script src="{base_url}/widget-embed.js"></script>'''
 
         return {
             "success": True,
