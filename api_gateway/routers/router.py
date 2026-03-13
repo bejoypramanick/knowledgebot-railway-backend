@@ -648,6 +648,39 @@ async def get_widget_config(request: Request):
 
 
 # =================================
+# PUBLIC SECURITY SETTINGS ENDPOINT (No Authentication Required)
+# =================================
+
+@router.get("/configuration/data/security-settings")
+async def get_security_settings(request: Request):
+    """
+    Proxy endpoint for security settings (public, no auth required).
+    Used by chat widget to get response policies and settings.
+    """
+    try:
+        settings = get_settings()
+        config_service_url = settings.configuration_service_url
+        full_url = f"{config_service_url}/api/v1/configuration/data/security-settings"
+
+        logger.info(f"🔄 Proxying security settings request to: {full_url}")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(full_url)
+
+            if response.status_code == 200:
+                settings_data = response.json()
+                logger.info(f"✓ Security settings loaded: {settings_data}")
+                return JSONResponse(content=settings_data, status_code=200)
+            else:
+                logger.error(f"❌ Config service returned {response.status_code}: {response.text[:200]}")
+                raise HTTPException(status_code=response.status_code, detail="Failed to load security settings")
+
+    except Exception as e:
+        logger.error(f"❌ Error proxying security settings: {e}")
+        raise HTTPException(status_code=500, detail=f"Error loading security settings: {str(e)}")
+
+
+# =================================
 # PUBLIC WIDGET ENDPOINT (No Authentication Required)
 # =================================
 
