@@ -209,17 +209,8 @@ app.add_middleware(
 
 app.add_middleware(
     CORSMiddleware,
-    # Allow specific origins for credential requests (chat window, admin)
-    # Also allow wildcard for public endpoints without credentials
-    allow_origins=[
-        "https://digibot-dev.globistaan.com",
-        "https://digibot.globistaan.com",
-        "https://dailogue.globistaan.com",  # Production frontend/chat window
-        "https://dailogue-bubble.globistaan.com",  # Production bubble widget
-        "http://localhost:3000",
-        "http://localhost:5173",
-    ],
-    allow_credentials=True,  # Allow cookies/credentials to be sent
+    allow_origins=["*"],  # Allow all origins - widget is embedded on any customer website
+    allow_credentials=False,  # Don't allow credentials with wildcard origin
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
     allow_headers=["*"],
     expose_headers=["*"],
