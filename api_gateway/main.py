@@ -202,6 +202,8 @@ app.add_middleware(
         "/api/v1/gateway/chatbot/chat/stream",  # Public chat widget endpoint
         "/api/v1/gateway/widget",  # Public widget HTML endpoint
         "/api/v1/gateway/configuration/widgetConfig",  # Public widget configuration endpoint
+        "/api/v1/gateway/configuration/data/security-settings",  # Public security settings for chat window
+        "/api/v1/gateway/configuration/chatAgentConfig",  # Public chatbot configuration for chat window
         "/chat",  # Confusion detector endpoint
     ]
 )
