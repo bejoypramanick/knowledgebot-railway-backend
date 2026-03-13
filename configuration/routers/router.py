@@ -345,45 +345,26 @@ async def get_admin_emails():
 
 @router.get("/widgetConfig")
 async def get_widget_config():
-    """Get widget configuration - returns default config on any error"""
-    # Default widget configuration
-    default_config = {
-        "display_name": "GLOBISTAAN",
-        "initial_message": "Hi! What can I help you with?",
-        "auto_show_duration": 4,
-        "keep_showing_suggested": True,
-        "theme": "light",
-        "primary_color": "#3b82f6",
-        "use_primary_for_header": False,
-        "chat_bubble_color": "#f3f4f6",
-        "align_bubble": "left",
-        "display_chatbot": True,
-        "profile_picture_url": "",
-        "chat_icon_url": "",
-        "profile_picture_filename": "",
-        "chat_icon_filename": "",
-        "profile_zoom": 1,
-        "chat_icon_zoom": 1,
-        "profile_position": {"x": 0, "y": 0},
-        "chat_icon_position": {"x": 0, "y": 0},
-        "suggested_messages": []
-    }
-    
+    """Get widget configuration - fails on error (no fallback)"""
     try:
         config = await config_service.get_widget_config()
-        
-        # If no config exists, return default configuration
+
+        # If no config exists, raise error instead of using default
         if not config:
-            logger.info("🔧 Returning default widget configuration (no data in database)")
-            return {"success": True, "data": default_config}
-        
+            logger.error("❌ No widget configuration found in database")
+            raise HTTPException(status_code=404, detail="Widget configuration not found")
+
+        logger.info(f"✓ Widget config retrieved: {config.get('display_name', 'Unknown')}")
         return {"success": True, "data": config}
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
-        logger.error(f"⚠️ Error getting widget config, returning default: {e}")
+        logger.error(f"❌ Error getting widget config: {e}")
         import traceback
-        logger.error(f"⚠️ Traceback: {traceback.format_exc()}")
-        # Return default config on any error instead of raising 500
-        return {"success": True, "data": default_config}
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        # Fail explicitly with error details
+        raise HTTPException(status_code=500, detail=f"Failed to fetch widget configuration: {str(e)}")
 
 @router.post("/widgetConfig")
 async def update_widget_config(
