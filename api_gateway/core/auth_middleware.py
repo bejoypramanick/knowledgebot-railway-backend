@@ -45,7 +45,7 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/gateway/chatbot/chat/stream",  # Anonymous chat for website visitors
             "/api/v1/gateway/widget",  # Widget HTML page for iframe embedding
             "/api/v1/gateway/configuration/data/security-settings",  # Public security settings for chat window
-            "/api/v1/gateway/configuration/chatAgentConfig",  # Public chatbot configuration for chat window
+            "/api/v1/gateway/configuration/widgetConfig",  # Public widget configuration for chat window
             # Customer session endpoints (anonymous customers)
             "/api/v1/gateway/configuration/admin/chat-sessions/end-customer",  # Customer ending their session
             "/api/v1/gateway/configuration/customer/sessions/set-current",  # Customer setting current session
