@@ -209,8 +209,12 @@ app.add_middleware(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins - widget is embedded on any customer website
-    allow_credentials=False,  # Don't allow credentials with wildcard origin
+    allow_origins=[
+        "https://dailogue.globistaan.com",
+        "https://dailogue-bubble.globistaan.com",
+        "*"  # Also allow all origins for embedded widget on customer sites
+    ],
+    allow_credentials=True,  # Allow credentials for authenticated requests
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
     allow_headers=["*"],
     expose_headers=["*"],
