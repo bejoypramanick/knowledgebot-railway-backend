@@ -657,6 +657,100 @@ async def get_widget_config(request: Request):
 
 
 # =================================
+# ADMIN WIDGET CONFIGURATION ENDPOINT (Authentication Required)
+# =================================
+
+@router.get("/configuration/admin/widgetConfig")
+async def get_admin_widget_config(request: Request):
+    """
+    Admin endpoint for widget configuration.
+    Used by admin dashboard to manage chat settings.
+    Requires authentication - allows credentials.
+    """
+    try:
+        # User is already authenticated by SessionAuthMiddleware
+        settings = get_settings()
+        config_service_url = settings.configuration_service_url
+        full_url = f"{config_service_url}/api/v1/configuration/widgetConfig"
+
+        logger.info(f"🔄 Proxying admin widget config request to: {full_url}")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(full_url)
+
+            if response.status_code == 200:
+                config_data = response.json()
+                logger.info(f"✓ Admin widget config loaded: display_name={config_data.get('display_name')}")
+                # Return with specific origin and credentials allowed
+                origin = request.headers.get('origin', '*')
+                return JSONResponse(
+                    content=config_data,
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": origin,
+                        "Access-Control-Allow-Methods": "GET, OPTIONS",
+                        "Access-Control-Allow-Headers": "*",
+                        "Access-Control-Allow-Credentials": "true",
+                    }
+                )
+            else:
+                logger.error(f"❌ Config service returned {response.status_code}: {response.text[:200]}")
+                raise HTTPException(status_code=response.status_code, detail="Failed to load widget configuration")
+
+    except Exception as e:
+        logger.error(f"❌ Error proxying admin widget config: {e}")
+        raise HTTPException(status_code=500, detail=f"Error loading widget configuration: {str(e)}")
+
+
+@router.post("/configuration/admin/widgetConfig")
+async def save_admin_widget_config(request: Request):
+    """
+    Admin endpoint for saving widget configuration.
+    Requires authentication - allows credentials.
+    """
+    try:
+        # User is already authenticated by SessionAuthMiddleware
+        settings = get_settings()
+        config_service_url = settings.configuration_service_url
+        full_url = f"{config_service_url}/api/v1/configuration/widgetConfig"
+
+        # Get request body
+        body = await request.body()
+
+        logger.info(f"🔄 Proxying admin widget config save request to: {full_url}")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                full_url,
+                content=body,
+                headers={"Content-Type": "application/json"}
+            )
+
+            if response.status_code in [200, 201]:
+                config_data = response.json()
+                logger.info(f"✓ Admin widget config saved")
+                # Return with specific origin and credentials allowed
+                origin = request.headers.get('origin', '*')
+                return JSONResponse(
+                    content=config_data,
+                    status_code=response.status_code,
+                    headers={
+                        "Access-Control-Allow-Origin": origin,
+                        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                        "Access-Control-Allow-Headers": "*",
+                        "Access-Control-Allow-Credentials": "true",
+                    }
+                )
+            else:
+                logger.error(f"❌ Config service returned {response.status_code}: {response.text[:200]}")
+                raise HTTPException(status_code=response.status_code, detail="Failed to save widget configuration")
+
+    except Exception as e:
+        logger.error(f"❌ Error proxying admin widget config save: {e}")
+        raise HTTPException(status_code=500, detail=f"Error saving widget configuration: {str(e)}")
+
+
+# =================================
 # PUBLIC SECURITY SETTINGS ENDPOINT (No Authentication Required)
 # =================================
 
