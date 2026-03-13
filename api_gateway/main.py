@@ -209,13 +209,7 @@ app.add_middleware(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://digibot-dev.globistaan.com",
-        "https://digibot.globistaan.com",
-        "https://dailogue.globistaan.com",  # Production frontend
-        "http://localhost:3000",
-        "http://localhost:5173",
-    ],
+    allow_origins=["*"],  # Allow all origins - widget is embedded on client websites
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"],
     allow_headers=["*"],
