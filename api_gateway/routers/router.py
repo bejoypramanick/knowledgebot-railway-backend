@@ -622,7 +622,7 @@ async def get_widget_config(request: Request):
     """
     Proxy endpoint for widget configuration.
     Used by embedded bubble widget to load chat settings (colors, display name, etc).
-    No authentication required - public endpoint.
+    No authentication required - public endpoint - allows all origins.
     """
     try:
         settings = get_settings()
@@ -637,7 +637,16 @@ async def get_widget_config(request: Request):
             if response.status_code == 200:
                 config_data = response.json()
                 logger.info(f"✓ Widget config loaded: display_name={config_data.get('display_name')}, has_icon={bool(config_data.get('chat_icon_url'))}")
-                return JSONResponse(content=config_data, status_code=200)
+                # Explicitly set CORS headers for public endpoint
+                return JSONResponse(
+                    content=config_data,
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, OPTIONS",
+                        "Access-Control-Allow-Headers": "*",
+                    }
+                )
             else:
                 logger.error(f"❌ Config service returned {response.status_code}: {response.text[:200]}")
                 raise HTTPException(status_code=response.status_code, detail="Failed to load widget configuration")
@@ -656,6 +665,7 @@ async def get_security_settings(request: Request):
     """
     Proxy endpoint for security settings (public, no auth required).
     Used by chat widget to get response policies and settings.
+    Allows all origins for embedded widgets.
     """
     try:
         settings = get_settings()
@@ -670,7 +680,16 @@ async def get_security_settings(request: Request):
             if response.status_code == 200:
                 settings_data = response.json()
                 logger.info(f"✓ Security settings loaded: {settings_data}")
-                return JSONResponse(content=settings_data, status_code=200)
+                # Explicitly set CORS headers for public endpoint
+                return JSONResponse(
+                    content=settings_data,
+                    status_code=200,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, OPTIONS",
+                        "Access-Control-Allow-Headers": "*",
+                    }
+                )
             else:
                 logger.error(f"❌ Config service returned {response.status_code}: {response.text[:200]}")
                 raise HTTPException(status_code=response.status_code, detail="Failed to load security settings")
