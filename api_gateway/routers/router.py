@@ -614,6 +614,40 @@ async def public_chat_stream(request: Request):
 
 
 # =================================
+# PUBLIC WIDGET CONFIGURATION ENDPOINT (No Authentication Required)
+# =================================
+
+@router.get("/configuration/widgetConfig")
+async def get_widget_config(request: Request):
+    """
+    Proxy endpoint for widget configuration.
+    Used by embedded bubble widget to load chat settings (colors, display name, etc).
+    No authentication required - public endpoint.
+    """
+    try:
+        settings = get_settings()
+        config_service_url = settings.configuration_service_url
+        full_url = f"{config_service_url}/api/v1/configuration/widgetConfig"
+
+        logger.info(f"🔄 Proxying widget config request to: {full_url}")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(full_url)
+
+            if response.status_code == 200:
+                config_data = response.json()
+                logger.info(f"✓ Widget config loaded: display_name={config_data.get('display_name')}, has_icon={bool(config_data.get('chat_icon_url'))}")
+                return JSONResponse(content=config_data, status_code=200)
+            else:
+                logger.error(f"❌ Config service returned {response.status_code}: {response.text[:200]}")
+                raise HTTPException(status_code=response.status_code, detail="Failed to load widget configuration")
+
+    except Exception as e:
+        logger.error(f"❌ Error proxying widget config: {e}")
+        raise HTTPException(status_code=500, detail=f"Error loading widget configuration: {str(e)}")
+
+
+# =================================
 # PUBLIC WIDGET ENDPOINT (No Authentication Required)
 # =================================
 
