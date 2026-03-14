@@ -37,7 +37,6 @@ from api_gateway.core.utils import (register_fastapi_exception_handlers,
                           setup_global_exception_logging)
 from shared.sqlalchemy_db import close_database, health_check as db_health_check
 from shared.db_retry import initialize_database_with_retry
-from shared.keepalive_service import start_keepalive_service, stop_keepalive_service
 
 setup_global_exception_logging("api_gateway")
 
@@ -61,12 +60,6 @@ async def lifespan(app: FastAPI):
         from api_gateway.services.profile_service import init_profile_service
         init_profile_service()
         logger.info("✅ ProfileService initialized with connection pooling")
-
-        # Initialize Keep-Alive Service (prevent Railway database/services from sleeping)
-        logger.info("🔄 Starting keep-alive service for Railway deployment...")
-        keepalive_interval = int(os.getenv("KEEPALIVE_INTERVAL_SECONDS", "300"))  # 5 minutes default
-        await start_keepalive_service(interval_seconds=keepalive_interval)
-        logger.info(f"✅ Keep-alive service started (pings database every {keepalive_interval}s)")
 
         # Initialize Gemini FileSearch Store (create if doesn't exist)
         logger.info("📂 Initializing Gemini FileSearch store...")
@@ -151,13 +144,6 @@ async def lifespan(app: FastAPI):
         yield
         # Shutdown
         logger.info("🛑 API Gateway shutting down")
-
-        # Stop Keep-Alive Service
-        try:
-            await stop_keepalive_service()
-            logger.info("✅ Keep-alive service stopped")
-        except Exception as e:
-            logger.error(f"❌ Error stopping keep-alive service: {e}")
 
         # Close ProfileService HTTP client
         try:
