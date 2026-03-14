@@ -352,6 +352,7 @@ class ChatLogService:
                 last_message_at=session_row['last_activity_at'].isoformat() if session_row['last_activity_at'] else datetime.utcnow().isoformat(),
                 created_at=session_row['created_at'].isoformat() if session_row['created_at'] else None,
                 assigned_agent=mask_email(assigned_agent) if assigned_agent else None,
+                is_assigned_to_me=(assigned_agent == user_email) if assigned_agent else False,
                 feedback=session_feedback,
                 customer_feedback=session_feedback,
                 agent_feedback=session_feedback,

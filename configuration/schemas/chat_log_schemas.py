@@ -24,6 +24,7 @@ class ChatSessionResponse(BaseModel):
     last_message_at: str
     created_at: Optional[str] = None
     assigned_agent: Optional[str] = None
+    is_assigned_to_me: Optional[bool] = False
     feedback: Optional[str] = None
     customer_feedback: Optional[str] = None
     agent_feedback: Optional[str] = None

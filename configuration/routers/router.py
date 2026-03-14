@@ -12,6 +12,7 @@ from collections import defaultdict
 
 from shared.otel_logger import get_otel_logger, clear_admin_context
 from shared.admin_audit import audit_action
+from shared.email_masking import mask_email
 from configuration.core.railway_storage import railway_storage
 from ..service.configuration_service import ConfigurationService
 from ..dao.admin_session_dao import AdminSessionDAO
@@ -2199,9 +2200,9 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
         # Return authenticated user profile with actual role
         logger.info("[TRANSFORM] Building user profile object")
         profile = {
-            "email": user.get("email"),
+            "email": mask_email(user.get("email")),
             "uid": user.get("uid"),
-            "display_name": user.get("name", user.get("email")),  # Frontend expects display_name
+            "display_name": user.get("name") or mask_email(user.get("email")),  # Frontend expects display_name
             "photo_url": user.get("picture"),  # Frontend expects photo_url
             "role": primary_role,
             "roles": user_roles,  # Include all roles for frontend
