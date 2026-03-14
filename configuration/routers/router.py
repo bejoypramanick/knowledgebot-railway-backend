@@ -12,6 +12,7 @@ from collections import defaultdict
 
 from shared.otel_logger import get_otel_logger, clear_admin_context
 from shared.admin_audit import audit_action
+from configuration.core.railway_storage import railway_storage
 from ..service.configuration_service import ConfigurationService
 from ..dao.admin_session_dao import AdminSessionDAO
 from ..dao.admin_action_dao import AdminActionDAO
@@ -441,6 +442,25 @@ async def update_widget_config(
                 config_data['chat_icon_url'] = storage_url
                 config_data['chat_icon_filename'] = storage_filename
 
+            # Handle image deletion: if URL is null/empty and no new image uploaded, delete from S3
+            if not (profile_image and profile_image.filename) and config_data.get('profile_picture_url') in (None, ''):
+                old_filenames = await widget_dao.get_image_filenames()
+                old_profile = old_filenames.get("profile_picture_filename")
+                if old_profile:
+                    logger.info(f"🗑️ Deleting old profile image from S3: {old_profile}")
+                    await railway_storage.delete_image(old_profile)
+                config_data['profile_picture_url'] = None
+                config_data['profile_picture_filename'] = None
+
+            if not (chat_icon_image and chat_icon_image.filename) and config_data.get('chat_icon_url') in (None, ''):
+                old_filenames = await widget_dao.get_image_filenames()
+                old_icon = old_filenames.get("chat_icon_filename")
+                if old_icon:
+                    logger.info(f"🗑️ Deleting old chat icon from S3: {old_icon}")
+                    await railway_storage.delete_image(old_icon)
+                config_data['chat_icon_url'] = None
+                config_data['chat_icon_filename'] = None
+
             # Update widget config
             await config_service.update_widget_config(config_data)
             return {"success": True, "message": "Widget configuration updated successfully with images"}
@@ -448,6 +468,29 @@ async def update_widget_config(
         else:
             # Handle JSON request (backward compatibility)
             body = await request.json()
+
+            # Handle image deletion for JSON requests too
+            from configuration.dao.widget_config_dao import WidgetConfigDAO
+            widget_dao = WidgetConfigDAO()
+
+            if body.get('profile_picture_url') in (None, ''):
+                old_filenames = await widget_dao.get_image_filenames()
+                old_profile = old_filenames.get("profile_picture_filename")
+                if old_profile:
+                    logger.info(f"🗑️ Deleting old profile image from S3: {old_profile}")
+                    await railway_storage.delete_image(old_profile)
+                body['profile_picture_url'] = None
+                body['profile_picture_filename'] = None
+
+            if body.get('chat_icon_url') in (None, ''):
+                old_filenames = await widget_dao.get_image_filenames()
+                old_icon = old_filenames.get("chat_icon_filename")
+                if old_icon:
+                    logger.info(f"🗑️ Deleting old chat icon from S3: {old_icon}")
+                    await railway_storage.delete_image(old_icon)
+                body['chat_icon_url'] = None
+                body['chat_icon_filename'] = None
+
             await config_service.update_widget_config(body)
             return {"success": True, "message": "Widget configuration updated successfully"}
 

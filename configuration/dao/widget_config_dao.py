@@ -217,6 +217,27 @@ class WidgetConfigDAO:
             logger.error(f"Error updating widget image '{image_type}': {e}")
             raise
 
+    async def get_image_filenames(self) -> dict:
+        """Get current image filenames from DB for S3 deletion."""
+        query = """
+            SELECT profile_picture_filename, chat_icon_filename
+            FROM widget_configuration
+            WHERE id = 1
+        """
+        try:
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                row = result.fetchone()
+                if row:
+                    return {
+                        "profile_picture_filename": row._mapping.get("profile_picture_filename"),
+                        "chat_icon_filename": row._mapping.get("chat_icon_filename")
+                    }
+                return {"profile_picture_filename": None, "chat_icon_filename": None}
+        except Exception as e:
+            logger.error(f"Error fetching image filenames: {e}")
+            return {"profile_picture_filename": None, "chat_icon_filename": None}
+
     async def clear_suggested_messages(self):
         """Clear all suggested messages."""
         query = "DELETE FROM widget_suggested_messages"
