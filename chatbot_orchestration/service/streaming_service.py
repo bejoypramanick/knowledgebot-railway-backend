@@ -982,19 +982,20 @@ class StreamingService:
                     from datetime import datetime
 
                     ai_response_event = {
-                        "type": "ai_response",
+                        "type": "bot_message",
+                        "message_id": f"bot-{session_id}-{int(time.time() * 1000)}",
                         "session_id": session_id,
                         "text": full_response,
-                        "sender": "ai",
+                        "sender": "bot",
                         "timestamp": datetime.utcnow().isoformat(),
                         "tool_calls": tool_call_count
                     }
 
                     broadcast_result = await broadcast_event_to_all_agents(ai_response_event)
-                    logger.info(f"📤 Broadcasted AI response to admins on agent:events:broadcast")
+                    logger.info(f"📤 Broadcasted bot response to admins on agent:events:broadcast")
                     logger.info(f"📤 Broadcast result: {broadcast_result}")
                 except Exception as broadcast_error:
-                    logger.error(f"❌ Failed to broadcast AI response to admins: {broadcast_error}")
+                    logger.error(f"❌ Failed to broadcast bot response to admins: {broadcast_error}")
                     # Continue anyway - don't block customer response if broadcast fails
 
                 # Break response into chunks for streaming (500 chars per chunk for smooth experience)
