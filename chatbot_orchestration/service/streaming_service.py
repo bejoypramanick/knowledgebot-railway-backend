@@ -976,6 +976,27 @@ class StreamingService:
                         full_response = "Human Agent support is currently not available."
                         logger.warning(f"⚠️ Could not find exact match, using fallback: {full_response}")
 
+                # 📤 BROADCAST AI RESPONSE TO ADMIN CHANNEL (so admins see AI responses in real-time)
+                try:
+                    from shared.redis_pubsub_manager import broadcast_event_to_all_agents
+                    from datetime import datetime
+
+                    ai_response_event = {
+                        "type": "ai_response",
+                        "session_id": session_id,
+                        "text": full_response,
+                        "sender": "ai",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "tool_calls": tool_call_count
+                    }
+
+                    broadcast_result = await broadcast_event_to_all_agents(ai_response_event)
+                    logger.info(f"📤 Broadcasted AI response to admins on agent:events:broadcast")
+                    logger.info(f"📤 Broadcast result: {broadcast_result}")
+                except Exception as broadcast_error:
+                    logger.error(f"❌ Failed to broadcast AI response to admins: {broadcast_error}")
+                    # Continue anyway - don't block customer response if broadcast fails
+
                 # Break response into chunks for streaming (500 chars per chunk for smooth experience)
                 chunk_size = 500
                 chunks = [full_response[i:i+chunk_size] for i in range(0, len(full_response), chunk_size)]
