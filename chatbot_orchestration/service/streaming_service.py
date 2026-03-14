@@ -346,14 +346,15 @@ class StreamingService:
                                 if response.status_code == 200:
                                     result = response.json()
                                     assigned_agent = result.get('agent_assigned')
-                                    logger.info(f"✅ Agent {assigned_agent} assigned before AI response")
+                                    assigned_agent_id = result.get('agent_id')
+                                    logger.info(f"✅ Agent {assigned_agent} (ID: {assigned_agent_id}) assigned before AI response")
                                     
                                     # Small delay to ensure database commit completes
                                     await asyncio.sleep(0.1)
                                     
                                     # Verify assignment was saved in database
                                     verify_query = """
-                                        SELECT u.email as agent_email
+                                        SELECT u.email as agent_email, u.id as agent_id
                                         FROM session_assignments sa
                                         LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                                         LEFT JOIN users u ON urm.user_id = u.id
@@ -362,7 +363,7 @@ class StreamingService:
                                     verify_result = await db_session.execute(text(verify_query), {"session_id": numeric_session_id})
                                     verify_row = verify_result.mappings().first()
                                     if verify_row:
-                                        logger.info(f"✅ Verified agent assignment in database: {verify_row['agent_email']}")
+                                        logger.info(f"✅ Verified agent assignment in database: {verify_row['agent_email']} (ID: {verify_row['agent_id']})")
                                     else:
                                         logger.warning(f"⚠️ Agent assignment not found in database yet for session {numeric_session_id}")
                                     
@@ -370,8 +371,8 @@ class StreamingService:
                                     from shared.redis_pubsub_manager import get_pubsub_redis
                                     redis_client = await get_pubsub_redis()
                                     cache_key = f"session:assigned_agent:{session_id}"
-                                    await redis_client.set(cache_key, assigned_agent, ex=3600)
-                                    logger.info(f"💾 Cached agent assignment: {session_id} → {assigned_agent}")
+                                    await redis_client.set(cache_key, assigned_agent_id, ex=3600)
+                                    logger.info(f"💾 Cached agent assignment: {session_id} → {assigned_agent_id}")
                                     
                                     # Save user message first
                                     await session_state_manager.save_message(
@@ -443,9 +444,9 @@ class StreamingService:
                                                 "messages": messages
                                             }
                                         }
-                                        # Broadcast to assigned agent's specific channel
-                                        result = await broadcast_event_to_agent(assigned_agent, session_event)
-                                        logger.info(f"📤 Broadcasted session_update to agent {assigned_agent} on channel agent:events:{assigned_agent}")
+                                        # Broadcast to assigned agent's specific channel (using user ID)
+                                        result = await broadcast_event_to_agent(assigned_agent_id, session_event)
+                                        logger.info(f"📤 Broadcasted session_update to agent {assigned_agent} (ID: {assigned_agent_id}) on channel agent:events:{assigned_agent_id}")
                                         logger.info(f"📤 Broadcast result: {result}")
                                         
                                         # ALSO broadcast to all admins via broadcast channel
@@ -461,6 +462,7 @@ class StreamingService:
                                         "type": "chat_assigned",
                                         "session_id": session_id,
                                         "agent_email": assigned_agent,
+                                        "agent_id": assigned_agent_id,
                                         "message": "A human agent has been assigned to your chat"
                                     }
                                     

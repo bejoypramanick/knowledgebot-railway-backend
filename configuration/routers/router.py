@@ -839,6 +839,7 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
     Streams events for ALL sessions assigned to the logged-in agent.
     
     Uses cookie-based authentication (no token parameter needed).
+    Uses user IDs instead of emails for Redis channel subscriptions.
     
     Simplified implementation:
     - No in-memory queues
@@ -847,18 +848,19 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
     - Scales horizontally
     """
     try:
-        # Get user email from authenticated user (via cookie)
+        # Get user email and ID from authenticated user (via cookie)
         user_email = user.get("email")
+        user_id = user.get("id")
         user_role = user.get("role", "human_agent")
 
-        if not user_email:
-            logger.error("No user email in SSE request")
+        if not user_email or not user_id:
+            logger.error("No user email or ID in SSE request")
             raise HTTPException(status_code=401, detail="Authentication required. Please sign in.")
 
-        logger.info(f"🔌 Agent {user_email} (role={user_role}) connecting to Redis Pub/Sub SSE stream")
+        logger.info(f"🔌 Agent {user_email} (ID: {user_id}, role={user_role}) connecting to Redis Pub/Sub SSE stream")
 
-        # Create Redis Pub/Sub subscriber for this agent
-        subscriber = AgentEventSubscriber(user_email, user_role)
+        # Create Redis Pub/Sub subscriber for this agent (using user ID)
+        subscriber = AgentEventSubscriber(user_id, user_email, user_role)
 
         async def event_generator():
             """
@@ -874,15 +876,15 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
             redis_task = None
             presence_task = None
             last_activity = time.time()
-            channel_name = f"agent:events:{user_email}"
+            channel_name = f"agent:events:{user_id}"
 
             try:
                 # Set initial presence key in Redis
                 from shared.redis_pubsub_manager import get_pubsub_redis
                 redis_client = await get_pubsub_redis()
-                presence_key = f"agent:online:{user_email}"
+                presence_key = f"agent:online:{user_id}"
                 await redis_client.set(presence_key, "1", ex=60)  # 60 second TTL
-                logger.info(f"✅ Set online presence for agent {user_email}")
+                logger.info(f"✅ Set online presence for agent {user_email} (ID: {user_id})")
 
                 async def presence_loop():
                     """Refresh agent presence key every 30 seconds"""
@@ -891,7 +893,7 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                             await asyncio.sleep(30)
                             try:
                                 await redis_client.set(presence_key, "1", ex=60)
-                                logger.debug(f"🔄 Refreshed online presence for agent {user_email}")
+                                logger.debug(f"🔄 Refreshed online presence for agent {user_email} (ID: {user_id})")
                             except Exception as e:
                                 logger.warning(f"Failed to refresh presence: {e}")
                                 break
@@ -943,7 +945,7 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
 
                 # Send initial connection established event immediately
                 # This ensures the browser receives a response and the SSE connection is established
-                yield f"data: {json.dumps({'type': 'connected', 'agent_email': user_email, 'role': user_role, 'timestamp': int(time.time())})}\n\n"
+                yield f"data: {json.dumps({'type': 'connected', 'agent_email': user_email, 'agent_id': user_id, 'role': user_role, 'timestamp': int(time.time())})}\n\n"
 
                 # Yield messages from queue
                 try:
@@ -952,7 +954,7 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                             # Check for inactivity timeout (5 minutes)
                             current_time = time.time()
                             if current_time - last_activity > 300:
-                                logger.info(f"⏱️ Connection timeout for {user_email} on channel {channel_name} - no activity for 5 minutes")
+                                logger.info(f"⏱️ Connection timeout for {user_email} (ID: {user_id}) on channel {channel_name} - no activity for 5 minutes")
                                 break
 
                             msg = await asyncio.wait_for(message_queue.get(), timeout=30)
@@ -962,12 +964,12 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                             else:
                                 # Real event data - update last_activity
                                 last_activity = time.time()
-                                logger.info(f"🔌 [SSE] Yielding message to {user_email}: {msg.get('type')} for session {msg.get('session_id', 'N/A')}")
+                                logger.info(f"🔌 [SSE] Yielding message to {user_email} (ID: {user_id}): {msg.get('type')} for session {msg.get('session_id', 'N/A')}")
                                 yield f"data: {json.dumps(msg)}\n\n"
 
                                 # Check if session ended - close connection immediately
                                 if msg.get("type") == "session_ended":
-                                    logger.info(f"🛑 Session ended event received for {user_email} on channel {channel_name} - closing connection")
+                                    logger.info(f"🛑 Session ended event received for {user_email} (ID: {user_id}) on channel {channel_name} - closing connection")
                                     break
                         except asyncio.TimeoutError:
                             # Queue empty for 30s, send heartbeat manually
@@ -978,25 +980,25 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
                             continue
                         except (BrokenPipeError, ConnectionResetError, RuntimeError) as e:
                             # Client disconnected - expected and normal
-                            logger.debug(f"🔌 Client {user_email} disconnected (yield error on channel {channel_name}): {type(e).__name__}")
+                            logger.debug(f"🔌 Client {user_email} (ID: {user_id}) disconnected (yield error on channel {channel_name}): {type(e).__name__}")
                             break
                         except Exception as e:
                             # Check if it's a client disconnection error
                             error_msg = str(e)
                             if "peer closed connection" in error_msg.lower() or "incomplete chunked read" in error_msg.lower():
-                                logger.debug(f"🔌 Client {user_email} disconnected (yield error on channel {channel_name}): {e}")
+                                logger.debug(f"🔌 Client {user_email} (ID: {user_id}) disconnected (yield error on channel {channel_name}): {e}")
                             else:
-                                logger.error(f"❌ Error yielding message to {user_email}: {e}")
+                                logger.error(f"❌ Error yielding message to {user_email} (ID: {user_id}): {e}")
                             break
 
                 except asyncio.CancelledError:
-                    logger.debug(f"🔌 SSE connection cancelled for {user_email}")
+                    logger.debug(f"🔌 SSE connection cancelled for {user_email} (ID: {user_id})")
                 except Exception as e:
                     error_msg = str(e)
                     if "peer closed connection" not in error_msg.lower() and "incomplete chunked read" not in error_msg.lower():
-                        logger.error(f"❌ Error in SSE generator for {user_email}: {e}")
+                        logger.error(f"❌ Error in SSE generator for {user_email} (ID: {user_id}): {e}")
                     else:
-                        logger.debug(f"🔌 Client disconnection in SSE generator for {user_email}: {e}")
+                        logger.debug(f"🔌 Client disconnection in SSE generator for {user_email} (ID: {user_id}): {e}")
 
             except asyncio.CancelledError:
                 logger.debug(f"🔌 SSE connection cancelled for {user_email}")
@@ -1877,6 +1879,10 @@ async def request_human_agent(request: Request):
     Can be called from:
     - Browser (via API Gateway which extracts UUID from cookie and converts to numeric ID)
     - Internal services (pass numeric session_id in request body)
+    
+    Returns:
+    - agent_assigned: Agent email (for display)
+    - agent_id: Agent user ID (for Redis channel subscription)
     """
     try:
         logger.info(f"🧑 [ENDPOINT] POST /admin/chat-sessions/request-agent called")
@@ -1899,13 +1905,14 @@ async def request_human_agent(request: Request):
 
         # Pass numeric ID to service
         logger.info(f"🔍 [ENDPOINT] Calling chat_log_service.request_human_agent with session_id={session_db_id}")
-        assigned_agent = await chat_log_service.request_human_agent(session_db_id)
-        logger.info(f"✅ [ENDPOINT] Agent assigned: {assigned_agent}")
+        assignment_result = await chat_log_service.request_human_agent(session_db_id)
+        logger.info(f"✅ [ENDPOINT] Agent assigned: {assignment_result}")
 
         response = {
             "success": True,
             "message": "Human agent assigned",
-            "agent_assigned": assigned_agent,
+            "agent_assigned": assignment_result['email'],
+            "agent_id": assignment_result['id'],
             "session_id": session_db_id
         }
         logger.info(f"✅ [ENDPOINT] Returning response: {response}")

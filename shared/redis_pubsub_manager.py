@@ -90,9 +90,9 @@ class AgentEventBroadcaster:
         if self.redis_client is None:
             self.redis_client = await get_pubsub_redis()
     
-    def _get_agent_channel(self, agent_email: str) -> str:
-        """Get Redis channel name for specific agent"""
-        return f"agent:events:{agent_email}"
+    def _get_agent_channel(self, agent_id: int) -> str:
+        """Get Redis channel name for specific agent (uses user ID, not email)"""
+        return f"agent:events:{agent_id}"
     
     def _get_broadcast_channel(self) -> str:
         """Get Redis channel name for broadcasting to all agents"""
@@ -102,12 +102,12 @@ class AgentEventBroadcaster:
         """Get Redis channel name for specific session (customer + agent)"""
         return f"session:events:{session_id}"
     
-    async def publish_to_agent(self, agent_email: str, event_data: Dict[str, Any]) -> bool:
+    async def publish_to_agent(self, agent_id: int, event_data: Dict[str, Any]) -> bool:
         """
         Publish event to specific agent's channel.
         
         Args:
-            agent_email: Target agent's email
+            agent_id: Target agent's user ID (from users table)
             event_data: Event data to send
         
         Returns:
@@ -115,21 +115,21 @@ class AgentEventBroadcaster:
         """
         try:
             await self._ensure_redis()
-            channel = self._get_agent_channel(agent_email)
+            channel = self._get_agent_channel(agent_id)
             message = json.dumps(event_data)
             
             # Publish to Redis channel (async, non-blocking)
             subscribers = await self.redis_client.publish(channel, message)
 
             if subscribers > 0:
-                logger.info(f"📤 Published event to {agent_email} on channel {channel}: {event_data.get('type')} ({subscribers} subscribers)")
+                logger.info(f"📤 Published event to agent {agent_id} on channel {channel}: {event_data.get('type')} ({subscribers} subscribers)")
             else:
-                logger.warning(f"📭 No subscribers for {agent_email} on channel {channel} - agent may not be connected to SSE")
+                logger.warning(f"📭 No subscribers for agent {agent_id} on channel {channel} - agent may not be connected to SSE")
             
             return True
             
         except Exception as e:
-            logger.error(f"❌ Error publishing to {agent_email}: {e}")
+            logger.error(f"❌ Error publishing to agent {agent_id}: {e}")
             return False
     
     async def publish_to_all_agents(self, event_data: Dict[str, Any]) -> bool:
@@ -187,7 +187,7 @@ class AgentEventBroadcaster:
             logger.error(f"❌ Error publishing to session {session_id}: {e}")
             return False
     
-    async def publish_for_session(self, session_id: str, event_data: Dict[str, Any], assigned_agent: Optional[str] = None) -> bool:
+    async def publish_for_session(self, session_id: str, event_data: Dict[str, Any], assigned_agent_id: Optional[int] = None) -> bool:
         """
         Publish event to all relevant channels for a session.
         
@@ -204,7 +204,7 @@ class AgentEventBroadcaster:
         Args:
             session_id: Session ID
             event_data: Event data to send
-            assigned_agent: Email of assigned agent (if known)
+            assigned_agent_id: User ID of assigned agent (if known)
         
         Returns:
             True if published successfully
@@ -214,8 +214,8 @@ class AgentEventBroadcaster:
             await self.publish_to_session(session_id, event_data)
             
             # 2. If assigned agent is known, also publish to agent-specific channel
-            if assigned_agent:
-                await self.publish_to_agent(assigned_agent, event_data)
+            if assigned_agent_id:
+                await self.publish_to_agent(assigned_agent_id, event_data)
             
             # 3. Always broadcast to admins (they see all sessions)
             await self.publish_to_all_agents(event_data)
@@ -324,10 +324,12 @@ class AgentEventSubscriber:
     """
     Event subscriber for agents using Redis Pub/Sub.
     Replaces asyncio.Queue with Redis subscription.
+    Uses user IDs instead of emails for channel names.
     """
     
-    def __init__(self, agent_email: str, role: str = 'human_agent'):
-        self.agent_email = agent_email
+    def __init__(self, agent_id: int, agent_email: str = None, role: str = 'human_agent'):
+        self.agent_id = agent_id
+        self.agent_email = agent_email  # For logging only
         self.role = role
         self.redis_client = None  # Will be initialized async
         self.pubsub = None
@@ -351,16 +353,17 @@ class AgentEventSubscriber:
                 # Admins ONLY subscribe to broadcast channel (all chats, view-only if not assigned)
                 broadcast_channel = "agent:events:broadcast"
                 await self.pubsub.subscribe(broadcast_channel)
-                logger.info(f"🔌 Admin {self.agent_email} subscribed to broadcast channel: {broadcast_channel}")
+                logger.info(f"🔌 Admin {self.agent_email} (ID: {self.agent_id}) subscribed to broadcast channel: {broadcast_channel}")
             else:
                 # Human agents subscribe to personal channel (only their assigned chats)
-                agent_channel = f"agent:events:{self.agent_email}"
+                agent_channel = f"agent:events:{self.agent_id}"
                 await self.pubsub.subscribe(agent_channel)
-                logger.info(f"🔌 Human agent {self.agent_email} subscribed to personal channel: {agent_channel}")
+                logger.info(f"🔌 Human agent {self.agent_email} (ID: {self.agent_id}) subscribed to personal channel: {agent_channel}")
 
             # Send initial connection event
             yield {
                 'type': 'connected',
+                'agent_id': self.agent_id,
                 'agent_email': self.agent_email,
                 'role': self.role
             }
@@ -370,7 +373,7 @@ class AgentEventSubscriber:
                 try:
                     if message['type'] == 'message':
                         # Parse and yield event data
-                        logger.info(f"🔌 Agent {self.agent_email} received Redis message on channel {message.get('channel')}")
+                        logger.info(f"🔌 Agent {self.agent_email} (ID: {self.agent_id}) received Redis message on channel {message.get('channel')}")
                         event_data = json.loads(message['data'])
                         logger.info(f"🔌 Parsed event type: {event_data.get('type')}, yielding to SSE client")
                         yield event_data
@@ -392,12 +395,12 @@ class AgentEventSubscriber:
                     await asyncio.sleep(1)
         
         except Exception as e:
-            logger.error(f"❌ Error in subscription for {self.agent_email}: {e}")
+            logger.error(f"❌ Error in subscription for agent {self.agent_id}: {e}")
             raise
         
         finally:
             # Cleanup
-            agent_channel = f"agent:events:{self.agent_email}"
+            agent_channel = f"agent:events:{self.agent_id}"
             if self.pubsub:
                 try:
                     logger.info(f"🧹 Cleaning up Redis subscription for channel: {agent_channel}")
@@ -417,7 +420,7 @@ class AgentEventSubscriber:
         if self.pubsub:
             await self.pubsub.unsubscribe()
             await self.pubsub.close()
-            logger.info(f"🔌 Agent {self.agent_email} unsubscribed")
+            logger.info(f"🔌 Agent {self.agent_email} (ID: {self.agent_id}) unsubscribed")
 
 
 # Global broadcaster instance
@@ -432,11 +435,11 @@ def get_broadcaster() -> AgentEventBroadcaster:
     return _broadcaster
 
 
-# Convenience functions for backward compatibility
-async def broadcast_event_to_agent(agent_email: str, event_data: Dict[str, Any]) -> bool:
-    """Broadcast event to specific agent"""
+# Convenience functions
+async def broadcast_event_to_agent(agent_id: int, event_data: Dict[str, Any]) -> bool:
+    """Broadcast event to specific agent (uses user ID)"""
     broadcaster = get_broadcaster()
-    return await broadcaster.publish_to_agent(agent_email, event_data)
+    return await broadcaster.publish_to_agent(agent_id, event_data)
 
 
 async def broadcast_event_to_all_agents(event_data: Dict[str, Any]) -> bool:
@@ -451,7 +454,7 @@ async def broadcast_event_to_session(session_id: str, event_data: Dict[str, Any]
     return await broadcaster.publish_to_session(session_id, event_data)
 
 
-async def broadcast_event_for_session(session_id: str, event_data: Dict[str, Any], assigned_agent: Optional[str] = None) -> bool:
-    """Broadcast event for specific session (all channels)"""
+async def broadcast_event_for_session(session_id: str, event_data: Dict[str, Any], assigned_agent_id: Optional[int] = None) -> bool:
+    """Broadcast event for specific session (all channels, uses user ID for agent)"""
     broadcaster = get_broadcaster()
-    return await broadcaster.publish_for_session(session_id, event_data, assigned_agent)
+    return await broadcaster.publish_for_session(session_id, event_data, assigned_agent_id)

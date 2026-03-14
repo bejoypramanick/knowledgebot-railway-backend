@@ -112,24 +112,27 @@ class ChatLogService:
             logger.error(f"Error assigning chat to agent: {e}", exc_info=True)
             raise
 
-    async def get_agent_online_status(self, email: str) -> bool:
+    async def get_agent_online_status(self, agent_id: int) -> bool:
         """
         Check if agent is online by checking Redis presence key.
         Agent is considered online if they have an active SSE connection.
         The presence key is set when agent connects and has a TTL of 60 seconds.
+        
+        Args:
+            agent_id: User ID of the agent (from users table)
         """
         try:
             from shared.redis_pubsub_manager import get_pubsub_redis
             redis_client = await get_pubsub_redis()
             
-            # Check if agent has an active presence key
-            presence_key = f"agent:online:{email}"
+            # Check if agent has an active presence key (using user ID)
+            presence_key = f"agent:online:{agent_id}"
             is_online = await redis_client.exists(presence_key)
             
-            logger.info(f"🔍 [ONLINE_CHECK] Agent {email} online status: {bool(is_online)}")
+            logger.info(f"🔍 [ONLINE_CHECK] Agent ID {agent_id} online status: {bool(is_online)}")
             return bool(is_online)
         except Exception as e:
-            logger.error(f"❌ Error checking agent online status for {email}: {e}")
+            logger.error(f"❌ Error checking agent online status for agent ID {agent_id}: {e}")
             # If Redis check fails, assume agent is offline (fail-safe)
             return False 
 
@@ -141,8 +144,12 @@ class ChatLogService:
             logger.error(f"Error getting agent chat count: {e}")
             return 0
 
-    async def assign_chat_with_load_balancing(self, session_id: int) -> Optional[str]:
-        """Assign a chat to an available agent using load balancing (numeric ID only)."""
+    async def assign_chat_with_load_balancing(self, session_id: int) -> Optional[Dict[str, Any]]:
+        """Assign a chat to an available agent using load balancing (numeric ID only).
+        
+        Returns:
+            Dict with 'email' and 'id' keys, or None if no agents available
+        """
         try:
             logger.info(f"🔍 [LOAD_BALANCE] Starting load balancing for session {session_id}")
             
@@ -155,13 +162,19 @@ class ChatLogService:
             if agent_emails:
                 logger.info(f"🔍 [LOAD_BALANCE] Checking availability of {len(agent_emails)} human agents")
                 for email in agent_emails:
-                    is_online = await self.get_agent_online_status(email)
-                    logger.info(f"🔍 [LOAD_BALANCE] Agent {email} online status: {is_online}")
+                    # Get user ID for this agent
+                    agent_id = await self.dao.get_user_id_by_email(email)
+                    if not agent_id:
+                        logger.warning(f"⚠️ [LOAD_BALANCE] Could not get user ID for agent {email}")
+                        continue
+                    
+                    is_online = await self.get_agent_online_status(agent_id)
+                    logger.info(f"🔍 [LOAD_BALANCE] Agent {email} (ID: {agent_id}) online status: {is_online}")
                     
                     if is_online:
                         chat_count = await self.get_agent_chat_count(email)
-                        logger.info(f"🔍 [LOAD_BALANCE] Agent {email} has {chat_count} active chats")
-                        agent_loads.append({'email': email, 'chat_count': chat_count})
+                        logger.info(f"🔍 [LOAD_BALANCE] Agent {email} (ID: {agent_id}) has {chat_count} active chats")
+                        agent_loads.append({'email': email, 'id': agent_id, 'chat_count': chat_count})
             else:
                 logger.warning(f"⚠️ [LOAD_BALANCE] No human agents found in database")
             
@@ -172,13 +185,19 @@ class ChatLogService:
                 logger.info(f"🔍 [LOAD_BALANCE] Found {len(admin_emails)} admins: {admin_emails}")
                 
                 for email in admin_emails:
-                    is_online = await self.get_agent_online_status(email)
-                    logger.info(f"🔍 [LOAD_BALANCE] Admin {email} online status: {is_online}")
+                    # Get user ID for this admin
+                    admin_id = await self.dao.get_user_id_by_email(email)
+                    if not admin_id:
+                        logger.warning(f"⚠️ [LOAD_BALANCE] Could not get user ID for admin {email}")
+                        continue
+                    
+                    is_online = await self.get_agent_online_status(admin_id)
+                    logger.info(f"🔍 [LOAD_BALANCE] Admin {email} (ID: {admin_id}) online status: {is_online}")
                     
                     if is_online:
                         chat_count = await self.get_agent_chat_count(email)
-                        logger.info(f"🔍 [LOAD_BALANCE] Admin {email} has {chat_count} active chats")
-                        agent_loads.append({'email': email, 'chat_count': chat_count})
+                        logger.info(f"🔍 [LOAD_BALANCE] Admin {email} (ID: {admin_id}) has {chat_count} active chats")
+                        agent_loads.append({'email': email, 'id': admin_id, 'chat_count': chat_count})
             
             # Step 3: Check if we found any agents
             if not agent_loads:
@@ -189,19 +208,21 @@ class ChatLogService:
             
             # Step 4: Sort by chat count and assign to least busy agent
             agent_loads.sort(key=lambda x: x['chat_count'])
-            assigned_agent = agent_loads[0]['email']
+            assigned_agent_info = agent_loads[0]
+            assigned_agent = assigned_agent_info['email']
+            assigned_agent_id = assigned_agent_info['id']
             assigned_is_admin = assigned_agent in (await self.dao.get_all_admins()) if agent_loads else False
 
-            logger.info(f"✅ [LOAD_BALANCE] Selected agent {assigned_agent} with {agent_loads[0]['chat_count']} chats")
+            logger.info(f"✅ [LOAD_BALANCE] Selected agent {assigned_agent} (ID: {assigned_agent_id}) with {agent_loads[0]['chat_count']} chats")
             logger.info(f"🔍 [LOAD_BALANCE] Agent type: {'ADMIN' if assigned_is_admin else 'HUMAN_AGENT'}")
             logger.info(f"🔍 [LOAD_BALANCE] All available agents: {agent_loads}")
-            logger.info(f"📊 [LOAD_BALANCE] Assignment details: human_agents_found={len(agent_emails)}, admins_found={len(admin_emails) if 'admin_emails' in locals() else 'N/A'}, selected={assigned_agent}")
+            logger.info(f"📊 [LOAD_BALANCE] Assignment details: human_agents_found={len(agent_emails)}, admins_found={len(admin_emails) if 'admin_emails' in locals() else 'N/A'}, selected={assigned_agent} (ID: {assigned_agent_id})")
 
             # Step 5: Assign the chat
             await self.assign_chat_to_agent(session_id, assigned_agent)
-            logger.info(f"✅ [LOAD_BALANCE] Successfully assigned session {session_id} to {assigned_agent} ({'ADMIN' if assigned_is_admin else 'HUMAN_AGENT'})")
+            logger.info(f"✅ [LOAD_BALANCE] Successfully assigned session {session_id} to {assigned_agent} (ID: {assigned_agent_id}) ({'ADMIN' if assigned_is_admin else 'HUMAN_AGENT'})")
             
-            return assigned_agent
+            return {'email': assigned_agent, 'id': assigned_agent_id}
         except Exception as e:
             logger.error(f"❌ [LOAD_BALANCE] Error in load balancing for session {session_id}: {e}", exc_info=True)
             return None
@@ -351,13 +372,8 @@ class ChatLogService:
                 customer_name = f"User-{session_db_id}"
 
             # Check if assigned to current user using user ID (not email)
-            assigned_agent_id = None
-            if assigned_agent:
-                try:
-                    assigned_agent_id = await self.dao.get_user_id_by_email(assigned_agent)
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not get user ID for assigned agent {assigned_agent}: {e}")
-            
+            # Get agent_id directly from query result (already joined in DAO)
+            assigned_agent_id = session_row.get('agent_id') if assigned_agent else None
             is_assigned_to_me = (assigned_agent_id == current_user_id) if (assigned_agent_id and current_user_id) else False
 
             from ..schemas.chat_log_schemas import ChatSessionResponse
@@ -497,14 +513,16 @@ class ChatLogService:
 
         # Step 2: Assign chat with load balancing (keep as numeric ID, don't convert to string)
         logger.info(f"🔍 [HUMAN_AGENT] Starting load balancing for session {session_id}")
-        assigned_agent = await self.assign_chat_with_load_balancing(session_id)
+        assignment_result = await self.assign_chat_with_load_balancing(session_id)
         
-        if not assigned_agent:
+        if not assignment_result:
             logger.error(f"❌ [HUMAN_AGENT] No available agents or admins to assign chat {session_id}")
             raise HTTPException(status_code=503, detail="No available agents or admins to assign chat")
         
-        logger.info(f"✅ [HUMAN_AGENT] Successfully assigned session {session_id} to agent {assigned_agent}")
-        return assigned_agent
+        assigned_agent_email = assignment_result['email']
+        assigned_agent_id = assignment_result['id']
+        logger.info(f"✅ [HUMAN_AGENT] Successfully assigned session {session_id} to agent {assigned_agent_email} (ID: {assigned_agent_id})")
+        return {'email': assigned_agent_email, 'id': assigned_agent_id}
 
     async def delete_session_messages(self, session_id: int) -> bool:
         """Delete all messages for a chat session using numeric ID only."""

@@ -730,14 +730,15 @@ async def request_human_agent_connection(
 
             if response.status_code == 200:
                 result = response.json()
-                assigned_agent = result.get('agent_assigned', 'an agent')
-                logger.info(f"✅ Chat {session_numeric_id} assigned to human agent {assigned_agent}")
+                assigned_agent_email = result.get('agent_assigned', 'an agent')
+                assigned_agent_id = result.get('agent_id')  # Get user ID from response
+                logger.info(f"✅ Chat {session_numeric_id} assigned to human agent {assigned_agent_email} (ID: {assigned_agent_id})")
                 logger.info(f"📚 Agent will see full chat history from chat_messages table")
 
                 # Broadcast session to agent in ChatSessionResponse format
                 # Agent's ChatLog UI will receive this and merge it seamlessly into their session list
                 try:
-                    logger.info(f"🔄 Starting broadcast to agent {assigned_agent} for session {session_numeric_id}")
+                    logger.info(f"🔄 Starting broadcast to agent {assigned_agent_email} (ID: {assigned_agent_id}) for session {session_numeric_id}")
                     from shared.redis_pubsub_manager import broadcast_event_to_agent
                     from shared.sqlalchemy_db import get_db_session
                     from sqlalchemy import text
@@ -803,7 +804,7 @@ async def request_human_agent_connection(
                                     "status": session_dict.get('archive_status', 'active'),
                                     "last_message_at": session_dict.get('last_activity_at').isoformat() if session_dict.get('last_activity_at') else datetime.utcnow().isoformat(),
                                     "created_at": session_dict.get('created_at').isoformat() if session_dict.get('created_at') else None,
-                                    "assigned_agent": assigned_agent,
+                                    "assigned_agent": assigned_agent_email,
                                     "feedback": None,
                                     "customer_feedback": None,
                                     "agent_feedback": None,
@@ -812,12 +813,12 @@ async def request_human_agent_connection(
                                     "messages": messages
                                 }
                             }
-                            logger.info(f"🔄 Broadcasting session event to agent {assigned_agent}...")
-                            logger.info(f"🔄 Event type: {session_event.get('type')}, agent: {assigned_agent}")
+                            logger.info(f"🔄 Broadcasting session event to agent {assigned_agent_email} (ID: {assigned_agent_id})...")
+                            logger.info(f"🔄 Event type: {session_event.get('type')}, agent_id: {assigned_agent_id}")
                             logger.info(f"🔄 Session event data keys: {session_event.get('data', {}).keys() if session_event.get('data') else 'NO DATA'}")
-                            result = await broadcast_event_to_agent(assigned_agent, session_event)
+                            result = await broadcast_event_to_agent(assigned_agent_id, session_event)
                             logger.info(f"🔄 Broadcast result: {result}, returned from broadcast_event_to_agent")
-                            logger.info(f"📤 Broadcasted session {session_uuid} to agent {assigned_agent}")
+                            logger.info(f"📤 Broadcasted session {session_uuid} to agent {assigned_agent_email} (ID: {assigned_agent_id})")
                         else:
                             logger.warning(f"⚠️ Session query returned no results for id={session_numeric_id}")
                 except Exception as e:
