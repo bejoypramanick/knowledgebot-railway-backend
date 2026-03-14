@@ -850,12 +850,21 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
     try:
         # Get user email and ID from authenticated user (via cookie)
         user_email = user.get("email")
-        user_id = user.get("id")
+        user_uid = user.get("uid")
         user_role = user.get("role", "human_agent")
 
-        if not user_email or not user_id:
-            logger.error("No user email or ID in SSE request")
+        if not user_email or not user_uid:
+            logger.error(f"No user email or UID in SSE request. User dict: {user}")
             raise HTTPException(status_code=401, detail="Authentication required. Please sign in.")
+
+        # Fetch user ID from database using email
+        from ..dao.chat_log_dao import ChatLogDAO
+        dao = ChatLogDAO()
+        user_id = await dao.get_user_id_by_email(user_email)
+        
+        if not user_id:
+            logger.error(f"Could not find user ID for email {user_email}")
+            raise HTTPException(status_code=401, detail="User not found in database")
 
         logger.info(f"🔌 Agent {user_email} (ID: {user_id}, role={user_role}) connecting to Redis Pub/Sub SSE stream")
 
