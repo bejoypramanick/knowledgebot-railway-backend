@@ -123,7 +123,9 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
                     logger.debug(f"⚠️ Could not resolve session UUID {session_uuid} to numeric ID")
 
         # Skip authentication for excluded paths (anonymous customers, public endpoints)
-        if self.is_excluded_path(path):
+        is_excluded = self.is_excluded_path(path)
+        if is_excluded:
+            logger.debug(f"✅ Path is excluded from auth: {path}")
             return await call_next(request)
 
         # 🔐 STEP 2: Verify Firebase authentication for protected endpoints
@@ -131,7 +133,7 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
         session_id = request.cookies.get("session")
 
         if not session_id:
-            logger.warning(f"❌ No session cookie for {path}")
+            logger.warning(f"❌ No session cookie for {path} (excluded: {is_excluded})")
             return JSONResponse(
                 status_code=401,
                 content={
