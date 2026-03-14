@@ -415,11 +415,11 @@ class ChatLogDAO:
                 SELECT * FROM (
                     SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email, u.id as agent_id
                     FROM chat_sessions cs
-                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id AND sa.status = 'active'
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
                     LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                     LEFT JOIN users u ON urm.user_id = u.id
                     WHERE (cs.message_count > 0 OR cs.message_count IS NULL)
-                    ORDER BY cs.id
+                    ORDER BY cs.id, sa.status DESC NULLS LAST
                 ) deduped
                 ORDER BY deduped.last_activity_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
@@ -458,12 +458,12 @@ class ChatLogDAO:
                 SELECT * FROM (
                     SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email, u.id as agent_id
                     FROM chat_sessions cs
-                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id AND sa.status = 'active'
+                    LEFT JOIN session_assignments sa ON cs.id = sa.session_id
                     LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                     LEFT JOIN users u ON urm.user_id = u.id
                     WHERE cs.archive_status = :archive_status
                       AND (cs.message_count > 0 OR cs.message_count IS NULL)
-                    ORDER BY cs.id
+                    ORDER BY cs.id, sa.status DESC NULLS LAST
                 ) deduped
                 ORDER BY deduped.last_activity_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
