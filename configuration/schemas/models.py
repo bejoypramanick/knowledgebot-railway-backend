@@ -73,9 +73,17 @@ class AdminAccount(BaseModel):
     email: ValidatedEmail
     password: str = Field(..., min_length=8, max_length=128)
 
+class UserEntry(BaseModel):
+    """User entry with either ID (existing user) or email (new user)"""
+    id: Optional[int] = None
+    email: Optional[str] = None
+    
+    class Config:
+        extra = 'allow'  # Allow extra fields
+
 class ChatbotConfigRequest(BaseModel):
-    admin_emails: Optional[List[Union[ValidatedEmail, AdminAccount]]] = Field(None, max_items=10)
-    human_agents: Optional[List[ValidatedEmail]] = Field(None, max_items=20)
+    admin_emails: Optional[List[Union[str, dict]]] = Field(None, max_items=10)
+    human_agents: Optional[List[Union[str, dict]]] = Field(None, max_items=20)
     metadata: Optional[MetadataUpdate] = None
     security: Optional[SecurityUpdate] = None
     data_management: Optional[DataManagementUpdate] = None
