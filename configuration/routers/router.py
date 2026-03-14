@@ -649,11 +649,11 @@ async def add_admin_user(request_data: AdminManagementRequest, request: Request)
         logger.error(f"Error adding admin user: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/admins/{email}")
-async def remove_admin_user(email: str, request: Request):
-    """Remove an admin user"""
+@router.delete("/admins/{user_id}")
+async def remove_admin_user(user_id: int, request: Request):
+    """Remove an admin user by user ID"""
     try:
-        result = await config_service.remove_admin(email)
+        result = await config_service.remove_admin(user_id)
         return {"success": True, "message": "Admin user removed successfully"}
     except Exception as e:
         logger.error(f"Error removing admin user: {e}")
@@ -679,11 +679,11 @@ async def add_human_agent(request_data: AdminManagementRequest, request: Request
         logger.error(f"Error adding human agent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/human-agents/{email}")
-async def remove_human_agent(email: str, request: Request):
-    """Remove a human agent"""
+@router.delete("/human-agents/{user_id}")
+async def remove_human_agent(user_id: int, request: Request):
+    """Remove a human agent by user ID"""
     try:
-        result = await config_service.remove_human_agent(email)
+        result = await config_service.remove_human_agent(user_id)
         return {"success": True, "message": "Human agent removed successfully"}
     except Exception as e:
         logger.error(f"Error removing human agent: {e}")

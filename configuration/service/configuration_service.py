@@ -5,7 +5,7 @@ Provides business logic layer for configuration operations
 from typing import Any, Dict, Optional
 
 from shared.otel_logger import get_otel_logger
-from shared.email_masking import mask_email, unmask_emails
+from shared.email_masking import mask_email
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
 from configuration.dao.widget_config_dao import WidgetConfigDAO
 
@@ -83,8 +83,8 @@ class ConfigurationService:
                 "llm_tokens": llm_tokens,
                 "security": security,
                 "persona": persona,
-                "human_agents": [mask_email(e) for e in human_agents_list],
-                "admin_emails": [mask_email(e) for e in admin_emails_list],
+                "human_agents": [{"id": item["id"], "email": mask_email(item["email"])} for item in human_agents_list],
+                "admin_emails": [{"id": item["id"], "email": mask_email(item["email"])} for item in admin_emails_list],
                 "metadata": metadata
             }
             
@@ -117,11 +117,20 @@ class ConfigurationService:
             # Extract widget config (appearance only - HIL moved to chat agent config)
             additional_widget_config = {}
 
-            # Extract chat agent config - unmask any masked emails using DB originals
-            current_admins = await self._chat_agent_dao.get_admins()
-            current_agents = await self._chat_agent_dao.get_human_agents()
-            admin_emails = unmask_emails(config.get('admin_emails', []), current_admins)
-            human_agents = unmask_emails(config.get('human_agents', []), current_agents)
+            # Extract chat agent config - use ID-based sync
+            admin_entries = config.get('admin_emails', [])
+            agent_entries = config.get('human_agents', [])
+
+            # Split entries into existing IDs and new emails
+            admin_existing_ids = [item["id"] for item in admin_entries if isinstance(item, dict) and "id" in item]
+            admin_new_emails = [item["email"] for item in admin_entries if isinstance(item, dict) and "id" not in item and "email" in item]
+            # Backward compat: plain strings are treated as new emails
+            admin_new_emails += [item for item in admin_entries if isinstance(item, str)]
+
+            agent_existing_ids = [item["id"] for item in agent_entries if isinstance(item, dict) and "id" in item]
+            agent_new_emails = [item["email"] for item in agent_entries if isinstance(item, dict) and "id" not in item and "email" in item]
+            agent_new_emails += [item for item in agent_entries if isinstance(item, str)]
+
             response_timeout = 30
             response_policy = 0.5  # Response policy (0=Strict, 1=Flexi, default=Balanced)
             hil_enabled = False
@@ -157,18 +166,24 @@ class ConfigurationService:
                 )
 
             # Persist chat agent config via DAO (includes HIL settings and response_policy)
-            if admin_emails or human_agents or response_timeout or response_policy or hil_enabled or hil_disabled_message or persona_name or llm_tokens:
-                await self._chat_agent_dao.save_chat_agent_config(
-                    admin_emails=admin_emails,
-                    human_agents=human_agents,
-                    response_timeout=response_timeout,
-                    response_policy=response_policy,
-                    hil_enabled=hil_enabled,
-                    hil_disabled_message=hil_disabled_message,
-                    persona_name=persona_name,
-                    system_prompt=system_prompt,
-                    llm_tokens=llm_tokens
-                )
+            # Sync admins and agents using ID-based methods
+            logger.info(f"👥 Syncing admins: keep_ids={admin_existing_ids}, new_emails={admin_new_emails}")
+            await self._chat_agent_dao.sync_admins(admin_existing_ids, admin_new_emails)
+
+            logger.info(f"🤖 Syncing human agents: keep_ids={agent_existing_ids}, new_emails={agent_new_emails}")
+            await self._chat_agent_dao.sync_human_agents(agent_existing_ids, agent_new_emails)
+
+            # Persist other settings via DAO
+            await self._chat_agent_dao.upsert_security_setting('response_timeout', str(response_timeout), 'integer')
+            await self._chat_agent_dao.upsert_security_setting('response_policy', str(response_policy), 'integer')
+            await self._chat_agent_dao.upsert_security_setting('hil_enabled', str(hil_enabled), 'boolean')
+            await self._chat_agent_dao.upsert_security_setting('hil_disabled_message', hil_disabled_message, 'string')
+            await self._chat_agent_dao.update_persona(persona_name, system_prompt, is_active=True)
+
+            for provider, tokens_data in llm_tokens.items():
+                limit_val = tokens_data.get('limit', 20000)
+                used_val = tokens_data.get('used', 0)
+                await self._chat_agent_dao.update_llm_provider_tokens(provider, limit_val, used_val)
 
             logger.info(f"✅ [SERVICE] Chatbot configuration persisted successfully (via DAOs)")
             return True
@@ -275,19 +290,19 @@ class ConfigurationService:
             raise
 
     async def get_human_agents(self):
-        """Get human agents list (masked for display)"""
+        """Get human agents list with {id, masked_email} for display"""
         try:
             agents = await self._chat_agent_dao.get_human_agents()
-            return [mask_email(e) for e in agents]
+            return [{"id": a["id"], "email": mask_email(a["email"])} for a in agents]
         except Exception as e:
             logger.error(f"Error getting human agents: {e}")
             raise
 
     async def get_admin_emails(self):
-        """Get admin emails list (masked for display)"""
+        """Get admin emails list with {id, masked_email} for display"""
         try:
-            emails = await self._chat_agent_dao.get_admins()
-            return [mask_email(e) for e in emails]
+            admins = await self._chat_agent_dao.get_admins()
+            return [{"id": a["id"], "email": mask_email(a["email"])} for a in admins]
         except Exception as e:
             logger.error(f"Error getting admin emails: {e}")
             raise
@@ -300,10 +315,10 @@ class ConfigurationService:
             logger.error(f"Error adding human agent: {e}")
             raise
 
-    async def remove_human_agent(self, email: str) -> bool:
-        """Remove a human agent"""
+    async def remove_human_agent(self, user_id: int) -> bool:
+        """Remove a human agent by user ID"""
         try:
-            return await self._chat_agent_dao.remove_human_agent(email)
+            return await self._chat_agent_dao.remove_human_agent_by_id(user_id)
         except Exception as e:
             logger.error(f"Error removing human agent: {e}")
             raise
@@ -316,10 +331,10 @@ class ConfigurationService:
             logger.error(f"Error adding admin: {e}")
             raise
 
-    async def remove_admin(self, email: str) -> bool:
-        """Remove an admin"""
+    async def remove_admin(self, user_id: int) -> bool:
+        """Remove an admin by user ID"""
         try:
-            return await self._chat_agent_dao.remove_admin(email)
+            return await self._chat_agent_dao.remove_admin_by_id(user_id)
         except Exception as e:
             logger.error(f"Error removing admin: {e}")
             raise

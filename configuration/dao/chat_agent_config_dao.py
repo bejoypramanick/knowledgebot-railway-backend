@@ -51,10 +51,10 @@ class ChatAgentConfigDAO:
             logger.log_db_query(str(query), params, error=e)
             raise
 
-    async def get_human_agents(self) -> List[str]:
-        """Get all human agent emails."""
+    async def get_human_agents(self) -> List[Dict[str, Any]]:
+        """Get all human agents with id and email."""
         query = text("""
-            SELECT DISTINCT u.email
+            SELECT DISTINCT u.id, u.email
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
@@ -68,15 +68,15 @@ class ChatAgentConfigDAO:
                 results = await session.execute(query)
                 rows = results.fetchall()
                 logger.log_db_query(str(query), None, rows)
-                return [dict(row._mapping)['email'] for row in rows] if rows else []  # Use mapping for dictionary access
+                return [{"id": row._mapping["id"], "email": row._mapping["email"]} for row in rows] if rows else []
         except Exception as e:
             logger.error(f"Error fetching human agents: {type(e).__name__}")
-            raise  # ← Raise exception instead of silently returning []
+            raise
 
-    async def get_admins(self) -> List[str]:
-        """Get all admin emails."""
+    async def get_admins(self) -> List[Dict[str, Any]]:
+        """Get all admins with id and email."""
         query = text("""
-            SELECT DISTINCT u.email
+            SELECT DISTINCT u.id, u.email
             FROM user_role_mapping urm
             JOIN users u ON urm.user_id = u.id
             JOIN roles r ON urm.role_id = r.id
@@ -90,10 +90,10 @@ class ChatAgentConfigDAO:
                 results = await session.execute(query)
                 rows = results.fetchall()
                 logger.log_db_query(str(query), None, rows)
-                return [dict(row._mapping)['email'] for row in rows] if rows else []  # Use mapping for dictionary access
+                return [{"id": row._mapping["id"], "email": row._mapping["email"]} for row in rows] if rows else []
         except Exception as e:
             logger.error(f"Error fetching admin emails: {type(e).__name__}")
-            raise  # ← Raise exception instead of silently returning []
+            raise
 
     async def get_llm_providers(self) -> List[Dict[str, Any]]:
         """Get all LLM providers."""
@@ -240,7 +240,7 @@ class ChatAgentConfigDAO:
             raise
 
     async def remove_human_agent(self, email: str) -> bool:
-        """Remove human_agent role from a user."""
+        """Remove human_agent role from a user by email."""
         try:
             query = text("""
                 DELETE FROM user_role_mapping
@@ -256,6 +256,25 @@ class ChatAgentConfigDAO:
                 return result.rowcount > 0
         except Exception as e:
             logger.log_db_query("remove_human_agent", {"email": email}, error=e)
+            raise
+
+    async def remove_human_agent_by_id(self, user_id: int) -> bool:
+        """Remove human_agent role from a user by user ID."""
+        try:
+            query = text("""
+                DELETE FROM user_role_mapping
+                WHERE user_id = :user_id
+                AND role_id = (SELECT id FROM roles WHERE role_name = 'human_agent')
+            """)
+            params = {"user_id": user_id}
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                logger.log_db_query(str(query), params, f"DELETE {result.rowcount}")
+                await session.commit()
+                return result.rowcount > 0
+        except Exception as e:
+            logger.log_db_query("remove_human_agent_by_id", {"user_id": user_id}, error=e)
             raise
 
     async def add_admin(self, email: str) -> bool:
@@ -313,7 +332,7 @@ class ChatAgentConfigDAO:
             raise
 
     async def remove_admin(self, email: str) -> bool:
-        """Remove admin role from a user."""
+        """Remove admin role from a user by email."""
         try:
             query = text("""
                 DELETE FROM user_role_mapping
@@ -331,24 +350,37 @@ class ChatAgentConfigDAO:
             logger.log_db_query("remove_admin", {"email": email}, error=e)
             raise
 
+    async def remove_admin_by_id(self, user_id: int) -> bool:
+        """Remove admin role from a user by user ID."""
+        try:
+            query = text("""
+                DELETE FROM user_role_mapping
+                WHERE user_id = :user_id
+                AND role_id = (SELECT id FROM roles WHERE role_name = 'admin')
+            """)
+            params = {"user_id": user_id}
+            logger.log_db_operation(str(query), params)
+            async with get_db_session() as session:
+                result = await session.execute(query, params)
+                logger.log_db_query(str(query), params, f"DELETE {result.rowcount}")
+                await session.commit()
+                return result.rowcount > 0
+        except Exception as e:
+            logger.log_db_query("remove_admin_by_id", {"user_id": user_id}, error=e)
+            raise
+
     async def sync_admin_emails(self, desired_emails: List[str]) -> None:
         """
-        Sync admin emails: add missing, remove extra.
-        Compares desired state with current state and makes only necessary changes.
+        Legacy sync admin emails: add missing, remove extra.
+        Kept for backward compatibility with save_chat_agent_config.
         """
         try:
-            # Get current admins from database
             current_admins = await self.get_admins()
-
-            # Calculate diffs
+            current_emails = {a["email"] for a in current_admins}
             desired_set = set(desired_emails)
-            current_set = set(current_admins)
-            to_add = desired_set - current_set
-            to_remove = current_set - desired_set
+            to_add = desired_set - current_emails
+            to_remove = current_emails - desired_set
 
-            logger.info(f"📊 Admin sync: current={len(current_set)}, desired={len(desired_set)}, to_add={len(to_add)}, to_remove={len(to_remove)}")
-
-            # Apply changes
             for email in to_add:
                 logger.info(f"➕ Adding admin: {email}")
                 await self.add_admin(email)
@@ -362,24 +394,47 @@ class ChatAgentConfigDAO:
             logger.error(f"Error syncing admin emails: {e}")
             raise
 
-    async def sync_human_agent_emails(self, desired_emails: List[str]) -> None:
+    async def sync_admins(self, desired_ids: List[int], new_emails: List[str]) -> None:
         """
-        Sync human agent emails: add missing, remove extra.
-        Compares desired state with current state and makes only necessary changes.
+        Sync admins using IDs for existing users and emails for new users.
+        - desired_ids: user IDs of existing admins to keep
+        - new_emails: email addresses of new users to add as admins
+        Removes any current admin whose user_id is NOT in desired_ids.
         """
         try:
-            # Get current human agents from database
+            current_admins = await self.get_admins()
+            current_id_set = {a["id"] for a in current_admins}
+            desired_id_set = set(desired_ids)
+
+            to_remove_ids = current_id_set - desired_id_set
+
+            logger.info(f"📊 Admin sync: current={len(current_id_set)}, keep={len(desired_id_set)}, to_add={len(new_emails)}, to_remove={len(to_remove_ids)}")
+
+            for user_id in to_remove_ids:
+                logger.info(f"➖ Removing admin by ID: {user_id}")
+                await self.remove_admin_by_id(user_id)
+
+            for email in new_emails:
+                logger.info(f"➕ Adding admin: {email}")
+                await self.add_admin(email)
+
+            logger.info(f"✅ Admin sync completed: added {len(new_emails)}, removed {len(to_remove_ids)}")
+        except Exception as e:
+            logger.error(f"Error syncing admins: {e}")
+            raise
+
+    async def sync_human_agent_emails(self, desired_emails: List[str]) -> None:
+        """
+        Legacy sync human agent emails: add missing, remove extra.
+        Kept for backward compatibility with save_chat_agent_config.
+        """
+        try:
             current_agents = await self.get_human_agents()
-
-            # Calculate diffs
+            current_emails = {a["email"] for a in current_agents}
             desired_set = set(desired_emails)
-            current_set = set(current_agents)
-            to_add = desired_set - current_set
-            to_remove = current_set - desired_set
+            to_add = desired_set - current_emails
+            to_remove = current_emails - desired_set
 
-            logger.info(f"📊 Human agent sync: current={len(current_set)}, desired={len(desired_set)}, to_add={len(to_add)}, to_remove={len(to_remove)}")
-
-            # Apply changes
             for email in to_add:
                 logger.info(f"➕ Adding human agent: {email}")
                 await self.add_human_agent(email)
@@ -391,6 +446,35 @@ class ChatAgentConfigDAO:
             logger.info(f"✅ Human agent sync completed: added {len(to_add)}, removed {len(to_remove)}")
         except Exception as e:
             logger.error(f"Error syncing human agent emails: {e}")
+            raise
+
+    async def sync_human_agents(self, desired_ids: List[int], new_emails: List[str]) -> None:
+        """
+        Sync human agents using IDs for existing users and emails for new users.
+        - desired_ids: user IDs of existing agents to keep
+        - new_emails: email addresses of new users to add as agents
+        Removes any current agent whose user_id is NOT in desired_ids.
+        """
+        try:
+            current_agents = await self.get_human_agents()
+            current_id_set = {a["id"] for a in current_agents}
+            desired_id_set = set(desired_ids)
+
+            to_remove_ids = current_id_set - desired_id_set
+
+            logger.info(f"📊 Human agent sync: current={len(current_id_set)}, keep={len(desired_id_set)}, to_add={len(new_emails)}, to_remove={len(to_remove_ids)}")
+
+            for user_id in to_remove_ids:
+                logger.info(f"➖ Removing human agent by ID: {user_id}")
+                await self.remove_human_agent_by_id(user_id)
+
+            for email in new_emails:
+                logger.info(f"➕ Adding human agent: {email}")
+                await self.add_human_agent(email)
+
+            logger.info(f"✅ Human agent sync completed: added {len(new_emails)}, removed {len(to_remove_ids)}")
+        except Exception as e:
+            logger.error(f"Error syncing human agents: {e}")
             raise
 
     async def update_llm_provider_tokens(self, provider: str, limit: int, used: int) -> bool:
