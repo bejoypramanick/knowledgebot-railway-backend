@@ -2137,11 +2137,14 @@ async def get_unread_message_count(request: Request, session_id: int = Query(...
 
 @router.post("/users/unique-id")
 async def create_or_get_unique_id(request: Request):
-    """Create or get unique user ID by role. Email extracted from Firebase auth cookie."""
+    """Create or get unique user ID by role. Email from X-User-Email header (set by API Gateway)."""
     try:
         body = await request.json()
         role = body.get("role", "customer")
-        email = request.state.user_email
+        email = request.headers.get("X-User-Email")
+
+        if not email:
+            raise HTTPException(status_code=401, detail="User email not provided. Authentication required.")
 
         result = await auth_service.get_or_create_unique_id(email, role)
         return {"success": True, **result}
@@ -2153,11 +2156,17 @@ async def create_or_get_unique_id(request: Request):
 
 @router.get("/users/unique-id")
 async def get_user_unique_id(request: Request, role: str = "customer"):
-    """Get unique ID for a user by role. Email extracted from Firebase auth cookie."""
+    """Get unique ID for a user by role. Email from X-User-Email header (set by API Gateway)."""
     try:
-        email = request.state.user_email
+        email = request.headers.get("X-User-Email")
+
+        if not email:
+            raise HTTPException(status_code=401, detail="User email not provided. Authentication required.")
+
         result = await auth_service.get_or_create_unique_id(email, role)
         return {"success": True, **result}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting user unique ID: {e}")
         raise HTTPException(status_code=500, detail=str(e))
