@@ -342,6 +342,9 @@ class ChatLogService:
             if not customer_name:
                 customer_name = f"User-{session_db_id}"
 
+            # Check if assigned to current user BEFORE masking the email
+            is_assigned_to_me = (assigned_agent == user_email) if assigned_agent else False
+
             from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(
                 id=str(session_db_id),
@@ -352,7 +355,7 @@ class ChatLogService:
                 last_message_at=session_row['last_activity_at'].isoformat() if session_row['last_activity_at'] else datetime.utcnow().isoformat(),
                 created_at=session_row['created_at'].isoformat() if session_row['created_at'] else None,
                 assigned_agent=mask_email(assigned_agent) if assigned_agent else None,
-                is_assigned_to_me=(assigned_agent == user_email) if assigned_agent else False,
+                is_assigned_to_me=is_assigned_to_me,
                 feedback=session_feedback,
                 customer_feedback=session_feedback,
                 agent_feedback=session_feedback,
