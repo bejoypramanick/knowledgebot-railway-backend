@@ -413,7 +413,7 @@ class ChatLogDAO:
         if archive_status.lower() == 'all':
             query = """
                 SELECT * FROM (
-                    SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email
+                    SELECT DISTINCT ON (cs.id) cs.*, u.email as agent_email, u.id as agent_id
                     FROM chat_sessions cs
                     LEFT JOIN session_assignments sa ON cs.id = sa.session_id AND sa.status = 'active'
                     LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id

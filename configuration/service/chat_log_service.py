@@ -57,7 +57,13 @@ class ChatLogService:
             # Get session UUID for caching and broadcasting
             session_uuid = session.get('session_id')  # UUID format
             
-            # Update metadata with customer display name (use numeric ID, not UUID)
+            # Get agent user ID for broadcasting
+            agent_id = await self.dao.get_user_id_by_email(agent_email)
+            if not agent_id:
+                logger.error(f"❌ Could not get user ID for agent {agent_email}")
+                raise HTTPException(status_code=400, detail=f"Invalid agent email: {agent_email}")
+            
+            # Update metadata with customer display name and assigned agent
             metadata = session.get('metadata') or {}
             if isinstance(metadata, str):
                 try:
@@ -68,10 +74,13 @@ class ChatLogService:
             # Set customer_name to "User-<numeric_id>" if not already set
             if not metadata.get('customer_name'):
                 metadata['customer_name'] = f"User-{session_db_id}"
-                await self.dao.update_chat_session_metadata(session_db_id, metadata)
-                logger.info(f"✅ Set customer_name to 'User-{session_db_id}' for session {session_uuid}")
             
-            logger.info(f"Chat session {session_db_id} assigned to agent {agent_email}")
+            # Store assigned_agent in metadata for persistence
+            metadata['assigned_agent'] = agent_email
+            await self.dao.update_chat_session_metadata(session_db_id, metadata)
+            logger.info(f"✅ Updated metadata: customer_name='User-{session_db_id}', assigned_agent='{agent_email}' for session {session_uuid}")
+            
+            logger.info(f"Chat session {session_db_id} assigned to agent {agent_email} (ID: {agent_id})")
             assignee_type = "agent"
             existing = await self.dao.get_session_assignment(session_db_id)
             if existing:
@@ -84,8 +93,8 @@ class ChatLogService:
             from shared.redis_pubsub_manager import get_pubsub_redis, broadcast_event_to_session
             redis_client = await get_pubsub_redis()
             agent_cache_key = f"session:assigned_agent:{session_uuid}"
-            await redis_client.set(agent_cache_key, agent_email, ex=3600)
-            logger.info(f"💾 Cached agent assignment: {session_uuid} → {agent_email} (TTL: 1h)")
+            await redis_client.set(agent_cache_key, agent_id, ex=3600)
+            logger.info(f"💾 Cached agent assignment: {session_uuid} → {agent_id} (TTL: 1h)")
             
             # CRITICAL: Broadcast to BOTH agent AND customer
             assignment_event = {
@@ -93,15 +102,16 @@ class ChatLogService:
                 "session_id": session_uuid,  # CRITICAL: Use UUID for SSE channel matching
                 "numeric_session_id": str(session_db_id),  # Include numeric ID for reference
                 "agent_email": agent_email,
+                "agent_id": agent_id,
                 "assignee_type": assignee_type,
                 "status": "active",
                 "message": "New chat assigned to you",
                 "timestamp": datetime.utcnow().isoformat()
             }
             
-            # Send to agent (so it appears in their ChatLog)
-            await broadcast_event_to_agent(agent_email, assignment_event)
-            logger.info(f"📤 Sent assignment notification to agent {agent_email} via Redis Pub/Sub")
+            # Send to agent (so it appears in their ChatLog) - use user ID
+            await broadcast_event_to_agent(agent_id, assignment_event)
+            logger.info(f"📤 Sent assignment notification to agent {agent_email} (ID: {agent_id}) via Redis Pub/Sub")
             
             # Send to customer (so UI blocks AI and enables agent chat)
             # CRITICAL: Use session UUID, not numeric ID
