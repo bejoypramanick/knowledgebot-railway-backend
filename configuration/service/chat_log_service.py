@@ -232,6 +232,14 @@ class ChatLogService:
         start_time = time.time()
         logger.info(f"🔍 [CHATLOG] Starting get_chat_sessions - role={role}, status={archive_status}, page={page}, limit={limit}")
         
+        # Get current user's ID for is_assigned_to_me comparison
+        current_user_id = None
+        if user_email:
+            try:
+                current_user_id = await self.dao.get_user_id_by_email(user_email)
+            except Exception as e:
+                logger.warning(f"⚠️ Could not get user ID for {user_email}: {e}")
+        
         # Use provided offset or calculate from page
         if offset is None:
             offset = (page - 1) * limit
@@ -342,8 +350,15 @@ class ChatLogService:
             if not customer_name:
                 customer_name = f"User-{session_db_id}"
 
-            # Check if assigned to current user BEFORE masking the email
-            is_assigned_to_me = (assigned_agent == user_email) if assigned_agent else False
+            # Check if assigned to current user using user ID (not email)
+            assigned_agent_id = None
+            if assigned_agent:
+                try:
+                    assigned_agent_id = await self.dao.get_user_id_by_email(assigned_agent)
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not get user ID for assigned agent {assigned_agent}: {e}")
+            
+            is_assigned_to_me = (assigned_agent_id == current_user_id) if (assigned_agent_id and current_user_id) else False
 
             from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(

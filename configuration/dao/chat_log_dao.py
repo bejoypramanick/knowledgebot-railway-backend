@@ -848,6 +848,54 @@ class ChatLogDAO:
             logger.log_db_query(query, {"session_id": session_id}, error=e)
             return None
 
+    async def get_assigned_agent_id(self, session_id: int) -> Optional[int]:
+        """Get the assigned agent's user ID for a session from session_assignments table."""
+        query = """
+            SELECT u.id
+            FROM session_assignments sa
+            JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+            JOIN users u ON urm.user_id = u.id
+            WHERE sa.session_id = :session_id AND sa.status = 'active'
+            ORDER BY sa.assigned_at DESC
+            LIMIT 1
+        """
+        try:
+            params = {"session_id": session_id}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                if row:
+                    logger.log_db_query(query, params, row)
+                    return row[0]
+                else:
+                    logger.log_db_query(query, params, None)
+                    return None
+        except Exception as e:
+            logger.error(f"❌ Error fetching assigned agent ID for session {session_id}: {e}", exc_info=True)
+            logger.log_db_query(query, {"session_id": session_id}, error=e)
+            return None
+
+    async def get_user_id_by_email(self, email: str) -> Optional[int]:
+        """Get user ID from email address."""
+        query = "SELECT id FROM users WHERE email = :email"
+        try:
+            params = {"email": email}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                if row:
+                    logger.log_db_query(query, params, row)
+                    return row[0]
+                else:
+                    logger.log_db_query(query, params, None)
+                    return None
+        except Exception as e:
+            logger.error(f"❌ Error fetching user ID for email {email}: {e}", exc_info=True)
+            logger.log_db_query(query, {"email": email}, error=e)
+            return None
+
 
     async def update_chat_session_metadata(self, session_db_id: int, metadata: Dict[str, Any]):
         query = "UPDATE chat_sessions SET metadata = :metadata WHERE id = :session_db_id"
