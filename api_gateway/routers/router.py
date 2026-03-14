@@ -1143,11 +1143,91 @@ async def generic_proxy_handler(request: Request, path: str):
         logger.error(f"❌ Connection failed to {full_url}: {e}")
         logger.error(f"❌ Service URL: {service_url}")
         logger.error(f"❌ This might mean the service is down or not accessible")
+        logger.warning(f"⚠️  Attempting retry for service wake-up (Railway sleep/wake cycle)...")
+        
+        # Retry logic for Railway services that might be sleeping
+        retry_delays = [1.0, 2.0, 3.0]  # Exponential backoff for service wake-up
+        for attempt, delay in enumerate(retry_delays, 1):
+            try:
+                logger.info(f"🔄 Retry attempt {attempt}/{len(retry_delays)} after {delay}s delay...")
+                await asyncio.sleep(delay)
+                
+                async with httpx.AsyncClient(timeout=request_timeout, follow_redirects=False) as retry_client:
+                    retry_response = await retry_client.request(
+                        method=request.method,
+                        url=full_url,
+                        headers=headers,
+                        content=body if request.method in ["POST", "PUT", "PATCH"] else None,
+                        params=dict(request.query_params) if request.query_params else None,
+                    )
+                    logger.info(f"✅ Retry successful! Status: {retry_response.status_code}")
+                    
+                    # Handle streaming responses
+                    if "text/event-stream" in retry_response.headers.get("content-type", ""):
+                        async def retry_stream():
+                            async with retry_response:
+                                async for chunk in retry_response.aiter_bytes():
+                                    yield chunk
+                        return StreamingResponse(retry_stream(), media_type="text/event-stream")
+                    
+                    return Response(
+                        content=retry_response.content,
+                        status_code=retry_response.status_code,
+                        headers=dict(retry_response.headers),
+                    )
+            except (httpx.ConnectError, httpx.TimeoutException) as retry_error:
+                if attempt < len(retry_delays):
+                    logger.warning(f"⚠️  Retry {attempt} failed: {retry_error}, will retry again...")
+                    continue
+                else:
+                    logger.error(f"❌ All retry attempts failed. Service is not responding.")
+                    raise HTTPException(status_code=503, detail=f"Service unavailable after retries: {service_url}")
+        
         raise HTTPException(status_code=503, detail=f"Service unavailable: {service_url}")
     except httpx.TimeoutException as e:
         logger.error(f"❌ Request timeout to {full_url}: {e}")
         logger.error(f"❌ Service URL: {service_url}")
         logger.error(f"❌ This could mean: service is slow, processing large files, or service is overloaded")
+        logger.warning(f"⚠️  Attempting retry for slow service wake-up...")
+        
+        # Retry logic for slow services (might be waking up)
+        retry_delays = [2.0, 4.0, 6.0]  # Longer delays for timeout scenarios
+        for attempt, delay in enumerate(retry_delays, 1):
+            try:
+                logger.info(f"🔄 Timeout retry attempt {attempt}/{len(retry_delays)} after {delay}s delay...")
+                await asyncio.sleep(delay)
+                
+                async with httpx.AsyncClient(timeout=request_timeout * 1.5, follow_redirects=False) as retry_client:
+                    retry_response = await retry_client.request(
+                        method=request.method,
+                        url=full_url,
+                        headers=headers,
+                        content=body if request.method in ["POST", "PUT", "PATCH"] else None,
+                        params=dict(request.query_params) if request.query_params else None,
+                    )
+                    logger.info(f"✅ Timeout retry successful! Status: {retry_response.status_code}")
+                    
+                    # Handle streaming responses
+                    if "text/event-stream" in retry_response.headers.get("content-type", ""):
+                        async def retry_stream():
+                            async with retry_response:
+                                async for chunk in retry_response.aiter_bytes():
+                                    yield chunk
+                        return StreamingResponse(retry_stream(), media_type="text/event-stream")
+                    
+                    return Response(
+                        content=retry_response.content,
+                        status_code=retry_response.status_code,
+                        headers=dict(retry_response.headers),
+                    )
+            except (httpx.ConnectError, httpx.TimeoutException) as retry_error:
+                if attempt < len(retry_delays):
+                    logger.warning(f"⚠️  Timeout retry {attempt} failed: {retry_error}, will retry again...")
+                    continue
+                else:
+                    logger.error(f"❌ All timeout retry attempts failed. Service is not responding.")
+                    raise HTTPException(status_code=504, detail=f"Service timeout after retries: {service_url}")
+        
         error_detail = f"Service timeout: {service_url}"
         if "batch" in backend_path:
             error_detail += " (batch operation took too long - check service logs)"
