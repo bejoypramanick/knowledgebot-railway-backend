@@ -53,7 +53,6 @@ class SessionAuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/gateway/configuration/customer/events",  # Customer SSE events
             "/api/v1/gateway/configuration/admin/chat-sessions/feedback",  # Customer feedback
             "/api/v1/gateway/configuration/admin/chat-sessions/request-agent",  # Customer requesting agent
-            "/api/v1/gateway/configuration/users/unique-id",  # Get/create user ID by email (used during agent initialization)
         ]
 
         # Path prefixes that don't require authentication
