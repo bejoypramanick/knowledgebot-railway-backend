@@ -510,17 +510,17 @@ class StreamingService:
 
                 redis_client = await get_pubsub_redis()
                 cache_key = f"session:assigned_agent:{session_id}"
-                assigned_agent = await redis_client.get(cache_key)
+                assigned_agent_id = await redis_client.get(cache_key)
 
                 # If not in Redis cache, check database
-                if not assigned_agent:
+                if not assigned_agent_id:
                     logger.info(f"📋 Redis cache miss, checking database for agent assignment...")
                     try:
                         async with get_db_session() as db_session:
                             # Query session_assignments table for active assignment
-                            # Need to JOIN to get email from users table
+                            # Need to JOIN to get user ID and email from users table
                             query = """
-                                SELECT u.email FROM session_assignments sa
+                                SELECT u.id as agent_id, u.email as agent_email FROM session_assignments sa
                                 JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                                 JOIN users u ON urm.user_id = u.id
                                 WHERE sa.session_id = (SELECT id FROM chat_sessions WHERE session_id = :session_uuid)
@@ -531,16 +531,18 @@ class StreamingService:
                             result = await db_session.execute(text(query), {"session_uuid": session_id})
                             row = result.mappings().first()
                             if row:
-                                assigned_agent = row['email']
-                                logger.info(f"✅ Found agent in database: {assigned_agent}")
-                                # Update Redis cache for future requests
-                                await redis_client.set(cache_key, assigned_agent, ex=3600)
-                                logger.info(f"💾 Cached agent assignment in Redis for {session_id}")
+                                assigned_agent_id = row['agent_id']
+                                assigned_agent_email = row['agent_email']
+                                logger.info(f"✅ Found agent in database: {assigned_agent_email} (ID: {assigned_agent_id})")
+                                # Update Redis cache for future requests (store user ID)
+                                await redis_client.set(cache_key, assigned_agent_id, ex=3600)
+                                logger.info(f"💾 Cached agent assignment in Redis for {session_id}: {assigned_agent_id}")
                     except Exception as db_error:
                         logger.warning(f"⚠️ Database lookup failed: {db_error}")
 
-                if assigned_agent:
-                    logger.info(f"👤 Human agent '{assigned_agent}' is assigned to session {session_id}")
+                if assigned_agent_id:
+                    assigned_agent_id = int(assigned_agent_id) if isinstance(assigned_agent_id, (str, bytes)) else assigned_agent_id
+                    logger.info(f"👤 Human agent (ID: {assigned_agent_id}) is assigned to session {session_id}")
                     logger.info(f"📧 Saving customer message and notifying agent...")
 
                     # Save the user message to database (agent will see it)
@@ -565,14 +567,14 @@ class StreamingService:
                             "timestamp": int(time.time()),
                             "message": f"Customer sent: {message[:100]}..."
                         }
-                        await broadcast_event_to_agent(assigned_agent, event)
-                        logger.info(f"📤 Notified agent {assigned_agent} about new customer message")
+                        await broadcast_event_to_agent(assigned_agent_id, event)
+                        logger.info(f"📤 Notified agent (ID: {assigned_agent_id}) about new customer message")
                     except Exception as e:
                         logger.warning(f"⚠️ Failed to notify agent: {e}")
 
                     # Tell customer that agent will respond
                     yield f"data: {json.dumps({'type': 'message_received', 'message': 'Your message has been sent to the agent. Please wait for their response.'})}\n\n"
-                    logger.info(f"✅ Customer message processed and forwarded to agent {assigned_agent}")
+                    logger.info(f"✅ Customer message processed and forwarded to agent (ID: {assigned_agent_id})")
                     return
 
             except Exception as e:
