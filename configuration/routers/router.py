@@ -2137,17 +2137,11 @@ async def get_unread_message_count(request: Request, session_id: int = Query(...
 
 @router.post("/users/unique-id")
 async def create_or_get_unique_id(request: Request):
-    """Create or get unique user ID by email and role"""
+    """Create or get unique user ID by role. Email extracted from Firebase auth cookie."""
     try:
         body = await request.json()
-        email = body.get("email")
         role = body.get("role", "customer")
-
-        if not email:
-            raise HTTPException(status_code=400, detail="Email is required")
-
-        if '****' in email:
-            raise HTTPException(status_code=400, detail="Cannot create user from masked email")
+        email = request.state.user_email
 
         result = await auth_service.get_or_create_unique_id(email, role)
         return {"success": True, **result}
@@ -2158,9 +2152,10 @@ async def create_or_get_unique_id(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/users/unique-id")
-async def get_user_unique_id(email: str, role: str = "customer"):
-    """Get unique ID for a user by email and role"""
+async def get_user_unique_id(request: Request, role: str = "customer"):
+    """Get unique ID for a user by role. Email extracted from Firebase auth cookie."""
     try:
+        email = request.state.user_email
         result = await auth_service.get_or_create_unique_id(email, role)
         return {"success": True, **result}
     except Exception as e:
