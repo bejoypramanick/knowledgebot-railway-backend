@@ -1730,6 +1730,10 @@ async def end_agent_session(request: Request):
         result = await broadcast_event_to_session(session_uuid, event_data)
         logger.info(f"📤 [END_AGENT] Broadcast result: {result}")
 
+        # Also notify the agent's own SSE stream and all admins
+        await broadcast_event_to_agent(user_email, event_data)
+        await broadcast_event_to_all_agents(event_data)
+
         return {
             "success": True,
             "message": "Session ended by agent",
@@ -1792,6 +1796,12 @@ async def end_customer_session(request: Request):
             if session_data:
                 session_uuid = session_data.get('session_id')
                 await broadcast_event_to_session(session_uuid, event_data)
+
+        # Notify the assigned agent and all admins
+        assigned_agent = await chat_log_service.dao.get_assigned_agent_email(numeric_session_id)
+        if assigned_agent:
+            await broadcast_event_to_agent(assigned_agent, event_data)
+        await broadcast_event_to_all_agents(event_data)
 
         return {
             "success": True,
@@ -2080,6 +2090,9 @@ async def create_or_get_unique_id(request: Request):
 
         if not email:
             raise HTTPException(status_code=400, detail="Email is required")
+
+        if '****' in email:
+            raise HTTPException(status_code=400, detail="Cannot create user from masked email")
 
         result = await auth_service.get_or_create_unique_id(email, role)
         return {"success": True, **result}
