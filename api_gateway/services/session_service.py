@@ -192,32 +192,32 @@ class SessionService:
         Returns:
             True if valid, False if potential hijacking detected
         """
-        # Check IP address match
-        if ip_address and session_data.get("ip_address"):
-            if ip_address != session_data["ip_address"]:
-                # Allow Railway internal IP changes (load balancing)
-                is_railway_internal = (
-                    ip_address.startswith("100.64.") and 
-                    session_data["ip_address"].startswith("100.64.")
-                )
-                
-                if not is_railway_internal:
-                    logger.warning(
-                        f"🚨 IP mismatch for {session_data.get('email')}: "
-                        f"expected {session_data['ip_address']}, got {ip_address}"
-                    )
-                    return False
-        
-        # Check User-Agent match
-        # Disabled: User-Agent validation is too strict for web apps
-        # Users legitimately access from different devices/browsers
-        # if user_agent and session_data.get("user_agent"):
-        #     if user_agent != session_data["user_agent"]:
-        #         logger.warning(
-        #             f"🚨 User-Agent mismatch for {session_data.get('email')}: "
-        #             f"session created with different browser/device"
+        # IP validation disabled: Users legitimately have different IPs
+        # - Mobile users switching between WiFi and cellular
+        # - ISP IP rotation (DHCP lease expiration)
+        # - VPN/proxy changes
+        # - Corporate networks with multiple exit IPs
+        # - Moving between locations
+        # 
+        # IP binding was too strict and caused legitimate users to be logged out.
+        # Session expiration (7 days) and other security measures are sufficient.
+        # 
+        # if ip_address and session_data.get("ip_address"):
+        #     if ip_address != session_data["ip_address"]:
+        #         # Allow Railway internal IP changes (load balancing)
+        #         is_railway_internal = (
+        #             ip_address.startswith("100.64.") and 
+        #             session_data["ip_address"].startswith("100.64.")
         #         )
-        #         return False
+        #         
+        #         if not is_railway_internal:
+        #             logger.warning(
+        #                 f"🚨 IP mismatch for {session_data.get('email')}: "
+        #                 f"expected {session_data['ip_address']}, got {ip_address}"
+        #             )
+        #             return False
+        
+        # User-Agent validation disabled (see above)
         
         return True
     
