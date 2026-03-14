@@ -314,3 +314,43 @@ class ChatAgentConfigService:
         except Exception as e:
             logger.error(f"Error getting admin emails: {e}")
             raise
+
+    async def remove_admin(self, user_id: int) -> bool:
+        """Remove an admin user by user ID"""
+        try:
+            result = await self._chatAgent_dao.remove_admin_by_id(user_id)
+            logger.info(f"✅ Admin user {user_id} removed successfully")
+            return result
+        except Exception as e:
+            logger.error(f"Error removing admin user {user_id}: {e}")
+            raise
+
+    async def remove_human_agent(self, user_id: int) -> bool:
+        """Remove a human agent by user ID"""
+        try:
+            result = await self._chatAgent_dao.remove_human_agent_by_id(user_id)
+            logger.info(f"✅ Human agent user {user_id} removed successfully")
+            return result
+        except Exception as e:
+            logger.error(f"Error removing human agent user {user_id}: {e}")
+            raise
+
+    async def add_human_agent(self, email: str) -> bool:
+        """Add a new human agent by email"""
+        try:
+            result = await self._chatAgent_dao.add_human_agent(email)
+            logger.info(f"✅ Human agent {email} added successfully")
+            return result
+        except Exception as e:
+            logger.error(f"Error adding human agent {email}: {e}")
+            raise
+
+    async def add_admin(self, email: str) -> bool:
+        """Add a new admin by email"""
+        try:
+            result = await self._chatAgent_dao.add_admin(email)
+            logger.info(f"✅ Admin {email} added successfully")
+            return result
+        except Exception as e:
+            logger.error(f"Error adding admin {email}: {e}")
+            raise
