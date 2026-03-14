@@ -5,7 +5,7 @@ Provides business logic layer for chat agent configuration operations
 from typing import Any, Dict, List, Optional
 
 from shared.otel_logger import get_otel_logger
-from shared.email_masking import mask_emails_list, create_masked_email_map
+from shared.email_masking import mask_emails_list, unmask_emails
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
 
 logger = get_otel_logger("chat_agent_config_service", "configuration")
@@ -87,9 +87,7 @@ class ChatAgentConfigService:
             # Build response with masked emails for display
             response = {
                 "admin_emails": mask_emails_list(admin_emails_list),
-                "admin_emails_original": admin_emails_list,  # Keep original for internal use
                 "human_agents": mask_emails_list(human_agents_list),
-                "human_agents_original": human_agents_list,  # Keep original for internal use
                 "security": security,
                 "llm_tokens": llm_tokens,
                 "persona": persona_config,
@@ -154,27 +152,21 @@ class ChatAgentConfigService:
                             'integer'
                         )
             
-            # Save admin emails if provided
-            # Use original unmasked emails if available, otherwise use the provided list
+            # Save admin emails if provided - unmask any masked emails using DB originals
             if 'admin_emails' in config_data:
                 admin_emails = config_data['admin_emails']
-                # Prefer original unmasked emails if provided
-                if 'admin_emails_original' in config_data:
-                    admin_emails = config_data['admin_emails_original']
-                
                 if isinstance(admin_emails, list):
+                    current_admins = await self._chatAgent_dao.get_admins()
+                    admin_emails = unmask_emails(admin_emails, current_admins)
                     logger.info(f"💾 Saving admin emails: {admin_emails}")
                     await self._chatAgent_dao.sync_admin_emails(admin_emails)
-            
-            # Save human agents if provided
-            # Use original unmasked emails if available, otherwise use the provided list
+
+            # Save human agents if provided - unmask any masked emails using DB originals
             if 'human_agents' in config_data:
                 human_agents = config_data['human_agents']
-                # Prefer original unmasked emails if provided
-                if 'human_agents_original' in config_data:
-                    human_agents = config_data['human_agents_original']
-                
                 if isinstance(human_agents, list):
+                    current_agents = await self._chatAgent_dao.get_human_agents()
+                    human_agents = unmask_emails(human_agents, current_agents)
                     logger.info(f"💾 Saving human agents: {human_agents}")
                     await self._chatAgent_dao.sync_human_agent_emails(human_agents)
             

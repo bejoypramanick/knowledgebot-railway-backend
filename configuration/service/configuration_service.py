@@ -5,6 +5,7 @@ Provides business logic layer for configuration operations
 from typing import Any, Dict, Optional
 
 from shared.otel_logger import get_otel_logger
+from shared.email_masking import mask_email, unmask_emails
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
 from configuration.dao.widget_config_dao import WidgetConfigDAO
 
@@ -82,8 +83,8 @@ class ConfigurationService:
                 "llm_tokens": llm_tokens,
                 "security": security,
                 "persona": persona,
-                "human_agents": human_agents_list,
-                "admin_emails": admin_emails_list,
+                "human_agents": [mask_email(e) for e in human_agents_list],
+                "admin_emails": [mask_email(e) for e in admin_emails_list],
                 "metadata": metadata
             }
             
@@ -116,9 +117,11 @@ class ConfigurationService:
             # Extract widget config (appearance only - HIL moved to chat agent config)
             additional_widget_config = {}
 
-            # Extract chat agent config
-            admin_emails = config.get('admin_emails', [])
-            human_agents = config.get('human_agents', [])
+            # Extract chat agent config - unmask any masked emails using DB originals
+            current_admins = await self._chat_agent_dao.get_admins()
+            current_agents = await self._chat_agent_dao.get_human_agents()
+            admin_emails = unmask_emails(config.get('admin_emails', []), current_admins)
+            human_agents = unmask_emails(config.get('human_agents', []), current_agents)
             response_timeout = 30
             response_policy = 0.5  # Response policy (0=Strict, 1=Flexi, default=Balanced)
             hil_enabled = False
