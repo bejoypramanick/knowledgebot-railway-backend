@@ -275,17 +275,19 @@ class ConfigurationService:
             raise
 
     async def get_human_agents(self):
-        """Get human agents list"""
+        """Get human agents list (masked for display)"""
         try:
-            return await self._chat_agent_dao.get_human_agents()
+            agents = await self._chat_agent_dao.get_human_agents()
+            return [mask_email(e) for e in agents]
         except Exception as e:
             logger.error(f"Error getting human agents: {e}")
             raise
 
     async def get_admin_emails(self):
-        """Get admin emails list"""
+        """Get admin emails list (masked for display)"""
         try:
-            return await self._chat_agent_dao.get_admins()
+            emails = await self._chat_agent_dao.get_admins()
+            return [mask_email(e) for e in emails]
         except Exception as e:
             logger.error(f"Error getting admin emails: {e}")
             raise
