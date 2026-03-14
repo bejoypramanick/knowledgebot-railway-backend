@@ -209,13 +209,15 @@ class SessionService:
                     return False
         
         # Check User-Agent match
-        if user_agent and session_data.get("user_agent"):
-            if user_agent != session_data["user_agent"]:
-                logger.warning(
-                    f"🚨 User-Agent mismatch for {session_data.get('email')}: "
-                    f"session created with different browser/device"
-                )
-                return False
+        # Disabled: User-Agent validation is too strict for web apps
+        # Users legitimately access from different devices/browsers
+        # if user_agent and session_data.get("user_agent"):
+        #     if user_agent != session_data["user_agent"]:
+        #         logger.warning(
+        #             f"🚨 User-Agent mismatch for {session_data.get('email')}: "
+        #             f"session created with different browser/device"
+        #         )
+        #         return False
         
         return True
     
