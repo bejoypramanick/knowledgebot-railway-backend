@@ -232,88 +232,39 @@ class StreamingService:
             pydantic_messages = self._convert_db_messages_to_pydantic_ai(chat_history)
             logger.info(f"✅ Converted {len(pydantic_messages)} messages to Pydantic AI format")
 
-            # 🚨 CRITICAL FIX: System Prompt Handling Strategy 🚨
-            # Two different approaches depending on whether we have chat history:
+            # System Prompt Strategy: Cache-aware handling
             #
-            # 1. FIRST MESSAGE (empty pydantic_messages):
-            #    - DON'T provide message_history parameter
-            #    - Pydantic AI will use Agent.system_prompt automatically ✅
-            #    - Agent already has system_prompt set at creation time
+            # If Gemini cache is active:
+            #   - System prompt is IN the cache, no need to prepend or rely on Agent.system_prompt
+            #   - Always pass message_history (even for first messages)
             #
-            # 2. FOLLOW-UP MESSAGES (non-empty pydantic_messages):
-            #    - MUST provide message_history parameter (to include conversation context)
-            #    - Since message_history overrides Agent.system_prompt in Pydantic AI,
-            #    - MUST prepend system prompt to the message_history list
-            #
-            # This ensures system prompt is ALWAYS used, avoiding the root cause:
-            # "Pydantic AI discards Agent.system_prompt when message_history is provided"
+            # If no cache (fallback - existing two-tier logic):
+            #   1. FIRST MESSAGE: Don't provide message_history, use Agent.system_prompt
+            #   2. FOLLOW-UP: Prepend SystemPromptPart to message_history
 
             has_chat_history = len(pydantic_messages) > 0
-            logger.info("=" * 100)
-            logger.info("🚨 SYSTEM PROMPT STRATEGY DECISION")
-            logger.info("=" * 100)
-            logger.info(f"Message Type: {'FOLLOW-UP (has chat history)' if has_chat_history else 'FIRST MESSAGE (no history)'}")
-            logger.info(f"Current messages in history: {len(pydantic_messages)}")
-            logger.info("=" * 100)
+            cache_name = agent_manager.get_cached_cache_name(session_id)
 
-            if has_chat_history:
-                # FOLLOW-UP MESSAGE: Must prepend system prompt to message_history
-                logger.info("🔄 FOLLOW-UP MESSAGE HANDLING")
-                logger.info("Strategy: Prepend system prompt to message_history (required for Pydantic AI)")
-                logger.info("=" * 100)
+            logger.info(f"System prompt strategy: cache={'active: ' + cache_name if cache_name else 'none'}, "
+                        f"history={len(pydantic_messages)} messages")
 
-                # Get system prompt from agent manager cache
+            if cache_name:
+                # Cache active: system prompt is in the cache
+                logger.info("System prompt served from Gemini cache (skipping prepend)")
+            elif has_chat_history:
+                # FOLLOW-UP MESSAGE (no cache): Must prepend system prompt to message_history
                 system_prompt_text = agent_manager.get_cached_system_prompt(session_id)
 
                 if system_prompt_text:
-                    logger.info(f"✅ Retrieved system prompt: {len(system_prompt_text)} characters")
-                    logger.info(f"   Preview: {system_prompt_text[:150]}...")
-
-                    # Create SystemPromptPart message
                     system_prompt_msg = ModelRequest(parts=[SystemPromptPart(content=system_prompt_text)])
-
-                    # Prepend to message history (CRITICAL: must be first message at index 0)
                     pydantic_messages.insert(0, system_prompt_msg)
-                    logger.info(f"✅ System prompt prepended to message_history")
-                    logger.info(f"   Message_history now has {len(pydantic_messages)} messages (including system prompt)")
-                    logger.info(f"   Message 0: System Prompt (PROTECTED)")
-                    logger.info(f"   Message 1+: Conversation history ({len(pydantic_messages) - 1} messages)")
-
-                    # SAFEGUARD: Validate only one system message exists
-                    system_msg_count = sum(1 for msg in pydantic_messages
-                                          if hasattr(msg, 'parts') and
-                                          any(isinstance(part, SystemPromptPart) for part in msg.parts))
-                    if system_msg_count > 1:
-                        logger.warning(f"⚠️ WARNING: Found {system_msg_count} system messages (expected 1)")
-                        logger.warning("⚠️ This may cause issues with Pydantic AI or Gemini API")
-                    else:
-                        logger.info(f"✅ System message count validated: {system_msg_count} (correct)")
+                    logger.info(f"System prompt prepended to message_history ({len(system_prompt_text)} chars)")
                 else:
-                    logger.error(f"🚨 CRITICAL: System prompt not found in cache for session {session_id}")
-                    logger.error(f"🚨 Agent will receive NO system prompt")
+                    logger.error(f"System prompt not found in cache for session {session_id}")
                     raise RuntimeError(f"System prompt not found for session {session_id}")
-
-                # DEBUG: Log message history structure for follow-up messages
-                logger.info("=" * 100)
-                logger.info("🔍 DEBUG: MESSAGE HISTORY STRUCTURE (FOLLOW-UP)")
-                logger.info("=" * 100)
-                for i, msg in enumerate(pydantic_messages):
-                    msg_type = type(msg).__name__
-                    protection_marker = " [PROTECTED - DO NOT PRUNE]" if i == 0 and hasattr(msg, 'parts') and any(isinstance(part, SystemPromptPart) for part in msg.parts) else ""
-                    logger.info(f"Message {i}: {msg_type}{protection_marker}")
-                    if hasattr(msg, 'parts'):
-                        for j, part in enumerate(msg.parts):
-                            part_type = type(part).__name__
-                            part_content = getattr(part, 'content', '')[:100]
-                            logger.info(f"  Part {j} ({part_type}): {part_content}...")
-                logger.info("=" * 100)
             else:
-                # FIRST MESSAGE: Don't provide message_history
-                logger.info("✨ FIRST MESSAGE HANDLING")
-                logger.info("Strategy: DON'T provide message_history (use Agent.system_prompt)")
-                logger.info("Reason: Agent was created with system_prompt set at line 229")
-                logger.info("Pydantic AI will use Agent.system_prompt automatically ✅")
-                logger.info("=" * 100)
+                # FIRST MESSAGE (no cache): Agent.system_prompt will be used automatically
+                logger.info("First message: using Agent.system_prompt (no cache fallback)")
 
             # 🚨 CRITICAL: Check if user is requesting human agent BEFORE AI responds
             logger.info(f"🔍 Checking if user is requesting human agent...")
@@ -607,54 +558,35 @@ class StreamingService:
                 # - Use other tools
                 # - Respond from knowledge
 
-                # Extended thinking configuration (flag-based)
-                from google.genai import types
                 from pydantic_ai.models.google import GoogleModelSettings
 
                 # Get response_policy (temperature) from agent manager
                 response_policy = 0.5  # Default balanced
                 try:
-                    # Fetch persona config to get response_policy
                     persona_config = await agent_manager._fetch_persona_config()
                     response_policy = persona_config.get('response_policy', 0.5)
-                    logger.info(f"🌡️ Response Policy (Temperature): {response_policy} (0=Strict, 1=Flexi)")
+                    logger.info(f"Temperature: {response_policy}")
                 except Exception as e:
-                    logger.warning(f"⚠️ Could not fetch response_policy: {e}, using default 0.5")
+                    logger.warning(f"Could not fetch response_policy: {e}, using default 0.5")
 
-                # Build GenerateContentConfig with temperature
-                generate_config = types.GenerateContentConfig(
-                    temperature=response_policy
-                )
+                # Build model settings with proper fields
+                model_settings_kwargs: dict = {
+                    'temperature': response_policy,
+                }
 
                 if ENABLE_EXTENDED_THINKING:
-                    logger.info("🧠 Extended thinking ENABLED (via ENABLE_EXTENDED_THINKING env var)")
-                    thinking_config = types.ThinkingConfigDict(
+                    from google.genai.types import ThinkingConfigDict
+                    model_settings_kwargs['google_thinking_config'] = ThinkingConfigDict(
                         include_thoughts=True
                     )
-                    generate_config = types.GenerateContentConfig(
-                        temperature=response_policy,
-                        google_thinking_config=thinking_config
-                    )
-                else:
-                    logger.info("🧠 Extended thinking DISABLED (default - set ENABLE_EXTENDED_THINKING=true to enable)")
 
-                model_settings = GoogleModelSettings(
-                    generate_config=generate_config
-                )
+                if cache_name:
+                    model_settings_kwargs['google_cached_content'] = cache_name
 
-                logger.info("=" * 100)
-                logger.info("📤 PREPARING AGENT.ITER() CALL")
-                logger.info(f"   Current message: '{message}'")
-                logger.info(f"   Chat history: {len(pydantic_messages) if has_chat_history else 0} messages")
-                if has_chat_history:
-                    logger.info(f"   message_history: WILL BE PROVIDED (follow-up message)")
-                    logger.info(f"   system_prompt: PREPENDED to message_history")
-                else:
-                    logger.info(f"   message_history: NOT PROVIDED (first message)")
-                    logger.info(f"   system_prompt: Using Agent.system_prompt (set at creation) ✅")
-                thinking_status = "ENABLED ✅" if ENABLE_EXTENDED_THINKING else "DISABLED (default)"
-                logger.info(f"   Extended thinking: {thinking_status}")
-                logger.info("=" * 100)
+                model_settings = GoogleModelSettings(**model_settings_kwargs)
+
+                logger.info(f"Agent.iter() call: message='{message[:80]}...', "
+                            f"history={len(pydantic_messages)}, cache={cache_name or 'none'}")
 
                 # Check token rate limit before calling Gemini API
                 # Estimate: ~500 tokens for system prompt + message history + current message
@@ -680,49 +612,33 @@ class StreamingService:
 
                 while retry_attempt < max_retries:
                     try:
-                        # CRITICAL: Use different calling conventions for first vs. follow-up messages
-                        if has_chat_history:
-                            # FOLLOW-UP MESSAGE: Provide message_history (which includes prepended system prompt)
+                        # Determine whether to pass message_history:
+                        # - Cache active: ALWAYS pass message_history (system prompt in cache)
+                        # - No cache, first message: DON'T pass (use Agent.system_prompt)
+                        # - No cache, follow-up: PASS (includes prepended system prompt)
+                        use_message_history = cache_name is not None or has_chat_history
+
+                        if use_message_history:
                             async with agent.iter(
-                                message,  # ✅ ORIGINAL message
-                                message_history=pydantic_messages,  # ✅ Full conversation context + system prompt
+                                message,
+                                message_history=pydantic_messages,
                                 deps=session_deps,
-                                model_settings=model_settings  # 🧠 Enable extended thinking
+                                model_settings=model_settings
                             ) as run:
-                                logger.info("🚀 Starting agent iteration (streaming + tools) [FOLLOW-UP MESSAGE]")
-
-                                # Import correct message types from pydantic_ai.messages
                                 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
-
-                                # Iterate through agent events/responses (these are Node objects, not ModelResponse)
                                 async for event in run:
-                                    event_type = type(event).__name__
-                                    logger.info(f"📌 Processing event: {event_type}")
-                                    # Events are Node types (UserPromptNode, ModelRequestNode, CallToolsNode, End)
-                                    # We don't stream from these directly - we get response after iteration via run.all_messages()
-
-                                # Success - break out of retry loop
+                                    logger.debug(f"Event: {type(event).__name__}")
                                 break
                         else:
-                            # FIRST MESSAGE: Don't provide message_history, use Agent.system_prompt
+                            # First message, no cache: use Agent.system_prompt
                             async with agent.iter(
-                                message,  # ✅ ORIGINAL message
+                                message,
                                 deps=session_deps,
-                                model_settings=model_settings  # 🧠 Enable extended thinking
+                                model_settings=model_settings
                             ) as run:
-                                logger.info("🚀 Starting agent iteration (streaming + tools) [FIRST MESSAGE]")
-
-                                # Import correct message types from pydantic_ai.messages
                                 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
-
-                                # Iterate through agent events/responses (these are Node objects, not ModelResponse)
                                 async for event in run:
-                                    event_type = type(event).__name__
-                                    logger.info(f"📌 Processing event: {event_type}")
-                                    # Events are Node types (UserPromptNode, ModelRequestNode, CallToolsNode, End)
-                                    # We don't stream from these directly - we get response after iteration via run.all_messages()
-
-                                # Success - break out of retry loop
+                                    logger.debug(f"Event: {type(event).__name__}")
                                 break
 
                     except Exception as e:
@@ -976,61 +892,39 @@ class StreamingService:
                                         logger.info(f"   User Email: {user_email}")
                                         logger.info("=" * 80)
 
-                    logger.info(f"✅ Agent completed with {tool_call_count} tool calls")
+                    logger.info(f"Agent completed with {tool_call_count} tool calls")
 
-                # ================================================================
-                # CRITICAL MONITORING: Track tool call failures
-                # ================================================================
-                # The system prompt requires ALL non-greeting queries to call at least 1 tool
-                # This is now a hard requirement in the prompt (Path A: greeting-only, Path B: tools required)
-                if tool_call_count == 0 and message.strip():
-                    greeting_patterns = ["hi", "hello", "hey", "good morning", "good afternoon", "greetings"]
-                    is_greeting = any(g in message.lower() for g in greeting_patterns)
+                    # Monitor tool call compliance
+                    if tool_call_count == 0 and message.strip():
+                        greeting_patterns = ["hi", "hello", "hey", "good morning", "good afternoon", "greetings"]
+                        is_greeting = any(g in message.lower() for g in greeting_patterns)
 
-                    # Detect emoji-only messages as greetings (e.g. "😀", "👋", "🙏")
-                    emoji_pattern = re.compile(
-                        r'^[\U0001F600-\U0001F64F'   # emoticons
-                        r'\U0001F300-\U0001F5FF'     # symbols & pictographs
-                        r'\U0001F680-\U0001F6FF'     # transport & map
-                        r'\U0001F1E0-\U0001F1FF'     # flags
-                        r'\U00002702-\U000027B0'     # dingbats
-                        r'\U0000FE00-\U0000FE0F'     # variation selectors
-                        r'\U0000200D'                # zero-width joiner
-                        r'\U00002600-\U000026FF'     # misc symbols
-                        r'\U0000231A-\U0000231B'     # watch/hourglass
-                        r'\U00002934-\U00002935'     # arrows
-                        r'\U000025AA-\U000025FE'     # geometric shapes
-                        r'\U00002B05-\U00002B07'     # arrows
-                        r'\U00002B1B-\U00002B1C'     # squares
-                        r'\U00002B50'                # star
-                        r'\U00002B55'                # circle
-                        r'\U0001F900-\U0001F9FF'     # supplemental symbols
-                        r'\U0001FA00-\U0001FA6F'     # chess symbols
-                        r'\U0001FA70-\U0001FAFF'     # symbols extended-A
-                        r'\s]+$'                     # allow whitespace between emojis
-                    )
-                    if not is_greeting and emoji_pattern.match(message.strip()):
-                        is_greeting = True
-                    has_history = len(pydantic_messages) > 0
+                        emoji_pattern = re.compile(
+                            r'^[\U0001F600-\U0001F64F'
+                            r'\U0001F300-\U0001F5FF'
+                            r'\U0001F680-\U0001F6FF'
+                            r'\U0001F1E0-\U0001F1FF'
+                            r'\U00002702-\U000027B0'
+                            r'\U0000FE00-\U0000FE0F'
+                            r'\U0000200D'
+                            r'\U00002600-\U000026FF'
+                            r'\U0000231A-\U0000231B'
+                            r'\U00002934-\U00002935'
+                            r'\U000025AA-\U000025FE'
+                            r'\U00002B05-\U00002B07'
+                            r'\U00002B1B-\U00002B1C'
+                            r'\U00002B50'
+                            r'\U00002B55'
+                            r'\U0001F900-\U0001F9FF'
+                            r'\U0001FA00-\U0001FA6F'
+                            r'\U0001FA70-\U0001FAFF'
+                            r'\s]+$'
+                        )
+                        if not is_greeting and emoji_pattern.match(message.strip()):
+                            is_greeting = True
 
-                    if not is_greeting:
-                        logger.error("=" * 100)
-                        logger.error("🚨 CRITICAL: TOOL CALL REQUIREMENT NOT MET")
-                        logger.error("=" * 100)
-                        logger.error(f"Message Type: {'Follow-up with history' if has_history else 'First message'}")
-                        logger.error(f"Query: '{message}'")
-                        logger.error(f"Tool Calls Made: 0 ❌ (REQUIRED: ≥1)")
-                        logger.error("")
-                        logger.error("SYSTEM PROMPT REQUIREMENT:")
-                        logger.error("- Non-greeting queries MUST follow Path B (call at least 1 tool)")
-                        logger.error("- This is a hard requirement for response quality")
-                        logger.error("- The model failed to follow the prompt's tool-first decision tree")
-                        logger.error("")
-                        logger.error("EXPECTED BEHAVIOR:")
-                        logger.error("- search_knowledge_base() for knowledge questions")
-                        logger.error("- query_railway_postgres() for system data")
-                        logger.error("- request_human_agent_connection() for escalation")
-                        logger.error("=" * 100)
+                        if not is_greeting:
+                            logger.error(f"TOOL CALL REQUIREMENT NOT MET: query='{message[:80]}', tools=0")
 
                 except Exception as result_error:
                     logger.error(f"❌ Error extracting results: {result_error}", exc_info=True)

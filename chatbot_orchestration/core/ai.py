@@ -1,10 +1,8 @@
 import os
-import logging
-from shared.otel_logger import get_otel_logger
 from shared.otel_logger import get_otel_logger
 
 from google import genai
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+from pydantic_ai.models.google import GoogleModel
 
 from chatbot_orchestration.core.config import settings
 
@@ -36,30 +34,16 @@ def get_genai_client():
         logger.error("❌ GEMINI_API_KEY is not set - Gemini client cannot be initialized")
     return genai_client
 
-# Initialize Gemini Model with caching
+# Initialize Gemini Model (used as fallback reference; agent_manager creates its own)
 if GEMINI_API_KEY:
     try:
-        logger.info(f"🔧 Attempting to initialize Gemini model: {MODEL_NAME}")
-        # Pydantic AI's GeminiModel with 15-minute caching
-        # Note: Extended thinking disabled to minimize token usage
-        # Reasoning is still logged via message structure inspection
-        gemini_model = GoogleModel(
-            MODEL_NAME,
-            settings=GoogleModelSettings(
-                # Enable caching with 15-minute TTL
-                cache_ttl=900  # 15 minutes in seconds
-            )
-        )
-        logger.info(f"✅ Gemini model '{MODEL_NAME}' initialized with 15-minute caching")
-        logger.info("   📊 Reasoning logged via message inspection (no extra token cost)")
+        gemini_model = GoogleModel(MODEL_NAME)
+        logger.info(f"Gemini model '{MODEL_NAME}' initialized")
     except Exception as e:
         gemini_model = None
-        logger.error(f"❌ Failed to initialize GeminiModel '{MODEL_NAME}': {e}")
-        logger.error(f"❌ Exception type: {type(e).__name__}")
-        logger.error("Gemini model will be unavailable; chat endpoints may return 503 or degraded responses")
+        logger.error(f"Failed to initialize GeminiModel '{MODEL_NAME}': {e}")
 else:
-    logger.warning("❌ Gemini model not initialized - GEMINI_API_KEY is missing")
-    logger.warning("Chat endpoints will return 'AI service is currently unavailable'")
+    logger.warning("Gemini model not initialized - GEMINI_API_KEY is missing")
 
 def get_gemini_model():
     """Get Gemini model with availability check"""

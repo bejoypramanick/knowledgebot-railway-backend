@@ -8,10 +8,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from pydantic_ai import Agent
-from pydantic_ai.models.google import GoogleModel
 from shared.otel_logger import get_otel_logger
 
 from ..core.ai import MODEL_NAME, get_genai_client
+from ..core.cached_google_model import CachedGoogleModel
+from ..core.cache_manager import gemini_cache_manager
 from ..core.dependencies import ChatSessionDeps
 from ..tools.knowledge_tools import search_knowledge_base, query_railway_postgres, request_human_agent_connection
 from .session_manager import session_state_manager
@@ -25,6 +26,7 @@ class AgentManager:
         self.genai_client = None
         self.agent_cache: Dict[str, Agent] = {}  # Cache agents by session_id
         self.system_prompt_cache: Dict[str, str] = {}  # Cache system prompts by session_id
+        self.cache_name_cache: Dict[str, Optional[str]] = {}  # Cache Gemini cache names by session_id
 
     async def initialize(self):
         """Initialize the agent manager."""
@@ -142,6 +144,19 @@ class AgentManager:
         """Get cached system prompt for a session if it exists."""
         return self.system_prompt_cache.get(session_id)
 
+    def get_cached_cache_name(self, session_id: str) -> Optional[str]:
+        """Get Gemini cache name for a session. Returns None if no cache or expired."""
+        stored = self.cache_name_cache.get(session_id)
+        if stored is None:
+            return None
+        # Validate it's still active via the manager's TTL check
+        active = gemini_cache_manager.cache_name
+        if active and active == stored:
+            return active
+        # Cache expired or was invalidated
+        self.cache_name_cache[session_id] = None
+        return None
+
     def clear_agent_cache(self, session_id: str = None):
         """Clear cached agent for a session or all sessions.
         
@@ -151,16 +166,21 @@ class AgentManager:
         if session_id:
             if session_id in self.agent_cache:
                 del self.agent_cache[session_id]
-                logger.info(f"🗑️ Cleared cached agent for session: {session_id}")
+                logger.info(f"Cleared cached agent for session: {session_id}")
             if session_id in self.system_prompt_cache:
                 del self.system_prompt_cache[session_id]
-                logger.info(f"🗑️ Cleared cached system prompt for session: {session_id}")
+                logger.info(f"Cleared cached system prompt for session: {session_id}")
+            if session_id in self.cache_name_cache:
+                del self.cache_name_cache[session_id]
+            gemini_cache_manager.invalidate()
         else:
             # Clear all cached agents and prompts
             cache_size = len(self.agent_cache)
             self.agent_cache.clear()
             self.system_prompt_cache.clear()
-            logger.info(f"🗑️ Cleared all cached agents and prompts ({cache_size} sessions)")
+            self.cache_name_cache.clear()
+            gemini_cache_manager.invalidate()
+            logger.info(f"Cleared all cached agents, prompts, and Gemini cache ({cache_size} sessions)")
 
     async def create_agent(self, session_id: str, user_email: str = "anonymous@example.com", force_new: bool = False) -> Agent:
         """Create or retrieve cached agent instance with PydanticAI's built-in caching.
@@ -212,47 +232,52 @@ class AgentManager:
 
         # Define tools (fixed set)
         tool_functions = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
-        logger.info(f"📋 Registering {len(tool_functions)} tools with agent")
+        logger.info(f"Registering {len(tool_functions)} tools with agent")
 
-        # Create agent (caching will be enabled at runtime via model_settings)
-        logger.info("🚀 Creating agent for session")
+        # Create Gemini explicit context cache (system prompt + tool declarations)
+        cache_name = None
         try:
-            # Create model
-            google_model = GoogleModel(MODEL_NAME)
-            logger.info("✅ GoogleModel created")
+            cache_name = await gemini_cache_manager.ensure_cache(
+                system_prompt=system_prompt,
+                tool_functions=tool_functions,
+                model_name=MODEL_NAME,
+            )
+            if cache_name:
+                logger.info(f"Gemini cache active: {cache_name}")
+            else:
+                logger.info("Gemini cache not available, using inline system prompt (fallback)")
+        except Exception as cache_error:
+            logger.warning(f"Gemini cache creation failed: {cache_error}, using fallback")
 
-            # Create agent with system prompt and tools
-            # Use end_strategy='exhaustive' to ensure ALL tools execute, not just first output
-            # This fixes issue where Gemini returns text instead of calling tools
+        # Create agent
+        logger.info("Creating agent for session")
+        try:
+            # Use CachedGoogleModel which strips tools/system_instruction when cache is active
+            google_model = CachedGoogleModel(MODEL_NAME)
+            logger.info("CachedGoogleModel created")
+
+            # Agent STILL gets system_prompt and tools (fallback if cache fails,
+            # and tools are needed for execution/parsing even when declarations are cached)
             agent = Agent(
                 google_model,
                 system_prompt=system_prompt,
                 tools=tool_functions,
                 deps_type=ChatSessionDeps,
-                end_strategy='exhaustive'  # Ensure tools execute even after initial output
+                end_strategy='exhaustive'
             )
-            logger.info("✅ Agent created successfully")
-            logger.info(f"📝 System prompt: {len(system_prompt)} chars")
-            logger.info(f"📝 System prompt preview: {system_prompt[:200]}...")
-            logger.info(f"📝 Has HTML formatting instructions: {'MANDATORY HTML FORMATTING' in system_prompt}")
-            logger.info("ℹ️ Caching will be enabled via model_settings in run_stream()")
-            logger.info("💰 Token savings: ~85-90% when cache_system_prompt=True is used")
+            logger.info(f"Agent created (system prompt: {len(system_prompt)} chars, cache: {cache_name or 'none'})")
 
         except Exception as agent_error:
-            logger.error(f"❌ Failed to create Agent: {agent_error}")
+            logger.error(f"Failed to create Agent: {agent_error}")
             raise
 
-        # Cache the agent instance for this session
+        # Cache the agent instance and related data for this session
         self.agent_cache[session_id] = agent
         self.system_prompt_cache[session_id] = system_prompt
-        logger.info(f"✅ Agent cached for session: {session_id}")
-        logger.info(f"✅ System prompt cached for session: {session_id}")
+        self.cache_name_cache[session_id] = cache_name
+        logger.info(f"Agent cached for session: {session_id}")
 
-        logger.info("="*80)
-        logger.info(f"✅ CREATE_AGENT COMPLETED - Session: {session_id}")
-        logger.info(f"   - Agent type: {type(agent).__name__}")
-        logger.info(f"   - Cached for reuse: Yes")
-        logger.info("="*80)
+        logger.info(f"CREATE_AGENT COMPLETED - Session: {session_id}, cache: {cache_name or 'none'}")
 
         return agent
 
