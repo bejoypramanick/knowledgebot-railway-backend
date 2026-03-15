@@ -444,7 +444,7 @@ class ChatLogDAO:
                     LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
                     LEFT JOIN users u ON urm.user_id = u.id
                     WHERE (cs.message_count > 0 OR cs.message_count IS NULL)
-                    ORDER BY cs.id, sa.status DESC NULLS LAST
+                    ORDER BY cs.id, CASE WHEN sa.status = 'active' THEN 0 ELSE 1 END, sa.assigned_at DESC NULLS LAST
                 ) deduped
                 ORDER BY deduped.last_activity_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset
@@ -488,7 +488,7 @@ class ChatLogDAO:
                     LEFT JOIN users u ON urm.user_id = u.id
                     WHERE cs.archive_status = :archive_status
                       AND (cs.message_count > 0 OR cs.message_count IS NULL)
-                    ORDER BY cs.id, sa.status DESC NULLS LAST
+                    ORDER BY cs.id, CASE WHEN sa.status = 'active' THEN 0 ELSE 1 END, sa.assigned_at DESC NULLS LAST
                 ) deduped
                 ORDER BY deduped.last_activity_at DESC NULLS LAST
                 LIMIT :limit OFFSET :offset

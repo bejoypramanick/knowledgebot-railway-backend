@@ -371,6 +371,7 @@ class StreamingService:
                                                 "last_message_at": redis_session.get('last_activity_at', datetime.utcnow().isoformat()),
                                                 "created_at": redis_session.get('started_at'),
                                                 "assigned_agent": assigned_agent,
+                                                "assigned_agent_id": assigned_agent_id,
                                                 "feedback": None,
                                                 "customer_feedback": None,
                                                 "agent_feedback": None,

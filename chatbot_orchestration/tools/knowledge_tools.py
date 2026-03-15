@@ -923,6 +923,7 @@ async def request_human_agent_connection(
                                     "last_message_at": session_dict.get('last_activity_at').isoformat() if session_dict.get('last_activity_at') else datetime.utcnow().isoformat(),
                                     "created_at": session_dict.get('created_at').isoformat() if session_dict.get('created_at') else None,
                                     "assigned_agent": assigned_agent_email,
+                                    "assigned_agent_id": assigned_agent_id,
                                     "feedback": None,
                                     "customer_feedback": None,
                                     "agent_feedback": None,
