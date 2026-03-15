@@ -26,7 +26,8 @@ class StreamingService:
     """Handles streaming responses for the chatbot."""
 
     def __init__(self):
-        pass
+        from ..dao.chat_dao import ChatDAO
+        self.chat_dao = ChatDAO()
 
     def _convert_db_messages_to_pydantic_ai(self, db_messages: List[Dict[str, Any]]) -> List[Any]:
         """Convert database messages to Pydantic AI message format."""
@@ -160,48 +161,33 @@ class StreamingService:
             logger.info(f"🚀 Starting agent stream for session: {session_id}")
             logger.info(f"📝 Message: {message[:100]}...")
 
-            # STEP 1: Ensure session exists in database (lazy creation on first message)
-            # Session may be created by frontend's /set-current call, or created here on first message
+            # STEP 1: Ensure session exists in Redis (DB 6) — zero PG connections
+            # PG row created lazily by write-through or ensure_numeric_id() on first message
             try:
-                from shared.sqlalchemy_db import get_db_session
-                from sqlalchemy import text
+                from shared.redis_chat_store import get_chat_store
 
-                session_exists = False
+                chat_store = get_chat_store()
                 numeric_session_id = None
 
-                # Check if session exists in database
-                async with get_db_session() as db_session:
-                    query = "SELECT id FROM chat_sessions WHERE session_id = :session_id LIMIT 1"
-                    result = await db_session.execute(text(query), {"session_id": session_id})
-                    existing_session = result.mappings().first()
+                # Get or create session in Redis
+                redis_session = await chat_store.get_or_create_session(
+                    session_uuid=session_id,
+                    metadata={"created_by": "first_message", "user_email": user_email}
+                )
 
-                    if existing_session:
-                        # Session exists - use its numeric ID
-                        session_exists = True
-                        numeric_session_id = existing_session["id"]
-                        logger.info(f"✅ Found existing session in DB: {session_id} (numeric ID: {numeric_session_id})")
+                if redis_session:
+                    numeric_session_id = redis_session.get("db_id")
+                    if numeric_session_id:
+                        logger.info(f"Found existing session in Redis: {session_id} (numeric ID: {numeric_session_id})")
                     else:
-                        # Session doesn't exist - create it on first message
-                        logger.info(f"📝 Creating new session in database on first message: {session_id}")
-                        insert_query = """
-                            INSERT INTO chat_sessions (session_id, metadata, created_at, last_activity_at, is_active)
-                            VALUES (:session_id, :metadata, NOW(), NOW(), true)
-                            RETURNING id
-                        """
-                        result = await db_session.execute(
-                            text(insert_query),
-                            {
-                                "session_id": session_id,
-                                "metadata": json.dumps({"created_by": "first_message", "user_email": user_email})
-                            }
-                        )
-                        numeric_session_id = result.scalar()
-                        await db_session.commit()
-                        logger.info(f"✅ Created new session in DB: {session_id} (numeric ID: {numeric_session_id})")
+                        # Need PG numeric ID (single PG call, first message only)
+                        numeric_session_id = await self.chat_dao.ensure_numeric_id(session_id)
+                        logger.info(f"Created PG numeric ID for session: {session_id} -> {numeric_session_id}")
+                else:
+                    logger.warning(f"Redis session creation returned None for {session_id}")
 
             except Exception as e:
-                logger.error(f"❌ Error managing session in database: {e}", exc_info=True)
-                # Continue anyway - session will be created when message is saved
+                logger.error(f"Error managing session in Redis: {e}", exc_info=True)
 
             # Update session activity
             session_state_manager.update_session_activity(session_id)
@@ -328,14 +314,9 @@ class StreamingService:
                     )
                     endpoint_url = f"{config_service_url}/api/v1/configuration/admin/chat-sessions/request-agent"
                     
-                    # Get numeric session ID
-                    async with get_db_session() as db_session:
-                        query = "SELECT id FROM chat_sessions WHERE session_id = :session_uuid LIMIT 1"
-                        result = await db_session.execute(text(query), {"session_uuid": session_id})
-                        row = result.mappings().first()
-                        if row:
-                            numeric_session_id = row['id']
-                            
+                    # Get numeric session ID from Redis/PG
+                    numeric_session_id = await self.chat_dao.ensure_numeric_id(session_id)
+                    if numeric_session_id:
                             # Call configuration service to assign agent
                             async with httpx.AsyncClient(timeout=10.0) as client:
                                 response = await client.post(
@@ -353,26 +334,27 @@ class StreamingService:
                                     await asyncio.sleep(0.1)
                                     
                                     # Verify assignment was saved in database
-                                    verify_query = """
-                                        SELECT u.email as agent_email, u.id as agent_id
-                                        FROM session_assignments sa
-                                        LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
-                                        LEFT JOIN users u ON urm.user_id = u.id
-                                        WHERE sa.session_id = :session_id AND sa.status = 'active'
-                                    """
-                                    verify_result = await db_session.execute(text(verify_query), {"session_id": numeric_session_id})
-                                    verify_row = verify_result.mappings().first()
-                                    if verify_row:
-                                        logger.info(f"✅ Verified agent assignment in database: {verify_row['agent_email']} (ID: {verify_row['agent_id']})")
-                                    else:
-                                        logger.warning(f"⚠️ Agent assignment not found in database yet for session {numeric_session_id}")
+                                    from shared.sqlalchemy_db import get_db_session as get_db
+                                    from sqlalchemy import text as sql_text
+                                    async with get_db() as verify_db:
+                                        verify_query = """
+                                            SELECT u.email as agent_email, u.id as agent_id
+                                            FROM session_assignments sa
+                                            LEFT JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
+                                            LEFT JOIN users u ON urm.user_id = u.id
+                                            WHERE sa.session_id = :session_id AND sa.status = 'active'
+                                        """
+                                        verify_result = await verify_db.execute(sql_text(verify_query), {"session_id": numeric_session_id})
+                                        verify_row = verify_result.mappings().first()
+                                        if verify_row:
+                                            logger.info(f"Verified agent assignment in database: {verify_row['agent_email']} (ID: {verify_row['agent_id']})")
+                                        else:
+                                            logger.warning(f"Agent assignment not found in database yet for session {numeric_session_id}")
                                     
-                                    # Cache the agent assignment immediately for future message broadcasts
-                                    from shared.redis_pubsub_manager import get_pubsub_redis
-                                    redis_client = await get_pubsub_redis()
-                                    cache_key = f"session:assigned_agent:{session_id}"
-                                    await redis_client.set(cache_key, assigned_agent_id, ex=3600)
-                                    logger.info(f"💾 Cached agent assignment: {session_id} → {assigned_agent_id}")
+                                    # Cache the agent assignment in Redis DB 4
+                                    from shared.redis_agent_cache import set_assigned_agent
+                                    await set_assigned_agent(session_id, assigned_agent_id)
+                                    logger.info(f"Cached agent assignment (DB 4): {session_id} -> {assigned_agent_id}")
                                     
                                     # Save user message first
                                     await session_state_manager.save_message(
@@ -386,55 +368,40 @@ class StreamingService:
                                     from shared.redis_pubsub_manager import broadcast_event_to_agent
                                     from datetime import datetime
                                     
-                                    # Get session details and messages
-                                    session_query = "SELECT * FROM chat_sessions WHERE id = :id LIMIT 1"
-                                    session_result = await db_session.execute(text(session_query), {"id": numeric_session_id})
-                                    session_row = session_result.mappings().first()
-                                    
-                                    if session_row:
-                                        session_dict = dict(session_row)
-                                        
-                                        # Get ALL messages for this session
-                                        msg_query = "SELECT id, content, role, created_at FROM chat_messages WHERE session_id = :session_id ORDER BY created_at ASC"
-                                        msg_result = await db_session.execute(text(msg_query), {"session_id": numeric_session_id})
-                                        msg_rows = msg_result.mappings().all()
-                                        
+                                    # Get session details and messages from Redis
+                                    redis_session = await chat_store.get_session(session_id)
+                                    redis_messages = await chat_store.get_messages(session_id)
+
+                                    if redis_session:
+
                                         messages = []
-                                        for msg_row in msg_rows:
+                                        for i, msg in enumerate(redis_messages):
                                             messages.append({
-                                                "id": str(msg_row['id']),
-                                                "text": msg_row['content'],
-                                                "sender": msg_row['role'],
-                                                "timestamp": msg_row['created_at'].isoformat() if msg_row['created_at'] else datetime.utcnow().isoformat(),
+                                                "id": str(i),
+                                                "text": msg.get('content', ''),
+                                                "sender": msg.get('role', ''),
+                                                "timestamp": msg.get('created_at', datetime.utcnow().isoformat()),
                                                 "session_id": session_id
                                             })
-                                        
-                                        # Get customer_name from metadata or generate it
-                                        metadata = session_dict.get('metadata')
-                                        customer_name = None
-                                        if metadata:
-                                            if isinstance(metadata, str):
-                                                try:
-                                                    metadata = json.loads(metadata)
-                                                except:
-                                                    metadata = {}
-                                            customer_name = metadata.get('customer_name')
-                                        
-                                        # If customer_name not set, use "User-<numeric_id>" format
+
+                                        # Get customer_name from Redis session metadata
+                                        session_metadata = redis_session.get('metadata', {})
+                                        customer_name = session_metadata.get('customer_name') if isinstance(session_metadata, dict) else None
+
                                         if not customer_name:
                                             customer_name = f"User-{numeric_session_id}"
-                                        
+
                                         # Build session event
                                         session_event = {
                                             "type": "session_update",
                                             "data": {
-                                                "id": str(session_dict.get('id')),
+                                                "id": str(redis_session.get('db_id', numeric_session_id)),
                                                 "session_uuid": session_id,
-                                                "customer_name": customer_name,  # Use generated name if not in DB
-                                                "customer_email": session_dict.get('customer_email'),
-                                                "status": session_dict.get('archive_status', 'active'),
-                                                "last_message_at": session_dict.get('last_activity_at').isoformat() if session_dict.get('last_activity_at') else datetime.utcnow().isoformat(),
-                                                "created_at": session_dict.get('created_at').isoformat() if session_dict.get('created_at') else None,
+                                                "customer_name": customer_name,
+                                                "customer_email": None,
+                                                "status": redis_session.get('archive_status', 'active'),
+                                                "last_message_at": redis_session.get('last_activity_at', datetime.utcnow().isoformat()),
+                                                "created_at": redis_session.get('started_at'),
                                                 "assigned_agent": assigned_agent,
                                                 "feedback": None,
                                                 "customer_feedback": None,
@@ -502,23 +469,20 @@ class StreamingService:
                     # Fall through to normal AI response
             
             # Check if human agent is already assigned to session
-            logger.info(f"🔍 Checking if human agent is assigned to session {session_id}...")
+            logger.info(f"Checking if human agent is assigned to session {session_id}...")
             try:
-                from shared.redis_pubsub_manager import get_pubsub_redis
-                from shared.sqlalchemy_db import get_db_session
-                from sqlalchemy import text
+                from shared.redis_agent_cache import get_assigned_agent, set_assigned_agent as cache_set_agent
 
-                redis_client = await get_pubsub_redis()
-                cache_key = f"session:assigned_agent:{session_id}"
-                assigned_agent_id = await redis_client.get(cache_key)
+                assigned_agent_id = await get_assigned_agent(session_id)
 
-                # If not in Redis cache, check database
+                # If not in Redis DB 4 cache, check database
                 if not assigned_agent_id:
-                    logger.info(f"📋 Redis cache miss, checking database for agent assignment...")
+                    logger.info(f"Agent cache miss (DB 4), checking database...")
                     try:
+                        from shared.sqlalchemy_db import get_db_session
+                        from sqlalchemy import text
+
                         async with get_db_session() as db_session:
-                            # Query session_assignments table for active assignment
-                            # Need to JOIN to get user ID and email from users table
                             query = """
                                 SELECT u.id as agent_id, u.email as agent_email FROM session_assignments sa
                                 JOIN user_role_mapping urm ON sa.user_role_id = urm.user_role_id
@@ -533,12 +497,11 @@ class StreamingService:
                             if row:
                                 assigned_agent_id = row['agent_id']
                                 assigned_agent_email = row['agent_email']
-                                logger.info(f"✅ Found agent in database: {assigned_agent_email} (ID: {assigned_agent_id})")
-                                # Update Redis cache for future requests (store user ID)
-                                await redis_client.set(cache_key, assigned_agent_id, ex=3600)
-                                logger.info(f"💾 Cached agent assignment in Redis for {session_id}: {assigned_agent_id}")
+                                logger.info(f"Found agent in database: {assigned_agent_email} (ID: {assigned_agent_id})")
+                                await cache_set_agent(session_id, assigned_agent_id)
+                                logger.info(f"Cached agent assignment (DB 4): {session_id} -> {assigned_agent_id}")
                     except Exception as db_error:
-                        logger.warning(f"⚠️ Database lookup failed: {db_error}")
+                        logger.warning(f"Database lookup failed: {db_error}")
 
                 if assigned_agent_id:
                     assigned_agent_id = int(assigned_agent_id) if isinstance(assigned_agent_id, (str, bytes)) else assigned_agent_id
@@ -598,6 +561,10 @@ class StreamingService:
             full_response = ""
             chunk_count = 0
             tool_call_count = 0
+            
+            # Import Redis pubsub manager for posting responses to channels
+            from shared.redis_pubsub_manager import broadcast_event_to_session, broadcast_event_to_all_agents, broadcast_event_to_agent
+            from shared.redis_agent_cache import get_assigned_agent
 
             try:
                 # Use agent.iter() for proper streaming + tool execution
@@ -1059,7 +1026,63 @@ class StreamingService:
                 except Exception as db_error:
                     logger.error(f"❌ Failed to save assistant response: {db_error}")
 
-            # Send completion signal (without content to avoid duplication)
+            # Post response to Redis channels instead of direct SSE streaming
+            logger.info("=" * 80)
+            logger.info("📤 POSTING RESPONSE TO REDIS CHANNELS")
+            logger.info(f"   Session ID: {session_id}")
+            logger.info(f"   Response Length: {len(full_response)} characters")
+            logger.info(f"   Tool Calls: {tool_call_count}")
+            logger.info("=" * 80)
+            
+            # Create response event for customer channel
+            customer_response_event = {
+                "type": "ai_response",
+                "session_id": session_id,
+                "content": full_response,
+                "chunk_count": chunk_count,
+                "tool_calls": tool_call_count,
+                "timestamp": int(time.time()),
+                "grounding_sources": "Gemini FileStore",
+                "response_format": "HTML with citations"
+            }
+            
+            # Post to customer's Redis channel
+            try:
+                customer_result = await broadcast_event_to_session(session_id, customer_response_event)
+                logger.info(f"✅ Posted AI response to customer channel: customer:events:{session_id}")
+                logger.info(f"   Broadcast result: {customer_result}")
+            except Exception as e:
+                logger.error(f"❌ Failed to post to customer channel: {e}")
+            
+            # Create response event for admin channel (if agent is assigned)
+            try:
+                assigned_agent_id = await get_assigned_agent(session_id)
+                if assigned_agent_id:
+                    admin_response_event = {
+                        "type": "ai_response",
+                        "session_id": session_id,
+                        "content": full_response,
+                        "chunk_count": chunk_count,
+                        "tool_calls": tool_call_count,
+                        "timestamp": int(time.time()),
+                        "grounding_sources": "Gemini FileStore",
+                        "response_format": "HTML with citations",
+                        "message": f"AI responded to customer in session {session_id}"
+                    }
+                    
+                    # Post to assigned agent's channel
+                    admin_result = await broadcast_event_to_agent(assigned_agent_id, admin_response_event)
+                    logger.info(f"✅ Posted AI response to agent channel: agent:events:{assigned_agent_id}")
+                    logger.info(f"   Broadcast result: {admin_result}")
+                    
+                    # Also post to broadcast channel for all admins
+                    broadcast_result = await broadcast_event_to_all_agents(admin_response_event)
+                    logger.info(f"✅ Posted AI response to admin broadcast channel: agent:events:broadcast")
+                    logger.info(f"   Broadcast result: {broadcast_result}")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to post to admin channels: {e}")
+
+            # Send completion signal via Redis (for SSE to pick up)
             logger.info("=" * 80)
             logger.info("🏁 STREAMING COMPLETION SUMMARY")
             logger.info(f"   Session ID: {session_id}")
@@ -1073,6 +1096,7 @@ class StreamingService:
             logger.info("   Completion Status: Successfully completed streaming")
             logger.info("=" * 80)
             
+            # Post completion event to Redis channels
             completion_data = {
                 "type": "complete",
                 "session_id": session_id,
@@ -1081,10 +1105,30 @@ class StreamingService:
                 "tool_calls": tool_call_count,
                 "grounding_sources": "Gemini FileStore",
                 "response_format": "HTML with citations",
-                "completion_status": "success"
+                "completion_status": "success",
+                "timestamp": int(time.time())
             }
-            json_response = json.dumps(completion_data, ensure_ascii=False)
-            yield f"data: {json_response}\n\n"
+            
+            # Post completion to customer channel
+            try:
+                await broadcast_event_to_session(session_id, completion_data)
+                logger.info(f"✅ Posted completion event to customer channel")
+            except Exception as e:
+                logger.error(f"❌ Failed to post completion to customer channel: {e}")
+            
+            # Post completion to admin channels
+            try:
+                assigned_agent_id = await get_assigned_agent(session_id)
+                if assigned_agent_id:
+                    await broadcast_event_to_agent(assigned_agent_id, completion_data)
+                    await broadcast_event_to_all_agents(completion_data)
+                    logger.info(f"✅ Posted completion event to admin channels")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to post completion to admin channels: {e}")
+            
+            # Yield completion signal for SSE (SSE will pick up from Redis channels)
+            completion_json = json.dumps(completion_data, ensure_ascii=False)
+            yield f"data: {completion_json}\n\n"
 
             logger.info(f"✅ Streaming completed for session: {session_id}")
             logger.info(f"📊 Total chunks sent: {chunk_count}")

@@ -1440,16 +1440,14 @@ async def send_customer_message(request: Request):
             session_uuid = row[0]
             logger.info(f"✅ Numeric ID {numeric_session_id} → UUID {session_uuid}")
 
-        # Check if agent is assigned
-        from shared.redis_pubsub_manager import get_pubsub_redis
-        redis_client = await get_pubsub_redis()
+        # Check if agent is assigned (Redis DB 4)
+        from shared.redis_agent_cache import get_assigned_agent, set_assigned_agent
 
-        assigned_agent_key = f"session:assigned_agent:{session_uuid}"
-        cached_agent_id = await redis_client.get(assigned_agent_key)
+        cached_agent_id = await get_assigned_agent(session_uuid)
 
         assigned_agent_id = None
         assigned_agent_email = None
-        
+
         if cached_agent_id:
             assigned_agent_id = int(cached_agent_id) if isinstance(cached_agent_id, (str, bytes)) else cached_agent_id
         else:
@@ -1458,8 +1456,8 @@ async def send_customer_message(request: Request):
             if assigned_agent_email:
                 assigned_agent_id = await chat_log_service.dao.get_user_id_by_email(assigned_agent_email)
                 if assigned_agent_id:
-                    await redis_client.set(assigned_agent_key, assigned_agent_id, ex=3600)
-                    logger.info(f"✅ Cached assigned agent {assigned_agent_email} (ID: {assigned_agent_id}) for session {session_uuid}")
+                    await set_assigned_agent(session_uuid, assigned_agent_id)
+                    logger.info(f"Cached assigned agent {assigned_agent_email} (ID: {assigned_agent_id}) for session {session_uuid}")
         
         # If we have cached ID but not email, fetch email for logging
         if assigned_agent_id and not assigned_agent_email:
@@ -1597,19 +1595,18 @@ async def send_agent_message(request: Request):
             # AGENT sent message - Verify authorization
             # Only the ASSIGNED agent can send messages
             # Get assigned agent for this session
-            redis_client = await get_pubsub_redis()
-            cache_key = f"session:assigned_agent:{session_uuid}"
-            cached_agent = await redis_client.get(cache_key)
+            from shared.redis_agent_cache import get_assigned_agent as get_cached_agent, set_assigned_agent as cache_agent
+            cached_agent = await get_cached_agent(session_uuid)
 
             if cached_agent:
-                assigned_agent = cached_agent  # Already decoded by Redis client (decode_responses=True)
-                logger.info(f"✅ Found cached agent assignment: {numeric_session_id} → {assigned_agent}")
+                assigned_agent = cached_agent
+                logger.info(f"Found cached agent assignment (DB 4): {numeric_session_id} -> {assigned_agent}")
             else:
                 # Cache MISS - query session_assignments table via DAO
                 assigned_agent = await chat_log_service.dao.get_assigned_agent_email(numeric_session_id)
                 if assigned_agent:
-                    await redis_client.set(cache_key, assigned_agent, ex=3600)
-                    logger.info(f"💾 Cached agent assignment: {numeric_session_id} → {assigned_agent}")
+                    await cache_agent(session_uuid, assigned_agent)
+                    logger.info(f"Cached agent assignment (DB 4): {numeric_session_id} -> {assigned_agent}")
 
             # Check if sender is the assigned agent
             if sender_id != assigned_agent:
@@ -1658,17 +1655,16 @@ async def send_agent_message(request: Request):
 
         elif sender_type == "user":
             # Customer sent message → Notify assigned agent AND all admins
-            # Try Redis cache first (should be set when agent is assigned)
-            redis_client = await get_pubsub_redis()
-            cache_key = f"session:assigned_agent:{session_uuid}"
-            cached_agent_id = await redis_client.get(cache_key)
+            # Try Redis DB 4 cache first
+            from shared.redis_agent_cache import get_assigned_agent as get_cached_agent2, set_assigned_agent as cache_agent2
+            cached_agent_id = await get_cached_agent2(session_uuid)
 
             assigned_agent_id = None
             assigned_agent_email = None
-            
+
             if cached_agent_id:
                 assigned_agent_id = int(cached_agent_id) if isinstance(cached_agent_id, (str, bytes)) else cached_agent_id
-                logger.info(f"✅ Found cached agent assignment: {numeric_session_id} → ID {assigned_agent_id}")
+                logger.info(f"Found cached agent assignment (DB 4): {numeric_session_id} -> ID {assigned_agent_id}")
                 # Fetch email for logging
                 async with get_db_session() as db_session:
                     result = await db_session.execute(
@@ -1683,10 +1679,9 @@ async def send_agent_message(request: Request):
                 assigned_agent_email = await chat_log_service.dao.get_assigned_agent_email(numeric_session_id)
                 if assigned_agent_email:
                     assigned_agent_id = await chat_log_service.dao.get_user_id_by_email(assigned_agent_email)
-                    # Cache for future messages (1 hour TTL) - store ID not email
                     if assigned_agent_id:
-                        await redis_client.set(cache_key, assigned_agent_id, ex=3600)
-                        logger.info(f"💾 Cached agent assignment: {numeric_session_id} → {assigned_agent_email} (ID: {assigned_agent_id}) (TTL: 1h)")
+                        await cache_agent2(session_uuid, assigned_agent_id)
+                        logger.info(f"Cached agent assignment (DB 4): {numeric_session_id} -> {assigned_agent_email} (ID: {assigned_agent_id})")
 
             if assigned_agent_id:
                 # Smart broadcast: avoid duplicate messages for admins

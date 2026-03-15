@@ -42,15 +42,48 @@ async def lifespan(app: FastAPI):
     database_url = os.getenv("DATABASE_URL")
     await initialize_database_with_retry(database_url, service_name="chatbot-orchestration")
 
-    logger.info("✅ Chatbot Orchestration Service fully ready")
+    # Initialize Redis chat store (DB 6) and write-through service
+    try:
+        from shared.redis_chat_store import init_chat_store_redis
+        await init_chat_store_redis()
+        logger.info("Redis chat store initialized (DB 6)")
+
+        from shared.redis_chat_writethrough import ChatWriteThroughService
+        writethrough = ChatWriteThroughService.get_instance()
+        await writethrough.start()
+        await writethrough.recovery_sync()
+        logger.info("Write-through service started with recovery sync")
+    except Exception as e:
+        logger.error(f"Redis chat store init failed: {e}")
+
+    # Initialize Redis agent cache (DB 4)
+    try:
+        from shared.redis_agent_cache import init_agent_cache_redis
+        await init_agent_cache_redis()
+        logger.info("Redis agent cache initialized (DB 4)")
+    except Exception as e:
+        logger.error(f"Redis agent cache init failed: {e}")
+
+    logger.info("Chatbot Orchestration Service fully ready")
     yield
 
-    logger.info("🛑 Chatbot Orchestration Service shutting down...")
+    logger.info("Chatbot Orchestration Service shutting down...")
+
+    # Flush all pending write-through data before shutdown
+    try:
+        from shared.redis_chat_writethrough import ChatWriteThroughService
+        writethrough = ChatWriteThroughService.get_instance()
+        await writethrough.flush_all()
+        await writethrough.stop()
+        logger.info("Write-through service stopped (all data flushed)")
+    except Exception as e:
+        logger.error(f"Error stopping write-through service: {e}")
+
     try:
         await close_database()
-        logger.info("✅ Database closed")
+        logger.info("Database closed")
     except Exception as e:
-        logger.error(f"❌ Error closing database: {e}")
+        logger.error(f"Error closing database: {e}")
 
 app = FastAPI(
     title="Chatbot Orchestration Service",
@@ -97,11 +130,29 @@ async def health_check(request: Request):
     logger.info(f"Health check invoked: {request.url}")
     log_endpoint_request("chatbot_orchestration", "health", request)
     db_health = await db_health_check()
+
+    # Check Redis chat store health
+    redis_chat_status = "unknown"
+    writethrough_pending = 0
+    try:
+        from shared.redis_chat_store import get_chat_store_redis
+        redis_client = await get_chat_store_redis()
+        await redis_client.ping()
+        redis_chat_status = "healthy"
+
+        from shared.redis_chat_writethrough import ChatWriteThroughService
+        writethrough_pending = await ChatWriteThroughService.get_instance().get_pending_count()
+    except Exception:
+        redis_chat_status = "unavailable"
+
+    overall = "healthy" if db_health["status"] == "healthy" else "unhealthy"
     return {
-        "status": "healthy" if db_health["status"] == "healthy" else "unhealthy",
+        "status": overall,
         "service": "chatbot_orchestration",
         "database": db_health["status"],
-        "database_latency_ms": db_health.get("latency_ms", 0)
+        "database_latency_ms": db_health.get("latency_ms", 0),
+        "redis_chat_store": redis_chat_status,
+        "writethrough_pending": writethrough_pending
     }
 
 if __name__ == "__main__":

@@ -1,83 +1,62 @@
 """
 Chat Data Access Object for Chatbot Orchestration
-Handles database operations for chat sessions and messages
+Redis-primary storage (DB 6). PG is written asynchronously via write-through.
+Hot-path reads/writes go to Redis only — zero PG connections during SSE streaming.
 """
 from typing import Dict, List, Any, Optional
 
 from sqlalchemy import text
 from shared.sqlalchemy_db import get_db_session
 from shared.otel_logger import get_otel_logger
+from shared.redis_chat_store import get_chat_store
 
 logger = get_otel_logger("chat_dao", "chatbot-orchestration")
 
 class ChatDAO:
-    """Unified Data Access Object for all chat operations"""
-    
+    """Unified Data Access Object for all chat operations (Redis-primary)"""
+
     def __init__(self):
-        pass  # No connection parameter - DAO manages its own connection
+        self._store = get_chat_store()
 
     async def create_session(self, session_id: str, user_role_id: int = None) -> Optional[Dict[str, Any]]:
-        """Create a new chat session record"""
-        query = """
-            INSERT INTO chat_sessions (session_id, user_role_id, started_at, last_activity_at, is_active, message_count)
-            VALUES (:session_id, :user_role_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
-            RETURNING id, session_id, user_role_id, started_at, last_activity_at, is_active, message_count
         """
-        params = {"session_id": session_id, "user_role_id": user_role_id}
-        try:
-            logger.log_db_operation(query, params)
-            async with get_db_session() as session:
-                record = (await session.execute(text(query), params)).fetchone()
-                logger.log_db_query(query, params, record)
-
-                if record:
-                    return {
-                        "id": record.id,
-                        "session_id": record.session_id,
-                        "user_role_id": record.user_role_id,
-                        "started_at": record.started_at.isoformat() if record.started_at else None,
-                        "last_activity_at": record.last_activity_at.isoformat() if record.last_activity_at else None,
-                        "is_active": record.is_active,
-                        "message_count": record.message_count
-                    }
-                else:
-                    return None
-        except Exception as e:
-            logger.log_db_query(query, params, error=e)
-            return None
+        Create a new chat session in Redis.
+        PG row is created lazily by write-through or on first message (for numeric ID).
+        """
+        session = await self._store.get_or_create_session(
+            session_uuid=session_id,
+            user_role_id=user_role_id
+        )
+        if session:
+            logger.info(f"Session created in Redis: {session_id}")
+            return {
+                "id": session.get("db_id"),
+                "session_id": session.get("session_uuid"),
+                "user_role_id": session.get("user_role_id"),
+                "started_at": session.get("started_at"),
+                "last_activity_at": session.get("last_activity_at"),
+                "is_active": session.get("is_active"),
+                "message_count": session.get("message_count")
+            }
+        return None
 
     async def get_session_metadata(self, session_id: str) -> Optional[Dict[str, Any]]:
-        """Get session metadata from database"""
-        query = """
-            SELECT session_id, user_role_id, created_at, last_activity_at, message_count
-            FROM chat_sessions
-            WHERE session_id = :session_id
-        """
-        params = {"session_id": session_id}
-        try:
-            logger.log_db_operation(query, params)
-            async with get_db_session() as session:
-                record = (await session.execute(text(query), params)).fetchone()
-                logger.log_db_query(query, params, record)
-
-                if record:
-                    user_email = await self.get_user_email_from_role_id(record.user_role_id)
-
-                    return {
-                        "session_id": record.session_id,
-                        "user_role_id": record.user_role_id,
-                        "user_email": user_email,
-                        "created_at": record.created_at,
-                        "last_activity_at": record.last_activity_at,
-                        "message_count": record.message_count
-                    }
-                return None
-        except Exception as e:
-            logger.log_db_query(query, params, error=e)
-            return None
+        """Get session metadata from Redis."""
+        session = await self._store.get_session(session_id)
+        if session:
+            user_email = await self.get_user_email_from_role_id(session.get("user_role_id"))
+            return {
+                "session_id": session.get("session_uuid"),
+                "user_role_id": session.get("user_role_id"),
+                "user_email": user_email,
+                "created_at": session.get("started_at"),
+                "last_activity_at": session.get("last_activity_at"),
+                "message_count": session.get("message_count")
+            }
+        return None
 
     async def get_user_email_from_role_id(self, user_role_id: int) -> Optional[str]:
-        """Get user email from user_role_id"""
+        """Get user email from user_role_id (PG lookup — cold path, rarely called)."""
         if user_role_id is None:
             return None
         query = """
@@ -88,98 +67,100 @@ class ChatDAO:
         """
         params = {"user_role_id": user_role_id}
         try:
-            logger.log_db_operation(query, params)
             async with get_db_session() as session:
                 record = (await session.execute(text(query), params)).fetchone()
-                logger.log_db_query(query, params, record)
                 return record.email if record else None
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.error(f"Error getting email for role {user_role_id}: {e}")
             return None
 
     async def get_chat_history(self, session_id: str) -> Dict[str, Any]:
-        """Get chat history for a session"""
-        session_query = """
-            SELECT id, session_id, user_role_id, created_at, last_activity_at, message_count
-            FROM chat_sessions
-            WHERE session_id = :session_id
         """
+        Get chat history from Redis.
+        If session doesn't exist in Redis, creates it (lazy creation).
+        """
+        # Ensure session exists in Redis
+        await self._store.get_or_create_session(session_uuid=session_id)
+
+        # Get messages from Redis
+        redis_messages = await self._store.get_messages(session_id)
+
+        messages = []
+        for i, msg in enumerate(redis_messages):
+            messages.append({
+                "id": str(i),
+                "sender": "user" if msg.get("role") == "user" else "agent",
+                "message": msg.get("content", ""),
+                "role": msg.get("role", ""),
+                "content": msg.get("content", ""),
+                "created_at": msg.get("created_at"),
+                "used_rag": msg.get("metadata", {}).get("used_rag") if isinstance(msg.get("metadata"), dict) else None,
+                "sources": msg.get("metadata", {}).get("sources", []) if isinstance(msg.get("metadata"), dict) else [],
+                "confidence_score": msg.get("metadata", {}).get("confidence_score") if isinstance(msg.get("metadata"), dict) else None
+            })
+
+        return {"messages": messages}
+
+    async def ensure_numeric_id(self, session_id: str) -> Optional[int]:
+        """
+        Ensure session has a PG numeric ID. Creates PG row if needed.
+        This is the ONLY PG call in the hot path — happens once per new session.
+        """
+        # Check if we already have a db_id cached in Redis
+        session = await self._store.get_session(session_id)
+        if session and session.get("db_id"):
+            return session["db_id"]
+
+        # Need to create PG row to get serial ID
         try:
-            async with get_db_session() as session:
-                logger.log_db_operation(session_query, session_id)
-                session_record = (await session.execute(text(session_query), {"session_id": session_id})).fetchone()
-                logger.log_db_query(session_query, session_id, session_record)
+            async with get_db_session() as db_session:
+                result = await db_session.execute(
+                    text("""
+                        INSERT INTO chat_sessions (session_id, is_active, archive_status, started_at, last_activity_at, message_count)
+                        VALUES (:session_id, true, 'active', NOW(), NOW(), 0)
+                        ON CONFLICT (session_id) DO UPDATE SET last_activity_at = NOW()
+                        RETURNING id
+                    """),
+                    {"session_id": session_id}
+                )
+                db_id = result.scalar()
+                await db_session.commit()
 
-                if not session_record:
-                    insert_query = """INSERT INTO chat_sessions (session_id, user_role_id, started_at, last_activity_at, is_active, message_count)
-                                   VALUES (:session_id, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0)
-                                   RETURNING id, session_id, user_role_id, created_at, last_activity_at, message_count"""
-                    logger.log_db_operation(insert_query, session_id)
-                    session_record = (await session.execute(text(insert_query), {"session_id": session_id})).fetchone()
-                    await session.commit()
-                    logger.log_db_query(insert_query, session_id, session_record)
+                # Cache the db_id in Redis
+                await self._store.set_session_db_id(session_id, db_id)
+                logger.info(f"PG numeric ID created for {session_id}: {db_id}")
+                return db_id
 
-                    if not session_record:
-                        return {"messages": []}
-
-                integer_session_id = session_record.id
-
-                query = """
-                    SELECT id, role, content, created_at, used_rag, sources, confidence_score
-                    FROM chat_messages
-                    WHERE session_id = :session_id
-                    ORDER BY created_at ASC
-                """
-                logger.log_db_operation(query, integer_session_id)
-                records = (await session.execute(text(query), {"session_id": integer_session_id})).fetchall()
-                logger.log_db_query(query, integer_session_id, records)
-
-                messages = []
-                for record in records:
-                    messages.append({
-                        "id": str(record.id),
-                        "sender": "user" if record.role == "user" else "agent",
-                        "message": record.content,
-                        "role": record.role,
-                        "created_at": record.created_at.isoformat() if record.created_at else None,
-                        "used_rag": record.used_rag,
-                        "sources": record.sources or [],
-                        "confidence_score": float(record.confidence_score) if record.confidence_score else None
-                    })
-
-                return {"messages": messages}
         except Exception as e:
-            logger.error(f"Error getting chat history for {session_id}: {e}")
-            return {"messages": []}
+            logger.error(f"Error creating PG numeric ID for {session_id}: {e}")
+            return None
 
     async def delete_session(self, session_id: str) -> bool:
-        """Delete a chat session"""
+        """Delete a chat session from both Redis and PG."""
+        await self._store.delete_session(session_id)
+
         query = "DELETE FROM chat_sessions WHERE session_id = :session_id"
-        params = {"session_id": session_id}
         try:
-            logger.log_db_operation(query, params)
             async with get_db_session() as session:
-                await session.execute(text(query), params)
+                await session.execute(text(query), {"session_id": session_id})
                 await session.commit()
-                logger.log_db_query(query, params, "DELETE 1")
+                logger.info(f"Session deleted from Redis + PG: {session_id}")
                 return True
         except Exception as e:
-            logger.log_db_query(query, params, error=e)
+            logger.error(f"Error deleting session from PG: {e}")
             return False
 
     async def get_all_sessions(self) -> List[Dict[str, Any]]:
-        """Get all chat sessions"""
+        """Get all chat sessions (admin cold path — PG only)."""
         query = """
             SELECT session_id, user_email, metadata, created_at, last_activity_at
             FROM chat_sessions
             ORDER BY last_activity_at DESC
         """
         try:
-            logger.log_db_operation(query)
             async with get_db_session() as session:
                 records = (await session.execute(text(query))).fetchall()
-                logger.log_db_query(query, None, records)
                 return [dict(record._mapping) for record in records]
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
+            logger.error(f"Error getting all sessions: {e}")
             return []

@@ -88,13 +88,11 @@ class ChatLogService:
             else:
                 await self.dao.create_session_assignment(session_db_id, agent_email, assignee_type, status='active')
             
-            # Cache the agent assignment in Redis (TTL: 1 hour)
-            # This avoids querying session_assignments table on every message
-            from shared.redis_pubsub_manager import get_pubsub_redis, broadcast_event_to_session
-            redis_client = await get_pubsub_redis()
-            agent_cache_key = f"session:assigned_agent:{session_uuid}"
-            await redis_client.set(agent_cache_key, agent_id, ex=3600)
-            logger.info(f"💾 Cached agent assignment: {session_uuid} → {agent_id} (TTL: 1h)")
+            # Cache the agent assignment in Redis DB 4 (TTL: 1 hour)
+            from shared.redis_agent_cache import set_assigned_agent
+            from shared.redis_pubsub_manager import broadcast_event_to_session
+            await set_assigned_agent(session_uuid, agent_id)
+            logger.info(f"Cached agent assignment (DB 4): {session_uuid} -> {agent_id}")
             
             # CRITICAL: Broadcast to BOTH agent AND customer
             assignment_event = {
@@ -442,12 +440,10 @@ class ChatLogService:
             if status == 'closed':
                 await self.dao.archive_session(session_id, 'closed')
                 
-                # Clear agent assignment cache when session closes
-                from shared.redis_pubsub_manager import get_pubsub_redis
-                redis_client = await get_pubsub_redis()
-                agent_cache_key = f"session:assigned_agent:{session_uuid}"
-                await redis_client.delete(agent_cache_key)
-                logger.info(f"🗑️ Cleared agent assignment cache for session {session_uuid}")
+                # Clear agent assignment cache (DB 4) when session closes
+                from shared.redis_agent_cache import clear_assigned_agent
+                await clear_assigned_agent(session_uuid)
+                logger.info(f"Cleared agent assignment cache (DB 4) for session {session_uuid}")
 
         if assigned_agent is not None:
             if assigned_agent == '' or assigned_agent is None:
@@ -492,12 +488,10 @@ class ChatLogService:
 
         await self.dao.archive_session(session_id, 'closed')
         
-        # Clear agent assignment cache when session ends
-        from shared.redis_pubsub_manager import get_pubsub_redis
-        redis_client = await get_pubsub_redis()
-        agent_cache_key = f"session:assigned_agent:{session_uuid}"
-        await redis_client.delete(agent_cache_key)
-        logger.info(f"🗑️ Cleared agent assignment cache for session {session_uuid}")
+        # Clear agent assignment cache (DB 4) when session ends
+        from shared.redis_agent_cache import clear_assigned_agent
+        await clear_assigned_agent(session_uuid)
+        logger.info(f"Cleared agent assignment cache (DB 4) for session {session_uuid}")
 
         if self.connection_manager:
             session_ended_message = {

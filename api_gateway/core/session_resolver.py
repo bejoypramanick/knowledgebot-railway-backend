@@ -10,6 +10,8 @@ Architecture:
 - Internal services use: Numeric database IDs (e.g., 505)
 - API Gateway translates UUID → Numeric ID once, on entry
 - Internal services trust the numeric ID without further lookup
+
+Uses Redis DB 5 for session UUID→numeric ID cache (dedicated, separate from Pub/Sub DB 3).
 """
 
 from typing import Optional
@@ -22,7 +24,7 @@ async def resolve_session_uuid_to_numeric_id(session_uuid: str) -> Optional[int]
     """
     Resolve chat session UUID to numeric database ID.
 
-    Uses Redis cache first (fast), falls back to database query.
+    Uses Redis DB 5 cache first (fast), falls back to database query.
     Caches result for 1 hour to avoid repeated lookups.
 
     Args:
@@ -32,22 +34,18 @@ async def resolve_session_uuid_to_numeric_id(session_uuid: str) -> Optional[int]
         Numeric session ID (e.g., 505) or None if not found
     """
     try:
-        # Import here to avoid circular dependencies
-        from shared.redis_pubsub_manager import get_pubsub_redis
+        from shared.redis_session_id_cache import get_numeric_id, set_numeric_id
         from shared.sqlalchemy_db import get_db_session
         from sqlalchemy import text
 
-        # Step 1: Try Redis cache first (very fast)
+        # Step 1: Try Redis DB 5 cache first (very fast)
         try:
-            redis_client = await get_pubsub_redis()
-            cache_key = f"session:uuid_to_id:{session_uuid}"
-            cached_id = await redis_client.get(cache_key)
-            if cached_id:
-                numeric_id = int(cached_id)
-                logger.debug(f"✅ Resolved {session_uuid} from Redis cache → {numeric_id}")
-                return numeric_id
+            cached_id = await get_numeric_id(session_uuid)
+            if cached_id is not None:
+                logger.debug(f"Resolved {session_uuid} from Redis cache (DB 5) -> {cached_id}")
+                return cached_id
         except Exception as e:
-            logger.debug(f"Redis lookup failed for {session_uuid}: {e}, falling back to DB")
+            logger.debug(f"Redis DB 5 lookup failed for {session_uuid}: {e}, falling back to DB")
 
         # Step 2: Query database
         try:
@@ -59,27 +57,25 @@ async def resolve_session_uuid_to_numeric_id(session_uuid: str) -> Optional[int]
                 if row:
                     numeric_id = row["id"]
 
-                    # Step 3: Cache the mapping for future requests (TTL: 1 hour)
+                    # Step 3: Cache the mapping in Redis DB 5 (TTL: 1 hour)
                     try:
-                        redis_client = await get_pubsub_redis()
-                        cache_key = f"session:uuid_to_id:{session_uuid}"
-                        await redis_client.setex(cache_key, 3600, str(numeric_id))
-                        logger.debug(f"💾 Cached {session_uuid} → {numeric_id} (TTL: 1h)")
+                        await set_numeric_id(session_uuid, numeric_id)
+                        logger.debug(f"Cached {session_uuid} -> {numeric_id} in Redis DB 5")
                     except Exception as cache_error:
                         logger.warning(f"Failed to cache UUID mapping: {cache_error}")
 
-                    logger.debug(f"✅ Resolved {session_uuid} from DB → {numeric_id}")
+                    logger.debug(f"Resolved {session_uuid} from DB -> {numeric_id}")
                     return numeric_id
                 else:
-                    logger.warning(f"⚠️ Session UUID {session_uuid} not found in database")
+                    logger.warning(f"Session UUID {session_uuid} not found in database")
                     return None
 
         except Exception as e:
-            logger.error(f"❌ Database lookup failed for {session_uuid}: {e}")
+            logger.error(f"Database lookup failed for {session_uuid}: {e}")
             return None
 
     except Exception as e:
-        logger.error(f"❌ Error resolving session UUID {session_uuid}: {e}")
+        logger.error(f"Error resolving session UUID {session_uuid}: {e}")
         return None
 
 
@@ -99,10 +95,10 @@ def extract_session_uuid_from_cookie(request) -> Optional[str]:
     try:
         session_uuid = request.cookies.get('chatbot_session_id')
         if session_uuid:
-            logger.debug(f"✅ Extracted session UUID from cookie: {session_uuid[:20]}...")
+            logger.debug(f"Extracted session UUID from cookie: {session_uuid[:20]}...")
             return session_uuid
         else:
-            logger.debug("ℹ️ No session UUID in chatbot_session_id cookie")
+            logger.debug("No session UUID in chatbot_session_id cookie")
             return None
     except Exception as e:
         logger.warning(f"Error extracting session UUID from cookie: {e}")
@@ -126,6 +122,6 @@ def extract_session_uuid_from_path(path: str) -> Optional[str]:
     import re
     match = re.search(r'(session_[a-zA-Z0-9_]+)', path)
     if match:
-        logger.warning(f"⚠️ Session UUID found in URL path (should use cookie): {match.group(1)[:20]}...")
+        logger.warning(f"Session UUID found in URL path (should use cookie): {match.group(1)[:20]}...")
         return match.group(1)
     return None

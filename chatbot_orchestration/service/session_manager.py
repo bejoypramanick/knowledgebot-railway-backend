@@ -1,6 +1,8 @@
 """
 Session State Management for Chatbot Orchestration
-Handles session state, caching, and metadata management
+Handles session state, caching, and metadata management.
+Uses Redis DB 6 for hot-path message storage and DB 4 for agent cache.
+PG is written asynchronously via write-through — no direct PG reads/writes here.
 """
 
 import time
@@ -29,19 +31,16 @@ class SessionStateManager:
             self.genai_client = get_genai_client()
 
     async def get_session_metadata(self, session_id: str) -> Dict[str, Any]:
-        """Retrieve session metadata from database."""
-        logger.info(f"🔍 Retrieving session metadata for session: {session_id}")
-
+        """Retrieve session metadata from Redis."""
         try:
             metadata = await self.chat_dao.get_session_metadata(session_id)
             if metadata:
-                logger.info(f"✅ Retrieved session metadata: {metadata}")
                 return metadata
             else:
-                logger.warning(f"⚠️ No metadata found for session: {session_id}")
+                logger.warning(f"No metadata found for session: {session_id}")
                 return {}
         except Exception as e:
-            logger.error(f"❌ Error retrieving session metadata: {e}")
+            logger.error(f"Error retrieving session metadata: {e}")
             return {}
 
     def get_session_state(self, session_id: str) -> Dict[str, Any]:
@@ -56,94 +55,78 @@ class SessionStateManager:
         return self.session_states[session_id]
 
     async def get_chat_history(self, session_id: str):
-        """Get chat history - delegates to chat_dao."""
+        """Get chat history from Redis."""
         result = await self.chat_dao.get_chat_history(session_id)
         return result.get("messages", []) if result else []
 
     async def save_message(self, session_id: str, role: str, content: str, metadata: Dict[str, Any] = None):
         """
-        Save message to database with lazy session creation.
-        
-        Session is created ONLY when the first message arrives (lazy creation).
-        This prevents empty sessions from cluttering the database.
+        Save message to Redis (DB 6) with lazy session creation.
+        PG write-through handles durable archival in background.
         """
         try:
-            from shared.sqlalchemy_db import get_db_session
-            from sqlalchemy import text
+            from shared.redis_chat_store import get_chat_store
 
-            async with get_db_session() as session:
-                # First, get or create the session integer ID (LAZY CREATION)
-                session_query = """
-                    SELECT id FROM chat_sessions WHERE session_id = :session_id
-                """
-                result = await session.execute(text(session_query), {"session_id": session_id})
-                session_record = result.mappings().first()
+            store = get_chat_store()
 
-                if not session_record:
-                    # Create session ONLY when first message arrives (lazy creation)
-                    logger.info(f"🆕 Creating new session {session_id} (first message received)")
-                    create_session_query = """
-                        INSERT INTO chat_sessions (session_id, started_at, last_activity_at, is_active, message_count, archive_status)
-                        VALUES (:session_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, true, 0, 'active')
-                        RETURNING id
-                    """
-                    result = await session.execute(text(create_session_query), {"session_id": session_id})
-                    session_record = result.mappings().first()
-                    await session.commit()
-                    logger.info(f"✅ Session {session_id} created with ID {session_record['id']}")
+            # Ensure session exists in Redis (lazy creation)
+            session_data = await store.get_or_create_session(session_uuid=session_id)
 
-                integer_session_id = session_record["id"]
+            # If session has no PG db_id yet, create one (single PG call for numeric ID)
+            db_id = session_data.get("db_id") if session_data else None
+            if not db_id:
+                db_id = await self.chat_dao.ensure_numeric_id(session_id)
 
-                # Insert message with integer session_id
-                insert_query = """
-                    INSERT INTO chat_messages (session_id, role, content, created_at)
-                    VALUES (:session_id, :role, :content, CURRENT_TIMESTAMP)
-                    RETURNING id, session_id, role, content, created_at
-                """
-                result = await session.execute(
-                    text(insert_query),
-                    {"session_id": integer_session_id, "role": role, "content": content}
-                )
-                record = result.mappings().first()
-                
-                # Increment message count
-                update_count_query = """
-                    UPDATE chat_sessions 
-                    SET message_count = message_count + 1,
-                        last_activity_at = CURRENT_TIMESTAMP
-                    WHERE id = :session_id
-                """
-                await session.execute(text(update_count_query), {"session_id": integer_session_id})
-                
-                await session.commit()
+            # Save message to Redis (atomic pipeline: RPUSH + HINCRBY + HSET + SADD)
+            result = await store.save_message(session_id, role, content, metadata)
 
-                logger.debug(f"💾 Saved {role} message to session {session_id} (DB ID: {integer_session_id})")
+            if not result:
+                logger.error(f"Redis save_message failed for session {session_id}")
+                return None
 
-                message_data = {
-                    "id": record["id"],
-                    "session_id": record["session_id"],
-                    "role": record["role"],
-                    "content": record["content"],
-                    "created_at": record["created_at"].isoformat() if record["created_at"] else None
-                }
+            logger.debug(f"Saved {role} message to Redis: {session_id}")
 
-                # Broadcast messages to agents in real-time via Redis Pub/Sub
-                if role in ["user", "assistant"]:
-                    try:
-                        from shared.redis_pubsub_manager import broadcast_event_for_session, get_pubsub_redis
-                        
-                        # Check Redis cache first for assigned agent (avoids DB query on every message)
-                        redis_client = await get_pubsub_redis()
-                        agent_cache_key = f"session:assigned_agent:{session_id}"
-                        cached_agent = await redis_client.get(agent_cache_key)
-                        
-                        if cached_agent:
-                            # Already decoded by Redis client (decode_responses=True)
-                            assigned_agent = cached_agent
-                            logger.debug(f"✅ Found cached agent assignment: {session_id} → {assigned_agent}")
-                        else:
-                            # Not in cache - query database (only happens once per session)
-                            # Join through session_assignments → user_role_mapping → users to get agent email
+            message_data = {
+                "id": result.get("index", 0),
+                "session_id": session_id,
+                "role": role,
+                "content": content,
+                "created_at": result.get("created_at")
+            }
+
+            # Broadcast messages to agents in real-time via Redis Pub/Sub
+            if role in ["user", "assistant"]:
+                await self._broadcast_message(session_id, role, content, message_data)
+
+            return message_data
+
+        except Exception as e:
+            logger.error(f"Error saving message to Redis: {e}")
+            return None
+
+    async def _broadcast_message(self, session_id: str, role: str, content: str, message_data: dict):
+        """Broadcast message to agents via Redis Pub/Sub. Uses DB 4 for agent cache."""
+        try:
+            from shared.redis_pubsub_manager import broadcast_event_for_session
+            from shared.redis_agent_cache import get_assigned_agent, set_assigned_agent
+
+            # Check DB 4 agent cache first
+            assigned_agent = await get_assigned_agent(session_id)
+
+            if not assigned_agent:
+                # Cache miss — query database (cold path, once per session)
+                try:
+                    from shared.sqlalchemy_db import get_db_session
+                    from sqlalchemy import text
+
+                    async with get_db_session() as db_session:
+                        session_result = await db_session.execute(
+                            text("SELECT id FROM chat_sessions WHERE session_id = :session_id"),
+                            {"session_id": session_id}
+                        )
+                        session_row = session_result.mappings().first()
+                        if session_row:
+                            integer_session_id = session_row["id"]
                             assignment_query = """
                                 SELECT u.email as agent_email
                                 FROM session_assignments sa
@@ -151,41 +134,33 @@ class SessionStateManager:
                                 LEFT JOIN users u ON urm.user_id = u.id
                                 WHERE sa.session_id = :session_id AND sa.status = 'active'
                             """
-                            assignment_result = await session.execute(
-                                text(assignment_query), 
+                            assignment_result = await db_session.execute(
+                                text(assignment_query),
                                 {"session_id": integer_session_id}
                             )
                             assignment = assignment_result.mappings().first()
                             assigned_agent = assignment["agent_email"] if assignment else None
-                            
-                            # Cache the assignment for future messages (TTL: 1 hour)
-                            if assigned_agent:
-                                await redis_client.set(agent_cache_key, assigned_agent, ex=3600)
-                                logger.info(f"💾 Cached agent assignment: {session_id} → {assigned_agent} (TTL: 1h)")
-                            else:
-                                logger.debug(f"No agent assigned to session {session_id}")
-                        
-                        # Broadcast to session channel (customer) and agent channel (if assigned)
-                        # CRITICAL: Use correct event type - bot messages should NOT be "agent_message"
-                        event_data = {
-                            "type": "customer_message" if role == "user" else "bot_message",  # Changed from "agent_message"
-                            "message_id": str(record["id"]),
-                            "session_id": session_id,
-                            "text": content,
-                            "sender": "customer" if role == "user" else "bot",  # Changed from "assistant"
-                            "timestamp": record["created_at"].isoformat() if record["created_at"] else None
-                        }
-                        
-                        await broadcast_event_for_session(session_id, event_data, assigned_agent)
-                        logger.info(f"📤 Broadcasted {role} message to session {session_id} and agent {assigned_agent}")
-                    except Exception as broadcast_error:
-                        logger.warning(f"⚠️ Failed to broadcast {role} message: {broadcast_error}")
-                        # Don't fail the save operation if broadcast fails
 
-                return message_data
-        except Exception as e:
-            logger.error(f"Error saving message: {e}")
-            return None
+                            if assigned_agent:
+                                await set_assigned_agent(session_id, assigned_agent)
+                                logger.info(f"Cached agent assignment (DB 4): {session_id} -> {assigned_agent}")
+                except Exception as db_error:
+                    logger.warning(f"DB agent lookup failed: {db_error}")
+
+            # Broadcast to session + agent channels
+            event_data = {
+                "type": "customer_message" if role == "user" else "bot_message",
+                "message_id": str(message_data.get("id", 0)),
+                "session_id": session_id,
+                "text": content,
+                "sender": "customer" if role == "user" else "bot",
+                "timestamp": message_data.get("created_at")
+            }
+
+            await broadcast_event_for_session(session_id, event_data, assigned_agent)
+            logger.info(f"Broadcasted {role} message to session {session_id}")
+        except Exception as broadcast_error:
+            logger.warning(f"Failed to broadcast {role} message: {broadcast_error}")
 
     def update_session_activity(self, session_id: str):
         """Update session activity timestamp."""
@@ -210,7 +185,7 @@ class SessionStateManager:
 
         for session_id in expired_sessions:
             del self.session_states[session_id]
-            logger.info(f"🗑️ Cleaned up expired session: {session_id}")
+            logger.info(f"Cleaned up expired session: {session_id}")
 
     def get_turn_count(self, session_id: str) -> int:
         """Get the turn count for a session."""
@@ -224,8 +199,6 @@ class SessionStateManager:
 
     def get_message_history(self, session_id: str) -> list:
         """Get message history for a session (synchronous version)."""
-        # This is a synchronous wrapper - returns empty list
-        # For actual history, use async get_chat_history
         return []
 
     def update_session_state(self, session_id: str, result: Any) -> Dict[str, Any]:
