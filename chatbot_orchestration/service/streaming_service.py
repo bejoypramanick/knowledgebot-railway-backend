@@ -950,9 +950,9 @@ class StreamingService:
                                 logger.error("- request_human_agent_connection() for escalation")
                                 logger.error("=" * 100)
 
-                    except Exception as result_error:
-                        logger.error(f"❌ Error extracting results: {result_error}", exc_info=True)
-                        logger.warning(f"⚠️ Error type: {type(result_error).__name__}")
+                except Exception as result_error:
+                    logger.error(f"❌ Error extracting results: {result_error}", exc_info=True)
+                    logger.warning(f"⚠️ Error type: {type(result_error).__name__}")
 
             except Exception as stream_error:
                 logger.error(f"❌ Error during agent streaming: {stream_error}")
