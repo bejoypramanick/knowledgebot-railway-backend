@@ -14,6 +14,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, Te
 from shared.otel_logger import get_otel_logger, set_session_id
 
 from ..core.dependencies import ChatSessionDeps
+from ..core.ai import MODEL_NAME
 from .session_manager import session_state_manager
 from .agent_manager import agent_manager
 
@@ -1028,7 +1029,7 @@ class StreamingService:
                 logger.info(f"   Response Chunks: {chunk_count}")
                 logger.info("-" * 100)
                 logger.info("🔗 GROUNDING TRUTH & DATA SOURCES:")
-                logger.info("   Source: Gemini FileStore (1.5 Flash model)")
+                logger.info(f"   Source: Gemini FileStore ({MODEL_NAME} model)")
                 logger.info("   Search Type: Knowledge base with file retrieval")
                 logger.info("   Processing: Raw docling output formatted by Gemini")
                 logger.info("   Response Format: HTML with proper citations")
