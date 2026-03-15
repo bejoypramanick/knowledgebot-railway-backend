@@ -921,6 +921,46 @@ class ChatLogDAO:
             logger.log_db_query(query, {"email": email}, error=e)
             return None
 
+    async def get_email_by_user_id(self, user_id: int) -> Optional[str]:
+        """Get email from user ID."""
+        query = "SELECT email FROM users WHERE id = :id"
+        try:
+            params = {"id": user_id}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                if row:
+                    logger.log_db_query(query, params, row)
+                    return row[0]
+                else:
+                    logger.log_db_query(query, params, None)
+                    return None
+        except Exception as e:
+            logger.error(f"❌ Error fetching email for user ID {user_id}: {e}", exc_info=True)
+            logger.log_db_query(query, {"id": user_id}, error=e)
+            return None
+
+    async def get_session_uuid(self, numeric_session_id: int) -> Optional[str]:
+        """Get session UUID from numeric session ID."""
+        query = "SELECT session_id FROM chat_sessions WHERE id = :id"
+        try:
+            params = {"id": numeric_session_id}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                if row:
+                    logger.log_db_query(query, params, row)
+                    return row[0]
+                else:
+                    logger.log_db_query(query, params, None)
+                    return None
+        except Exception as e:
+            logger.error(f"❌ Error fetching UUID for session {numeric_session_id}: {e}", exc_info=True)
+            logger.log_db_query(query, {"id": numeric_session_id}, error=e)
+            return None
+
 
     async def update_chat_session_metadata(self, session_db_id: int, metadata: Dict[str, Any]):
         query = "UPDATE chat_sessions SET metadata = :metadata WHERE id = :session_db_id"

@@ -17,7 +17,12 @@ logger = get_otel_logger(__name__, "shared")
 _agent_cache_client: Optional[redis.Redis] = None
 
 CACHE_KEY_PREFIX = "session:assigned_agent:"
+USER_EMAIL_PREFIX = "user:email:"      # email → numeric ID
+USER_ID_PREFIX = "user:id:"            # numeric ID → email
+ADMIN_IDS_KEY = "cache:admin_ids"      # cached list of admin IDs
 DEFAULT_TTL = 3600  # 1 hour
+USER_CACHE_TTL = 600  # 10 minutes for user lookups
+ADMIN_CACHE_TTL = 300  # 5 minutes for admin list
 
 
 async def init_agent_cache_redis() -> redis.Redis:
@@ -145,3 +150,62 @@ async def clear_assigned_agent(session_uuid: str) -> bool:
     except Exception as e:
         logger.warning(f"Agent cache DEL failed for {session_uuid}: {e}")
         return False
+
+
+# --- User identity cache (email ↔ ID) ---
+
+async def get_cached_user_id(email: str) -> Optional[int]:
+    """Get cached numeric user ID from email."""
+    try:
+        client = await get_agent_cache_redis()
+        value = await client.get(f"{USER_EMAIL_PREFIX}{email}")
+        return int(value) if value else None
+    except Exception as e:
+        logger.warning(f"User ID cache GET failed for {email}: {e}")
+        return None
+
+
+async def set_cached_user_id(email: str, user_id: int) -> None:
+    """Cache email → numeric ID and ID → email bidirectionally."""
+    try:
+        client = await get_agent_cache_redis()
+        await client.set(f"{USER_EMAIL_PREFIX}{email}", str(user_id), ex=USER_CACHE_TTL)
+        await client.set(f"{USER_ID_PREFIX}{user_id}", email, ex=USER_CACHE_TTL)
+    except Exception as e:
+        logger.warning(f"User ID cache SET failed for {email}: {e}")
+
+
+async def get_cached_user_email(user_id: int) -> Optional[str]:
+    """Get cached email from numeric user ID."""
+    try:
+        client = await get_agent_cache_redis()
+        return await client.get(f"{USER_ID_PREFIX}{user_id}")
+    except Exception as e:
+        logger.warning(f"User email cache GET failed for {user_id}: {e}")
+        return None
+
+
+# --- Admin IDs cache ---
+
+async def get_cached_admin_ids() -> Optional[list]:
+    """Get cached list of admin IDs. Returns None on miss."""
+    try:
+        client = await get_agent_cache_redis()
+        value = await client.get(ADMIN_IDS_KEY)
+        if value:
+            import json
+            return json.loads(value)
+        return None
+    except Exception as e:
+        logger.warning(f"Admin IDs cache GET failed: {e}")
+        return None
+
+
+async def set_cached_admin_ids(admin_ids: list) -> None:
+    """Cache the list of admin IDs."""
+    try:
+        import json
+        client = await get_agent_cache_redis()
+        await client.set(ADMIN_IDS_KEY, json.dumps(admin_ids), ex=ADMIN_CACHE_TTL)
+    except Exception as e:
+        logger.warning(f"Admin IDs cache SET failed: {e}")

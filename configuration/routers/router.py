@@ -8,7 +8,6 @@ from fastapi.responses import StreamingResponse
 from typing import Dict, List, Any, Optional
 import json
 import asyncio
-from collections import defaultdict
 
 from shared.otel_logger import get_otel_logger, clear_admin_context
 from shared.admin_audit import audit_action
@@ -35,7 +34,6 @@ from ..schemas.models import (
 # This version includes detailed logging for get_user_profile debugging
 logger = get_otel_logger("configuration_router", "configuration")
 router = APIRouter()
-
 
 def get_session_id_from_context(request: Request, session_id: str | int) -> int:
     """
@@ -1418,61 +1416,31 @@ async def send_customer_message(request: Request):
         if not session_id_raw:
             raise HTTPException(status_code=400, detail="session_id is required")
 
-        # API Gateway sends numeric ID (converted from UUID)
-        # Use numeric ID for all DB operations
-        from shared.sqlalchemy_db import get_db_session
-        from sqlalchemy import text as sql_text
-
         try:
             numeric_session_id = int(session_id_raw)
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail=f"session_id must be numeric (API Gateway converts UUID). Got: {session_id_raw}")
 
-        # Look up the UUID for Redis channel broadcasting
-        async with get_db_session() as db_session:
-            result = await db_session.execute(
-                sql_text("SELECT session_id FROM chat_sessions WHERE id = :id"),
-                {"id": numeric_session_id}
-            )
-            row = result.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail=f"Session not found: {numeric_session_id}")
-            session_uuid = row[0]
-            logger.info(f"✅ Numeric ID {numeric_session_id} → UUID {session_uuid}")
+        # Look up UUID via service (for Redis channel broadcasting)
+        session_uuid = await chat_log_service.get_session_uuid(numeric_session_id)
+        if not session_uuid:
+            raise HTTPException(status_code=404, detail=f"Session not found: {numeric_session_id}")
+        logger.info(f"✅ Numeric ID {numeric_session_id} → UUID {session_uuid}")
 
-        # Check if agent is assigned (Redis DB 4)
-        from shared.redis_agent_cache import get_assigned_agent, set_assigned_agent
-
-        cached_agent_id_raw = await get_assigned_agent(session_uuid)
-
-        assigned_agent_id = None
-
-        if cached_agent_id_raw:
-            try:
-                assigned_agent_id = int(cached_agent_id_raw)
-                logger.info(f"Found cached agent assignment (DB 4): {numeric_session_id} -> ID {assigned_agent_id}")
-            except (ValueError, TypeError):
-                logger.warning(f"⚠️ Cached agent value is non-numeric (legacy): '{cached_agent_id_raw}' - falling through to DB lookup")
-
-        if assigned_agent_id is None:
-            # Cache MISS or legacy email value - query DB for numeric ID directly
-            assigned_agent_id = await chat_log_service.dao.get_assigned_agent_id(numeric_session_id)
-            if assigned_agent_id:
-                await set_assigned_agent(session_uuid, assigned_agent_id)  # Cache numeric ID (consistent)
-                logger.info(f"Cached assigned agent ID {assigned_agent_id} for session {session_uuid}")
+        # Check if agent is assigned (Redis DB4 cache + DB fallback via service)
+        assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, numeric_session_id)
 
         if not assigned_agent_id:
             raise HTTPException(status_code=400, detail="No agent assigned to this session. Use chatbot API instead.")
 
-        # Save message to database using numeric ID
-        message_id = await chat_log_service.dao.create_message(numeric_session_id, 'user', text)
-        await chat_log_service.dao.increment_message_count(numeric_session_id)
+        # Save customer message to database
+        message_id = await chat_log_service.send_customer_message(numeric_session_id, text)
 
         # Prepare event data - use UUID for Redis channel matching
         import datetime
         event_data = {
             "type": "customer_message",
-            "session_id": session_uuid,  # UUID for SSE channel matching
+            "session_id": session_uuid,
             "message_id": str(message_id),
             "text": text,
             "sender": "customer",
@@ -1481,46 +1449,34 @@ async def send_customer_message(request: Request):
 
         logger.info(f"📨 Broadcasting customer message: numeric={numeric_session_id}, uuid={session_uuid}")
 
-        # Smart broadcast: avoid duplicate messages for admins
         from shared.redis_pubsub_manager import broadcast_event_to_agent, broadcast_event_to_all_agents, broadcast_event_to_session
 
-        # Check if assigned agent is an admin using numeric IDs
-        admin_ids = await chat_log_service.dao.get_all_admin_ids()
+        # Check if assigned agent is admin (via service with Redis cache)
+        admin_ids = await chat_log_service.get_admin_ids_cached()
         is_assigned_admin = assigned_agent_id in admin_ids
 
-        logger.info(f"🔍 Agent assignment check: ID {assigned_agent_id} is_admin={is_assigned_admin}, admin_ids={admin_ids}")
-
-        # CRITICAL: Always broadcast to the session channel so customer can see their own message
+        # Always broadcast to session channel so customer can see their own message
         await broadcast_event_to_session(session_uuid, event_data)
         logger.info(f"📤 Customer message broadcasted to session channel {session_uuid}")
 
         if is_assigned_admin:
-            # Assigned agent is an ADMIN - send ONLY via broadcast channel to avoid duplicates
-            # Admin listens to broadcast channel, so they'll get it once
+            await broadcast_event_to_all_agents(event_data)
             logger.info(f"📤 Broadcasting to all agents (admin ID {assigned_agent_id})")
-            broadcast_result = await broadcast_event_to_all_agents(event_data)
-            logger.info(f"📤 Broadcast result for admin: {broadcast_result}")
         else:
-            # Assigned agent is HUMAN AGENT - send to their personal channel
-            # And also broadcast to all admins
-            logger.info(f"📤 Broadcasting to human agent ID {assigned_agent_id}")
-            agent_result = await broadcast_event_to_agent(assigned_agent_id, event_data)
-            logger.info(f"📤 Broadcast result for human agent ID {assigned_agent_id}: {agent_result}")
-
-            logger.info(f"📤 Also broadcasting to all admins")
-            admin_result = await broadcast_event_to_all_agents(event_data)
-            logger.info(f"📤 Broadcast result for admins: {admin_result}")
+            await broadcast_event_to_agent(assigned_agent_id, event_data)
+            await broadcast_event_to_all_agents(event_data)
+            logger.info(f"📤 Broadcasting to human agent ID {assigned_agent_id} and all admins")
 
         return {
             "success": True,
             "message_id": str(message_id)
-            # session_id intentionally omitted - it's in httpOnly cookie only
         }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error sending customer message: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/admin/chat-sessions/messages")
 async def send_agent_message(request: Request):
     """Send a message from an agent or customer in a chat session
@@ -1551,63 +1507,29 @@ async def send_agent_message(request: Request):
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
 
-        # Resolve sender identity: prefer numeric agent_id, fall back to X-User-Email header
-        from shared.sqlalchemy_db import get_db_session
-        from sqlalchemy import text as sql_text
-
-        sender_id_int = None
-        sender_email = None
-
-        # Try parsing agent_id as numeric
-        if sender_id_raw and sender_id_raw != 'system':
-            try:
-                sender_id_int = int(sender_id_raw)
-            except (ValueError, TypeError):
-                # agent_id is non-numeric (could be email) - try resolving
-                sender_id_int = await chat_log_service.dao.get_user_id_by_email(str(sender_id_raw))
-                if sender_id_int:
-                    sender_email = str(sender_id_raw)
-
-        # If still no numeric ID, resolve from X-User-Email header (set by API Gateway)
-        if sender_id_int is None:
-            header_email = request.headers.get("X-User-Email", "")
-            if header_email:
-                sender_id_int = await chat_log_service.dao.get_user_id_by_email(header_email)
-                if sender_id_int:
-                    sender_email = header_email
-                    logger.info(f"🔍 Resolved sender from X-User-Email header: {header_email} → ID {sender_id_int}")
+        # Resolve sender identity via service (Redis cache + DB fallback)
+        header_email = request.headers.get("X-User-Email", "")
+        sender_id_int, sender_email = await chat_log_service.resolve_sender_identity(sender_id_raw, header_email)
 
         if sender_id_int is None:
             raise HTTPException(status_code=400, detail="Could not resolve agent identity. Provide numeric agent_id or ensure X-User-Email header is set.")
 
-        # Fetch sender email if not already known (for event payload / frontend display)
-        if not sender_email:
-            async with get_db_session() as db_session:
-                result = await db_session.execute(
-                    sql_text("SELECT email FROM users WHERE id = :id"),
-                    {"id": sender_id_int}
-                )
-                row = result.fetchone()
-                sender_email = row[0] if row else f"agent-{sender_id_int}"
-
         logger.info(f"🔍 POST /admin/chat-sessions/messages called for session {numeric_session_id}, sender: {sender_email} (ID: {sender_id_int})")
 
-        # Get session UUID from database (needed for customer SSE channel)
-        session_data = await chat_log_service.dao.get_session_by_id_with_messages(numeric_session_id)
-        if not session_data:
+        # Get session UUID via service (for SSE channel broadcasting)
+        session_uuid = await chat_log_service.get_session_uuid(numeric_session_id)
+        if not session_uuid:
             raise HTTPException(status_code=404, detail=f"Session {numeric_session_id} not found")
-
-        session_uuid = session_data.get('session_id')  # UUID format
         logger.info(f"🔍 [SEND_MESSAGE] Numeric ID: {numeric_session_id}, UUID: {session_uuid}")
 
-        # Save message to database using sender email (for display/audit)
+        # Save message to database
         message_id = await chat_log_service.send_agent_message(numeric_session_id, sender_email, text)
 
         # Prepare event data
         import datetime
         event_data = {
             "type": "agent_message",
-            "session_id": session_uuid,  # CRITICAL: Use UUID for SSE channel matching
+            "session_id": session_uuid,
             "message_id": str(message_id),
             "text": text,
             "sender": sender_type,
@@ -1618,116 +1540,58 @@ async def send_agent_message(request: Request):
         from shared.redis_pubsub_manager import broadcast_event_to_session, broadcast_event_to_agent, broadcast_event_to_all_agents
 
         if sender_type == "agent":
-            # AGENT sent message - Verify authorization using numeric IDs
-            # Only the ASSIGNED agent can send messages
-            from shared.redis_agent_cache import get_assigned_agent as get_cached_agent, set_assigned_agent as cache_agent
-
             event_data["agent_email"] = sender_email
 
-            # Get assigned agent ID (numeric)
-            cached_agent = await get_cached_agent(session_uuid)
-            assigned_agent_id = None
+            # Get assigned agent ID via service (Redis cache + DB fallback)
+            assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, numeric_session_id)
 
-            if cached_agent:
-                try:
-                    assigned_agent_id = int(cached_agent)
-                    logger.info(f"Found cached agent assignment (DB 4): {numeric_session_id} -> ID {assigned_agent_id}")
-                except (ValueError, TypeError):
-                    # Cached value is email (legacy inconsistency) - ignore and fall through to DB
-                    logger.warning(f"⚠️ Cached agent value is non-numeric (legacy): '{cached_agent}' - falling through to DB lookup")
+            # Fetch admin IDs once via service (Redis cache + DB fallback)
+            admin_ids = await chat_log_service.get_admin_ids_cached()
 
-            if assigned_agent_id is None:
-                # Cache MISS or legacy email value - query DB for numeric ID
-                assigned_agent_id = await chat_log_service.dao.get_assigned_agent_id(numeric_session_id)
-                if assigned_agent_id:
-                    await cache_agent(session_uuid, assigned_agent_id)  # Cache numeric ID (consistent)
-                    logger.info(f"Cached agent assignment (DB 4): {numeric_session_id} -> ID {assigned_agent_id}")
-
-            # Fetch admin IDs once (used for both auth check and broadcast routing)
-            admin_ids = await chat_log_service.dao.get_all_admin_ids()
-
-            # Compare numeric IDs
+            # Compare numeric IDs for authorization
             if sender_id_int != assigned_agent_id:
-                # Sender is NOT the assigned agent - check if they're an admin
                 is_sender_admin = sender_id_int in admin_ids
-
                 if is_sender_admin:
                     logger.warning(f"⚠️ Admin ID {sender_id_int} attempted to reply to session {numeric_session_id} assigned to agent ID {assigned_agent_id}")
-                    raise HTTPException(status_code=403, detail=f"Only the assigned agent can reply to this chat. You can view messages as read-only.")
+                    raise HTTPException(status_code=403, detail="Only the assigned agent can reply to this chat. You can view messages as read-only.")
                 else:
                     logger.warning(f"⚠️ User ID {sender_id_int} attempted to send message to session {numeric_session_id} assigned to agent ID {assigned_agent_id}")
                     raise HTTPException(status_code=403, detail="Only the assigned agent can send messages to this chat")
 
             logger.info(f"✅ Authorization check passed: ID {sender_id_int} is assigned to session {numeric_session_id}")
 
-            # Agent sent message → Broadcast to customer and other agents
-            # CRITICAL: Use UUID session_id for customer SSE channel (not numeric ID)
-            logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to customer on channel: session:{session_uuid}")
-            customer_result = await broadcast_event_to_session(session_uuid, event_data)
-            logger.info(f"📤 [AGENT_MESSAGE] Customer broadcast result: {customer_result}")
+            # Broadcast to customer
+            await broadcast_event_to_session(session_uuid, event_data)
+            logger.info(f"📤 [AGENT_MESSAGE] Broadcasted to customer on session:{session_uuid}")
 
-            # Check if sender is admin for smart broadcasting
+            # Smart agent broadcasting
             is_sender_admin = sender_id_int in admin_ids
-
             if is_sender_admin:
-                # Sending agent is an ADMIN - send ONLY via broadcast to avoid duplicates
-                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to all admins (sender ID {sender_id_int} is admin)")
-                admin_result = await broadcast_event_to_all_agents(event_data)
-                logger.info(f"📤 [AGENT_MESSAGE] Admin broadcast result: {admin_result}")
-                logger.info(f"📤 Agent (admin ID {sender_id_int}) message sent to customer and all admins (session: {session_uuid})")
+                await broadcast_event_to_all_agents(event_data)
+                logger.info(f"📤 Agent (admin ID {sender_id_int}) message sent to customer and all admins")
             else:
-                # Sending agent is HUMAN AGENT - send to their personal channel + broadcast to admins
-                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to human agent ID {sender_id_int}")
-                agent_result = await broadcast_event_to_agent(sender_id_int, event_data)
-                logger.info(f"📤 [AGENT_MESSAGE] Agent broadcast result: {agent_result}")
-
-                logger.info(f"📤 [AGENT_MESSAGE] Broadcasting to all admins")
-                admin_result = await broadcast_event_to_all_agents(event_data)
-                logger.info(f"📤 [AGENT_MESSAGE] Admin broadcast result: {admin_result}")
-
-                logger.info(f"📤 Agent ID {sender_id_int} message sent to customer, agent, and all admins (session: {session_uuid})")
+                await broadcast_event_to_agent(sender_id_int, event_data)
+                await broadcast_event_to_all_agents(event_data)
+                logger.info(f"📤 Agent ID {sender_id_int} message sent to customer, agent, and all admins")
 
         elif sender_type == "user":
             # Customer sent message → Notify assigned agent AND all admins
-            # Try Redis DB 4 cache first
-            from shared.redis_agent_cache import get_assigned_agent as get_cached_agent2, set_assigned_agent as cache_agent2
-            cached_agent_id_raw = await get_cached_agent2(session_uuid)
-
-            assigned_agent_id = None
-
-            if cached_agent_id_raw:
-                try:
-                    assigned_agent_id = int(cached_agent_id_raw)
-                    logger.info(f"Found cached agent assignment (DB 4): {numeric_session_id} -> ID {assigned_agent_id}")
-                except (ValueError, TypeError):
-                    logger.warning(f"⚠️ Cached agent value is non-numeric (legacy): '{cached_agent_id_raw}' - falling through to DB lookup")
-
-            if assigned_agent_id is None:
-                # Cache MISS or legacy email value - query DB for numeric ID
-                assigned_agent_id = await chat_log_service.dao.get_assigned_agent_id(numeric_session_id)
-                if assigned_agent_id:
-                    await cache_agent2(session_uuid, assigned_agent_id)  # Cache numeric ID (consistent)
-                    logger.info(f"Cached agent assignment (DB 4): {numeric_session_id} -> ID {assigned_agent_id}")
+            assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, numeric_session_id)
 
             if assigned_agent_id:
-                # Smart broadcast: avoid duplicate messages for admins
-                admin_ids = await chat_log_service.dao.get_all_admin_ids()
+                admin_ids = await chat_log_service.get_admin_ids_cached()
                 is_assigned_admin = assigned_agent_id in admin_ids
 
                 if is_assigned_admin:
-                    # Assigned agent is an ADMIN - send ONLY via broadcast to avoid duplicates
                     await broadcast_event_to_all_agents(event_data)
                     logger.info(f"📤 Customer message sent via broadcast (assigned agent ID {assigned_agent_id} is admin)")
                 else:
-                    # Assigned agent is HUMAN AGENT - send to personal channel + broadcast to admins
                     await broadcast_event_to_agent(assigned_agent_id, event_data)
                     await broadcast_event_to_all_agents(event_data)
                     logger.info(f"📤 Customer message sent to human agent ID {assigned_agent_id} and all admins")
             else:
-                # No agent assigned - notify all admins (for assignment)
                 await broadcast_event_to_all_agents(event_data)
                 logger.info(f"📤 Customer message sent to admins (no agent assigned)")
-        
 
         return {
             "success": True,
@@ -1761,18 +1625,16 @@ async def end_agent_session(request: Request):
 
         logger.info(f"🔍 End-agent endpoint: session_id={numeric_session_id}")
 
-        # Get user ID for broadcasting
-        user_id = await chat_log_service.dao.get_user_id_by_email(user_email)
+        # Get user ID for broadcasting (via service with Redis cache)
+        user_id = await chat_log_service.get_user_id_by_email_cached(user_email)
         if not user_id:
             logger.error(f"❌ Could not get user ID for agent {user_email}")
             raise HTTPException(status_code=400, detail=f"Invalid agent email: {user_email}")
 
-        # Get session UUID for broadcasting
-        session_data = await chat_log_service.dao.get_session_by_id_with_messages(numeric_session_id)
-        if not session_data:
+        # Get session UUID for broadcasting (via service)
+        session_uuid = await chat_log_service.get_session_uuid(numeric_session_id)
+        if not session_uuid:
             raise HTTPException(status_code=404, detail=f"Session {numeric_session_id} not found")
-
-        session_uuid = session_data.get("session_id")  # UUID
 
         await chat_log_service.update_chat_session(
             session_id=numeric_session_id,
@@ -1874,15 +1736,13 @@ async def end_customer_session(request: Request):
         else:
             # Fallback: query database for UUID (shouldn't happen if API Gateway is working)
             logger.warning(f"⚠️ session_uuid not provided by API Gateway, querying database")
-            session_data = await chat_log_service.dao.get_session_by_id(numeric_session_id)
-            if session_data:
-                session_uuid = session_data.get('session_id')
+            session_uuid = await chat_log_service.get_session_uuid(numeric_session_id)
+            if session_uuid:
                 await broadcast_event_to_session(session_uuid, event_data)
 
-        # Notify the assigned agent and all admins
-        assigned_agent_email = await chat_log_service.dao.get_assigned_agent_email(numeric_session_id)
-        if assigned_agent_email:
-            assigned_agent_id = await chat_log_service.dao.get_user_id_by_email(assigned_agent_email)
+        # Notify the assigned agent and all admins (via service with Redis cache)
+        if session_uuid:
+            assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, numeric_session_id)
             if assigned_agent_id:
                 await broadcast_event_to_agent(assigned_agent_id, event_data)
         await broadcast_event_to_all_agents(event_data)

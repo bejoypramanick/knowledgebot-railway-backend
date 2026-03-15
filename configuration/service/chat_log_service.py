@@ -19,12 +19,95 @@ from shared.redis_pubsub_manager import (
 
 class ChatLogService:
     """Service layer for chat log operations"""
-    
+
     def __init__(self):
         self.dao = ChatLogDAO()
         self.auth_dao = AuthDAO()
         self.connection_manager = None  # Placeholder - should be initialized if needed for websockets
 
+    # --- Cached identity resolution methods (Redis DB4 cache + DB fallback) ---
+
+    async def get_user_id_by_email_cached(self, email: str) -> Optional[int]:
+        """Get user ID from email, using Redis cache with DB fallback."""
+        from shared.redis_agent_cache import get_cached_user_id, set_cached_user_id
+        cached = await get_cached_user_id(email)
+        if cached is not None:
+            return cached
+        user_id = await self.dao.get_user_id_by_email(email)
+        if user_id is not None:
+            await set_cached_user_id(email, user_id)
+        return user_id
+
+    async def get_email_by_user_id_cached(self, user_id: int) -> Optional[str]:
+        """Get email from user ID, using Redis cache with DB fallback."""
+        from shared.redis_agent_cache import get_cached_user_email, set_cached_user_id
+        cached = await get_cached_user_email(user_id)
+        if cached is not None:
+            return cached
+        email = await self.dao.get_email_by_user_id(user_id)
+        if email is not None:
+            await set_cached_user_id(email, user_id)  # Caches both directions
+        return email
+
+    async def get_admin_ids_cached(self) -> List[int]:
+        """Get all admin IDs, using Redis cache with DB fallback."""
+        from shared.redis_agent_cache import get_cached_admin_ids, set_cached_admin_ids
+        cached = await get_cached_admin_ids()
+        if cached is not None:
+            return cached
+        ids = await self.dao.get_all_admin_ids()
+        await set_cached_admin_ids(ids)
+        return ids
+
+    async def get_assigned_agent_id_cached(self, session_uuid: str, numeric_session_id: int) -> Optional[int]:
+        """Get assigned agent ID, using Redis DB4 cache with DB fallback."""
+        from shared.redis_agent_cache import get_assigned_agent, set_assigned_agent
+        cached = await get_assigned_agent(session_uuid)
+        if cached:
+            try:
+                return int(cached)
+            except (ValueError, TypeError):
+                logger.warning(f"⚠️ Cached agent value is non-numeric (legacy): '{cached}' - falling through to DB lookup")
+        agent_id = await self.dao.get_assigned_agent_id(numeric_session_id)
+        if agent_id:
+            await set_assigned_agent(session_uuid, agent_id)
+            logger.info(f"Cached agent assignment (DB 4): {numeric_session_id} -> ID {agent_id}")
+        return agent_id
+
+    async def get_session_uuid(self, numeric_session_id: int) -> Optional[str]:
+        """Get session UUID from numeric session ID."""
+        return await self.dao.get_session_uuid(numeric_session_id)
+
+    async def resolve_sender_identity(self, sender_id_raw: Optional[str], header_email: str) -> tuple[Optional[int], Optional[str]]:
+        """Resolve sender numeric ID and email from agent_id body param or X-User-Email header.
+
+        Returns:
+            (sender_id_int, sender_email) tuple. Either may be None if resolution fails.
+        """
+        sender_id_int = None
+        sender_email = None
+
+        if sender_id_raw and sender_id_raw != 'system':
+            try:
+                sender_id_int = int(sender_id_raw)
+            except (ValueError, TypeError):
+                # agent_id is non-numeric (could be email)
+                sender_id_int = await self.get_user_id_by_email_cached(str(sender_id_raw))
+                if sender_id_int:
+                    sender_email = str(sender_id_raw)
+
+        # Fallback to X-User-Email header
+        if sender_id_int is None and header_email:
+            sender_id_int = await self.get_user_id_by_email_cached(header_email)
+            if sender_id_int:
+                sender_email = header_email
+                logger.info(f"🔍 Resolved sender from X-User-Email header: {header_email} → ID {sender_id_int}")
+
+        # Get email if we have ID but no email yet
+        if sender_id_int and not sender_email:
+            sender_email = await self.get_email_by_user_id_cached(sender_id_int) or f"agent-{sender_id_int}"
+
+        return sender_id_int, sender_email
 
     async def get_all_chat_logs(self) -> List[Dict[str, Any]]:
         """Get all chat logs"""
@@ -416,6 +499,13 @@ class ChatLogService:
         """Send a message from an agent to a customer using numeric ID only.
         Broadcasting to customer SSE is handled by the router after this call."""
         message_id = await self.dao.create_message(session_id, 'agent', text)
+        await self.dao.increment_message_count(session_id)
+        return message_id
+
+    async def send_customer_message(self, session_id: int, text: str):
+        """Save a customer message to the database.
+        Broadcasting is handled by the router after this call."""
+        message_id = await self.dao.create_message(session_id, 'user', text)
         await self.dao.increment_message_count(session_id)
         return message_id
 
