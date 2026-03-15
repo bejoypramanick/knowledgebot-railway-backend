@@ -122,6 +122,25 @@ class ChatWriteThroughService:
                 # Step 1: Ensure session row exists in PG
                 db_id = session_data.get("db_id")
                 if not db_id:
+                    # Parse ISO string timestamps back to datetime objects for asyncpg
+                    started_at_str = session_data.get("started_at")
+                    if isinstance(started_at_str, str):
+                        try:
+                            started_at = datetime.fromisoformat(started_at_str.replace('Z', '+00:00'))
+                        except (ValueError, AttributeError):
+                            started_at = None
+                    else:
+                        started_at = started_at_str
+
+                    last_activity_str = session_data.get("last_activity_at")
+                    if isinstance(last_activity_str, str):
+                        try:
+                            last_activity_at = datetime.fromisoformat(last_activity_str.replace('Z', '+00:00'))
+                        except (ValueError, AttributeError):
+                            last_activity_at = None
+                    else:
+                        last_activity_at = last_activity_str
+
                     # INSERT with ON CONFLICT for idempotency
                     result = await db.execute(
                         text("""
@@ -132,8 +151,8 @@ class ChatWriteThroughService:
                         """),
                         {
                             "session_uuid": session_uuid,
-                            "started_at": session_data.get("started_at"),
-                            "last_activity_at": session_data.get("last_activity_at")
+                            "started_at": started_at,
+                            "last_activity_at": last_activity_at
                         }
                     )
                     db_id = result.scalar()
@@ -174,6 +193,16 @@ class ChatWriteThroughService:
                         max_index = msg.get("_index", max_index)
 
                     # Step 3: Update session metadata
+                    # Parse last_activity_at timestamp
+                    last_activity_str = session_data.get("last_activity_at")
+                    if isinstance(last_activity_str, str):
+                        try:
+                            last_activity_at = datetime.fromisoformat(last_activity_str.replace('Z', '+00:00'))
+                        except (ValueError, AttributeError):
+                            last_activity_at = None
+                    else:
+                        last_activity_at = last_activity_str
+
                     await db.execute(
                         text("""
                             UPDATE chat_sessions
@@ -184,7 +213,7 @@ class ChatWriteThroughService:
                         """),
                         {
                             "db_id": db_id,
-                            "last_activity": session_data.get("last_activity_at")
+                            "last_activity": last_activity_at
                         }
                     )
 
@@ -201,6 +230,16 @@ class ChatWriteThroughService:
                         await self._store.remove_from_dirty(session_uuid)
                 else:
                     # No messages to sync, just update session metadata
+                    # Parse last_activity_at timestamp
+                    last_activity_str = session_data.get("last_activity_at")
+                    if isinstance(last_activity_str, str):
+                        try:
+                            last_activity_at = datetime.fromisoformat(last_activity_str.replace('Z', '+00:00'))
+                        except (ValueError, AttributeError):
+                            last_activity_at = None
+                    else:
+                        last_activity_at = last_activity_str
+
                     await db.execute(
                         text("""
                             UPDATE chat_sessions
@@ -209,7 +248,7 @@ class ChatWriteThroughService:
                         """),
                         {
                             "db_id": db_id,
-                            "last_activity": session_data.get("last_activity_at")
+                            "last_activity": last_activity_at
                         }
                     )
                     await db.commit()
