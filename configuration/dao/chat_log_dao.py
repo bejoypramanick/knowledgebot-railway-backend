@@ -962,6 +962,26 @@ class ChatLogDAO:
             return None
 
 
+    async def get_session_numeric_id(self, session_uuid: str) -> Optional[int]:
+        """Get numeric session ID from session UUID."""
+        query = "SELECT id FROM chat_sessions WHERE session_id = :uuid"
+        try:
+            params = {"uuid": session_uuid}
+            logger.log_db_operation(query, params)
+            async with get_db_session() as session:
+                result = await session.execute(text(query), params)
+                row = result.fetchone()
+                if row:
+                    logger.log_db_query(query, params, row)
+                    return row[0]
+                else:
+                    logger.log_db_query(query, params, None)
+                    return None
+        except Exception as e:
+            logger.error(f"❌ Error fetching numeric ID for UUID {session_uuid}: {e}", exc_info=True)
+            logger.log_db_query(query, {"uuid": session_uuid}, error=e)
+            return None
+
     async def update_chat_session_metadata(self, session_db_id: int, metadata: Dict[str, Any]):
         query = "UPDATE chat_sessions SET metadata = :metadata WHERE id = :session_db_id"
         try:

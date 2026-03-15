@@ -78,6 +78,25 @@ class ChatLogService:
         """Get session UUID from numeric session ID."""
         return await self.dao.get_session_uuid(numeric_session_id)
 
+    async def resolve_session_id(self, session_id_raw: str) -> tuple[int, Optional[str]]:
+        """Resolve session_id (numeric or UUID) to (numeric_id, uuid) tuple.
+
+        Accepts both numeric IDs and UUIDs. Returns (numeric_id, session_uuid).
+        Raises HTTPException if session not found.
+        """
+        session_id_str = str(session_id_raw)
+        if session_id_str.isdigit():
+            numeric_id = int(session_id_str)
+            session_uuid = await self.dao.get_session_uuid(numeric_id)
+            if not session_uuid:
+                raise HTTPException(status_code=404, detail=f"Session {numeric_id} not found")
+            return numeric_id, session_uuid
+        else:
+            numeric_id = await self.dao.get_session_numeric_id(session_id_str)
+            if not numeric_id:
+                raise HTTPException(status_code=404, detail=f"Session not found: {session_id_str}")
+            return numeric_id, session_id_str
+
     async def resolve_sender_identity(self, sender_id_raw: Optional[str], header_email: str) -> tuple[Optional[int], Optional[str]]:
         """Resolve sender numeric ID and email from agent_id body param or X-User-Email header.
 
@@ -494,6 +513,10 @@ class ChatLogService:
     async def get_session_messages(self, session_id: int):
         """Get all messages for a specific chat session (full conversation on click)."""
         return await self.dao.get_session_messages(session_id)
+
+    async def update_session_feedback(self, session_id: int, feedback_type: str) -> bool:
+        """Update session feedback (positive/negative)."""
+        return await self.dao.update_session_feedback(session_id, feedback_type)
 
     async def send_agent_message(self, session_id: int, agent_email: str, text: str):
         """Send a message from an agent to a customer using numeric ID only.

@@ -1608,7 +1608,7 @@ async def send_agent_message(request: Request):
 async def end_agent_session(request: Request):
     """End chat session from the agent side
 
-    Request body: {session_id: int (numeric session ID)}
+    Request body: {session_id: str (numeric ID or UUID)}
     """
     try:
         body = await request.json()
@@ -1617,24 +1617,18 @@ async def end_agent_session(request: Request):
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required in request body")
 
-        try:
-            numeric_session_id = int(session_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
+        # Resolve session ID (accepts both numeric and UUID formats) via service
+        numeric_session_id, session_uuid = await chat_log_service.resolve_session_id(session_id)
+
         user_email = request.headers.get("X-User-Email", "agent@example.com")
 
-        logger.info(f"🔍 End-agent endpoint: session_id={numeric_session_id}")
+        logger.info(f"🔍 End-agent endpoint: session_id={numeric_session_id}, uuid={session_uuid}")
 
         # Get user ID for broadcasting (via service with Redis cache)
         user_id = await chat_log_service.get_user_id_by_email_cached(user_email)
         if not user_id:
             logger.error(f"❌ Could not get user ID for agent {user_email}")
             raise HTTPException(status_code=400, detail=f"Invalid agent email: {user_email}")
-
-        # Get session UUID for broadcasting (via service)
-        session_uuid = await chat_log_service.get_session_uuid(numeric_session_id)
-        if not session_uuid:
-            raise HTTPException(status_code=404, detail=f"Session {numeric_session_id} not found")
 
         await chat_log_service.update_chat_session(
             session_id=numeric_session_id,
@@ -1706,11 +1700,10 @@ async def end_customer_session(request: Request):
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required (should be injected by API Gateway or provided in request body)")
 
-        # session_id is already numeric (injected by API Gateway from cookie)
-        try:
-            numeric_session_id = int(session_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail=f"session_id must be numeric, got: {session_id}")
+        # Resolve session ID (accepts both numeric and UUID formats) via service
+        # Use session_uuid from body/state if available, otherwise resolve_session_id will get it
+        numeric_session_id, resolved_uuid = await chat_log_service.resolve_session_id(session_id)
+        session_uuid = session_uuid or resolved_uuid
 
         user_email = request.headers.get("X-User-Email", "customer@example.com")
 
@@ -1723,22 +1716,18 @@ async def end_customer_session(request: Request):
 
         event_data = {
             "type": "session_ended",
-            "session_id": str(numeric_session_id),
+            "session_id": session_uuid or str(numeric_session_id),
+            "numeric_session_id": numeric_session_id,
             "ended_by": "customer",
             "show_feedback": True,  # Trigger feedback UI
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
-        
-        # Use session_uuid if provided by API Gateway, otherwise query database
+
+        # Broadcast to customer SSE channel using UUID
         if session_uuid:
-            # CRITICAL: Use UUID for customer SSE channel, not numeric ID
             await broadcast_event_to_session(session_uuid, event_data)
         else:
-            # Fallback: query database for UUID (shouldn't happen if API Gateway is working)
-            logger.warning(f"⚠️ session_uuid not provided by API Gateway, querying database")
-            session_uuid = await chat_log_service.get_session_uuid(numeric_session_id)
-            if session_uuid:
-                await broadcast_event_to_session(session_uuid, event_data)
+            logger.warning(f"⚠️ No session_uuid available for broadcasting session_ended to customer")
 
         # Notify the assigned agent and all admins (via service with Redis cache)
         if session_uuid:
@@ -1787,10 +1776,8 @@ async def submit_session_feedback(request: Request):
         if not session_id:
             raise HTTPException(status_code=400, detail="session_id is required (should be injected by API Gateway or provided in request body)")
 
-        try:
-            numeric_session_id = int(session_id)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=400, detail=f"session_id must be numeric, got: {session_id}")
+        # Resolve session ID (accepts both numeric and UUID formats) via service
+        numeric_session_id, _ = await chat_log_service.resolve_session_id(session_id)
 
         if not feedback_type:
             raise HTTPException(status_code=400, detail="feedback_type is required")
@@ -1801,7 +1788,7 @@ async def submit_session_feedback(request: Request):
         logger.info(f"🔍 Feedback endpoint: session_id={numeric_session_id}, feedback={feedback_type}")
 
         # Update feedback in database
-        success = await chat_log_service.dao.update_session_feedback(numeric_session_id, feedback_type)
+        success = await chat_log_service.update_session_feedback(numeric_session_id, feedback_type)
 
         if not success:
             raise HTTPException(status_code=404, detail="Session not found")
