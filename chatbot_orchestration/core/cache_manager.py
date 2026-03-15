@@ -110,6 +110,14 @@ class GeminiCacheManager:
                 )
 
                 logger.info(f"Creating Gemini cache (model: {model_name}, TTL: {self._cache_ttl}s, hash: {content_hash})")
+                logger.info(f"Cache config includes:")
+                logger.info(f"  - System instruction: {len(system_prompt)} chars")
+                logger.info(f"  - Tools: {len(gemini_tools) if gemini_tools else 0} tool(s)")
+                if gemini_tools:
+                    for tool in gemini_tools:
+                        if hasattr(tool, 'function_declarations'):
+                            logger.info(f"    - Tool functions: {[f.name for f in tool.function_declarations]}")
+                
                 cached_content = await client.aio.caches.create(
                     model=model_name,
                     config=cache_config,
