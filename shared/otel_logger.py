@@ -225,8 +225,39 @@ class OpenTelemetryLogger:
         for reserved_attr in RESERVED_LOGRECORD_ATTRS:
             extra.pop(reserved_attr, None)
 
+        # Calculate correct stacklevel by finding the first frame outside of otel_logger and logging
+        # This ensures we always point to the actual caller, not the logger wrapper
+        stacklevel = 2
+        try:
+            stack = inspect.stack()
+            # Skip frames from:
+            # - otel_logger.py (this file)
+            # - logging module (Python's logging internals)
+            # - asyncio module (async wrapper frames)
+            # - concurrent.futures (thread pool frames)
+            skip_modules = {'otel_logger.py', 'logging', 'asyncio', 'concurrent', 'threading'}
+            
+            for i, frame_info in enumerate(stack[1:], start=1):
+                filename = frame_info.filename
+                # Check if this frame should be skipped
+                should_skip = False
+                for skip_module in skip_modules:
+                    if skip_module in filename:
+                        should_skip = True
+                        break
+                
+                # Also skip frames from the OpenTelemetryLogger class methods
+                if frame_info.function in {'info', 'error', 'warning', 'debug', 'critical', '_log_with_context', 'log'}:
+                    should_skip = True
+                
+                if not should_skip:
+                    stacklevel = i + 1
+                    break
+        except Exception:
+            stacklevel = 4  # Fallback to 4 if inspection fails
+
         # Prepare logger.log kwargs
-        log_kwargs = {'extra': extra, 'stacklevel': 4}  # stacklevel=4 skips all wrapper frames
+        log_kwargs = {'extra': extra, 'stacklevel': stacklevel}
         if exc_info is not None:
             log_kwargs['exc_info'] = exc_info
         if exc_text is not None:
