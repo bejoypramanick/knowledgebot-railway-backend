@@ -715,6 +715,28 @@ class StreamingService:
                     all_messages = run.all_messages()
                     logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
 
+                    # DEBUG: Log all messages structure
+                    if not all_messages:
+                        logger.error("🚨 CRITICAL: all_messages is EMPTY!")
+                    else:
+                        logger.info("=" * 100)
+                        logger.info("🔍 DEBUG: all_messages structure")
+                        logger.info("=" * 100)
+                        for i, msg in enumerate(all_messages):
+                            logger.info(f"Message {i}: {type(msg).__name__}")
+                            if hasattr(msg, 'parts'):
+                                logger.info(f"  Parts: {len(msg.parts)}")
+                                for j, part in enumerate(msg.parts):
+                                    part_type = type(part).__name__
+                                    logger.info(f"    Part {j}: {part_type}")
+                                    if hasattr(part, 'content'):
+                                        content = getattr(part, 'content', '')
+                                        content_len = len(str(content))
+                                        logger.info(f"      Content length: {content_len}")
+                                        if content_len > 0:
+                                            logger.info(f"      Preview: {str(content)[:100]}...")
+                        logger.info("=" * 100)
+
                     # Log model decision process
                     logger.info("=" * 100)
                     logger.info("🔍 MODEL DECISION PROCESS & TOOL USAGE")
@@ -971,6 +993,22 @@ class StreamingService:
             # STREAM THE RESPONSE IN CHUNKS (after enforcement check)
             # ================================================================
             # Now that enforcement has been applied (if needed), stream the response in chunks
+
+            # 🚨 CRITICAL: Check if full_response is empty
+            if not full_response or full_response.strip() == "":
+                logger.error("=" * 100)
+                logger.error("🚨 CRITICAL: Agent returned EMPTY response!")
+                logger.error("=" * 100)
+                logger.error(f"Message: '{message}'")
+                logger.error(f"Session ID: {session_id}")
+                logger.error(f"Tool calls made: {tool_call_count}")
+                logger.error(f"Pydantic messages: {len(pydantic_messages)}")
+                logger.error("=" * 100)
+
+                # Fallback response to customer
+                full_response = "I'm sorry, I encountered an issue while processing your request. Please try again or contact support."
+                logger.warning(f"⚠️ Using fallback response: {full_response}")
+
             if full_response:
                 logger.info("📤 Streaming final response in chunks (after enforcement check)...")
                 logger.info(f"🔍 DEBUG: full_response length = {len(full_response)} chars")
