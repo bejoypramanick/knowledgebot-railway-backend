@@ -21,7 +21,7 @@ from .agent_manager import agent_manager
 logger = get_otel_logger("streaming_service", "chatbot-orchestration")
 
 # Feature flags
-ENABLE_EXTENDED_THINKING = os.getenv("ENABLE_EXTENDED_THINKING", "false").lower() == "true"
+ENABLE_EXTENDED_THINKING = os.getenv("ENABLE_EXTENDED_THINKING", "true").lower() == "true"
 
 class StreamingService:
     """Handles streaming responses for the chatbot."""
@@ -580,6 +580,7 @@ class StreamingService:
                     model_settings_kwargs['google_thinking_config'] = ThinkingConfigDict(
                         include_thoughts=True
                     )
+                    logger.info(f"🧠 Extended thinking ENABLED for this request")
 
                 if cache_name:
                     model_settings_kwargs['google_cached_content'] = cache_name
