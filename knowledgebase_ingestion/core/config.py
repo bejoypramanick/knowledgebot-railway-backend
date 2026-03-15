@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     api_gateway_host: str = "0.0.0.0"
     
     # Chatbot Configuration
-    chatbot_model: str = "gemini-2.0-flash-exp"
+    chatbot_model: str = "gemini-2.5-flash-lite"
 
     # Gemini FileSearch Store Configuration (required from Railway env)
     gemini_file_search_store_name: Optional[str] = None  # FileSearch store display name - MUST be set in Railway env

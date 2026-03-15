@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     api_gateway_host: str = "0.0.0.0"
     
     # Chatbot Configuration
-    chatbot_model: str = "gemini-2.0-flash-exp"
+    chatbot_model: str = "gemini-2.5-flash-lite"
     
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None

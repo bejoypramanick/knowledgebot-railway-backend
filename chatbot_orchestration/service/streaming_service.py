@@ -653,7 +653,6 @@ class StreamingService:
                                 retry_delay = 10  # Default 10 seconds
                                 if 'retry' in error_str.lower():
                                     # Try to extract delay from error message
-                                    import re
                                     match = re.search(r'(\d+\.?\d*)\s*s', error_str)
                                     if match:
                                         retry_delay = float(match.group(1))
