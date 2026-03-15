@@ -10,6 +10,7 @@ Configurable via:
 """
 import asyncio
 import os
+from datetime import datetime
 from typing import Optional
 
 from shared.otel_logger import get_otel_logger
@@ -148,6 +149,16 @@ class ChatWriteThroughService:
                     max_index = 0
 
                     for msg in batch:
+                        # Parse ISO string timestamp back to datetime object for asyncpg
+                        created_at_str = msg.get("created_at")
+                        if isinstance(created_at_str, str):
+                            try:
+                                created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                            except (ValueError, AttributeError):
+                                created_at = None
+                        else:
+                            created_at = created_at_str
+
                         await db.execute(
                             text("""
                                 INSERT INTO chat_messages (session_id, role, content, created_at, updated_at)
@@ -157,7 +168,7 @@ class ChatWriteThroughService:
                                 "session_id": db_id,
                                 "role": msg["role"],
                                 "content": msg["content"],
-                                "created_at": msg.get("created_at")
+                                "created_at": created_at
                             }
                         )
                         max_index = msg.get("_index", max_index)
