@@ -1792,18 +1792,31 @@ async def end_agent_session(request: Request):
 @router.post("/admin/chat-sessions/end-customer")
 async def end_customer_session(request: Request):
     """End a chat session from the customer side
-    
+
     API Gateway extracts session UUID from httpOnly cookie and injects both:
     - session_id (numeric) for internal service operations
     - session_uuid (UUID) for broadcasting to customer SSE channels
+
+    Accepts session_id from multiple sources (in priority order):
+    1. Request body (explicit passing)
+    2. request.state.session_numeric_id (injected by API Gateway middleware)
+    3. request.state.session_uuid (resolve to numeric if needed)
     """
     try:
         body = await request.json()
         session_id = body.get("session_id")
         session_uuid = body.get("session_uuid")
 
+        # If session_id not in body, try to get from request.state (API Gateway injection)
         if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required (should be injected by API Gateway)")
+            session_id = getattr(request.state, 'session_numeric_id', None)
+
+        # If session_uuid not in body, try to get from request.state
+        if not session_uuid:
+            session_uuid = getattr(request.state, 'session_uuid', None)
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required (should be injected by API Gateway or provided in request body)")
 
         # session_id is already numeric (injected by API Gateway from cookie)
         try:
@@ -1864,7 +1877,7 @@ async def end_customer_session(request: Request):
 async def submit_session_feedback(request: Request):
     """
     Submit customer feedback for a chat session.
-    
+
     API Gateway injects session_id (numeric) and session_uuid (UUID) from cookie.
     Request Body:
         session_id: int (numeric, injected by API Gateway)
@@ -1877,8 +1890,16 @@ async def submit_session_feedback(request: Request):
         session_uuid = body.get("session_uuid")
         feedback_type = body.get("feedback_type")
 
+        # If session_id not in body, try to get from request.state (API Gateway injection)
         if not session_id:
-            raise HTTPException(status_code=400, detail="session_id is required (should be injected by API Gateway)")
+            session_id = getattr(request.state, 'session_numeric_id', None)
+
+        # If session_uuid not in body, try to get from request.state
+        if not session_uuid:
+            session_uuid = getattr(request.state, 'session_uuid', None)
+
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id is required (should be injected by API Gateway or provided in request body)")
 
         try:
             numeric_session_id = int(session_id)
@@ -1918,11 +1939,14 @@ async def submit_session_feedback(request: Request):
 async def request_human_agent(request: Request):
     """Request a human agent for current chat session
 
-    Session numeric ID comes from request body (session_id parameter)
+    Session numeric ID comes from multiple sources:
+    1. Request body (session_id parameter)
+    2. request.state.session_numeric_id (injected by API Gateway from cookie)
+
     Can be called from:
     - Browser (via API Gateway which extracts UUID from cookie and converts to numeric ID)
     - Internal services (pass numeric session_id in request body)
-    
+
     Returns:
     - agent_assigned: Agent email (for display)
     - agent_id: Agent user ID (for Redis channel subscription)
@@ -1933,10 +1957,14 @@ async def request_human_agent(request: Request):
         body = await request.json()
         session_id = body.get("session_id")
 
+        # If session_id not in body, try to get from request.state (API Gateway injection)
+        if not session_id:
+            session_id = getattr(request.state, 'session_numeric_id', None)
+
         if not session_id:
             raise HTTPException(
                 status_code=400,
-                detail="session_id is required in request body"
+                detail="session_id is required in request body or should be injected by API Gateway"
             )
 
         # Session ID should be numeric (API Gateway converts UUID to numeric ID before calling internal services)
