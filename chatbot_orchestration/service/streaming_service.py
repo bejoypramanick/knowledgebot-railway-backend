@@ -925,6 +925,9 @@ class StreamingService:
 
                         if not is_greeting:
                             logger.error(f"TOOL CALL REQUIREMENT NOT MET: query='{message[:80]}', tools=0")
+                            logger.error(f"🚨 CRITICAL: Agent should have called search_knowledge_base for non-greeting query")
+                            logger.error(f"🚨 Response was: {full_response[:100]}...")
+                            logger.error(f"🚨 This indicates the agent is not following the mandatory tool-calling requirement")
 
                 except Exception as result_error:
                     logger.error(f"❌ Error extracting results: {result_error}", exc_info=True)
