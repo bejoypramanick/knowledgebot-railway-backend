@@ -2554,6 +2554,26 @@ async def logout(request: Request, user: dict = Depends(get_current_user)):
 
 
 # =================================
+# PERFORMANCE METRICS ENDPOINTS
+# =================================
+
+@router.get("/performance/metrics")
+async def get_performance_metrics():
+    """Get performance metrics for dashboard"""
+    try:
+        performance_service = PerformanceService()
+        metrics = await performance_service.get_performance_metrics()
+        logger.info("✅ Successfully retrieved performance metrics")
+        return {
+            "success": True,
+            "data": metrics
+        }
+    except Exception as e:
+        logger.error(f"❌ Error fetching performance metrics: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch performance metrics: {str(e)}")
+
+
+# =================================
 # HEALTH ENDPOINTS
 # =================================
 
