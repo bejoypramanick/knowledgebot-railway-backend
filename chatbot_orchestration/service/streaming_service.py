@@ -232,74 +232,88 @@ class StreamingService:
             pydantic_messages = self._convert_db_messages_to_pydantic_ai(chat_history)
             logger.info(f"✅ Converted {len(pydantic_messages)} messages to Pydantic AI format")
 
-            # 🚨 PRE-FLIGHT SYSTEM PROMPT INJECTION 🚨
-            # CRITICAL FIX: ALWAYS prepend system prompt, even for first messages!
-            # Pydantic AI discards Agent.system_prompt when message_history parameter is provided,
-            # even if message_history is empty. So we MUST prepend it to the list.
+            # 🚨 CRITICAL FIX: System Prompt Handling Strategy 🚨
+            # Two different approaches depending on whether we have chat history:
             #
-            # IMPORTANT SAFEGUARDS:
-            # 1. System prompt MUST be at index 0 (never prune it when sliding window is used)
-            # 2. Only ONE system message allowed (Pydantic AI + Gemini requirement)
-            # 3. This workaround is compatible with Pydantic AI's current implementation
-            #    but may need adjustment if they add native system message handling
+            # 1. FIRST MESSAGE (empty pydantic_messages):
+            #    - DON'T provide message_history parameter
+            #    - Pydantic AI will use Agent.system_prompt automatically ✅
+            #    - Agent already has system_prompt set at creation time
+            #
+            # 2. FOLLOW-UP MESSAGES (non-empty pydantic_messages):
+            #    - MUST provide message_history parameter (to include conversation context)
+            #    - Since message_history overrides Agent.system_prompt in Pydantic AI,
+            #    - MUST prepend system prompt to the message_history list
+            #
+            # This ensures system prompt is ALWAYS used, avoiding the root cause:
+            # "Pydantic AI discards Agent.system_prompt when message_history is provided"
 
+            has_chat_history = len(pydantic_messages) > 0
             logger.info("=" * 100)
-            logger.info("🚨 PRE-FLIGHT SYSTEM PROMPT INJECTION (Pydantic AI Gotcha Fix)")
+            logger.info("🚨 SYSTEM PROMPT STRATEGY DECISION")
             logger.info("=" * 100)
-            logger.info(f"Current message_history length: {len(pydantic_messages)} messages")
-            logger.info("Issue: Pydantic AI discards Agent.system_prompt when message_history parameter exists")
-            logger.info("Solution: ALWAYS prepend system prompt as first message in history (even if empty)")
+            logger.info(f"Message Type: {'FOLLOW-UP (has chat history)' if has_chat_history else 'FIRST MESSAGE (no history)'}")
+            logger.info(f"Current messages in history: {len(pydantic_messages)}")
             logger.info("=" * 100)
 
-            # Get system prompt from agent manager cache
-            system_prompt_text = agent_manager.get_cached_system_prompt(session_id)
+            if has_chat_history:
+                # FOLLOW-UP MESSAGE: Must prepend system prompt to message_history
+                logger.info("🔄 FOLLOW-UP MESSAGE HANDLING")
+                logger.info("Strategy: Prepend system prompt to message_history (required for Pydantic AI)")
+                logger.info("=" * 100)
 
-            if system_prompt_text:
-                logger.info(f"✅ Using agent's system prompt: {len(system_prompt_text)} characters")
-                logger.info(f"   Preview: {system_prompt_text[:150]}...")
+                # Get system prompt from agent manager cache
+                system_prompt_text = agent_manager.get_cached_system_prompt(session_id)
 
-                # Create SystemPromptPart message
-                system_prompt_msg = ModelRequest(parts=[SystemPromptPart(content=system_prompt_text)])
+                if system_prompt_text:
+                    logger.info(f"✅ Retrieved system prompt: {len(system_prompt_text)} characters")
+                    logger.info(f"   Preview: {system_prompt_text[:150]}...")
 
-                # Prepend to message history (CRITICAL: must be first message at index 0)
-                pydantic_messages.insert(0, system_prompt_msg)
-                logger.info(f"✅ System prompt prepended to message_history")
-                logger.info(f"   Now message_history has {len(pydantic_messages)} messages (including system prompt)")
-                logger.info(f"   Message 0: System Prompt (PROTECTED - DO NOT PRUNE)")
-                if len(pydantic_messages) > 1:
+                    # Create SystemPromptPart message
+                    system_prompt_msg = ModelRequest(parts=[SystemPromptPart(content=system_prompt_text)])
+
+                    # Prepend to message history (CRITICAL: must be first message at index 0)
+                    pydantic_messages.insert(0, system_prompt_msg)
+                    logger.info(f"✅ System prompt prepended to message_history")
+                    logger.info(f"   Message_history now has {len(pydantic_messages)} messages (including system prompt)")
+                    logger.info(f"   Message 0: System Prompt (PROTECTED)")
                     logger.info(f"   Message 1+: Conversation history ({len(pydantic_messages) - 1} messages)")
 
-                # SAFEGUARD: Validate only one system message exists
-                system_msg_count = sum(1 for msg in pydantic_messages
-                                      if hasattr(msg, 'parts') and
-                                      any(isinstance(part, SystemPromptPart) for part in msg.parts))
-                if system_msg_count > 1:
-                    logger.warning(f"⚠️ WARNING: Found {system_msg_count} system messages (expected 1)")
-                    logger.warning("⚠️ This may cause issues with Pydantic AI or Gemini API")
+                    # SAFEGUARD: Validate only one system message exists
+                    system_msg_count = sum(1 for msg in pydantic_messages
+                                          if hasattr(msg, 'parts') and
+                                          any(isinstance(part, SystemPromptPart) for part in msg.parts))
+                    if system_msg_count > 1:
+                        logger.warning(f"⚠️ WARNING: Found {system_msg_count} system messages (expected 1)")
+                        logger.warning("⚠️ This may cause issues with Pydantic AI or Gemini API")
+                    else:
+                        logger.info(f"✅ System message count validated: {system_msg_count} (correct)")
                 else:
-                    logger.info(f"✅ System message count validated: {system_msg_count} (correct)")
+                    logger.error(f"🚨 CRITICAL: System prompt not found in cache for session {session_id}")
+                    logger.error(f"🚨 Agent will receive NO system prompt")
+                    raise RuntimeError(f"System prompt not found for session {session_id}")
+
+                # DEBUG: Log message history structure for follow-up messages
+                logger.info("=" * 100)
+                logger.info("🔍 DEBUG: MESSAGE HISTORY STRUCTURE (FOLLOW-UP)")
+                logger.info("=" * 100)
+                for i, msg in enumerate(pydantic_messages):
+                    msg_type = type(msg).__name__
+                    protection_marker = " [PROTECTED - DO NOT PRUNE]" if i == 0 and hasattr(msg, 'parts') and any(isinstance(part, SystemPromptPart) for part in msg.parts) else ""
+                    logger.info(f"Message {i}: {msg_type}{protection_marker}")
+                    if hasattr(msg, 'parts'):
+                        for j, part in enumerate(msg.parts):
+                            part_type = type(part).__name__
+                            part_content = getattr(part, 'content', '')[:100]
+                            logger.info(f"  Part {j} ({part_type}): {part_content}...")
+                logger.info("=" * 100)
             else:
-                logger.error(f"🚨 CRITICAL: System prompt not found in cache for session {session_id}")
-                logger.error(f"🚨 Agent will receive NO system prompt and produce empty/broken responses")
-                raise RuntimeError(f"System prompt not found for session {session_id}")
-
-            logger.info("=" * 100)
-
-            # 🔍 DEBUG: Log actual message history content being passed to agent
-            logger.info("=" * 100)
-            logger.info("🔍 DEBUG: MESSAGE HISTORY BEING PASSED TO AGENT")
-            logger.info("=" * 100)
-            for i, msg in enumerate(pydantic_messages):
-                msg_type = type(msg).__name__
-                # Mark system prompt as protected
-                protection_marker = " [PROTECTED - DO NOT PRUNE]" if i == 0 and hasattr(msg, 'parts') and any(isinstance(part, SystemPromptPart) for part in msg.parts) else ""
-                logger.info(f"Message {i}: {msg_type}{protection_marker}")
-                if hasattr(msg, 'parts'):
-                    for j, part in enumerate(msg.parts):
-                        part_type = type(part).__name__
-                        part_content = getattr(part, 'content', '')[:100]
-                        logger.info(f"  Part {j} ({part_type}): {part_content}...")
-            logger.info("=" * 100)
+                # FIRST MESSAGE: Don't provide message_history
+                logger.info("✨ FIRST MESSAGE HANDLING")
+                logger.info("Strategy: DON'T provide message_history (use Agent.system_prompt)")
+                logger.info("Reason: Agent was created with system_prompt set at line 229")
+                logger.info("Pydantic AI will use Agent.system_prompt automatically ✅")
+                logger.info("=" * 100)
 
             # 🚨 CRITICAL: Check if user is requesting human agent BEFORE AI responds
             logger.info(f"🔍 Checking if user is requesting human agent...")
@@ -629,10 +643,15 @@ class StreamingService:
                 )
 
                 logger.info("=" * 100)
-                logger.info("📤 CALLING AGENT.ITER() WITH:")
+                logger.info("📤 PREPARING AGENT.ITER() CALL")
                 logger.info(f"   Current message: '{message}'")
-                logger.info(f"   Message history length: {len(pydantic_messages)} messages")
-                logger.info(f"   System prompt injected: YES ✅ (fix for Pydantic AI gotcha)")
+                logger.info(f"   Chat history: {len(pydantic_messages) if has_chat_history else 0} messages")
+                if has_chat_history:
+                    logger.info(f"   message_history: WILL BE PROVIDED (follow-up message)")
+                    logger.info(f"   system_prompt: PREPENDED to message_history")
+                else:
+                    logger.info(f"   message_history: NOT PROVIDED (first message)")
+                    logger.info(f"   system_prompt: Using Agent.system_prompt (set at creation) ✅")
                 thinking_status = "ENABLED ✅" if ENABLE_EXTENDED_THINKING else "DISABLED (default)"
                 logger.info(f"   Extended thinking: {thinking_status}")
                 logger.info("=" * 100)
@@ -641,10 +660,10 @@ class StreamingService:
                 # Estimate: ~500 tokens for system prompt + message history + current message
                 estimated_tokens = 500 + (len(pydantic_messages) * 100) + len(message)
                 logger.info(f"⏳ Checking token rate limit (estimated: {estimated_tokens} tokens)...")
-                
+
                 from shared.gemini_token_limiter import get_gemini_token_limiter
                 token_limiter = get_gemini_token_limiter()
-                
+
                 try:
                     await token_limiter.wait_for_tokens(estimated_tokens)
                     logger.info(f"✅ Token rate limit check passed")
@@ -661,26 +680,50 @@ class StreamingService:
 
                 while retry_attempt < max_retries:
                     try:
-                        async with agent.iter(
-                            message,  # ✅ ORIGINAL message
-                            message_history=pydantic_messages,  # ✅ Full conversation context
-                            deps=session_deps,
-                            model_settings=model_settings  # 🧠 Enable extended thinking
-                        ) as run:
-                            logger.info("🚀 Starting agent iteration (streaming + tools)")
+                        # CRITICAL: Use different calling conventions for first vs. follow-up messages
+                        if has_chat_history:
+                            # FOLLOW-UP MESSAGE: Provide message_history (which includes prepended system prompt)
+                            async with agent.iter(
+                                message,  # ✅ ORIGINAL message
+                                message_history=pydantic_messages,  # ✅ Full conversation context + system prompt
+                                deps=session_deps,
+                                model_settings=model_settings  # 🧠 Enable extended thinking
+                            ) as run:
+                                logger.info("🚀 Starting agent iteration (streaming + tools) [FOLLOW-UP MESSAGE]")
 
-                            # Import correct message types from pydantic_ai.messages
-                            from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+                                # Import correct message types from pydantic_ai.messages
+                                from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 
-                            # Iterate through agent events/responses (these are Node objects, not ModelResponse)
-                            async for event in run:
-                                event_type = type(event).__name__
-                                logger.info(f"📌 Processing event: {event_type}")
-                                # Events are Node types (UserPromptNode, ModelRequestNode, CallToolsNode, End)
-                                # We don't stream from these directly - we get response after iteration via run.all_messages()
+                                # Iterate through agent events/responses (these are Node objects, not ModelResponse)
+                                async for event in run:
+                                    event_type = type(event).__name__
+                                    logger.info(f"📌 Processing event: {event_type}")
+                                    # Events are Node types (UserPromptNode, ModelRequestNode, CallToolsNode, End)
+                                    # We don't stream from these directly - we get response after iteration via run.all_messages()
 
-                            # Success - break out of retry loop
-                            break
+                                # Success - break out of retry loop
+                                break
+                        else:
+                            # FIRST MESSAGE: Don't provide message_history, use Agent.system_prompt
+                            async with agent.iter(
+                                message,  # ✅ ORIGINAL message
+                                deps=session_deps,
+                                model_settings=model_settings  # 🧠 Enable extended thinking
+                            ) as run:
+                                logger.info("🚀 Starting agent iteration (streaming + tools) [FIRST MESSAGE]")
+
+                                # Import correct message types from pydantic_ai.messages
+                                from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+
+                                # Iterate through agent events/responses (these are Node objects, not ModelResponse)
+                                async for event in run:
+                                    event_type = type(event).__name__
+                                    logger.info(f"📌 Processing event: {event_type}")
+                                    # Events are Node types (UserPromptNode, ModelRequestNode, CallToolsNode, End)
+                                    # We don't stream from these directly - we get response after iteration via run.all_messages()
+
+                                # Success - break out of retry loop
+                                break
 
                     except Exception as e:
                         error_str = str(e)
