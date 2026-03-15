@@ -157,9 +157,12 @@ class AgentManager:
         self.cache_name_cache[session_id] = None
         return None
 
-    def clear_agent_cache(self, session_id: str = None):
+    async def clear_agent_cache(self, session_id: str = None):
         """Clear cached agent for a session or all sessions.
-        
+
+        When the last session is removed, deletes the Gemini cache from Google
+        to stop per-hour billing for idle cache storage.
+
         Args:
             session_id: If provided, clear only this session's cache. If None, clear all caches.
         """
@@ -169,18 +172,22 @@ class AgentManager:
                 logger.info(f"Cleared cached agent for session: {session_id}")
             if session_id in self.system_prompt_cache:
                 del self.system_prompt_cache[session_id]
-                logger.info(f"Cleared cached system prompt for session: {session_id}")
             if session_id in self.cache_name_cache:
                 del self.cache_name_cache[session_id]
-            gemini_cache_manager.invalidate()
+
+            # If no more active sessions, delete Gemini cache from Google (stop billing)
+            if not self.agent_cache:
+                logger.info("Last session closed — deleting Gemini cache from Google")
+                await gemini_cache_manager.delete_cache()
+            else:
+                logger.info(f"{len(self.agent_cache)} sessions still active, keeping Gemini cache")
         else:
-            # Clear all cached agents and prompts
             cache_size = len(self.agent_cache)
             self.agent_cache.clear()
             self.system_prompt_cache.clear()
             self.cache_name_cache.clear()
-            gemini_cache_manager.invalidate()
-            logger.info(f"Cleared all cached agents, prompts, and Gemini cache ({cache_size} sessions)")
+            await gemini_cache_manager.delete_cache()
+            logger.info(f"Cleared all caches and deleted Gemini cache from Google ({cache_size} sessions)")
 
     async def create_agent(self, session_id: str, user_email: str = "anonymous@example.com", force_new: bool = False) -> Agent:
         """Create or retrieve cached agent instance with PydanticAI's built-in caching.

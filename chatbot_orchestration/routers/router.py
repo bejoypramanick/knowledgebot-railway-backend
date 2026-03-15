@@ -180,15 +180,15 @@ async def clear_agent_cache(request: Request):
         session_id = request.query_params.get("session_id", None)
 
         if session_id:
-            logger.info(f"🔄 Clearing agent cache for session: {session_id}")
-            agent_manager.clear_agent_cache(session_id)
+            logger.info(f"Clearing agent cache for session: {session_id}")
+            await agent_manager.clear_agent_cache(session_id)
             return {
                 "success": True,
                 "message": f"Agent cache cleared for session: {session_id}"
             }
         else:
-            logger.info("🔄 Clearing all agent caches")
-            agent_manager.clear_agent_cache()  # Clear all
+            logger.info("Clearing all agent caches")
+            await agent_manager.clear_agent_cache()
             return {
                 "success": True,
                 "message": "All agent caches cleared"

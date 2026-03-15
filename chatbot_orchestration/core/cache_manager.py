@@ -4,6 +4,12 @@ GeminiCacheManager - Manages Gemini explicit context caching lifecycle.
 Caches the system prompt + tool declarations so they don't need to be sent
 with every request. Gemini gives a 90% discount on cached input tokens.
 
+The cache is GLOBAL (shared across all sessions) because the system prompt
+and tools are identical for every customer. Cost control:
+- Cache is created when the first session starts
+- Cache is DELETED from Google when the last session closes
+- Short TTL (10 min default) as safety net for idle hours
+
 Cache includes:
 - System instruction (the full system prompt)
 - Tool declarations (function signatures)
@@ -22,8 +28,8 @@ from shared.otel_logger import get_otel_logger
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
 
-# Default cache TTL: 1 hour
-DEFAULT_CACHE_TTL_SECONDS = 3600
+# Default cache TTL: 10 minutes (safety net — cache is explicitly deleted on last session close)
+DEFAULT_CACHE_TTL_SECONDS = 600
 
 
 class GeminiCacheManager:
@@ -49,7 +55,7 @@ class GeminiCacheManager:
             return None
         elapsed = time.time() - self._cache_created_at
         if elapsed >= self._cache_ttl:
-            logger.info(f"Gemini cache expired (elapsed: {elapsed:.0f}s, TTL: {self._cache_ttl}s)")
+            logger.info(f"Gemini cache expired locally (elapsed: {elapsed:.0f}s, TTL: {self._cache_ttl}s)")
             self._cache_name = None
             self._cache_hash = None
             return None
@@ -124,10 +130,43 @@ class GeminiCacheManager:
                 logger.warning("Falling back to non-cached mode (agent works without cache)")
                 return None
 
+    async def delete_cache(self):
+        """Delete the cached content from Google to stop billing.
+
+        Called when the last active session closes. Safe to call multiple times.
+        """
+        async with self._lock:
+            cache_name = self._cache_name
+            if not cache_name:
+                return
+
+            # Clear local state first (so no request tries to use it mid-delete)
+            self._cache_name = None
+            self._cache_hash = None
+            self._cache_created_at = 0
+
+            try:
+                from ..core.ai import get_genai_client
+
+                client = get_genai_client()
+                if not client:
+                    logger.warning("GenAI client not available, cannot delete cache")
+                    return
+
+                await client.aio.caches.delete(name=cache_name)
+                logger.info(f"Deleted Gemini cache from Google: {cache_name} (billing stopped)")
+
+            except Exception as e:
+                # Cache may already be expired/deleted on Google's side — that's fine
+                logger.warning(f"Could not delete Gemini cache {cache_name}: {e}")
+
     def invalidate(self):
-        """Clear the current cache (e.g. when persona changes)."""
+        """Clear local cache reference (does NOT delete from Google).
+
+        Use delete_cache() to also stop Google billing.
+        """
         if self._cache_name:
-            logger.info(f"Invalidating Gemini cache: {self._cache_name}")
+            logger.info(f"Invalidating local Gemini cache reference: {self._cache_name}")
         self._cache_name = None
         self._cache_hash = None
         self._cache_created_at = 0
