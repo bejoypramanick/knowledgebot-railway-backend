@@ -54,19 +54,36 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
     """
     Initialize SQLAlchemy async engine with exponential backoff for cold starts.
 
-    Uses Railway environment configuration:
-    - DATABASE_URL: PostgreSQL connection string
-    - DB_POOL_SIZE: Min connections kept alive (default: 10)
-    - DB_POOL_MAX_OVERFLOW: Additional connections for burst traffic (default: 10)
-    - DB_POOL_RECYCLE: Recycle stale connections after 3600s (prevents stale connections)
-    - DB_CONNECT_TIMEOUT: Connection timeout in seconds (default: 60 for cold-start resilience)
+    🚀 Railway Serverless Optimization ("The Gentle Wake-up")
+
+    CRITICAL: Use INTERNAL URL, not public URL!
+    - ✅ DATABASE_URL=postgresql://...railway.internal:5432/... (internal network)
+    - ❌ DATABASE_URL=postgresql://...railway.app:5432/... (goes to internet!)
+
+    Connection pooling for serverless:
+    - pool_size=3 (not 10) - Prevents overwhelming cold-booting DB
+    - Multiple services × pool_size = total connections. Keep each service small!
+
+    Service staggering strategy (important!):
+    1. Start database first
+    2. Wait 30 seconds for DB to stabilize
+    3. Start configuration service only (let it warm up)
+    4. Once healthy, start remaining services (api_gateway, chatbot_orchestration, etc)
+
+    Environment variables:
+    - DATABASE_URL: PostgreSQL connection (MUST use railway.internal, not public URL!)
+    - DB_POOL_SIZE: Min connections (default: 3 for serverless)
+    - DB_POOL_MAX_OVERFLOW: Burst connections (default: 2)
+    - DB_POOL_RECYCLE: Recycle stale connections after 3600s
+    - DB_CONNECT_TIMEOUT: Connection timeout in seconds (default: 60)
     - DB_COMMAND_TIMEOUT: Command timeout in seconds (default: 20)
 
-    Production features:
-    - Exponential backoff for cold starts (1s → 2s → 4s → 8s → 16s)
-    - pool_pre_ping=True: Automatic connection health checks
-    - pool_recycle=3600: Recycled stale connections
-    - Fails fast if DB unreachable after retries (let container crash)
+    Features:
+    - Exponential backoff: 1s → 2s → 4s → 8s → 16s retries
+    - Per-attempt timeout: 70s (generous for cold-start)
+    - pool_pre_ping=True: Connection health checks
+    - pool_recycle=3600s: Prevents stale connections
+    - Fails fast if DB unreachable (container crash → auto-restart)
 
     Args:
         database_url: PostgreSQL connection URL. If None, uses DATABASE_URL env var.
@@ -94,8 +111,11 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
         async_url = db_url
 
     # Read Railway environment configuration
-    pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
-    pool_max_overflow = int(os.getenv("DB_POOL_MAX_OVERFLOW", "10"))
+    # IMPORTANT: Use SMALL pool_size for serverless/cold-start scenarios
+    # If 5 services each have pool_size=10, that's 50+ connections hitting DB at startup
+    # Railway hobby tier often has 20-50 max connections total
+    pool_size = int(os.getenv("DB_POOL_SIZE", "3"))  # Reduced from 10 to 3 for serverless
+    pool_max_overflow = int(os.getenv("DB_POOL_MAX_OVERFLOW", "2"))  # Reduced from 10 to 2
     pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "3600"))
     statement_timeout = os.getenv("DB_STATEMENT_TIMEOUT", "60000")
     connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "60"))  # 60s for cold-start resilience
@@ -110,8 +130,9 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
         try:
             logger.info(f"🔄 Connection attempt {attempt}/{max_retries}")
 
-            # Add per-attempt timeout (connect_timeout + buffer) to prevent hanging
-            attempt_timeout = connect_timeout + 5
+            # Add per-attempt timeout with generous buffer for serverless cold-start
+            # Cold-booting PostgreSQL on shared tier can be slow, especially with network latency
+            attempt_timeout = connect_timeout + 10  # 70s total timeout
 
             async with asyncio.timeout(attempt_timeout):
                 # Create async engine with AsyncAdaptedQueuePool
