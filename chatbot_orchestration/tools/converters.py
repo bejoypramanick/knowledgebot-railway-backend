@@ -91,8 +91,9 @@ def extract_tool_metadata(func: Callable) -> dict:
     required = []
 
     for param_name, param in sig.parameters.items():
-        # Skip 'self', 'cls', and 'deps' parameters
-        if param_name in ('self', 'cls', 'deps'):
+        # Skip 'self', 'cls', 'deps', and 'ctx' parameters
+        # These are automatically injected by Pydantic AI and should not be exposed as tool parameters
+        if param_name in ('self', 'cls', 'deps', 'ctx'):
             continue
 
         param_type = type_hints.get(param_name, str)
