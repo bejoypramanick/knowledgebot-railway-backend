@@ -226,7 +226,7 @@ class OpenTelemetryLogger:
             extra.pop(reserved_attr, None)
 
         # Prepare logger.log kwargs
-        log_kwargs = {'extra': extra}
+        log_kwargs = {'extra': extra, 'stacklevel': 2}  # stacklevel=2 skips _log_with_context frame
         if exc_info is not None:
             log_kwargs['exc_info'] = exc_info
         if exc_text is not None:
