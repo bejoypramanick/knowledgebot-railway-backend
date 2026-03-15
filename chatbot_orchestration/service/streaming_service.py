@@ -713,91 +713,91 @@ class StreamingService:
                 try:
                     # Get all messages from the run (this is the correct API for agent.iter())
                     all_messages = run.all_messages()
-                        logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
+                    logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
 
-                        # Log model decision process
-                        logger.info("=" * 100)
-                        logger.info("🔍 MODEL DECISION PROCESS & TOOL USAGE")
-                        logger.info("=" * 100)
-                        logger.info(f"📝 Input message: '{message}'")
-                        logger.info(f"📚 Conversation history length: {len(pydantic_messages)} messages")
-                        logger.info(f"🔧 Tools available: search_knowledge_base, query_railway_postgres, request_human_agent_connection")
-                        sys.stdout.flush()
+                    # Log model decision process
+                    logger.info("=" * 100)
+                    logger.info("🔍 MODEL DECISION PROCESS & TOOL USAGE")
+                    logger.info("=" * 100)
+                    logger.info(f"📝 Input message: '{message}'")
+                    logger.info(f"📚 Conversation history length: {len(pydantic_messages)} messages")
+                    logger.info(f"🔧 Tools available: search_knowledge_base, query_railway_postgres, request_human_agent_connection")
+                    sys.stdout.flush()
 
-                        tool_calls_made = []
+                    tool_calls_made = []
+                    for i, msg in enumerate(all_messages):
+                        msg_type = type(msg).__name__
+                        logger.info(f"📌 Message {i}: {msg_type}")
+
+                        # Log tool calls
+                        if hasattr(msg, 'parts'):
+                            for j, part in enumerate(msg.parts):
+                                part_type = type(part).__name__
+
+                                # Detect tool calls
+                                if hasattr(part, 'tool_name'):
+                                    tool_name = getattr(part, 'tool_name', 'unknown')
+                                    tool_calls_made.append(tool_name)
+                                    logger.info(f"   ✅ Tool called: {tool_name}")
+
+                                # Log text content
+                                elif part_type == 'TextPart' and hasattr(part, 'content'):
+                                    content = getattr(part, 'content', '')
+                                    preview = content[:200] if len(content) > 200 else content
+                                    logger.info(f"   📝 {part_type}: {preview}...")
+
+                    logger.info("=" * 100)
+                    logger.info(f"📊 SUMMARY: {len(tool_calls_made)} tools called: {tool_calls_made if tool_calls_made else 'NONE'}")
+                    if len(tool_calls_made) == 0 and len(pydantic_messages) > 0:
+                        logger.warning("⚠️  WARNING: This is a follow-up (history exists) but NO tools were called!")
+                        logger.warning("⚠️  Expected: search_knowledge_base should have been called")
+                    logger.info("=" * 100)
+
+                    # 🚨 CRITICAL: Check if request_human_agent_connection was called
+                    # If so, bypass model response and stream tool response directly
+                    tool_response_found = False
+                    if 'request_human_agent_connection' in tool_calls_made:
+                        logger.warning("🚨 DETECTED: request_human_agent_connection tool was called")
+                        logger.warning("🚨 BYPASSING model response - streaming tool response directly")
+                        
+                        # Extract tool result from all_messages
+                        # In Pydantic AI, tool results appear in messages after the tool call
+                        logger.info("🔍 Searching for tool response in all_messages...")
+                        logger.info(f"📊 Total messages: {len(all_messages)}")
+                        
+                        # Log all messages and parts for debugging
                         for i, msg in enumerate(all_messages):
                             msg_type = type(msg).__name__
-                            logger.info(f"📌 Message {i}: {msg_type}")
-
-                            # Log tool calls
+                            logger.info(f"   Message {i}: {msg_type}")
                             if hasattr(msg, 'parts'):
+                                logger.info(f"     Parts count: {len(msg.parts)}")
                                 for j, part in enumerate(msg.parts):
                                     part_type = type(part).__name__
-
-                                    # Detect tool calls
-                                    if hasattr(part, 'tool_name'):
-                                        tool_name = getattr(part, 'tool_name', 'unknown')
-                                        tool_calls_made.append(tool_name)
-                                        logger.info(f"   ✅ Tool called: {tool_name}")
-
-                                    # Log text content
-                                    elif part_type == 'TextPart' and hasattr(part, 'content'):
-                                        content = getattr(part, 'content', '')
-                                        preview = content[:200] if len(content) > 200 else content
-                                        logger.info(f"   📝 {part_type}: {preview}...")
-
-                        logger.info("=" * 100)
-                        logger.info(f"📊 SUMMARY: {len(tool_calls_made)} tools called: {tool_calls_made if tool_calls_made else 'NONE'}")
-                        if len(tool_calls_made) == 0 and len(pydantic_messages) > 0:
-                            logger.warning("⚠️  WARNING: This is a follow-up (history exists) but NO tools were called!")
-                            logger.warning("⚠️  Expected: search_knowledge_base should have been called")
-                        logger.info("=" * 100)
-
-                        # 🚨 CRITICAL: Check if request_human_agent_connection was called
-                        # If so, bypass model response and stream tool response directly
-                        tool_response_found = False
-                        if 'request_human_agent_connection' in tool_calls_made:
-                            logger.warning("🚨 DETECTED: request_human_agent_connection tool was called")
-                            logger.warning("🚨 BYPASSING model response - streaming tool response directly")
-                            
-                            # Extract tool result from all_messages
-                            # In Pydantic AI, tool results appear in messages after the tool call
-                            logger.info("🔍 Searching for tool response in all_messages...")
-                            logger.info(f"📊 Total messages: {len(all_messages)}")
-                            
-                            # Log all messages and parts for debugging
-                            for i, msg in enumerate(all_messages):
-                                msg_type = type(msg).__name__
-                                logger.info(f"   Message {i}: {msg_type}")
-                                if hasattr(msg, 'parts'):
-                                    logger.info(f"     Parts count: {len(msg.parts)}")
-                                    for j, part in enumerate(msg.parts):
-                                        part_type = type(part).__name__
-                                        logger.info(f"       Part {j}: {part_type}")
-                                        if isinstance(part, TextPart):
-                                            text_content = getattr(part, 'content', '')
-                                            logger.info(f"         Content length: {len(text_content)}")
-                                            logger.info(f"         Content: {text_content[:150]}...")
-                            
-                            # First pass: Look for exact tool response messages
-                            for i, msg in enumerate(all_messages):
-                                if hasattr(msg, 'parts'):
-                                    for j, part in enumerate(msg.parts):
-                                        # Check if this is a text part that contains the tool result
-                                        if isinstance(part, TextPart):
-                                            text_content = getattr(part, 'content', '')
-                                            
-                                            # Check if this looks like a tool result (not model elaboration)
-                                            # Tool results from request_human_agent_connection are short and specific
-                                            if text_content and ('Human Agent support is currently not available' in text_content or 
-                                                               'Connected to human agent' in text_content):
-                                                logger.info(f"✅ Extracted tool response (exact match): {text_content[:100]}...")
-                                                full_response = text_content
-                                                tool_response_found = True
-                                                logger.info(f"🚨 Using tool response directly, bypassing model elaboration")
-                                                break
-                                if tool_response_found:
-                                    break
+                                    logger.info(f"       Part {j}: {part_type}")
+                                    if isinstance(part, TextPart):
+                                        text_content = getattr(part, 'content', '')
+                                        logger.info(f"         Content length: {len(text_content)}")
+                                        logger.info(f"         Content: {text_content[:150]}...")
+                        
+                        # First pass: Look for exact tool response messages
+                        for i, msg in enumerate(all_messages):
+                            if hasattr(msg, 'parts'):
+                                for j, part in enumerate(msg.parts):
+                                    # Check if this is a text part that contains the tool result
+                                    if isinstance(part, TextPart):
+                                        text_content = getattr(part, 'content', '')
+                                        
+                                        # Check if this looks like a tool result (not model elaboration)
+                                        # Tool results from request_human_agent_connection are short and specific
+                                        if text_content and ('Human Agent support is currently not available' in text_content or 
+                                                           'Connected to human agent' in text_content):
+                                            logger.info(f"✅ Extracted tool response (exact match): {text_content[:100]}...")
+                                            full_response = text_content
+                                            tool_response_found = True
+                                            logger.info(f"🚨 Using tool response directly, bypassing model elaboration")
+                                            break
+                            if tool_response_found:
+                                break
                             
                             # Second pass: If not found, look for short TextParts (likely tool responses)
                             if not tool_response_found:
