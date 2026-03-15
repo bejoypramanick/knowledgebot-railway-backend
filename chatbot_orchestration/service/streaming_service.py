@@ -635,29 +635,84 @@ class StreamingService:
                 logger.info(f"   Extended thinking: {thinking_status}")
                 logger.info("=" * 100)
 
-                async with agent.iter(
-                    message,  # ✅ ORIGINAL message
-                    message_history=pydantic_messages,  # ✅ Full conversation context
-                    deps=session_deps,
-                    model_settings=model_settings  # 🧠 Enable extended thinking
-                ) as run:
-                    logger.info("🚀 Starting agent iteration (streaming + tools)")
+                # Check token rate limit before calling Gemini API
+                # Estimate: ~500 tokens for system prompt + message history + current message
+                estimated_tokens = 500 + (len(pydantic_messages) * 100) + len(message)
+                logger.info(f"⏳ Checking token rate limit (estimated: {estimated_tokens} tokens)...")
+                
+                from shared.gemini_token_limiter import get_gemini_token_limiter
+                token_limiter = get_gemini_token_limiter()
+                
+                try:
+                    await token_limiter.wait_for_tokens(estimated_tokens)
+                    logger.info(f"✅ Token rate limit check passed")
+                except TimeoutError as e:
+                    logger.error(f"❌ Token rate limit timeout: {e}")
+                    yield f"data: {json.dumps({'error': 'Service temporarily rate limited. Please try again in a moment.'})}\n\n"
+                    return
 
-                    # Import correct message types from pydantic_ai.messages
-                    from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+                # Retry logic for rate limiting (429 errors)
+                max_retries = 3
+                retry_attempt = 0
+                last_error = None
+                run = None
 
-                    # Iterate through agent events/responses (these are Node objects, not ModelResponse)
-                    async for event in run:
-                        event_type = type(event).__name__
-                        logger.info(f"📌 Processing event: {event_type}")
-                        # Events are Node types (UserPromptNode, ModelRequestNode, CallToolsNode, End)
-                        # We don't stream from these directly - we get response after iteration via run.all_messages()
-
-                    # After iteration completes, get final result
-                    logger.info("🔍 Agent iteration completed, extracting response from all_messages()...")
+                while retry_attempt < max_retries:
                     try:
-                        # Get all messages from the run (this is the correct API for agent.iter())
-                        all_messages = run.all_messages()
+                        async with agent.iter(
+                            message,  # ✅ ORIGINAL message
+                            message_history=pydantic_messages,  # ✅ Full conversation context
+                            deps=session_deps,
+                            model_settings=model_settings  # 🧠 Enable extended thinking
+                        ) as run:
+                            logger.info("🚀 Starting agent iteration (streaming + tools)")
+
+                            # Import correct message types from pydantic_ai.messages
+                            from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+
+                            # Iterate through agent events/responses (these are Node objects, not ModelResponse)
+                            async for event in run:
+                                event_type = type(event).__name__
+                                logger.info(f"📌 Processing event: {event_type}")
+                                # Events are Node types (UserPromptNode, ModelRequestNode, CallToolsNode, End)
+                                # We don't stream from these directly - we get response after iteration via run.all_messages()
+
+                            # Success - break out of retry loop
+                            break
+
+                    except Exception as e:
+                        error_str = str(e)
+                        last_error = e
+                        
+                        # Check if this is a 429 rate limit error
+                        if '429' in error_str or 'RESOURCE_EXHAUSTED' in error_str or 'quota' in error_str.lower():
+                            retry_attempt += 1
+                            if retry_attempt < max_retries:
+                                # Extract retry delay from error if available
+                                retry_delay = 10  # Default 10 seconds
+                                if 'retry' in error_str.lower():
+                                    # Try to extract delay from error message
+                                    import re
+                                    match = re.search(r'(\d+\.?\d*)\s*s', error_str)
+                                    if match:
+                                        retry_delay = float(match.group(1))
+                                
+                                logger.warning(f"⚠️ Rate limit hit (429) - Attempt {retry_attempt}/{max_retries}")
+                                logger.warning(f"⏳ Retrying in {retry_delay:.1f} seconds...")
+                                await asyncio.sleep(retry_delay)
+                                continue
+                            else:
+                                logger.error(f"❌ Rate limit exceeded after {max_retries} retries")
+                                raise
+                        else:
+                            # Not a rate limit error - re-raise immediately
+                            raise
+
+                # After iteration completes, get final result
+                logger.info("🔍 Agent iteration completed, extracting response from all_messages()...")
+                try:
+                    # Get all messages from the run (this is the correct API for agent.iter())
+                    all_messages = run.all_messages()
                         logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
 
                         # Log model decision process
