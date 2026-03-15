@@ -240,6 +240,8 @@ class AgentManager:
         # Define tools (fixed set)
         tool_functions = [search_knowledge_base, query_railway_postgres, request_human_agent_connection]
         logger.info(f"Registering {len(tool_functions)} tools with agent")
+        for tool in tool_functions:
+            logger.info(f"  - Tool: {tool.__name__}")
 
         # Create Gemini explicit context cache (system prompt + tool declarations)
         cache_name = None
@@ -273,6 +275,10 @@ class AgentManager:
                 end_strategy='exhaustive'
             )
             logger.info(f"Agent created (system prompt: {len(system_prompt)} chars, cache: {cache_name or 'none'})")
+            logger.info(f"Agent tools: {len(agent.tools) if hasattr(agent, 'tools') else 'unknown'}")
+            if hasattr(agent, 'tools'):
+                for tool in agent.tools:
+                    logger.info(f"  - Agent tool: {tool}")
 
         except Exception as agent_error:
             logger.error(f"Failed to create Agent: {agent_error}")
