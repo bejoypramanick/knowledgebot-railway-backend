@@ -182,7 +182,7 @@ class ActionAudit:
                     """
                     await session.execute(
                         text(update_query),
-                        {"last_activity_at": datetime.utcnow().isoformat(), "session_id": session_db_id}
+                        {"last_activity_at": datetime.utcnow(), "session_id": session_db_id}
                     )
                     await session.commit()
 
