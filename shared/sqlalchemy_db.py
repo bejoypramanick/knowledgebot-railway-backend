@@ -110,43 +110,59 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
         try:
             logger.info(f"🔄 Connection attempt {attempt}/{max_retries}")
 
-            # Create async engine with AsyncAdaptedQueuePool
-            _engine = create_async_engine(
-                async_url,
-                echo=False,
-                poolclass=AsyncAdaptedQueuePool,
-                pool_size=pool_size,
-                max_overflow=pool_max_overflow,
-                pool_recycle=pool_recycle,
-                pool_pre_ping=True,  # Health check before using connections
-                echo_pool=False,
-                connect_args={
-                    "timeout": connect_timeout,
-                    "command_timeout": command_timeout,
-                    "server_settings": {
-                        "application_name": "knowledgebot_service",
-                        "statement_timeout": statement_timeout,
+            # Add per-attempt timeout (connect_timeout + buffer) to prevent hanging
+            attempt_timeout = connect_timeout + 5
+
+            async with asyncio.timeout(attempt_timeout):
+                # Create async engine with AsyncAdaptedQueuePool
+                _engine = create_async_engine(
+                    async_url,
+                    echo=False,
+                    poolclass=AsyncAdaptedQueuePool,
+                    pool_size=pool_size,
+                    max_overflow=pool_max_overflow,
+                    pool_recycle=pool_recycle,
+                    pool_pre_ping=True,  # Health check before using connections
+                    echo_pool=False,
+                    connect_args={
+                        "timeout": connect_timeout,
+                        "command_timeout": command_timeout,
+                        "server_settings": {
+                            "application_name": "knowledgebot_service",
+                            "statement_timeout": statement_timeout,
+                        },
                     },
-                },
-            )
+                )
 
-            # Create async session factory
-            _async_session_maker = async_sessionmaker(
-                _engine,
-                class_=AsyncSession,
-                expire_on_commit=False,
-                autoflush=False,
-                autocommit=False,
-            )
+                # Create async session factory
+                _async_session_maker = async_sessionmaker(
+                    _engine,
+                    class_=AsyncSession,
+                    expire_on_commit=False,
+                    autoflush=False,
+                    autocommit=False,
+                )
 
-            # Test connection
-            async with _engine.begin() as conn:
-                await conn.execute(text("SELECT 1"))
+                # Test connection with timeout
+                async with _engine.begin() as conn:
+                    await conn.execute(text("SELECT 1"))
 
             logger.info("✅ SQLAlchemy engine initialized successfully")
             logger.info(f"📊 Production pool: min={pool_size}, max={pool_size + pool_max_overflow}, "
                        f"recycle={pool_recycle}s, pre_ping=True")
             return
+
+        except asyncio.TimeoutError as e:
+            last_error = e
+            logger.error(f"❌ Attempt {attempt}/{max_retries} timeout (>{attempt_timeout}s): {e}")
+
+            if attempt < max_retries:
+                wait_time = 2 ** (attempt - 1)
+                logger.info(f"⏳ Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+            else:
+                logger.error(f"❌ All {max_retries} attempts timed out. Container will exit.")
+                raise RuntimeError(f"Database connection timeout after {max_retries} attempts")
 
         except Exception as e:
             last_error = e
@@ -160,10 +176,8 @@ async def init_database(database_url: Optional[str] = None, max_retries: int = 5
             else:
                 # All retries exhausted - let container crash (fail fast)
                 logger.error(f"❌ All {max_retries} connection attempts failed. Container will exit.")
-                logger.error(f"❌ Last error: {last_error}")
                 raise RuntimeError(
-                    f"Failed to connect to database after {max_retries} attempts with exponential backoff. "
-                    f"Last error: {last_error}"
+                    f"Failed to connect to database after {max_retries} attempts. Last error: {last_error}"
                 )
 
 
