@@ -561,9 +561,9 @@ async def query_railway_postgres(query: str) -> str:
             # File count queries
             if any(word in query_lower for word in ['count', 'total', 'number', 'how many']):
                 if any(word in query_lower for word in ['file', 'document', 'upload']):
-                    result = await session.execute(text("SELECT COUNT(*) FROM uploaded_files WHERE is_active = true"))
+                    result = await session.execute(text("SELECT COUNT(*) FROM file_uploads WHERE processing_status = 'completed'"))
                     count = result.scalar()
-                    result = f"Total active files in system: {count}"
+                    result = f"Total processed files in system: {count}"
                     logger.info(f"✅ Tool completed: query_railway_postgres (file count: {count})")
                     return result
                 elif any(word in query_lower for word in ['session', 'chat', 'conversation']):
@@ -577,23 +577,23 @@ async def query_railway_postgres(query: str) -> str:
             elif any(word in query_lower for word in ['recent', 'latest', 'last']):
                 if any(word in query_lower for word in ['file', 'document', 'upload']):
                     result = await session.execute(
-                        text("SELECT display_name, mime_type, size_bytes, uploaded_at FROM uploaded_files WHERE is_active = true ORDER BY uploaded_at DESC LIMIT 5")
+                        text("SELECT display_name, mime_type, file_size, created_at FROM file_uploads WHERE processing_status = 'completed' ORDER BY created_at DESC LIMIT 5")
                     )
                     rows = result.mappings().all()
                     if rows:
                         result_str = "Recent uploaded files:\n"
                         for row in rows:
-                            result_str += f"- {row['display_name']} ({row['mime_type']}, {row['size_bytes']} bytes)\n"
+                            result_str += f"- {row['display_name']} ({row['mime_type']}, {row['file_size']} bytes)\n"
                         logger.info(f"✅ Tool completed: query_railway_postgres (recent files: {len(rows)})")
                         return result_str
                     return "No recent files found."
 
             # Default: provide general info
-            file_result = await session.execute(text("SELECT COUNT(*) FROM uploaded_files WHERE is_active = true"))
+            file_result = await session.execute(text("SELECT COUNT(*) FROM file_uploads WHERE processing_status = 'completed'"))
             file_count = file_result.scalar()
             session_result = await session.execute(text("SELECT COUNT(*) FROM chat_sessions WHERE is_active = true"))
             session_count = session_result.scalar()
-            result = f"Database Summary:\n- Active files: {file_count}\n- Active sessions: {session_count}\n\nPlease ask a more specific question about the data you need."
+            result = f"Database Summary:\n- Processed files: {file_count}\n- Active chat sessions: {session_count}\n\nPlease ask a more specific question about the data you need."
             logger.info(f"✅ Tool completed: query_railway_postgres (summary)")
             return result
 
