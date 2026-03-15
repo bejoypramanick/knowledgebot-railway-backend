@@ -401,11 +401,6 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         logger.info("📄 RESPONSE TEXT:")
         logger.info("-" * 100)
 
-        # Log response text
-        logger.info("-" * 100)
-        logger.info("📄 RESPONSE TEXT:")
-        logger.info("-" * 100)
-
         response_text = response.text if hasattr(response, 'text') else str(response)
         logger.info(f"Response Text Length: {len(response_text)} chars")
         logger.info(f"Response Text Preview (first 500 chars):")
