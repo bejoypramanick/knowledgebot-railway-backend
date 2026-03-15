@@ -50,34 +50,30 @@ _engine = None
 _async_session_maker = None
 
 
-async def init_database(database_url: Optional[str] = None) -> None:
+async def init_database(database_url: Optional[str] = None, max_retries: int = 5) -> None:
     """
-    Initialize SQLAlchemy async engine with connection pooling.
+    Initialize SQLAlchemy async engine with exponential backoff for cold starts.
 
     Uses Railway environment configuration:
     - DATABASE_URL: PostgreSQL connection string
-    - RAILWAY_PRIVATE_IP: For internal service-to-service communication
+    - DB_POOL_SIZE: Min connections kept alive (default: 10)
+    - DB_POOL_MAX_OVERFLOW: Additional connections for burst traffic (default: 10)
+    - DB_POOL_RECYCLE: Recycle stale connections after 3600s (prevents stale connections)
+    - DB_CONNECT_TIMEOUT: Connection timeout in seconds (default: 60 for cold-start resilience)
+    - DB_COMMAND_TIMEOUT: Command timeout in seconds (default: 20)
 
-    Pool configuration from environment (with production defaults):
-    - DB_POOL_SIZE: Min connections kept alive (default: 5, production: 10-20)
-    - DB_POOL_MAX_OVERFLOW: Additional connections for burst traffic (default: 3, production: 5-10)
-    - DB_POOL_RECYCLE: Recycle stale connections after N seconds (default: 3600)
-    - DB_STATEMENT_TIMEOUT: Query timeout in ms (default: 60000, production: 30000-120000)
-    - DB_CONNECT_TIMEOUT: Connection timeout in seconds (default: 10, production: 10-15)
-    - DB_COMMAND_TIMEOUT: Command timeout in seconds (default: 20, production: 20-30)
-
-    Production-grade configuration:
-    - Uses AsyncAdaptedQueuePool for robust async connection management
-    - pool_pre_ping=True enables automatic connection health checks
-    - Automatic reconnection on stale/dead connections
-    - Connection recycling prevents PostgreSQL timeout issues
+    Production features:
+    - Exponential backoff for cold starts (1s → 2s → 4s → 8s → 16s)
+    - pool_pre_ping=True: Automatic connection health checks
+    - pool_recycle=3600: Recycled stale connections
+    - Fails fast if DB unreachable after retries (let container crash)
 
     Args:
         database_url: PostgreSQL connection URL. If None, uses DATABASE_URL env var.
+        max_retries: Maximum retry attempts (default: 5)
 
     Raises:
-        RuntimeError: If DATABASE_URL is not set
-        Exception: If database connection fails
+        RuntimeError: If DATABASE_URL is not set or all retries exhausted
     """
     global _engine, _async_session_maker
 
@@ -97,60 +93,78 @@ async def init_database(database_url: Optional[str] = None) -> None:
     else:
         async_url = db_url
 
-    # Read Railway environment configuration with production-appropriate defaults
-    # Increased from 5/3 to 10/10 to handle concurrent requests better
+    # Read Railway environment configuration
     pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
     pool_max_overflow = int(os.getenv("DB_POOL_MAX_OVERFLOW", "10"))
     pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "3600"))
     statement_timeout = os.getenv("DB_STATEMENT_TIMEOUT", "60000")
-    connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "10"))
+    connect_timeout = int(os.getenv("DB_CONNECT_TIMEOUT", "60"))  # 60s for cold-start resilience
     command_timeout = int(os.getenv("DB_COMMAND_TIMEOUT", "20"))
 
-    logger.info("🚀 Initializing SQLAlchemy async engine with Railway configuration...")
+    logger.info("🚀 Initializing SQLAlchemy async engine with cold-start retry logic...")
     logger.info(f"📊 Pool: size={pool_size}, overflow={pool_max_overflow}, recycle={pool_recycle}s")
     logger.info(f"⏱️  Timeouts: connect={connect_timeout}s, command={command_timeout}s, statement={statement_timeout}ms")
 
-    try:
-        # Create async engine with AsyncAdaptedQueuePool for production robustness
-        _engine = create_async_engine(
-            async_url,
-            echo=False,
-            poolclass=AsyncAdaptedQueuePool,
-            pool_size=pool_size,
-            max_overflow=pool_max_overflow,
-            pool_recycle=pool_recycle,
-            pool_pre_ping=True,  # Verify connections before using (critical for production)
-            echo_pool=False,
-            connect_args={
-                "timeout": connect_timeout,
-                "command_timeout": command_timeout,
-                "server_settings": {
-                    "application_name": "knowledgebot_service",
-                    "statement_timeout": statement_timeout,
+    last_error = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"🔄 Connection attempt {attempt}/{max_retries}")
+
+            # Create async engine with AsyncAdaptedQueuePool
+            _engine = create_async_engine(
+                async_url,
+                echo=False,
+                poolclass=AsyncAdaptedQueuePool,
+                pool_size=pool_size,
+                max_overflow=pool_max_overflow,
+                pool_recycle=pool_recycle,
+                pool_pre_ping=True,  # Health check before using connections
+                echo_pool=False,
+                connect_args={
+                    "timeout": connect_timeout,
+                    "command_timeout": command_timeout,
+                    "server_settings": {
+                        "application_name": "knowledgebot_service",
+                        "statement_timeout": statement_timeout,
+                    },
                 },
-            },
-        )
+            )
 
-        # Create async session factory
-        _async_session_maker = async_sessionmaker(
-            _engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-            autoflush=False,
-            autocommit=False,
-        )
+            # Create async session factory
+            _async_session_maker = async_sessionmaker(
+                _engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+                autoflush=False,
+                autocommit=False,
+            )
 
-        # Test connection
-        async with _engine.begin() as conn:
-            await conn.execute(text("SELECT 1"))
+            # Test connection
+            async with _engine.begin() as conn:
+                await conn.execute(text("SELECT 1"))
 
-        logger.info("✅ SQLAlchemy engine initialized successfully")
-        logger.info(f"📊 Production pool config: min={pool_size}, max={pool_size + pool_max_overflow}, "
-                   f"recycle={pool_recycle}s, pre_ping=True")
+            logger.info("✅ SQLAlchemy engine initialized successfully")
+            logger.info(f"📊 Production pool: min={pool_size}, max={pool_size + pool_max_overflow}, "
+                       f"recycle={pool_recycle}s, pre_ping=True")
+            return
 
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize database: {e}")
-        raise
+        except Exception as e:
+            last_error = e
+            logger.error(f"❌ Attempt {attempt}/{max_retries} failed: {e}")
+
+            if attempt < max_retries:
+                # Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                wait_time = 2 ** (attempt - 1)
+                logger.info(f"⏳ Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+            else:
+                # All retries exhausted - let container crash (fail fast)
+                logger.error(f"❌ All {max_retries} connection attempts failed. Container will exit.")
+                logger.error(f"❌ Last error: {last_error}")
+                raise RuntimeError(
+                    f"Failed to connect to database after {max_retries} attempts with exponential backoff. "
+                    f"Last error: {last_error}"
+                )
 
 
 @asynccontextmanager
