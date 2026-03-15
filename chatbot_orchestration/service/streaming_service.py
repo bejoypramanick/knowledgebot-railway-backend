@@ -892,7 +892,9 @@ class StreamingService:
 
                     # Extract assistant response and tool calls (SKIP if tool response was found)
                     # NOTE: This MUST run for ALL cases (tools called or not)
+                    logger.info(f"🔍 DIAGNOSTIC: tool_response_found = {tool_response_found}, entering extraction if block = {not tool_response_found}")
                     if not tool_response_found:
+                        logger.info(f"✅ EXTRACTION LOOP STARTING - tool_response_found is FALSE, proceeding with TextPart extraction")
                         for i, msg in enumerate(all_messages):
                             msg_type = type(msg).__name__
                             logger.info(f"📌 Message {i}: {msg_type}")
