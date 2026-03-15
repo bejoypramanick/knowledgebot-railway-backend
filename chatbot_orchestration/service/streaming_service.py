@@ -11,7 +11,6 @@ import time
 from typing import Any, Dict, List, AsyncGenerator
 import sys
 from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, TextPart, SystemPromptPart
-from pydantic_ai import RunContext
 from shared.otel_logger import get_otel_logger, set_session_id
 
 from ..core.dependencies import ChatSessionDeps
@@ -895,7 +894,7 @@ class StreamingService:
 
                     logger.info(f"Agent completed with {tool_call_count} tool calls")
 
-                    # Monitor tool call compliance and FORCE tool calling if needed
+                    # Monitor tool call compliance
                     if tool_call_count == 0 and message.strip():
                         greeting_patterns = ["hi", "hello", "hey", "good morning", "good afternoon", "greetings"]
                         is_greeting = any(g in message.lower() for g in greeting_patterns)
@@ -926,38 +925,6 @@ class StreamingService:
 
                         if not is_greeting:
                             logger.error(f"TOOL CALL REQUIREMENT NOT MET: query='{message[:80]}', tools=0")
-                            logger.error(f"🚨 CRITICAL: Agent should have called search_knowledge_base for non-greeting query")
-                            logger.error(f"🚨 Response was: {full_response[:100]}...")
-                            logger.error(f"🚨 This indicates the agent is not following the mandatory tool-calling requirement")
-                            
-                            # FALLBACK: Force tool call if agent didn't call any tools for non-greeting query
-                            logger.warning(f"🚨 FORCING TOOL CALL: Calling search_knowledge_base directly")
-                            try:
-                                from ..tools.knowledge_tools import search_knowledge_base
-                                
-                                # Call search_knowledge_base with the user's message
-                                rag_results = await search_knowledge_base(
-                                    ctx=RunContext(deps=session_deps),
-                                    query=message
-                                )
-                                
-                                logger.info(f"✅ Forced tool call completed: search_knowledge_base returned {len(rag_results) if rag_results else 0} results")
-                                
-                                # If we got results, use them instead of the agent's response
-                                if rag_results:
-                                    logger.info(f"🔄 Replacing agent response with RAG results")
-                                    # Format RAG results as HTML
-                                    formatted_results = "<ul>"
-                                    for result in rag_results:
-                                        formatted_results += f"<li>{result}</li>"
-                                    formatted_results += "</ul>"
-                                    full_response = formatted_results
-                                    tool_call_count = 1
-                                    logger.info(f"✅ Response replaced with RAG results")
-                                else:
-                                    logger.warning(f"⚠️ RAG search returned no results, keeping agent response")
-                            except Exception as force_call_error:
-                                logger.error(f"❌ Failed to force tool call: {force_call_error}", exc_info=True)
                             logger.error(f"🚨 CRITICAL: Agent should have called search_knowledge_base for non-greeting query")
                             logger.error(f"🚨 Response was: {full_response[:100]}...")
                             logger.error(f"🚨 This indicates the agent is not following the mandatory tool-calling requirement")
