@@ -274,6 +274,38 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
 
         # Step 3: Call Gemini API with full conversation context
         # FileSearch will use entire conversation for better RAG results
+        
+        # ============================================================================
+        # LOG ALL REQUEST PARAMETERS
+        # ============================================================================
+        logger.info("=" * 100)
+        logger.info("📤 GEMINI FILESTORE API REQUEST")
+        logger.info("=" * 100)
+        logger.info(f"Model: gemini-2.5-flash")
+        logger.info(f"File Search Store: {file_search_store_name}")
+        logger.info(f"Total messages in contents: {len(contents)}")
+        logger.info("-" * 100)
+        logger.info("📋 CONTENTS ARRAY (Full Request):")
+        logger.info("-" * 100)
+        
+        for i, content in enumerate(contents):
+            logger.info(f"Message {i}:")
+            logger.info(f"  Role: {content.role}")
+            if hasattr(content, 'parts') and content.parts:
+                for j, part in enumerate(content.parts):
+                    if hasattr(part, 'text'):
+                        text_preview = part.text[:200] if len(part.text) > 200 else part.text
+                        logger.info(f"  Part {j} (text): {text_preview}...")
+                        logger.info(f"  Part {j} (full length): {len(part.text)} chars")
+                    else:
+                        logger.info(f"  Part {j}: {type(part).__name__}")
+        
+        logger.info("-" * 100)
+        logger.info("🔧 TOOLS CONFIGURATION:")
+        logger.info(f"  Tool Type: FileSearch")
+        logger.info(f"  File Search Store Names: {[file_search_store_name]}")
+        logger.info("=" * 100)
+        
         response = genai_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=contents,  # ✅ PROFESSIONAL: Full conversation per Gemini API spec
@@ -287,9 +319,100 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                 ]
             )
         )
+        
+        # ============================================================================
+        # LOG ALL RESPONSE PARAMETERS
+        # ============================================================================
+        logger.info("=" * 100)
+        logger.info("📥 GEMINI FILESTORE API RESPONSE")
+        logger.info("=" * 100)
+        logger.info(f"Response Type: {type(response).__name__}")
+        logger.info(f"Response Attributes: {dir(response)}")
+        logger.info("-" * 100)
+        
+        # Log response structure
+        if hasattr(response, 'candidates'):
+            logger.info(f"Number of candidates: {len(response.candidates)}")
+            for i, candidate in enumerate(response.candidates):
+                logger.info(f"\nCandidate {i}:")
+                logger.info(f"  Type: {type(candidate).__name__}")
+                logger.info(f"  Attributes: {dir(candidate)}")
+                
+                # Log content
+                if hasattr(candidate, 'content'):
+                    logger.info(f"  Content: {candidate.content}")
+                
+                # Log finish reason
+                if hasattr(candidate, 'finish_reason'):
+                    logger.info(f"  Finish Reason: {candidate.finish_reason}")
+                
+                # Log grounding metadata
+                if hasattr(candidate, 'grounding_metadata'):
+                    logger.info(f"  Has Grounding Metadata: True")
+                    gm = candidate.grounding_metadata
+                    logger.info(f"    Grounding Metadata Type: {type(gm).__name__}")
+                    logger.info(f"    Grounding Metadata Attributes: {dir(gm)}")
+                    
+                    if hasattr(gm, 'grounding_chunks'):
+                        logger.info(f"    Number of Grounding Chunks: {len(gm.grounding_chunks)}")
+                        for j, chunk in enumerate(gm.grounding_chunks):
+                            logger.info(f"\n    Chunk {j}:")
+                            logger.info(f"      Type: {type(chunk).__name__}")
+                            logger.info(f"      Attributes: {dir(chunk)}")
+                            
+                            # Log retrieved context
+                            if hasattr(chunk, 'retrieved_context'):
+                                ctx = chunk.retrieved_context
+                                logger.info(f"      Retrieved Context Type: {type(ctx).__name__}")
+                                logger.info(f"      Retrieved Context Attributes: {dir(ctx)}")
+                                
+                                if hasattr(ctx, 'title'):
+                                    logger.info(f"        Title: {ctx.title}")
+                                if hasattr(ctx, 'uri'):
+                                    logger.info(f"        URI: {ctx.uri}")
+                                if hasattr(ctx, 'text'):
+                                    text_preview = ctx.text[:300] if len(ctx.text) > 300 else ctx.text
+                                    logger.info(f"        Text Preview: {text_preview}...")
+                                    logger.info(f"        Text Length: {len(ctx.text)} chars")
+                            
+                            # Log web search result
+                            if hasattr(chunk, 'web'):
+                                logger.info(f"      Web Result Type: {type(chunk.web).__name__}")
+                                logger.info(f"      Web Result Attributes: {dir(chunk.web)}")
+                                if hasattr(chunk.web, 'uri'):
+                                    logger.info(f"        Web URI: {chunk.web.uri}")
+                            
+                            # Log custom metadata
+                            if hasattr(chunk, 'custom_metadata'):
+                                logger.info(f"      Custom Metadata: {chunk.custom_metadata}")
+                else:
+                    logger.info(f"  Has Grounding Metadata: False")
+                
+                # Log usage metadata
+                if hasattr(candidate, 'usage_metadata'):
+                    logger.info(f"  Usage Metadata: {candidate.usage_metadata}")
+                else:
+                    logger.info(f"  Has Usage Metadata: False")
+        else:
+            logger.info("Response has no candidates attribute")
+        
+        # Log response text
+        logger.info("-" * 100)
+        logger.info("📄 RESPONSE TEXT:")
+        logger.info("-" * 100)
+
+        # Log response text
+        logger.info("-" * 100)
+        logger.info("📄 RESPONSE TEXT:")
+        logger.info("-" * 100)
 
         response_text = response.text if hasattr(response, 'text') else str(response)
-        logger.info(f"✅ Generated response: {len(response_text)} characters")
+        logger.info(f"Response Text Length: {len(response_text)} chars")
+        logger.info(f"Response Text Preview (first 500 chars):")
+        logger.info(response_text[:500])
+        if len(response_text) > 500:
+            logger.info(f"... [truncated, total {len(response_text)} chars]")
+        logger.info("=" * 100)
         
         # Track token usage from Gemini API response
         try:
