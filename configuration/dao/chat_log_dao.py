@@ -66,6 +66,31 @@ class ChatLogDAO:
             logger.log_db_query(query, None, error=e)
             return []
 
+    async def get_all_admin_ids(self) -> List[int]:
+        """Get all admin user IDs."""
+        query = """
+            SELECT DISTINCT u.id
+            FROM user_role_mapping urm
+            JOIN users u ON urm.user_id = u.id
+            JOIN roles r ON urm.role_id = r.id
+            WHERE r.role_name = 'admin'
+        """
+        try:
+            logger.info(f"🔍 [DAO] Fetching all admin IDs")
+            logger.log_db_operation(query)
+            async with get_db_session() as session:
+                result = await session.execute(text(query))
+                rows = result.fetchall()
+                logger.log_db_query(query, None, rows)
+
+                ids = [dict(r._mapping)['id'] for r in rows] if rows else []
+                logger.info(f"✅ [DAO] Found {len(ids)} admin IDs: {ids}")
+                return ids
+        except Exception as e:
+            logger.error(f"❌ [DAO] Error fetching admin IDs: {e}", exc_info=True)
+            logger.log_db_query(query, None, error=e)
+            return []
+
     async def check_user_role(self, email: str) -> Dict[str, bool]:
         """Check if user is agent or admin."""
         # Use CAST to ensure proper boolean type from PostgreSQL
