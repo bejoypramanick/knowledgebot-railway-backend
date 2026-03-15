@@ -9,7 +9,7 @@ import inspect
 import logging
 from shared.otel_logger import get_otel_logger
 from shared.otel_logger import get_otel_logger
-from typing import Any, Callable, List, get_args, get_origin, get_type_hints
+from typing import Any, Annotated, Callable, List, get_args, get_origin, get_type_hints
 from google.genai import types
 
 logger = get_otel_logger(__name__, "chatbot-orchestration")
