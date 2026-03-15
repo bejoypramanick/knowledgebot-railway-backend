@@ -866,20 +866,32 @@ class StreamingService:
                             if tool_response_found:
                                 break
                             
-                            # Second pass: If not found, look for short TextParts (likely tool responses)
+                            # Second pass: If not found, look for tool response keyword patterns
                             if not tool_response_found:
-                                logger.warning("⚠️ Exact tool response not found, looking for short TextParts...")
+                                logger.warning("⚠️ Exact tool response not found, looking for keyword-based tool responses...")
+                                # Define specific keywords that indicate actual tool responses (not model elaboration)
+                                tool_response_keywords = [
+                                    'human agent support',
+                                    'connected to',
+                                    'escalat',  # matches: escalated, escalation
+                                    'support is currently',
+                                    'connecting you',
+                                ]
                                 for i, msg in enumerate(all_messages):
                                     if hasattr(msg, 'parts'):
                                         for j, part in enumerate(msg.parts):
                                             if isinstance(part, TextPart):
                                                 text_content = getattr(part, 'content', '')
-                                                # Tool responses are typically short (< 200 chars)
-                                                if text_content and len(text_content) < 200 and len(text_content) > 10:
-                                                    logger.info(f"✅ Found short TextPart (likely tool response): {text_content[:100]}...")
+                                                # Check for tool response keywords (NOT just length-based heuristic)
+                                                # This prevents matching regular model responses like greetings
+                                                text_lower = text_content.lower()
+                                                has_tool_keyword = any(keyword in text_lower for keyword in tool_response_keywords)
+
+                                                if text_content and has_tool_keyword and len(text_content) < 200:
+                                                    logger.info(f"✅ Found keyword-matched tool response: {text_content[:100]}...")
                                                     full_response = text_content
                                                     tool_response_found = True
-                                                    logger.info(f"🚨 Using short TextPart as tool response")
+                                                    logger.info(f"🚨 Using keyword-matched tool response")
                                                     break
                                     if tool_response_found:
                                         break
