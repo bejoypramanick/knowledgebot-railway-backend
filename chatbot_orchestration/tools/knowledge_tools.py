@@ -178,6 +178,7 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
                         AND original_url IS NOT NULL
                     """
                     logger.info(f"📎 [DB_BATCH] Strategy 2 query with patterns: {page_patterns}")
+                    logger.info(f"📎 [DB_BATCH] Title to pattern mapping: {title_to_pattern}")
                     result2 = await session.execute(text(query2), {"patterns": page_patterns})
                     rows2 = result2.fetchall()
                     
@@ -188,10 +189,13 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
                         logger.info(f"📎 [DB_BATCH] Found gemini_file_name: {gemini_name} → {url}")
                         # Map the original title to the URL
                         for title, pattern in title_to_pattern.items():
+                            logger.info(f"📎 [DB_BATCH] Checking if pattern '{pattern}' is in gemini_name '{gemini_name}'")
                             if pattern in gemini_name:
                                 url_map[title] = url
-                                logger.info(f"   📎 {title} → {url} (via page pattern match with pattern: {pattern})")
+                                logger.info(f"   📎 ✅ MATCH: {title} → {url} (via page pattern match with pattern: {pattern})")
                                 break
+                            else:
+                                logger.info(f"   📎 ❌ NO MATCH: pattern '{pattern}' not found in '{gemini_name}'")
 
             logger.info(f"📎 [DB_BATCH] Final result: {len(url_map)} URLs mapped")
             return url_map
