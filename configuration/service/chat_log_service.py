@@ -479,10 +479,13 @@ class ChatLogService:
             if not customer_name:
                 customer_name = f"User-{session_db_id}"
 
-            # Check if assigned to current user using numeric IDs only (not email)
-            # Get agent_id directly from SQL join result — independent of email/metadata
+            # Check if assigned to current user
+            # Primary: compare numeric IDs from SQL join
+            # Fallback: if SQL join didn't resolve agent_id, compare emails directly
             assigned_agent_id = session_row.get('agent_id')
             is_assigned_to_me = (assigned_agent_id is not None and current_user_id is not None and assigned_agent_id == current_user_id)
+            if not is_assigned_to_me and assigned_agent and user_email:
+                is_assigned_to_me = (assigned_agent.lower() == user_email.lower())
 
             from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(
