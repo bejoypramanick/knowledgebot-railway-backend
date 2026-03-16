@@ -366,6 +366,7 @@ class ChatLogService:
         if user_email:
             try:
                 current_user_id = await self.dao.get_user_id_by_email(user_email)
+                logger.info(f"🔍 [CHATLOG] Resolved current_user_id={current_user_id} (type={type(current_user_id).__name__}) for email={user_email}")
             except Exception as e:
                 logger.warning(f"⚠️ Could not get user ID for {user_email}: {e}")
         
@@ -479,16 +480,11 @@ class ChatLogService:
             if not customer_name:
                 customer_name = f"User-{session_db_id}"
 
-            # Resolve assigned agent's numeric ID
-            # Primary: from SQL join (session_assignments → user_role_mapping → users)
-            # Fallback: resolve from assigned_agent email via users table
-            # The SQL join can return NULL when session_assignments rows are CASCADE-deleted
-            # (e.g., sync_admins removes user_role_mapping → ON DELETE CASCADE wipes assignments)
+            # Get agent_id from SQL join (session_assignments → user_role_mapping → users)
             assigned_agent_id = session_row.get('agent_id')
-            if not assigned_agent_id and assigned_agent:
-                assigned_agent_id = await self.get_user_id_by_email_cached(assigned_agent)
-
             is_assigned_to_me = (assigned_agent_id is not None and current_user_id is not None and assigned_agent_id == current_user_id)
+            if assigned_agent and not is_assigned_to_me:
+                logger.warning(f"🔍 [ASSIGN_DEBUG] session={session_db_id} assigned_agent={assigned_agent} agent_id={assigned_agent_id} (type={type(assigned_agent_id).__name__}) current_user_id={current_user_id} (type={type(current_user_id).__name__}) agent_email_from_join={session_row.get('agent_email')} is_assigned_to_me={is_assigned_to_me}")
 
             from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(
