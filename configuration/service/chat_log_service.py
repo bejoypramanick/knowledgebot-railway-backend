@@ -479,13 +479,16 @@ class ChatLogService:
             if not customer_name:
                 customer_name = f"User-{session_db_id}"
 
-            # Check if assigned to current user
-            # Primary: compare numeric IDs from SQL join
-            # Fallback: if SQL join didn't resolve agent_id, compare emails directly
+            # Resolve assigned agent's numeric ID
+            # Primary: from SQL join (session_assignments → user_role_mapping → users)
+            # Fallback: resolve from assigned_agent email via users table
+            # The SQL join can return NULL when session_assignments rows are CASCADE-deleted
+            # (e.g., sync_admins removes user_role_mapping → ON DELETE CASCADE wipes assignments)
             assigned_agent_id = session_row.get('agent_id')
+            if not assigned_agent_id and assigned_agent:
+                assigned_agent_id = await self.get_user_id_by_email_cached(assigned_agent)
+
             is_assigned_to_me = (assigned_agent_id is not None and current_user_id is not None and assigned_agent_id == current_user_id)
-            if not is_assigned_to_me and assigned_agent and user_email:
-                is_assigned_to_me = (assigned_agent.lower() == user_email.lower())
 
             from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(
