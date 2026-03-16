@@ -385,6 +385,8 @@ async def update_widget_config(
 
             # Parse JSON config from form
             config_data = json.loads(config)
+            logger.info(f"📋 [Router] Parsed config_data keys: {list(config_data.keys())}")
+            logger.info(f"📋 [Router] suggested_messages in config: {'suggested_messages' in config_data}, value: {config_data.get('suggested_messages', 'NOT_PRESENT')}")
 
             # Upload images if provided using DAO with S3 storage
             from configuration.dao.widget_config_dao import WidgetConfigDAO
@@ -466,6 +468,8 @@ async def update_widget_config(
         else:
             # Handle JSON request (backward compatibility)
             body = await request.json()
+            logger.info(f"📋 [Router/JSON] Body keys: {list(body.keys())}")
+            logger.info(f"📋 [Router/JSON] suggested_messages in body: {'suggested_messages' in body}, value: {body.get('suggested_messages', 'NOT_PRESENT')}")
 
             # Handle image deletion for JSON requests too
             from configuration.dao.widget_config_dao import WidgetConfigDAO

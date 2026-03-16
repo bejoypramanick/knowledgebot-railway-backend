@@ -66,14 +66,18 @@ class WidgetConfigService:
             
             # Extract suggested messages if present
             suggested_messages = config_data.pop('suggested_messages', None)
-            
+            logger.info(f"📋 Extracted suggested_messages from config_data: {suggested_messages} (type: {type(suggested_messages).__name__})")
+
             # Update main widget configuration
             await self._widget_config_dao.update_widget_config(config_data)
-            
+
             # Update suggested messages if provided
             if suggested_messages is not None:
-                logger.info(f"Updating suggested messages: {suggested_messages}")
+                logger.info(f"💾 Updating {len(suggested_messages)} suggested messages: {suggested_messages}")
                 await self._widget_config_dao.update_suggested_messages(suggested_messages)
+                logger.info(f"✅ Suggested messages updated successfully")
+            else:
+                logger.info(f"⚠️ No suggested_messages key found in config_data - skipping update")
             
             # Broadcast state change if display_chatbot changed
             if old_display_chatbot != new_display_chatbot:

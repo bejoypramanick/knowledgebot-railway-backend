@@ -134,6 +134,7 @@ class WidgetConfigDAO:
     async def update_suggested_messages(self, messages: List[str]):
         """Update suggested messages."""
         try:
+            logger.info(f"📋 [DAO] update_suggested_messages called with {len(messages)} messages: {messages}")
             async with get_db_session() as session:
                 # Get the widget config ID (should be ID 1 for the main config)
                 config_id_query = "SELECT id FROM widget_configuration LIMIT 1"
@@ -143,16 +144,18 @@ class WidgetConfigDAO:
                 logger.log_db_query(config_id_query, None, config_id_row)
 
                 if not config_id_row:
+                    logger.error("❌ [DAO] No widget_configuration row found! Cannot insert suggested messages.")
                     raise ValueError("No widget configuration found")
 
                 widget_config_id = config_id_row["id"]
+                logger.info(f"✅ [DAO] Found widget_config_id: {widget_config_id}")
 
                 # Clear existing messages for this widget config
                 delete_query = "DELETE FROM widget_suggested_messages WHERE widget_config_id = :widget_config_id"
                 delete_params = {"widget_config_id": widget_config_id}
                 logger.log_db_operation(delete_query, delete_params)
                 await session.execute(text(delete_query), delete_params)
-                logger.log_db_query(delete_query, delete_params, None)
+                logger.info(f"🗑️ [DAO] Deleted existing suggested messages for widget_config_id={widget_config_id}")
 
                 # Insert new messages
                 insert_query = """
@@ -163,11 +166,14 @@ class WidgetConfigDAO:
                     insert_params = {"widget_config_id": widget_config_id, "message_text": message, "display_order": i}
                     logger.log_db_operation(insert_query, insert_params)
                     await session.execute(text(insert_query), insert_params)
-                    logger.log_db_query(insert_query, insert_params, None)
+                    logger.info(f"➕ [DAO] Inserted message [{i}]: '{message}'")
 
                 await session.commit()
+                logger.info(f"✅ [DAO] Committed {len(messages)} suggested messages successfully")
         except Exception as e:
-            logger.error(f"Error updating suggested messages: {e}")
+            logger.error(f"❌ [DAO] Error updating suggested messages: {e}")
+            import traceback
+            logger.error(f"❌ [DAO] Traceback: {traceback.format_exc()}")
             raise
 
     async def update_widget_image(self, image_type: str, image_data: bytes, filename: str) -> Tuple[str, str]:
