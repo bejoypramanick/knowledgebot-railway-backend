@@ -569,44 +569,42 @@ async def public_chat_stream(request: Request):
         # Make request to chatbot service — streaming SSE proxy
         # No read timeout: first chunk can take a while (RAG search + AI inference)
         # Chunks are forwarded to the client as they arrive from the backend
+        # IMPORTANT: httpx client + stream must live INSIDE the generator so the
+        # connection stays open while FastAPI iterates chunks (same pattern as
+        # the admin/customer SSE proxies at lines 151-158).
         sse_timeout = httpx.Timeout(connect=10.0, read=None, write=None, pool=None)
+        stream_url = f"{chatbot_service_url}/api/v1/chatbot/chat/stream"
 
         from fastapi.responses import StreamingResponse
 
-        async with httpx.AsyncClient(timeout=sse_timeout, follow_redirects=False) as client:
-            async with client.stream(
-                method=request.method,
-                url=f"{chatbot_service_url}/api/v1/chatbot/chat/stream",
-                headers=headers,
-                content=body_bytes,
-            ) as response:
+        async def stream_response():
+            try:
+                async with httpx.AsyncClient(timeout=sse_timeout, follow_redirects=False) as client:
+                    async with client.stream(
+                        method=request.method,
+                        url=stream_url,
+                        headers=headers,
+                        content=body_bytes,
+                    ) as response:
+                        logger.info(f"✅ [{correlation_id}] Chat stream connected: {response.status_code}")
+                        async for chunk in response.aiter_bytes():
+                            yield chunk
+            except httpx.ConnectError as e:
+                logger.error(f"❌ [{correlation_id}] Cannot connect to chatbot service: {e}")
+                yield f"data: {{\"type\":\"error\",\"content\":\"Connection to backend failed\"}}\n\n".encode()
+            except httpx.ConnectTimeout as e:
+                logger.error(f"❌ [{correlation_id}] Connection timeout to chatbot service: {e}")
+                yield f"data: {{\"type\":\"error\",\"content\":\"Backend connection timeout\"}}\n\n".encode()
+            except (BrokenPipeError, ConnectionResetError, RuntimeError) as e:
+                logger.debug(f"🔌 [{correlation_id}] Client disconnected from chat stream: {type(e).__name__}")
+            except Exception as e:
+                logger.error(f"❌ [{correlation_id}] Chat stream error: {e}")
+                yield f"data: {{\"type\":\"error\",\"content\":\"Stream error\"}}\n\n".encode()
 
-                logger.info(f"✅ [{correlation_id}] Chat stream connected: {response.status_code}")
-
-                # Filter response headers to prevent internal URL leakage
-                response_headers = {}
-                blocked_headers = [
-                    'content-length',
-                    'transfer-encoding',
-                    'location',
-                    'content-location',
-                    'host',
-                    'server',
-                ]
-                for key, value in response.headers.items():
-                    if key.lower() not in blocked_headers:
-                        response_headers[key] = value
-
-                # Forward SSE chunks as they arrive from the backend
-                async def stream_response():
-                    async for chunk in response.aiter_bytes():
-                        yield chunk
-
-                return StreamingResponse(
-                    stream_response(),
-                    status_code=response.status_code,
-                    headers=response_headers
-                )
+        return StreamingResponse(
+            stream_response(),
+            media_type="text/event-stream",
+        )
 
     except HTTPException:
         raise
