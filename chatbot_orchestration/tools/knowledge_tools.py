@@ -170,16 +170,15 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
                         logger.info(f"📎 [DB_BATCH] Extracted page pattern from '{title}': %{pattern}%")
                 
                 if page_patterns:
-                    # Query for gemini_file_names containing these page patterns
-                    placeholders = ','.join([f"'{p}'" for p in page_patterns])
-                    query2 = f"""
+                    # Query for gemini_file_names containing these page patterns using parameterized query
+                    query2 = """
                         SELECT gemini_file_name, original_url FROM scraped_websites
-                        WHERE (gemini_file_name LIKE ANY(ARRAY[{placeholders}]))
+                        WHERE gemini_file_name LIKE ANY(:patterns)
                         AND processing_status != 'deleted'
                         AND original_url IS NOT NULL
                     """
-                    logger.info(f"📎 [DB_BATCH] Strategy 2 query: {query2}")
-                    result2 = await session.execute(text(query2))
+                    logger.info(f"📎 [DB_BATCH] Strategy 2 query with patterns: {page_patterns}")
+                    result2 = await session.execute(text(query2), {"patterns": page_patterns})
                     rows2 = result2.fetchall()
                     
                     logger.info(f"📎 [DB_BATCH] Strategy 2 found {len(rows2)} matches")
@@ -197,7 +196,7 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
             logger.info(f"📎 [DB_BATCH] Final result: {len(url_map)} URLs mapped")
             return url_map
     except Exception as e:
-        logger.warning(f"⚠️ [DB_BATCH] Error batch looking up URLs: {e}")
+        logger.warning(f"⚠️ [DB_BATCH] Error batch looking up URLs: {e}", exc_info=True)
         return {}
 
 
