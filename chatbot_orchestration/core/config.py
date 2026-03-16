@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     
     # Chatbot Configuration
     chatbot_model: str = "gemini-2.5-flash-lite"
+
+    # Citation Configuration
+    enable_citations: bool = True  # Enable DB lookup for inline citation URLs
     
     # Railway PostgreSQL Configuration (connection URL only)
     railway_postgres_url: Optional[str] = None

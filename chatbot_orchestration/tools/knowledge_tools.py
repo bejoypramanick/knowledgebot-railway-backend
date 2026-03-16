@@ -120,55 +120,40 @@ async def get_citation_hierarchy(urls: List[str]) -> Dict[str, Any]:
         return build_citation_tree(urls)
 
 
-async def _lookup_url_by_gemini_file_name(doc_title: str) -> Optional[str]:
+async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict[str, str]:
     """
-    Look up the original source URL from database using the Gemini file display_name.
-    This is the most reliable citation strategy since grounding chunks return the display_name
-    as retrieved_context.title, and we store it in both scraped_websites.gemini_file_name
-    and file_uploads.gemini_file_name.
+    Batch lookup original source URLs from database using Gemini file display_names.
+    Single query for all titles → returns {title: url} mapping.
 
-    Returns the original_url if found (web content), or None (uploaded files have no URL).
+    Grounding chunks return display_name as retrieved_context.title,
+    and we store it in scraped_websites.gemini_file_name during upload.
     """
+    if not doc_titles:
+        return {}
+
     try:
         from shared.sqlalchemy_db import get_db_session
         from sqlalchemy import text
 
         async with get_db_session() as session:
-            # First check scraped_websites (web content has URLs)
             query = """
-                SELECT original_url FROM scraped_websites
-                WHERE gemini_file_name = :doc_title
+                SELECT gemini_file_name, original_url FROM scraped_websites
+                WHERE gemini_file_name = ANY(:titles)
                 AND processing_status != 'deleted'
                 AND original_url IS NOT NULL
-                LIMIT 1
             """
-            result = await session.execute(text(query), {"doc_title": doc_title})
-            row = result.fetchone()
-            if row:
-                url = row[0]
-                logger.info(f"📎 [DB_LOOKUP] Found URL for '{doc_title}': {url}")
-                return url
+            result = await session.execute(text(query), {"titles": doc_titles})
+            rows = result.fetchall()
 
-            # Also try partial match (display_name might have extension stripped)
-            query_like = """
-                SELECT original_url FROM scraped_websites
-                WHERE gemini_file_name LIKE :doc_title_pattern
-                AND processing_status != 'deleted'
-                AND original_url IS NOT NULL
-                LIMIT 1
-            """
-            result = await session.execute(text(query_like), {"doc_title_pattern": f"{doc_title}%"})
-            row = result.fetchone()
-            if row:
-                url = row[0]
-                logger.info(f"📎 [DB_LOOKUP] Found URL via partial match for '{doc_title}': {url}")
-                return url
+            url_map = {row[0]: row[1] for row in rows}
+            logger.info(f"📎 [DB_BATCH] Looked up {len(doc_titles)} titles → found {len(url_map)} URLs")
+            for title, url in url_map.items():
+                logger.info(f"   📎 {title} → {url}")
 
-            logger.info(f"ℹ️ [DB_LOOKUP] No URL found for '{doc_title}' in scraped_websites (likely an uploaded file)")
-            return None
+            return url_map
     except Exception as e:
-        logger.warning(f"⚠️ [DB_LOOKUP] Error looking up URL for '{doc_title}': {e}")
-        return None
+        logger.warning(f"⚠️ [DB_BATCH] Error batch looking up URLs: {e}")
+        return {}
 
 
 async def _perform_rag_search(session_id: str, query: str) -> str:
@@ -524,7 +509,33 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
 
         # Extract source URLs from grounding metadata
         source_urls = []
-        if hasattr(response, 'candidates'):
+
+        # Check if citations are enabled via config flag
+        from ..core.config import settings
+        citations_enabled = settings.enable_citations
+        logger.info(f"📎 [CITATION] Citations enabled: {citations_enabled}")
+
+        # Phase 1: Collect all document titles from grounding chunks
+        all_doc_titles = []
+        if citations_enabled and hasattr(response, 'candidates'):
+            for candidate in response.candidates:
+                if hasattr(candidate, 'grounding_metadata'):
+                    grounding = candidate.grounding_metadata
+                    if hasattr(grounding, 'grounding_chunks'):
+                        for chunk in grounding.grounding_chunks:
+                            if hasattr(chunk, 'retrieved_context'):
+                                doc_title = getattr(chunk.retrieved_context, 'title', None)
+                                if doc_title and doc_title not in all_doc_titles:
+                                    all_doc_titles.append(doc_title)
+
+        # Phase 2: Single batch DB lookup for all titles → URL mapping
+        title_to_url = {}
+        if all_doc_titles:
+            logger.info(f"📎 [CITATION] Batch looking up {len(all_doc_titles)} document titles: {all_doc_titles}")
+            title_to_url = await _batch_lookup_urls_by_gemini_file_names(all_doc_titles)
+
+        # Phase 3: Extract URLs using mapping + fallback strategies (only if citations enabled)
+        if citations_enabled and hasattr(response, 'candidates'):
             for candidate in response.candidates:
                 if hasattr(candidate, 'grounding_metadata'):
                     grounding = candidate.grounding_metadata
@@ -537,27 +548,21 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                                     source_urls.append(url)
                                     logger.info(f"📎 Found web search URL: {url}")
 
-                            # Extract FileSearch document information (web-crawled URLs only)
+                            # Extract FileSearch document URLs
                             if hasattr(chunk, 'retrieved_context'):
                                 context = chunk.retrieved_context
                                 url_found = False
-
-                                # Get document title for logging
                                 doc_title = getattr(context, 'title', None)
-                                if doc_title:
-                                    logger.info(f"📄 Found document title: {doc_title}")
 
-                                # PRIMARY STRATEGY: Database lookup by gemini_file_name
-                                # Most reliable - looks up original_url from scraped_websites table
-                                # using the Gemini display_name (stored as gemini_file_name in DB)
-                                if not url_found and doc_title:
-                                    db_url = await _lookup_url_by_gemini_file_name(doc_title)
+                                # PRIMARY: Use batch DB lookup result (zero extra queries)
+                                if doc_title and doc_title in title_to_url:
+                                    db_url = title_to_url[doc_title]
                                     if db_url and db_url not in source_urls:
                                         source_urls.append(db_url)
-                                        logger.info(f"📎 [DB_STRATEGY] Found URL via DB lookup: {db_url}")
+                                        logger.info(f"📎 [DB_BATCH] URL for '{doc_title}': {db_url}")
                                         url_found = True
 
-                                # Strategy 1: Check if context has URI field (like web search)
+                                # Fallback 1: Check context.uri
                                 if not url_found and hasattr(context, 'uri'):
                                     doc_url = context.uri
                                     if doc_url and doc_url not in source_urls:
@@ -565,32 +570,13 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                                         logger.info(f"📎 Extracted URL from context.uri: {doc_url}")
                                         url_found = True
 
-                                # Strategy 2: Check custom_metadata for page_url/original_url (web-crawled content)
-                                if not url_found and hasattr(chunk, 'custom_metadata'):
-                                    metadata = chunk.custom_metadata
-                                    logger.info(f"🔍 Found custom_metadata: {metadata}")
-                                    for meta_item in metadata:
-                                        if hasattr(meta_item, 'key') and meta_item.key in ('page_url', 'original_url'):
-                                            doc_url = getattr(meta_item, 'string_value', None)
-                                            if doc_url and doc_url not in source_urls:
-                                                source_urls.append(doc_url)
-                                                logger.info(f"📎 Extracted URL from custom_metadata ({meta_item.key}): {doc_url}")
-                                                url_found = True
-                                                break
-
-                                # Strategy 3: Extract URL from document text content (embedded "Source URL:")
+                                # Fallback 2: Extract "Source URL:" from text snippet
                                 if not url_found:
                                     content_text = getattr(context, 'text', None)
                                     if content_text:
-                                        logger.info(f"📄 Document snippet: {content_text[:200]}...")
-
-                                        # Try to extract URL from document content
-                                        # Pattern to match "Source URL: https://..."
                                         url_pattern = r'Source URL:\s*(https?://[^\s\n\)]+)'
                                         url_matches = re.findall(url_pattern, content_text, re.IGNORECASE)
-
                                         for doc_url in url_matches:
-                                            # Clean up URL (remove trailing punctuation)
                                             doc_url = doc_url.rstrip('.,;:)')
                                             if doc_url and doc_url not in source_urls:
                                                 source_urls.append(doc_url)
@@ -598,40 +584,11 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                                                 url_found = True
                                                 break
 
-                                # Strategy 4: Parse URL from filename (for scraped files)
-                                # Filename format: scraped_{url_encoded}_YYYYMMDD_HHMMSS.md
-                                # Example: scraped_en.wikipedia.org_wiki_Sachin_Tendulkar_20260210_223347.md
-                                # → URL: https://en.wikipedia.org/wiki/Sachin_Tendulkar
-                                if not url_found and doc_title and doc_title.startswith('scraped_'):
-                                    try:
-                                        logger.info(f"🔍 Attempting to reconstruct URL from filename: {doc_title}")
-
-                                        # Remove 'scraped_' prefix and '.md' extension
-                                        url_part = doc_title[8:]  # Remove 'scraped_'
-                                        url_part = url_part[:-3]  # Remove '.md'
-
-                                        # Remove timestamp (YYYYMMDD_HHMMSS pattern at end)
-                                        timestamp_pattern = r'_\d{8}_\d{6}$'
-                                        url_part = re.sub(timestamp_pattern, '', url_part)
-
-                                        logger.info(f"🔍 After removing timestamp: {url_part}")
-
-                                        # Replace underscores with slashes to reconstruct URL path
-                                        reconstructed_url = f"https://{url_part.replace('_', '/')}"
-
-                                        if reconstructed_url not in source_urls:
-                                            source_urls.append(reconstructed_url)
-                                            logger.info(f"✅ Reconstructed actual webpage URL: {reconstructed_url}")
-                                            url_found = True
-                                    except Exception as parse_error:
-                                        logger.warning(f"⚠️ Failed to parse URL from filename '{doc_title}': {parse_error}")
-
-                                # Note: Only show URLs for web-crawled content (uploaded files have no URL)
                                 if not url_found:
                                     logger.info(f"ℹ️ No URL found for document '{doc_title}' - skipping citation (uploaded file)")
 
-        # Fallback: Parse response text for source URLs
-        if not source_urls and response_text:
+        # Fallback: Parse response text for source URLs (only if citations enabled)
+        if citations_enabled and not source_urls and response_text:
             url_matches = re.findall(r'Source URL:\s*(https?://[^\s\n]+)', response_text)
             for url in url_matches:
                 if url not in source_urls:
