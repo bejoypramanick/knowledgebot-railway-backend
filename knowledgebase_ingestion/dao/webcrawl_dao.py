@@ -54,7 +54,7 @@ class WebCrawlDAO:
 
         query = """
             INSERT INTO scraped_websites (original_url, domain, processing_status, user_role_id, celery_task_id, metadata, created_at, updated_at)
-            VALUES (:url, :domain, 'pending', :user_role_id, :task_id, :metadata::jsonb, NOW(), NOW())
+            VALUES (:url, :domain, 'pending', :user_role_id, :task_id, CAST(:metadata AS jsonb), NOW(), NOW())
             RETURNING id
         """
         params = {
