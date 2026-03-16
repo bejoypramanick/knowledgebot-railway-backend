@@ -212,7 +212,12 @@ Docling raw table data (includes coordinates and spans):
 Return the formatted table in the markdown KV format shown above."""
 
 
-async def _format_single_table(genai_client, table: Dict[str, Any], table_number: int) -> Optional[str]:
+# Max concurrent Gemini API calls (Tier 1: 150-300 RPM, safe with 5 parallel)
+_GEMINI_TABLE_CONCURRENCY = 5
+
+
+async def _format_single_table(genai_client, table: Dict[str, Any], table_number: int,
+                                semaphore: asyncio.Semaphore, executor: ThreadPoolExecutor) -> Optional[str]:
     """Format a single table with Gemini. Returns markdown string or None on failure."""
     table_text = json.dumps(table, indent=2, ensure_ascii=False)
     num_rows = table.get('data', {}).get('num_rows', 0)
@@ -222,7 +227,6 @@ async def _format_single_table(genai_client, table: Dict[str, Any], table_number
     prompt = _build_table_prompt(table_text, table_number)
 
     loop = asyncio.get_event_loop()
-    executor = ThreadPoolExecutor(max_workers=1)
 
     def call_gemini():
         return genai_client.models.generate_content(
@@ -231,7 +235,8 @@ async def _format_single_table(genai_client, table: Dict[str, Any], table_number
         )
 
     try:
-        response = await loop.run_in_executor(executor, call_gemini)
+        async with semaphore:
+            response = await loop.run_in_executor(executor, call_gemini)
 
         if not response or not hasattr(response, 'text') or not response.text:
             logger.error(f"❌ [GEMINI_TABLE_{table_number}] Empty or invalid response")
@@ -248,10 +253,10 @@ async def _format_single_table(genai_client, table: Dict[str, Any], table_number
 
 async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Send tables to Gemini one at a time for formatting.
+    Send tables to Gemini in parallel for formatting.
 
-    Processes each table individually to avoid overwhelming the API
-    with large prompts when documents have many tables.
+    Processes tables concurrently (up to 5 at a time) using asyncio.gather
+    with a semaphore to stay within Gemini Tier 1 rate limits (150-300 RPM).
 
     Args:
         tables: List of table objects from docling
@@ -267,7 +272,7 @@ async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, A
         logger.warning("⚠️ [GEMINI_TABLES] No tables to format - returning empty")
         return {"tables": {}}
 
-    logger.info(f"📊 [GEMINI_TABLES] Received {len(tables)} table(s) - processing one at a time")
+    logger.info(f"📊 [GEMINI_TABLES] Received {len(tables)} table(s) - processing in parallel (max {_GEMINI_TABLE_CONCURRENCY} concurrent)")
 
     try:
         genai_client = get_genai_client()
@@ -275,14 +280,22 @@ async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, A
             logger.error("❌ [GEMINI_TABLES] Gemini client not available")
             return {"tables": {}, "error": "Gemini client not configured"}
 
-        # Process each table individually
+        # Create semaphore and executor per invocation (safe across event loops)
+        semaphore = asyncio.Semaphore(_GEMINI_TABLE_CONCURRENCY)
+        executor = ThreadPoolExecutor(max_workers=_GEMINI_TABLE_CONCURRENCY)
+
+        # Launch all tables in parallel, semaphore limits concurrency
+        tasks = [
+            _format_single_table(genai_client, table, idx + 1, semaphore, executor)
+            for idx, table in enumerate(tables)
+        ]
+        results = await asyncio.gather(*tasks)
+
+        # Collect results in order, filtering out failures
         all_markdown = []
         success_count = 0
         fail_count = 0
-
-        for idx, table in enumerate(tables):
-            table_number = idx + 1
-            result = await _format_single_table(genai_client, table, table_number)
+        for idx, result in enumerate(results):
             if result:
                 all_markdown.append(result)
                 success_count += 1
@@ -295,7 +308,7 @@ async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, A
             logger.error("❌ [GEMINI_TABLES] All tables failed to format")
             return {"tables_markdown": "", "error": "All tables failed"}
 
-        # Combine all formatted tables
+        # Combine all formatted tables (order preserved from asyncio.gather)
         combined_markdown = "\n\n".join(all_markdown)
         logger.info(f"✅ [GEMINI_TABLES] Combined markdown: {len(combined_markdown)} chars")
 
