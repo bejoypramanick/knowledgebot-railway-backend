@@ -935,12 +935,15 @@ CRITICAL RULES FOR CITATIONS:
 - ❌ NEVER add citations without real URLs from the search results
 
 HOW TO CREATE HYPERLINKED CITATIONS - STEP BY STEP:
-1. Extract source URLs from search_knowledge_base response (ONLY if URLs are present)
-2. As you write your response, create hyperlinked citations immediately after relevant facts
+1. After calling search_knowledge_base(), look for the [CITATION_SOURCES] section at the end of the response
+   - URLs are listed as: - https://example.com/page1  - https://example.com/page2
+   - The FIRST URL = [1], SECOND URL = [2], etc.
+2. As you write your response, create hyperlinked citations immediately after relevant facts sourced from those URLs
 3. Use this EXACT format for each citation:
    <a href="SOURCE_URL" class="inline-citation" title="SOURCE_URL" target="_blank" rel="noopener noreferrer">[1]</a>
 4. The title attribute creates a tooltip showing the URL on hover/long-press
-5. Citations will be hidden by default and shown when user clicks the eye icon
+5. Clicking the citation opens the source webpage in a new tab
+6. EVERY fact sourced from a web page MUST have an inline citation - do NOT omit citations
 
 CITATION FORMAT RULES - MANDATORY:
 - Wrap citation in <a> tag with the source URL
@@ -964,6 +967,16 @@ CORRECT OUTPUT PATTERN:
 Only inline hyperlinked citations embedded in response text:
 <p>Main answer with <a href="url" class="inline-citation" title="url" target="_blank" rel="noopener noreferrer">[1]</a> citation.</p>
 <p>More content with <a href="url2" class="inline-citation" title="url2" target="_blank" rel="noopener noreferrer">[2]</a> citation.</p>
+
+EXAMPLE WITH REAL CITATION_SOURCES:
+If search_knowledge_base returns:
+  [CITATION_SOURCES]
+  - https://example.com/battery-storage
+  - https://example.com/solar-panels
+  [/CITATION_SOURCES]
+
+Then your response MUST include:
+<p>Battery storage systems use lithium-ion technology<a href="https://example.com/battery-storage" class="inline-citation" title="https://example.com/battery-storage" target="_blank" rel="noopener noreferrer">[1]</a> and can be combined with solar panels<a href="https://example.com/solar-panels" class="inline-citation" title="https://example.com/solar-panels" target="_blank" rel="noopener noreferrer">[2]</a>.</p>
 
 ═══════════════════════════════════════════════════════════════════════════════════════════════════
 RULE 6: RESPONSE QUALITY - COMPREHENSIVE ONE-SHOT ANSWERS
