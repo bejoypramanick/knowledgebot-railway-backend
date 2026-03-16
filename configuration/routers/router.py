@@ -468,8 +468,15 @@ async def update_widget_config(
         else:
             # Handle JSON request (backward compatibility)
             body = await request.json()
+            logger.info("=" * 100)
+            logger.info("📥 RECEIVED JSON REQUEST FOR WIDGET CONFIG UPDATE")
+            logger.info("=" * 100)
             logger.info(f"📋 [Router/JSON] Body keys: {list(body.keys())}")
-            logger.info(f"📋 [Router/JSON] suggested_messages in body: {'suggested_messages' in body}, value: {body.get('suggested_messages', 'NOT_PRESENT')}")
+            logger.info(f"📋 [Router/JSON] suggested_messages in body: {'suggested_messages' in body}")
+            if 'suggested_messages' in body:
+                logger.info(f"📋 [Router/JSON] suggested_messages value: {body.get('suggested_messages')}")
+                logger.info(f"📋 [Router/JSON] suggested_messages type: {type(body.get('suggested_messages')).__name__}")
+            logger.info("=" * 100)
 
             # Handle image deletion for JSON requests too
             from configuration.dao.widget_config_dao import WidgetConfigDAO

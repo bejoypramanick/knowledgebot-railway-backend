@@ -59,6 +59,11 @@ class WidgetConfigService:
     async def update_widget_config(self, config_data: Dict[str, Any]):
         """Update widget configuration"""
         try:
+            logger.info("=" * 100)
+            logger.info("🔄 UPDATING WIDGET CONFIGURATION")
+            logger.info("=" * 100)
+            logger.info(f"📥 Received config_data keys: {list(config_data.keys())}")
+            
             # Check if display_chatbot is being changed
             old_config = await self.get_widget_config()
             old_display_chatbot = old_config.get("display_chatbot", True)
@@ -67,17 +72,25 @@ class WidgetConfigService:
             # Extract suggested messages if present
             suggested_messages = config_data.pop('suggested_messages', None)
             logger.info(f"📋 Extracted suggested_messages from config_data: {suggested_messages} (type: {type(suggested_messages).__name__})")
+            
+            if suggested_messages is not None:
+                logger.info(f"📋 Suggested messages found:")
+                for i, msg in enumerate(suggested_messages, 1):
+                    logger.info(f"   [{i}] {msg}")
 
             # Update main widget configuration
             await self._widget_config_dao.update_widget_config(config_data)
+            logger.info(f"✅ Main widget configuration updated")
 
             # Update suggested messages if provided
             if suggested_messages is not None:
-                logger.info(f"💾 Updating {len(suggested_messages)} suggested messages: {suggested_messages}")
+                logger.info(f"💾 Updating {len(suggested_messages)} suggested messages in database...")
                 await self._widget_config_dao.update_suggested_messages(suggested_messages)
                 logger.info(f"✅ Suggested messages updated successfully")
             else:
                 logger.info(f"⚠️ No suggested_messages key found in config_data - skipping update")
+            
+            logger.info("=" * 100)
             
             # Broadcast state change if display_chatbot changed
             if old_display_chatbot != new_display_chatbot:
@@ -89,7 +102,8 @@ class WidgetConfigService:
                     logger.error(f"Error broadcasting state change: {e}")
             
         except Exception as e:
-            logger.error(f"Error updating widget config: {e}")
+            logger.error(f"❌ Error updating widget config: {e}")
+            logger.info("=" * 100)
             raise
     
 
