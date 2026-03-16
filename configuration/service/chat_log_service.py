@@ -201,7 +201,7 @@ class ChatLogService:
                 "type": "chat_assigned",
                 "session_id": session_uuid,  # CRITICAL: Use UUID for SSE channel matching
                 "numeric_session_id": str(session_db_id),  # Include numeric ID for reference
-                "agent_email": agent_email,
+                "agent_email": mask_email(agent_email) if agent_email else None,
                 "agent_id": agent_id,
                 "assignee_type": assignee_type,
                 "status": "active",

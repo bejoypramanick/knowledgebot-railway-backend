@@ -374,6 +374,7 @@ async def update_widget_config(
     chat_icon_image: Optional[UploadFile] = File(None)
 ):
     """Update widget configuration with optional image uploads"""
+    import json
     try:
         # Check if this is multipart/form-data or JSON
         content_type = request.headers.get('content-type', '')
@@ -384,7 +385,6 @@ async def update_widget_config(
                 raise HTTPException(status_code=400, detail="Config data required in multipart request")
 
             # Parse JSON config from form
-            import json
             config_data = json.loads(config)
 
             # Upload images if provided using DAO with S3 storage
@@ -952,7 +952,7 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
 
                 # Send initial connection established event immediately
                 # This ensures the browser receives a response and the SSE connection is established
-                yield f"data: {json.dumps({'type': 'connected', 'agent_email': user_email, 'agent_id': user_id, 'role': user_role, 'timestamp': int(time.time())})}\n\n"
+                yield f"data: {json.dumps({'type': 'connected', 'agent_email': mask_email(user_email) if user_email else None, 'agent_id': user_id, 'role': user_role, 'timestamp': int(time.time())})}\n\n"
 
                 # Yield messages from queue
                 try:
@@ -1501,18 +1501,21 @@ async def send_agent_message(request: Request):
             raise HTTPException(status_code=400, detail="session_id must be a numeric ID")
 
         text = body.get("text", "")
-        sender_id_raw = body.get("agent_id")
         sender_type = body.get("sender", "agent")  # "agent" or "user" (customer)
 
         if not text:
             raise HTTPException(status_code=400, detail="Message text is required")
 
-        # Resolve sender identity via service (Redis cache + DB fallback)
+        # Resolve sender identity from trusted X-User-Email header (set by API Gateway from JWT)
+        # Never trust agent_id from frontend body for authorization
         header_email = request.headers.get("X-User-Email", "")
-        sender_id_int, sender_email = await chat_log_service.resolve_sender_identity(sender_id_raw, header_email)
+        if not header_email:
+            raise HTTPException(status_code=401, detail="User identity not found. X-User-Email header is required.")
+        sender_id_int = await chat_log_service.get_user_id_by_email_cached(header_email)
+        sender_email = header_email
 
         if sender_id_int is None:
-            raise HTTPException(status_code=400, detail="Could not resolve agent identity. Provide numeric agent_id or ensure X-User-Email header is set.")
+            raise HTTPException(status_code=400, detail="Could not resolve user identity from authenticated email.")
 
         logger.info(f"🔍 POST /admin/chat-sessions/messages called for session {numeric_session_id}, sender: {sender_email} (ID: {sender_id_int})")
 
@@ -1540,7 +1543,8 @@ async def send_agent_message(request: Request):
         from shared.redis_pubsub_manager import broadcast_event_to_session, broadcast_event_to_agent, broadcast_event_to_all_agents
 
         if sender_type == "agent":
-            event_data["agent_email"] = sender_email
+            event_data["agent_id"] = sender_id_int
+            event_data["agent_email"] = mask_email(sender_email) if sender_email else None
 
             # Get assigned agent ID via service (Redis cache + DB fallback)
             assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, numeric_session_id)
@@ -1646,7 +1650,7 @@ async def end_agent_session(request: Request):
             "session_id": session_uuid,      # Use UUID for SSE channel matching
             "numeric_session_id": numeric_session_id,
             "ended_by": "agent",
-            "agent_email": user_email,
+            "agent_email": mask_email(user_email) if user_email else None,
             "show_feedback": True,  # Trigger feedback UI for customer
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
@@ -2165,9 +2169,13 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
         primary_role = "admin" if "admin" in user_roles else ("human_agent" if "human_agent" in user_roles else "user")
         logger.info(f"[RESULT] Primary role determined: {primary_role}")
         
+        # Get numeric user ID from database (used for authorization, not display)
+        user_numeric_id = await chat_log_service.get_user_id_by_email_cached(user_email)
+
         # Return authenticated user profile with actual role
         logger.info("[TRANSFORM] Building user profile object")
         profile = {
+            "id": user_numeric_id,  # Numeric DB ID for authorization comparisons
             "email": mask_email(user.get("email")),
             "uid": user.get("uid"),
             "display_name": user.get("name") or mask_email(user.get("email")),  # Frontend expects display_name

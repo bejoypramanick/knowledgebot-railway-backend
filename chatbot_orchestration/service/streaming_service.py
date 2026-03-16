@@ -360,6 +360,7 @@ class StreamingService:
                                             customer_name = f"User-{numeric_session_id}"
 
                                         # Build session event
+                                        from shared.email_masking import mask_email
                                         session_event = {
                                             "type": "session_update",
                                             "data": {
@@ -370,7 +371,7 @@ class StreamingService:
                                                 "status": redis_session.get('archive_status', 'active'),
                                                 "last_message_at": redis_session.get('last_activity_at', datetime.utcnow().isoformat()),
                                                 "created_at": redis_session.get('started_at'),
-                                                "assigned_agent": assigned_agent,
+                                                "assigned_agent": mask_email(assigned_agent) if assigned_agent else None,
                                                 "assigned_agent_id": assigned_agent_id,
                                                 "feedback": None,
                                                 "customer_feedback": None,
@@ -397,7 +398,7 @@ class StreamingService:
                                     chat_assigned_event = {
                                         "type": "chat_assigned",
                                         "session_id": session_id,
-                                        "agent_email": assigned_agent,
+                                        "agent_email": mask_email(assigned_agent) if assigned_agent else None,
                                         "agent_id": assigned_agent_id,
                                         "message": "A human agent has been assigned to your chat"
                                     }
