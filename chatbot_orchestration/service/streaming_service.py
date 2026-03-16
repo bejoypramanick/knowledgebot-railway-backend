@@ -1174,7 +1174,7 @@ class StreamingService:
 
             # Track token usage after streaming completes
             try:
-                await self._track_token_usage(session_id, user_email, full_response, tool_call_count)
+                await self._track_token_usage(session_id, user_email, full_response, tool_call_count, run=run)
             except Exception as token_error:
                 logger.error(f"❌ Error tracking token usage: {token_error}")
 
@@ -1195,35 +1195,81 @@ class StreamingService:
             session_state_manager.set_streaming_state(session_id, False)
             logger.info(f"🔄 Streaming state reset for session: {session_id}")
 
-    async def _track_token_usage(self, session_id: str, user_email: str, response_text: str, tool_call_count: int):
-        """Track token usage after agent response completes."""
+    async def _track_token_usage(self, session_id: str, user_email: str, response_text: str, tool_call_count: int, run=None):
+        """Track token usage after agent response completes.
+        
+        Args:
+            session_id: Session ID
+            user_email: User email
+            response_text: Response text
+            tool_call_count: Number of tool calls made
+            run: Pydantic AI run object (optional) - if provided, uses actual token counts from Gemini
+        """
         try:
             from ..core.token_tracker import track_gemini_usage
             import os
 
             model_name = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
 
-            # Estimate token usage based on response length
-            # Gemini token estimation: ~4 chars = 1 token (rough estimate)
-            response_chars = len(response_text)
-            estimated_completion_tokens = max(1, response_chars // 4)
+            # Try to get actual token usage from run object first
+            actual_prompt_tokens = 0
+            actual_completion_tokens = 0
+            actual_total_tokens = 0
             
-            # Estimate prompt tokens based on conversation history
-            estimated_prompt_tokens = 500  # Default estimate for conversation history
+            if run:
+                try:
+                    # Get actual usage from Pydantic AI run object
+                    usage = run.usage()
+                    if usage:
+                        # Extract token counts from usage object
+                        actual_prompt_tokens = getattr(usage, 'input_tokens', 0) or 0
+                        actual_completion_tokens = getattr(usage, 'output_tokens', 0) or 0
+                        actual_total_tokens = getattr(usage, 'total_tokens', 0) or (actual_prompt_tokens + actual_completion_tokens)
+                        
+                        logger.info(f"✅ Got ACTUAL token counts from Gemini API:")
+                        logger.info(f"   Input tokens: {actual_prompt_tokens}")
+                        logger.info(f"   Output tokens: {actual_completion_tokens}")
+                        logger.info(f"   Total tokens: {actual_total_tokens}")
+                except Exception as usage_error:
+                    logger.warning(f"⚠️ Could not extract usage from run object: {usage_error}")
+                    actual_prompt_tokens = 0
+                    actual_completion_tokens = 0
+                    actual_total_tokens = 0
             
-            # Total tokens = prompt + completion
-            total_tokens = estimated_prompt_tokens + estimated_completion_tokens
+            # If we got actual tokens, use them; otherwise fall back to estimates
+            if actual_total_tokens > 0:
+                prompt_tokens = actual_prompt_tokens
+                completion_tokens = actual_completion_tokens
+                total_tokens = actual_total_tokens
+                token_source = "ACTUAL (from Gemini API)"
+            else:
+                # Fallback: Estimate token usage based on response length
+                # Gemini token estimation: ~4 chars = 1 token (rough estimate)
+                response_chars = len(response_text)
+                completion_tokens = max(1, response_chars // 4)
+                
+                # Estimate prompt tokens based on conversation history
+                prompt_tokens = 500  # Default estimate for conversation history
+                
+                # Total tokens = prompt + completion
+                total_tokens = prompt_tokens + completion_tokens
+                token_source = "ESTIMATED (from response length)"
+
+            logger.info(f"📊 Token tracking source: {token_source}")
+            logger.info(f"   Prompt tokens: {prompt_tokens}")
+            logger.info(f"   Completion tokens: {completion_tokens}")
+            logger.info(f"   Total tokens: {total_tokens}")
 
             success = await track_gemini_usage(
-                prompt_tokens=estimated_prompt_tokens,
-                candidates_tokens=estimated_completion_tokens,
+                prompt_tokens=prompt_tokens,
+                candidates_tokens=completion_tokens,
                 session_id=session_id,
                 api_call_type='agent_stream',
                 model=model_name
             )
 
             if success:
-                logger.info(f"✅ Tracked {total_tokens} tokens for session {session_id[:8]}... (prompt: {estimated_prompt_tokens}, completion: {estimated_completion_tokens})")
+                logger.info(f"✅ Tracked {total_tokens} tokens for session {session_id[:8]}... ({token_source})")
             else:
                 logger.error(f"❌ Failed to track token usage for session {session_id}")
 
