@@ -52,13 +52,24 @@ class WidgetConfigDAO:
         """
         try:
             logger.log_db_operation(query)
+            logger.info("=" * 100)
+            logger.info("📖 RETRIEVING SUGGESTED MESSAGES FROM widget_suggested_messages TABLE")
+            logger.info("=" * 100)
+            logger.info(f"Query: {query}")
             async with get_db_session() as session:
                 result = await session.execute(text(query))
                 rows = result.fetchall()
                 logger.log_db_query(query, None, rows)
-                return [row["message_text"] for row in rows]
+                messages = [row["message_text"] for row in rows]
+                logger.info(f"✅ Retrieved {len(messages)} suggested messages:")
+                for i, msg in enumerate(messages, 1):
+                    logger.info(f"   [{i}] {msg}")
+                logger.info("=" * 100)
+                return messages
         except Exception as e:
             logger.log_db_query(query, None, error=e)
+            logger.error(f"❌ Error retrieving suggested messages: {e}")
+            logger.info("=" * 100)
             return []
 
     async def update_widget_config(self, config_data: Dict[str, Any]):
@@ -162,11 +173,18 @@ class WidgetConfigDAO:
                     INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
                     VALUES (:widget_config_id, :message_text, :display_order, true, NOW(), NOW())
                 """
+                logger.info("=" * 100)
+                logger.info("📝 INSERTING SUGGESTED MESSAGES INTO widget_suggested_messages TABLE")
+                logger.info("=" * 100)
                 for i, message in enumerate(messages):
                     insert_params = {"widget_config_id": widget_config_id, "message_text": message, "display_order": i}
                     logger.log_db_operation(insert_query, insert_params)
+                    logger.info(f"📤 INSERT QUERY #{i+1}:")
+                    logger.info(f"   Query: {insert_query}")
+                    logger.info(f"   Params: widget_config_id={widget_config_id}, message_text='{message}', display_order={i}, is_active=true")
                     await session.execute(text(insert_query), insert_params)
-                    logger.info(f"➕ [DAO] Inserted message [{i}]: '{message}'")
+                    logger.info(f"✅ [DAO] Inserted message [{i}]: '{message}'")
+                logger.info("=" * 100)
 
                 await session.commit()
                 logger.info(f"✅ [DAO] Committed {len(messages)} suggested messages successfully")
@@ -249,12 +267,20 @@ class WidgetConfigDAO:
         query = "DELETE FROM widget_suggested_messages"
         try:
             logger.log_db_operation(query)
+            logger.info("=" * 100)
+            logger.info("🗑️ CLEARING ALL SUGGESTED MESSAGES FROM widget_suggested_messages TABLE")
+            logger.info("=" * 100)
+            logger.info(f"Query: {query}")
             async with get_db_session() as session:
-                await session.execute(text(query))
+                result = await session.execute(text(query))
                 await session.commit()
+                logger.info(f"✅ Deleted {result.rowcount} rows from widget_suggested_messages")
                 logger.log_db_query(query, None, None)
+                logger.info("=" * 100)
         except Exception as e:
             logger.log_db_query(query, None, error=e)
+            logger.error(f"❌ Error clearing suggested messages: {e}")
+            logger.info("=" * 100)
             raise
 
     async def add_suggested_message(self, message: str, index: int):

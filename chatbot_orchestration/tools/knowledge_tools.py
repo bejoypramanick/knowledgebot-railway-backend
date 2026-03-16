@@ -595,32 +595,73 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                     source_urls.append(url)
                     logger.info(f"📄 Extracted URL from response text: {url}")
 
+        # Insert inline citation markers [1], [2] using grounding_supports
+        # grounding_supports maps text segments → chunk indices, and we have chunk → URL
+        cited_response = response_text
+        if citations_enabled and source_urls and hasattr(response, 'candidates'):
+            # Build chunk_index → citation_number mapping
+            # Each unique URL gets a citation number (1-indexed)
+            chunk_to_citation = {}
+            for candidate in response.candidates:
+                if hasattr(candidate, 'grounding_metadata'):
+                    grounding = candidate.grounding_metadata
+                    if hasattr(grounding, 'grounding_chunks'):
+                        for idx, chunk in enumerate(grounding.grounding_chunks):
+                            if hasattr(chunk, 'retrieved_context'):
+                                doc_title = getattr(chunk.retrieved_context, 'title', None)
+                                if doc_title and doc_title in title_to_url:
+                                    url = title_to_url[doc_title]
+                                    if url in source_urls:
+                                        citation_num = source_urls.index(url) + 1
+                                        chunk_to_citation[idx] = citation_num
+
+                    # Insert markers at segment end positions (work backwards to preserve offsets)
+                    if hasattr(grounding, 'grounding_supports') and chunk_to_citation:
+                        insertions = []  # (position, citation_text)
+                        for support in grounding.grounding_supports:
+                            if hasattr(support, 'grounding_chunk_indices') and hasattr(support, 'segment'):
+                                segment = support.segment
+                                end_idx = getattr(segment, 'end_index', None)
+                                if end_idx is not None:
+                                    # Get the citation number(s) for this support's chunks
+                                    nums = set()
+                                    for ci in support.grounding_chunk_indices:
+                                        if ci in chunk_to_citation:
+                                            nums.add(chunk_to_citation[ci])
+                                    if nums:
+                                        marker = ''.join(f'[{n}]' for n in sorted(nums))
+                                        insertions.append((end_idx, marker))
+
+                        # Sort by position descending and insert (so offsets don't shift)
+                        insertions.sort(key=lambda x: x[0], reverse=True)
+                        # Deduplicate: skip if same position already has a marker
+                        seen_positions = set()
+                        for pos, marker in insertions:
+                            if pos not in seen_positions and pos <= len(cited_response):
+                                cited_response = cited_response[:pos] + marker + cited_response[pos:]
+                                seen_positions.add(pos)
+
+                        logger.info(f"📎 [INLINE] Inserted {len(seen_positions)} inline citation markers into response text")
+
         # Append source URLs to content for citation
-        enhanced_content = response_text
+        enhanced_content = cited_response
         if source_urls:
-            # Build tree structure for hierarchical citations
-            citation_tree = await get_citation_hierarchy(source_urls)
-
-            # Format as JSON for frontend parsing
-            citation_section = "\n\n[CITATION_TREE]"
-            citation_section += json.dumps(citation_tree, indent=2)
-            citation_section += "\n[/CITATION_TREE]"
-
-            # Also include flat list for backward compatibility
-            citation_section += "\n\n[CITATION_SOURCES]"
+            # Include flat list for frontend citationMapping
+            citation_section = "\n\n[CITATION_SOURCES]"
             for url in source_urls:
                 citation_section += f"\n- {url}"
             citation_section += "\n[/CITATION_SOURCES]"
 
             enhanced_content += citation_section
-            logger.info(f"📎 Appended {len(source_urls)} source URL(s) to content with tree structure")
+            logger.info(f"📎 Appended {len(source_urls)} source URL(s) to content")
             logger.info("=" * 80)
-            logger.info("📎 CITATIONS ADDED:")
+            logger.info("📎 CITATIONS:")
             for i, url in enumerate(source_urls, 1):
-                logger.info(f"  {i}. {url}")
+                logger.info(f"  [{i}] {url}")
             logger.info("=" * 80)
         else:
-            logger.warning("⚠️ No source URLs found - no citations appended!")
+            if citations_enabled:
+                logger.warning("⚠️ No source URLs found - no citations appended!")
             # Still include the response text even without citations
 
         # Check if response is meaningful or empty
