@@ -150,49 +150,9 @@ def extract_text_content_from_docling(json_content: str) -> str:
     return text
 
 
-async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Send tables to Gemini model to convert into meaningful JSON format.
-
-    Args:
-        tables: List of table objects from docling
-
-    Returns:
-        Dictionary with formatted tables as JSON
-    """
-    logger.info("=" * 80)
-    logger.info("🤖 [GEMINI_TABLES] === START TABLE FORMATTING WITH GEMINI ===")
-    logger.info("=" * 80)
-
-    if not tables:
-        logger.warning("⚠️ [GEMINI_TABLES] No tables to format - returning empty")
-        return {"tables": {}}
-
-    logger.info(f"📊 [GEMINI_TABLES] Received {len(tables)} table(s) from docling")
-
-    try:
-        logger.info("[GEMINI_TABLES] Getting Gemini client...")
-        genai_client = get_genai_client()
-        if not genai_client:
-            logger.error("❌ [GEMINI_TABLES] Gemini client not available")
-            return {"tables": {}, "error": "Gemini client not configured"}
-
-        logger.info("✅ [GEMINI_TABLES] Gemini client obtained")
-
-        # Prepare table data for Gemini
-        logger.info("[GEMINI_TABLES] Converting tables to JSON...")
-        tables_text = json.dumps(tables, indent=2, ensure_ascii=False)
-        logger.info(f"✅ [GEMINI_TABLES] Converted to JSON: {len(tables_text)} chars")
-
-        logger.info(f"📊 [GEMINI_TABLES] Table statistics:")
-        for idx, table in enumerate(tables):
-            num_rows = table.get('data', {}).get('num_rows', 0)
-            num_cols = table.get('data', {}).get('num_cols', 0)
-            logger.info(f"   Table {idx+1}: {num_rows} rows × {num_cols} cols")
-
-        # Create prompt for Gemini to format tables
-        logger.info("[GEMINI_TABLES] Creating prompt for Gemini...")
-        prompt = f"""You are a table analysis and formatting expert. I have extracted raw table data from a PDF using docling.
+def _build_table_prompt(table_text: str, table_number: int) -> str:
+    """Build the Gemini prompt for formatting a single table."""
+    return f"""You are a table analysis and formatting expert. I have extracted raw table data from a PDF using docling.
 
 The data includes:
 - Cell coordinates (bounding boxes) for alignment
@@ -208,8 +168,8 @@ YOUR TASK:
    - FLATTEN the table so each row is independent
    - Include parent context in each nested row (use parent IDs/names as columns)
    - Make relationships explicit through shared parent identifiers
-4. Create structured markdown format for each table with:
-   - Title showing table number/name
+4. Create structured markdown format with:
+   - Title showing table number {table_number}
    - Summary line describing table purpose, key columns, and data type
    - Column list (including parent context columns if nested)
    - Data rows in key-value format
@@ -217,29 +177,17 @@ YOUR TASK:
 
 OUTPUT FORMAT (Structured Markdown):
 
-### Table: [Table Name/Number]
+### Table: Table {table_number}
 **Summary**: [Brief description of table contents, purpose, key columns, and data type]
 **Columns**: [Comma-separated list of column headers]
 
 **Row 1 (first row, 1st entry)**
 - [Column 1]: [Value 1]
 - [Column 2]: [Value 2]
-- [Column 3]: [Value 3]
 
 **Row 2 (second row, 2nd entry)**
 - [Column 1]: [Value 1]
 - [Column 2]: [Value 2]
-- [Column 3]: [Value 3]
-
-**Row 3 (third row, 3rd entry)**
-- [Column 1]: [Value 1]
-- [Column 2]: [Value 2]
-- [Column 3]: [Value 3]
-
-**Row 4 (fourth row, 4th entry)**
-- [Column 1]: [Value 1]
-- [Column 2]: [Value 2]
-- [Column 3]: [Value 3]
 
 [Continue for all rows...]
 
@@ -247,128 +195,120 @@ NESTED TABLE HANDLING:
 If the original table has nested/hierarchical structure, FLATTEN it like this:
 - Each nested item becomes its own row
 - Include parent identifiers (Parent ID, Parent Name, etc.)
-- Example:
-  **Row 1** (Parent Item)
-  - ID: P1
-  - Name: Parent A
-  - Child ID: C1
-  - Child Name: Child A1
-  - Child Value: Val1
-
-  **Row 2** (Another Child of Parent A)
-  - ID: P1
-  - Name: Parent A
-  - Child ID: C2
-  - Child Name: Child A2
-  - Child Value: Val2
-
-  **Row 3** (Parent Item B)
-  - ID: P2
-  - Name: Parent B
-  - Child ID: C3
-  - Child Name: Child B1
-  - Child Value: Val3
 
 REQUIREMENTS:
 - Use markdown format, NOT JSON
 - Include summary at top for context
 - Use key-value pairs (-) for each column in each row
-- Number each row with BOTH number AND spelled-out position: **Row N (first/second/third/fourth row, Nth entry)**
-  * Row 1 → "Row 1 (first row, 1st entry)"
-  * Row 2 → "Row 2 (second row, 2nd entry)"
-  * Row 3 → "Row 3 (third row, 3rd entry)"
-  * Row 4 → "Row 4 (fourth row, 4th entry)"
-  * Row 5 → "Row 5 (fifth row, 5th entry)"
-  * Continue pattern for all rows
+- Number each row with BOTH number AND spelled-out position
 - List all columns in "Columns:" line
 - Make it easy to read and search - explicit row naming helps RAG find specific rows
 - Do NOT include raw docling metadata
 - Do NOT include explanations, only the formatted markdown output
 
 Docling raw table data (includes coordinates and spans):
-{tables_text}
+{table_text}
 
-Return the formatted tables in the markdown KV format shown above."""
-        logger.info(f"✅ [GEMINI_TABLES] Prompt created: {len(prompt)} chars")
+Return the formatted table in the markdown KV format shown above."""
 
-        # Call Gemini API in thread executor (synchronous API in async context)
-        logger.info("[GEMINI_TABLES] Setting up executor for Gemini API call...")
-        loop = asyncio.get_event_loop()
-        executor = ThreadPoolExecutor(max_workers=1)
 
-        def call_gemini():
-            logger.info("[GEMINI_TABLES] >>> Calling genai_client.models.generate_content()...")
-            try:
-                result = genai_client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt
-                )
-                logger.info(f"[GEMINI_TABLES] <<< API call returned successfully")
-                return result
-            except Exception as api_err:
-                logger.error(f"[GEMINI_TABLES] <<< API call FAILED: {api_err}")
-                raise
+async def _format_single_table(genai_client, table: Dict[str, Any], table_number: int) -> Optional[str]:
+    """Format a single table with Gemini. Returns markdown string or None on failure."""
+    table_text = json.dumps(table, indent=2, ensure_ascii=False)
+    num_rows = table.get('data', {}).get('num_rows', 0)
+    num_cols = table.get('data', {}).get('num_cols', 0)
+    logger.info(f"🤖 [GEMINI_TABLE_{table_number}] Formatting table: {num_rows} rows x {num_cols} cols, {len(table_text)} chars")
 
-        logger.info("[GEMINI_TABLES] Running Gemini API in executor...")
+    prompt = _build_table_prompt(table_text, table_number)
+
+    loop = asyncio.get_event_loop()
+    executor = ThreadPoolExecutor(max_workers=1)
+
+    def call_gemini():
+        return genai_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
+
+    try:
         response = await loop.run_in_executor(executor, call_gemini)
-        logger.info(f"✅ [GEMINI_TABLES] Executor returned response: {type(response)}")
 
-        logger.info("[GEMINI_TABLES] Checking response...")
-        if not response:
-            logger.error("❌ [GEMINI_TABLES] Response is None/null")
-            return {"tables": {}, "error": "Null response from Gemini"}
+        if not response or not hasattr(response, 'text') or not response.text:
+            logger.error(f"❌ [GEMINI_TABLE_{table_number}] Empty or invalid response")
+            return None
 
-        logger.info(f"✅ [GEMINI_TABLES] Response object exists: {type(response).__name__}")
+        result = response.text.strip()
+        logger.info(f"✅ [GEMINI_TABLE_{table_number}] Formatted: {len(result)} chars")
+        return result
 
-        if not hasattr(response, 'text'):
-            logger.error(f"❌ [GEMINI_TABLES] Response has no 'text' attribute. Attributes: {dir(response)}")
-            return {"tables": {}, "error": "Response missing text attribute"}
+    except Exception as e:
+        logger.error(f"❌ [GEMINI_TABLE_{table_number}] Failed: {e}")
+        return None
 
-        if not response.text:
-            logger.error(f"❌ [GEMINI_TABLES] Response text is empty/None")
-            return {"tables": {}, "error": "Empty Gemini response text"}
 
-        logger.info(f"✅ [GEMINI_TABLES] Got response text: {len(response.text)} chars")
-        logger.info(f"📋 [GEMINI_TABLES_RESPONSE] Response preview (first 500 chars):")
-        logger.info(response.text[:500])
+async def format_tables_with_gemini(tables: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Send tables to Gemini one at a time for formatting.
 
-        # Handle markdown response (structured KV format)
-        logger.info("[GEMINI_TABLES] Processing markdown response...")
-        try:
-            response_text = response.text.strip()
-            logger.info(f"[GEMINI_TABLES] Response text length: {len(response_text)} chars")
+    Processes each table individually to avoid overwhelming the API
+    with large prompts when documents have many tables.
 
-            # Response is now markdown format, not JSON
-            # Return it wrapped in a structure for the merge function
-            if not response_text:
-                logger.error("❌ [GEMINI_TABLES] Empty response text")
-                return {"tables_markdown": "", "error": "Empty response"}
+    Args:
+        tables: List of table objects from docling
 
-            logger.info(f"✅ [GEMINI_TABLES] Received formatted markdown ({len(response_text)} chars)")
-            logger.info("[GEMINI_TABLES] Markdown preview (first 500 chars):")
-            logger.info(response_text[:500])
+    Returns:
+        Dictionary with formatted tables as markdown
+    """
+    logger.info("=" * 80)
+    logger.info("🤖 [GEMINI_TABLES] === START TABLE FORMATTING WITH GEMINI ===")
+    logger.info("=" * 80)
 
-            # Return markdown content wrapped in expected format
-            result = {
-                "tables_markdown": response_text,
-                "format": "markdown_kv"
-            }
+    if not tables:
+        logger.warning("⚠️ [GEMINI_TABLES] No tables to format - returning empty")
+        return {"tables": {}}
 
-            logger.info("=" * 80)
-            logger.info("✅ [GEMINI_TABLES] === END TABLE FORMATTING - SUCCESS ===")
-            logger.info("=" * 80)
-            return result
+    logger.info(f"📊 [GEMINI_TABLES] Received {len(tables)} table(s) - processing one at a time")
 
-        except Exception as e:
-            logger.error(f"❌ [GEMINI_TABLES] Error processing response: {e}")
-            logger.error(f"[GEMINI_TABLES] Full response text:")
-            for line in response.text.split('\n')[:20]:  # Log first 20 lines
-                logger.error(f"  {line}")
-            return {"tables_markdown": "", "error": str(e)}
+    try:
+        genai_client = get_genai_client()
+        if not genai_client:
+            logger.error("❌ [GEMINI_TABLES] Gemini client not available")
+            return {"tables": {}, "error": "Gemini client not configured"}
+
+        # Process each table individually
+        all_markdown = []
+        success_count = 0
+        fail_count = 0
+
+        for idx, table in enumerate(tables):
+            table_number = idx + 1
+            result = await _format_single_table(genai_client, table, table_number)
+            if result:
+                all_markdown.append(result)
+                success_count += 1
+            else:
+                fail_count += 1
+
+        logger.info(f"📊 [GEMINI_TABLES] Results: {success_count} succeeded, {fail_count} failed out of {len(tables)}")
+
+        if not all_markdown:
+            logger.error("❌ [GEMINI_TABLES] All tables failed to format")
+            return {"tables_markdown": "", "error": "All tables failed"}
+
+        # Combine all formatted tables
+        combined_markdown = "\n\n".join(all_markdown)
+        logger.info(f"✅ [GEMINI_TABLES] Combined markdown: {len(combined_markdown)} chars")
+
+        logger.info("=" * 80)
+        logger.info("✅ [GEMINI_TABLES] === END TABLE FORMATTING - SUCCESS ===")
+        logger.info("=" * 80)
+        return {
+            "tables_markdown": combined_markdown,
+            "format": "markdown_kv"
+        }
 
     except Exception as e:
         logger.error(f"❌ [GEMINI_TABLES] Unexpected error: {e}")
-        logger.error(f"[GEMINI_TABLES] Error type: {type(e).__name__}")
         import traceback
         logger.error(f"[GEMINI_TABLES] Traceback:\n{traceback.format_exc()}")
         logger.info("=" * 80)
