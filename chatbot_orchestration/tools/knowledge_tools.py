@@ -505,6 +505,30 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                     gm = candidate.grounding_metadata
                     logger.info(f"  - Grounding metadata attributes: {dir(gm)}")
                     logger.info(f"  - Grounding metadata: {gm}")
+                    
+                    # Log grounding_chunks details
+                    if hasattr(gm, 'grounding_chunks') and gm.grounding_chunks:
+                        logger.info(f"  - Number of grounding_chunks: {len(gm.grounding_chunks)}")
+                        for j, chunk in enumerate(gm.grounding_chunks):
+                            logger.info(f"    Chunk {j}:")
+                            logger.info(f"      Type: {type(chunk).__name__}")
+                            if hasattr(chunk, 'retrieved_context'):
+                                ctx = chunk.retrieved_context
+                                logger.info(f"      retrieved_context.title: {getattr(ctx, 'title', 'N/A')}")
+                                logger.info(f"      retrieved_context.uri: {getattr(ctx, 'uri', 'N/A')}")
+                            if hasattr(chunk, 'web'):
+                                logger.info(f"      web.uri: {getattr(chunk.web, 'uri', 'N/A')}")
+                    
+                    # Log grounding_supports details
+                    if hasattr(gm, 'grounding_supports') and gm.grounding_supports:
+                        logger.info(f"  - Number of grounding_supports: {len(gm.grounding_supports)}")
+                        for j, support in enumerate(gm.grounding_supports):
+                            logger.info(f"    Support {j}:")
+                            logger.info(f"      grounding_chunk_indices: {getattr(support, 'grounding_chunk_indices', 'N/A')}")
+                            if hasattr(support, 'segment'):
+                                seg = support.segment
+                                logger.info(f"      segment.start_index: {getattr(seg, 'start_index', 'N/A')}")
+                                logger.info(f"      segment.end_index: {getattr(seg, 'end_index', 'N/A')}")
         logger.info("=" * 80)
 
         # Extract source URLs from grounding metadata
@@ -518,21 +542,30 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         # Phase 1: Collect all document titles from grounding chunks
         all_doc_titles = []
         if citations_enabled and hasattr(response, 'candidates'):
+            logger.info(f"📎 [CITATION] Phase 1: Collecting document titles from grounding chunks...")
             for candidate in response.candidates:
                 if hasattr(candidate, 'grounding_metadata'):
                     grounding = candidate.grounding_metadata
                     if hasattr(grounding, 'grounding_chunks'):
-                        for chunk in grounding.grounding_chunks:
+                        logger.info(f"📎 [CITATION] Found {len(grounding.grounding_chunks)} grounding chunks")
+                        for chunk_idx, chunk in enumerate(grounding.grounding_chunks):
+                            logger.info(f"📎 [CITATION] Processing chunk {chunk_idx}...")
                             if hasattr(chunk, 'retrieved_context'):
                                 doc_title = getattr(chunk.retrieved_context, 'title', None)
+                                logger.info(f"📎 [CITATION] Chunk {chunk_idx} retrieved_context.title: {doc_title}")
                                 if doc_title and doc_title not in all_doc_titles:
                                     all_doc_titles.append(doc_title)
+                                    logger.info(f"📎 [CITATION] Added title to collection: {doc_title}")
+                            else:
+                                logger.info(f"📎 [CITATION] Chunk {chunk_idx} has no retrieved_context")
+            logger.info(f"📎 [CITATION] Phase 1 complete: Collected {len(all_doc_titles)} unique titles")
 
         # Phase 2: Single batch DB lookup for all titles → URL mapping
         title_to_url = {}
         if all_doc_titles:
             logger.info(f"📎 [CITATION] Batch looking up {len(all_doc_titles)} document titles: {all_doc_titles}")
             title_to_url = await _batch_lookup_urls_by_gemini_file_names(all_doc_titles)
+            logger.info(f"📎 [CITATION] Batch lookup result: {title_to_url}")
 
         # Phase 3: Extract URLs using mapping + fallback strategies (only if citations enabled)
         if citations_enabled and hasattr(response, 'candidates'):
