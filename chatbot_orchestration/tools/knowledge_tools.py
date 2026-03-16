@@ -125,8 +125,9 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
     Batch lookup original source URLs from database using Gemini file display_names.
     Single query for all titles → returns {title: url} mapping.
 
-    Grounding chunks return display_name as retrieved_context.title,
-    and we store it in scraped_websites.gemini_file_name during upload.
+    Handles two title formats:
+    1. gemini_file_name: "fileSearchStores/knowledgebotsearchstore-lsdbiz21ga9m/documents/page68871771998252-c5rsigc7mc1k"
+    2. page title: "page_7127_1773651148" (from retrieved_context.title)
     """
     if not doc_titles:
         return {}
@@ -136,6 +137,7 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
         from sqlalchemy import text
 
         async with get_db_session() as session:
+            # Strategy 1: Try direct match with gemini_file_name
             query = """
                 SELECT gemini_file_name, original_url FROM scraped_websites
                 WHERE gemini_file_name = ANY(:titles)
@@ -144,12 +146,54 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
             """
             result = await session.execute(text(query), {"titles": doc_titles})
             rows = result.fetchall()
-
             url_map = {row[0]: row[1] for row in rows}
-            logger.info(f"📎 [DB_BATCH] Looked up {len(doc_titles)} titles → found {len(url_map)} URLs")
+            
+            logger.info(f"📎 [DB_BATCH] Strategy 1 (gemini_file_name match): Looked up {len(doc_titles)} titles → found {len(url_map)} URLs")
             for title, url in url_map.items():
                 logger.info(f"   📎 {title} → {url}")
 
+            # Strategy 2: For titles that didn't match, try matching by page title pattern
+            unmatched_titles = [t for t in doc_titles if t not in url_map]
+            if unmatched_titles:
+                logger.info(f"📎 [DB_BATCH] Strategy 2: Attempting to match {len(unmatched_titles)} unmatched titles by page pattern...")
+                
+                # Extract page numbers from titles like "page_7127_1773651148"
+                page_patterns = []
+                for title in unmatched_titles:
+                    if title.startswith('page_'):
+                        # Extract the page number (first number after 'page_')
+                        parts = title.split('_')
+                        if len(parts) >= 2:
+                            page_num = parts[1]
+                            page_patterns.append(f"page{page_num}%")
+                            logger.info(f"📎 [DB_BATCH] Extracted page pattern from '{title}': page{page_num}%")
+                
+                if page_patterns:
+                    # Query for gemini_file_names containing these page patterns
+                    placeholders = ','.join([f"'{p}'" for p in page_patterns])
+                    query2 = f"""
+                        SELECT gemini_file_name, original_url FROM scraped_websites
+                        WHERE (gemini_file_name LIKE ANY(ARRAY[{placeholders}]))
+                        AND processing_status != 'deleted'
+                        AND original_url IS NOT NULL
+                    """
+                    result2 = await session.execute(text(query2))
+                    rows2 = result2.fetchall()
+                    
+                    logger.info(f"📎 [DB_BATCH] Strategy 2 found {len(rows2)} matches")
+                    for row in rows2:
+                        gemini_name = row[0]
+                        url = row[1]
+                        # Map both the original title and the gemini_file_name to the URL
+                        for title in unmatched_titles:
+                            if title.startswith('page_'):
+                                parts = title.split('_')
+                                if len(parts) >= 2 and f"page{parts[1]}" in gemini_name:
+                                    url_map[title] = url
+                                    logger.info(f"   📎 {title} → {url} (via page pattern match)")
+                                    break
+
+            logger.info(f"📎 [DB_BATCH] Final result: {len(url_map)} URLs mapped")
             return url_map
     except Exception as e:
         logger.warning(f"⚠️ [DB_BATCH] Error batch looking up URLs: {e}")
@@ -541,6 +585,7 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
 
         # Phase 1: Collect all document titles from grounding chunks
         all_doc_titles = []
+        all_doc_texts = []  # Also collect text snippets for fallback matching
         if citations_enabled and hasattr(response, 'candidates'):
             logger.info(f"📎 [CITATION] Phase 1: Collecting document titles from grounding chunks...")
             for candidate in response.candidates:
@@ -552,10 +597,14 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                             logger.info(f"📎 [CITATION] Processing chunk {chunk_idx}...")
                             if hasattr(chunk, 'retrieved_context'):
                                 doc_title = getattr(chunk.retrieved_context, 'title', None)
+                                doc_text = getattr(chunk.retrieved_context, 'text', None)
                                 logger.info(f"📎 [CITATION] Chunk {chunk_idx} retrieved_context.title: {doc_title}")
+                                logger.info(f"📎 [CITATION] Chunk {chunk_idx} retrieved_context.text length: {len(doc_text) if doc_text else 0}")
                                 if doc_title and doc_title not in all_doc_titles:
                                     all_doc_titles.append(doc_title)
                                     logger.info(f"📎 [CITATION] Added title to collection: {doc_title}")
+                                if doc_text:
+                                    all_doc_texts.append((doc_title, doc_text))
                             else:
                                 logger.info(f"📎 [CITATION] Chunk {chunk_idx} has no retrieved_context")
             logger.info(f"📎 [CITATION] Phase 1 complete: Collected {len(all_doc_titles)} unique titles")
