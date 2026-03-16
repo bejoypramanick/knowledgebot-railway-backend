@@ -157,16 +157,17 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
             if unmatched_titles:
                 logger.info(f"📎 [DB_BATCH] Strategy 2: Attempting to match {len(unmatched_titles)} unmatched titles by page pattern...")
                 
-                # Extract page numbers from titles like "page_7127_1773651148"
+                # Extract page patterns from titles like "page_7127_1773651148"
+                # Remove underscores to get "page71271773651148" for pattern matching
                 page_patterns = []
+                title_to_pattern = {}
                 for title in unmatched_titles:
                     if title.startswith('page_'):
-                        # Extract the page number (first number after 'page_')
-                        parts = title.split('_')
-                        if len(parts) >= 2:
-                            page_num = parts[1]
-                            page_patterns.append(f"page{page_num}%")
-                            logger.info(f"📎 [DB_BATCH] Extracted page pattern from '{title}': page{page_num}%")
+                        # Remove all underscores from the title
+                        pattern = title.replace('_', '')
+                        page_patterns.append(f"%{pattern}%")
+                        title_to_pattern[title] = pattern
+                        logger.info(f"📎 [DB_BATCH] Extracted page pattern from '{title}': %{pattern}%")
                 
                 if page_patterns:
                     # Query for gemini_file_names containing these page patterns
@@ -177,6 +178,7 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
                         AND processing_status != 'deleted'
                         AND original_url IS NOT NULL
                     """
+                    logger.info(f"📎 [DB_BATCH] Strategy 2 query: {query2}")
                     result2 = await session.execute(text(query2))
                     rows2 = result2.fetchall()
                     
@@ -184,14 +186,13 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
                     for row in rows2:
                         gemini_name = row[0]
                         url = row[1]
-                        # Map both the original title and the gemini_file_name to the URL
-                        for title in unmatched_titles:
-                            if title.startswith('page_'):
-                                parts = title.split('_')
-                                if len(parts) >= 2 and f"page{parts[1]}" in gemini_name:
-                                    url_map[title] = url
-                                    logger.info(f"   📎 {title} → {url} (via page pattern match)")
-                                    break
+                        logger.info(f"📎 [DB_BATCH] Found gemini_file_name: {gemini_name} → {url}")
+                        # Map the original title to the URL
+                        for title, pattern in title_to_pattern.items():
+                            if pattern in gemini_name:
+                                url_map[title] = url
+                                logger.info(f"   📎 {title} → {url} (via page pattern match with pattern: {pattern})")
+                                break
 
             logger.info(f"📎 [DB_BATCH] Final result: {len(url_map)} URLs mapped")
             return url_map
