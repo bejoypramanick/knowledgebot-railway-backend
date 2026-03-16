@@ -481,10 +481,10 @@ class ChatLogService:
             if not customer_name:
                 customer_name = f"User-{session_db_id}"
 
-            # Check if assigned to current user using user ID (not email)
-            # Get agent_id directly from query result (already joined in DAO)
-            assigned_agent_id = session_row.get('agent_id') if assigned_agent else None
-            is_assigned_to_me = (assigned_agent_id == current_user_id) if (assigned_agent_id and current_user_id) else False
+            # Check if assigned to current user using numeric IDs only (not email)
+            # Get agent_id directly from SQL join result — independent of email/metadata
+            assigned_agent_id = session_row.get('agent_id')
+            is_assigned_to_me = (assigned_agent_id is not None and current_user_id is not None and assigned_agent_id == current_user_id)
 
             from ..schemas.chat_log_schemas import ChatSessionResponse
             formatted_sessions.append(ChatSessionResponse(
