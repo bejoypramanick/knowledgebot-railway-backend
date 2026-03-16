@@ -504,16 +504,16 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                                         logger.info(f"📎 Extracted URL from context.uri: {doc_url}")
                                         url_found = True
 
-                                # Strategy 2: Check custom_metadata for original_url (web-crawled content)
+                                # Strategy 2: Check custom_metadata for page_url/original_url (web-crawled content)
                                 if not url_found and hasattr(chunk, 'custom_metadata'):
                                     metadata = chunk.custom_metadata
                                     logger.info(f"🔍 Found custom_metadata: {metadata}")
                                     for meta_item in metadata:
-                                        if hasattr(meta_item, 'key') and meta_item.key == 'original_url':
+                                        if hasattr(meta_item, 'key') and meta_item.key in ('page_url', 'original_url'):
                                             doc_url = getattr(meta_item, 'string_value', None)
                                             if doc_url and doc_url not in source_urls:
                                                 source_urls.append(doc_url)
-                                                logger.info(f"📎 Extracted URL from custom_metadata: {doc_url}")
+                                                logger.info(f"📎 Extracted URL from custom_metadata ({meta_item.key}): {doc_url}")
                                                 url_found = True
                                                 break
 

@@ -911,10 +911,12 @@ class ProcessingService:
             raise Exception("Gemini client not configured")
         
         # Use markdown content for Gemini FileStore
-        content = page_data.markdown
+        # Prepend source URL so it's embedded in the document text for citation extraction
+        source_header = f"Source URL: {page_data.page_url}\n\n" if page_data.page_url else ""
+        content = source_header + page_data.markdown
         mime_type = 'text/markdown'
         temp_suffix = '.md'
-        logger.info(f"📋 [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content)} chars")
+        logger.info(f"📋 [MARKDOWN_UPLOAD] Using markdown content for Gemini FileStore: {len(content)} chars (source URL: {page_data.page_url})")
         
         # Create temporary file with appropriate suffix
         fd, temp_file = tempfile.mkstemp(suffix=temp_suffix)
