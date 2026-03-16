@@ -566,44 +566,47 @@ async def public_chat_stream(request: Request):
         headers.pop("host", None)
         headers.pop("authorization", None)
 
-        # Make request to chatbot service
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
-            response = await client.request(
+        # Make request to chatbot service — streaming SSE proxy
+        # No read timeout: first chunk can take a while (RAG search + AI inference)
+        # Chunks are forwarded to the client as they arrive from the backend
+        sse_timeout = httpx.Timeout(connect=10.0, read=None, write=None, pool=None)
+
+        from fastapi.responses import StreamingResponse
+
+        async with httpx.AsyncClient(timeout=sse_timeout, follow_redirects=False) as client:
+            async with client.stream(
                 method=request.method,
                 url=f"{chatbot_service_url}/api/v1/chatbot/chat/stream",
                 headers=headers,
                 content=body_bytes,
-                params=request.query_params
-            )
+            ) as response:
 
-            logger.info(f"✅ [{correlation_id}] Chat stream response: {response.status_code}")
+                logger.info(f"✅ [{correlation_id}] Chat stream connected: {response.status_code}")
 
-            # Filter response headers to prevent internal URL leakage
-            response_headers = {}
-            blocked_headers = [
-                'content-length',
-                'transfer-encoding',
-                'location',
-                'content-location',
-                'host',
-                'server',
-            ]
-            for key, value in response.headers.items():
-                if key.lower() not in blocked_headers:
-                    response_headers[key] = value
+                # Filter response headers to prevent internal URL leakage
+                response_headers = {}
+                blocked_headers = [
+                    'content-length',
+                    'transfer-encoding',
+                    'location',
+                    'content-location',
+                    'host',
+                    'server',
+                ]
+                for key, value in response.headers.items():
+                    if key.lower() not in blocked_headers:
+                        response_headers[key] = value
 
-            # Return streaming response (session UUID is in SSE stream, not header/cookie)
-            from fastapi.responses import StreamingResponse
+                # Forward SSE chunks as they arrive from the backend
+                async def stream_response():
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
 
-            async def stream_response():
-                async for chunk in response.aiter_bytes():
-                    yield chunk
-
-            return StreamingResponse(
-                stream_response(),
-                status_code=response.status_code,
-                headers=response_headers
-            )
+                return StreamingResponse(
+                    stream_response(),
+                    status_code=response.status_code,
+                    headers=response_headers
+                )
 
     except HTTPException:
         raise
