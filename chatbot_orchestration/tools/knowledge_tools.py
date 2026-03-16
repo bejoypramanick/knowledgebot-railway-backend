@@ -120,6 +120,57 @@ async def get_citation_hierarchy(urls: List[str]) -> Dict[str, Any]:
         return build_citation_tree(urls)
 
 
+async def _lookup_url_by_gemini_file_name(doc_title: str) -> Optional[str]:
+    """
+    Look up the original source URL from database using the Gemini file display_name.
+    This is the most reliable citation strategy since grounding chunks return the display_name
+    as retrieved_context.title, and we store it in both scraped_websites.gemini_file_name
+    and file_uploads.gemini_file_name.
+
+    Returns the original_url if found (web content), or None (uploaded files have no URL).
+    """
+    try:
+        from shared.sqlalchemy_db import get_db_session
+        from sqlalchemy import text
+
+        async with get_db_session() as session:
+            # First check scraped_websites (web content has URLs)
+            query = """
+                SELECT original_url FROM scraped_websites
+                WHERE gemini_file_name = :doc_title
+                AND processing_status != 'deleted'
+                AND original_url IS NOT NULL
+                LIMIT 1
+            """
+            result = await session.execute(text(query), {"doc_title": doc_title})
+            row = result.fetchone()
+            if row:
+                url = row[0]
+                logger.info(f"📎 [DB_LOOKUP] Found URL for '{doc_title}': {url}")
+                return url
+
+            # Also try partial match (display_name might have extension stripped)
+            query_like = """
+                SELECT original_url FROM scraped_websites
+                WHERE gemini_file_name LIKE :doc_title_pattern
+                AND processing_status != 'deleted'
+                AND original_url IS NOT NULL
+                LIMIT 1
+            """
+            result = await session.execute(text(query_like), {"doc_title_pattern": f"{doc_title}%"})
+            row = result.fetchone()
+            if row:
+                url = row[0]
+                logger.info(f"📎 [DB_LOOKUP] Found URL via partial match for '{doc_title}': {url}")
+                return url
+
+            logger.info(f"ℹ️ [DB_LOOKUP] No URL found for '{doc_title}' in scraped_websites (likely an uploaded file)")
+            return None
+    except Exception as e:
+        logger.warning(f"⚠️ [DB_LOOKUP] Error looking up URL for '{doc_title}': {e}")
+        return None
+
+
 async def _perform_rag_search(session_id: str, query: str) -> str:
     """
     Internal RAG search function - pure business logic with no RunContext dependency.
@@ -496,8 +547,18 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                                 if doc_title:
                                     logger.info(f"📄 Found document title: {doc_title}")
 
+                                # PRIMARY STRATEGY: Database lookup by gemini_file_name
+                                # Most reliable - looks up original_url from scraped_websites table
+                                # using the Gemini display_name (stored as gemini_file_name in DB)
+                                if not url_found and doc_title:
+                                    db_url = await _lookup_url_by_gemini_file_name(doc_title)
+                                    if db_url and db_url not in source_urls:
+                                        source_urls.append(db_url)
+                                        logger.info(f"📎 [DB_STRATEGY] Found URL via DB lookup: {db_url}")
+                                        url_found = True
+
                                 # Strategy 1: Check if context has URI field (like web search)
-                                if hasattr(context, 'uri'):
+                                if not url_found and hasattr(context, 'uri'):
                                     doc_url = context.uri
                                     if doc_url and doc_url not in source_urls:
                                         source_urls.append(doc_url)
