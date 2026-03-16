@@ -141,73 +141,78 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
             logger.info(f"📎 [DB_BATCH] Starting batch lookup for {len(doc_titles)} titles")
             logger.info(f"📎 [DB_BATCH] Doc titles: {doc_titles}")
             
-            # Strategy 1: Try direct match with gemini_file_name
-            query = """
-                SELECT gemini_file_name, original_url FROM scraped_websites
-                WHERE gemini_file_name = ANY(:titles)
-                AND processing_status != 'deleted'
-                AND original_url IS NOT NULL
-            """
-            logger.info(f"📎 [DB_BATCH] Strategy 1 query: {query}")
-            logger.info(f"📎 [DB_BATCH] Strategy 1 params: titles={doc_titles}")
-            result = await session.execute(text(query), {"titles": doc_titles})
-            rows = result.fetchall()
-            url_map = {row[0]: row[1] for row in rows}
+            url_map = {}
             
-            logger.info(f"📎 [DB_BATCH] Strategy 1 (gemini_file_name match): Looked up {len(doc_titles)} titles → found {len(url_map)} URLs")
-            for title, url in url_map.items():
-                logger.info(f"   📎 {title} → {url}")
-
-            # Strategy 2: For titles that didn't match, try matching by page title pattern
-            unmatched_titles = [t for t in doc_titles if t not in url_map]
-            if unmatched_titles:
-                logger.info(f"📎 [DB_BATCH] Strategy 2: Attempting to match {len(unmatched_titles)} unmatched titles by page pattern...")
-                logger.info(f"📎 [DB_BATCH] Unmatched titles: {unmatched_titles}")
+            # For each title, try to find the URL
+            for title in doc_titles:
+                logger.info(f"📎 [DB_BATCH] Processing title: {title}")
                 
-                # Extract page patterns from titles like "page_7127_1773651148"
-                # Remove underscores to get "page71271773651148" for pattern matching
-                page_patterns = []
-                title_to_pattern = {}
-                for title in unmatched_titles:
-                    if title.startswith('page_'):
-                        # Remove all underscores from the title
-                        pattern = title.replace('_', '')
-                        page_patterns.append(f"%{pattern}%")
-                        title_to_pattern[title] = pattern
-                        logger.info(f"📎 [DB_BATCH] Extracted page pattern from '{title}': %{pattern}%")
-                    else:
-                        logger.info(f"📎 [DB_BATCH] Title '{title}' does not start with 'page_', skipping pattern extraction")
+                # Strategy 1: Direct match with gemini_file_name
+                query1 = """
+                    SELECT gemini_file_name, original_url FROM scraped_websites
+                    WHERE gemini_file_name = :title
+                    AND processing_status != 'deleted'
+                    AND original_url IS NOT NULL
+                    LIMIT 1
+                """
+                logger.info(f"📎 [DB_BATCH] Strategy 1 (direct match): {query1}")
+                result1 = await session.execute(text(query1), {"title": title})
+                row1 = result1.fetchone()
                 
-                if page_patterns:
-                    # Query for gemini_file_names containing these page patterns using parameterized query
+                if row1:
+                    url_map[title] = row1[1]
+                    logger.info(f"📎 [DB_BATCH] ✅ Strategy 1 MATCH: {title} → {row1[1]}")
+                    continue
+                
+                # Strategy 2: Pattern match for page titles
+                if title.startswith('page_'):
+                    pattern = title.replace('_', '')
+                    pattern_like = f"%{pattern}%"
+                    logger.info(f"📎 [DB_BATCH] Strategy 2 (pattern match): Searching for pattern: {pattern_like}")
+                    
                     query2 = """
                         SELECT gemini_file_name, original_url FROM scraped_websites
-                        WHERE gemini_file_name LIKE ANY(:patterns)
+                        WHERE gemini_file_name LIKE :pattern
                         AND processing_status != 'deleted'
                         AND original_url IS NOT NULL
+                        LIMIT 1
                     """
                     logger.info(f"📎 [DB_BATCH] Strategy 2 query: {query2}")
-                    logger.info(f"📎 [DB_BATCH] Strategy 2 query with patterns: {page_patterns}")
-                    logger.info(f"📎 [DB_BATCH] Title to pattern mapping: {title_to_pattern}")
-                    result2 = await session.execute(text(query2), {"patterns": page_patterns})
-                    rows2 = result2.fetchall()
+                    result2 = await session.execute(text(query2), {"pattern": pattern_like})
+                    row2 = result2.fetchone()
                     
-                    logger.info(f"📎 [DB_BATCH] Strategy 2 found {len(rows2)} matches")
-                    for row in rows2:
-                        gemini_name = row[0]
-                        url = row[1]
-                        logger.info(f"📎 [DB_BATCH] Found gemini_file_name: {gemini_name} → {url}")
-                        # Map the original title to the URL
-                        for title, pattern in title_to_pattern.items():
-                            logger.info(f"📎 [DB_BATCH] Checking if pattern '{pattern}' is in gemini_name '{gemini_name}'")
-                            if pattern in gemini_name:
-                                url_map[title] = url
-                                logger.info(f"   📎 ✅ MATCH: {title} → {url} (via page pattern match with pattern: {pattern})")
-                                break
-                            else:
-                                logger.info(f"   📎 ❌ NO MATCH: pattern '{pattern}' not found in '{gemini_name}'")
-                else:
-                    logger.info(f"📎 [DB_BATCH] No page patterns extracted from unmatched titles")
+                    if row2:
+                        url_map[title] = row2[1]
+                        logger.info(f"📎 [DB_BATCH] ✅ Strategy 2 MATCH: {title} → {row2[1]} (via pattern {pattern_like})")
+                        continue
+                    else:
+                        logger.info(f"📎 [DB_BATCH] ❌ Strategy 2 NO MATCH: pattern {pattern_like} not found")
+                
+                # Strategy 3: Check all scraped_websites to see what's available
+                logger.info(f"📎 [DB_BATCH] Strategy 3 (debug): Checking available gemini_file_names in database...")
+                query3 = """
+                    SELECT COUNT(*) FROM scraped_websites
+                    WHERE processing_status != 'deleted'
+                    AND original_url IS NOT NULL
+                """
+                result3 = await session.execute(text(query3))
+                count = result3.scalar()
+                logger.info(f"📎 [DB_BATCH] Total scraped_websites records: {count}")
+                
+                # Get a sample of gemini_file_names
+                query4 = """
+                    SELECT gemini_file_name, original_url FROM scraped_websites
+                    WHERE processing_status != 'deleted'
+                    AND original_url IS NOT NULL
+                    LIMIT 5
+                """
+                result4 = await session.execute(text(query4))
+                samples = result4.fetchall()
+                logger.info(f"📎 [DB_BATCH] Sample gemini_file_names from database:")
+                for sample in samples:
+                    logger.info(f"   - {sample[0]} → {sample[1]}")
+                
+                logger.info(f"📎 [DB_BATCH] ❌ NO MATCH for title: {title}")
 
             logger.info(f"📎 [DB_BATCH] Final result: {len(url_map)} URLs mapped")
             logger.info(f"📎 [DB_BATCH] Final URL map: {url_map}")
