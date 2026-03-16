@@ -506,6 +506,22 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
             logger.info(f"... [truncated, total {len(response_text)} chars]")
         logger.info("=" * 100)
         
+        # Strip out Gemini's HTML citations (e.g., <sup id="cite_ref-3"><a href="#cite_note-3">[3]</a></sup>)
+        # These will be replaced with our own [CITATION_SOURCES] section
+        logger.info("📎 [CITATION] Stripping Gemini's HTML citations from response...")
+        original_response_text = response_text
+        # Remove HTML citation markers like <sup id="cite_ref-X">...</sup>
+        response_text = re.sub(r'<sup[^>]*id="cite_ref-\d+"[^>]*>.*?</sup>', '', response_text, flags=re.DOTALL)
+        # Remove citation footnotes section like <div id="cite_note-1">...</div>
+        response_text = re.sub(r'<div[^>]*id="cite_note-\d+"[^>]*>.*?</div>', '', response_text, flags=re.DOTALL)
+        # Remove any remaining <a href="#cite_note-X"> links
+        response_text = re.sub(r'<a[^>]*href="#cite_note-\d+"[^>]*>.*?</a>', '', response_text, flags=re.DOTALL)
+        
+        if original_response_text != response_text:
+            logger.info(f"📎 [CITATION] Stripped HTML citations. Length before: {len(original_response_text)}, after: {len(response_text)}")
+        else:
+            logger.info(f"📎 [CITATION] No HTML citations found to strip")
+        
         # Track token usage from Gemini API response
         try:
             from ..core.token_tracker import track_gemini_usage_from_response
