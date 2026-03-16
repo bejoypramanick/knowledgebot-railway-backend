@@ -83,7 +83,7 @@ class FileUploadDAO:
                 file_size = :file_size,
                 char_count = :char_count,
                 sha256_hash = :sha256_hash,
-                metadata = :metadata::jsonb,
+                metadata = CAST(:metadata AS jsonb),
                 processed_by_docling = :processed_by_docling,
                 docling_processing_time_ms = :docling_processing_time_ms,
                 docling_images_extracted = :docling_images_extracted,

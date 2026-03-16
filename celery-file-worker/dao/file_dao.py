@@ -74,7 +74,7 @@ class FileDAO:
                 :user_id, :original_filename, :file_display_name, :size_bytes,
                 :mime_type, :processing_status, :gemini_file_name, :gemini_file_uri,
                 :gemini_state, :gemini_processed_at, :source, :sha256_hash,
-                :file_search_metadata::jsonb, NOW()
+                CAST(:file_search_metadata AS jsonb), NOW()
             ) RETURNING id
         """
         params = {

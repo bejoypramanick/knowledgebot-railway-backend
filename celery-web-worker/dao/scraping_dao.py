@@ -131,7 +131,7 @@ class ScrapingDAO:
                 user_role_id, original_url, processing_status, metadata,
                 created_at, updated_at
             ) VALUES (
-                :user_role_id, :original_url, :processing_status, :metadata::jsonb,
+                :user_role_id, :original_url, :processing_status, CAST(:metadata AS jsonb),
                 NOW(), NOW()
             ) RETURNING id
         """
@@ -316,7 +316,7 @@ class ScrapingDAO:
                 created_at, updated_at
             ) VALUES (
                 :parent_id, :page_url, :processing_status,
-                :gemini_file_name, :gemini_file_uri, :metadata::jsonb, :depth, :user_role_id,
+                :gemini_file_name, :gemini_file_uri, CAST(:metadata AS jsonb), :depth, :user_role_id,
                 :file_size, :char_count, :title, :description, :crawl_session_id,
                 :pages_scraped, :processed_content_s3_key,
                 NOW(), NOW()
@@ -496,7 +496,7 @@ class ScrapingDAO:
                     description = :description,
                     crawl_session_id = :crawl_session_id,
                     pages_scraped = :pages_scraped,
-                    metadata = :metadata::jsonb,
+                    metadata = CAST(:metadata AS jsonb),
                     processed_content_s3_key = :processed_content_s3_key,
                     processing_status = 'completed',
                     updated_at = NOW()
@@ -514,7 +514,7 @@ class ScrapingDAO:
                     description = :description,
                     crawl_session_id = :crawl_session_id,
                     pages_scraped = :pages_scraped,
-                    metadata = :metadata::jsonb,
+                    metadata = CAST(:metadata AS jsonb),
                     processed_content_s3_key = :processed_content_s3_key,
                     updated_at = NOW()
                 WHERE id = :website_id
