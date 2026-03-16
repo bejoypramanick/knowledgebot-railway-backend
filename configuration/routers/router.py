@@ -1525,7 +1525,26 @@ async def send_agent_message(request: Request):
             raise HTTPException(status_code=404, detail=f"Session {numeric_session_id} not found")
         logger.info(f"🔍 [SEND_MESSAGE] Numeric ID: {numeric_session_id}, UUID: {session_uuid}")
 
-        # Save message to database
+        # Authorization check BEFORE saving — all lookups are Redis-cached
+        if sender_type == "agent":
+            # Get assigned agent ID via service (Redis cache + DB fallback)
+            assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, numeric_session_id)
+
+            # Compare numeric IDs for authorization
+            if sender_id_int != assigned_agent_id:
+                # Fetch admin IDs via service (Redis cache + DB fallback)
+                admin_ids = await chat_log_service.get_admin_ids_cached()
+                is_sender_admin = sender_id_int in admin_ids
+                if is_sender_admin:
+                    logger.warning(f"⚠️ Admin ID {sender_id_int} attempted to reply to session {numeric_session_id} assigned to agent ID {assigned_agent_id}")
+                    raise HTTPException(status_code=403, detail="Only the assigned agent can reply to this chat. You can view messages as read-only.")
+                else:
+                    logger.warning(f"⚠️ User ID {sender_id_int} attempted to send message to session {numeric_session_id} assigned to agent ID {assigned_agent_id}")
+                    raise HTTPException(status_code=403, detail="Only the assigned agent can send messages to this chat")
+
+            logger.info(f"✅ Authorization check passed: ID {sender_id_int} is assigned to session {numeric_session_id}")
+
+        # Save message to database (only after auth passes)
         message_id = await chat_log_service.send_agent_message(numeric_session_id, sender_email, text)
 
         # Prepare event data
@@ -1546,23 +1565,8 @@ async def send_agent_message(request: Request):
             event_data["agent_id"] = sender_id_int
             event_data["agent_email"] = mask_email(sender_email) if sender_email else None
 
-            # Get assigned agent ID via service (Redis cache + DB fallback)
-            assigned_agent_id = await chat_log_service.get_assigned_agent_id_cached(session_uuid, numeric_session_id)
-
-            # Fetch admin IDs once via service (Redis cache + DB fallback)
+            # Fetch admin IDs for broadcast logic (reuse if already fetched above)
             admin_ids = await chat_log_service.get_admin_ids_cached()
-
-            # Compare numeric IDs for authorization
-            if sender_id_int != assigned_agent_id:
-                is_sender_admin = sender_id_int in admin_ids
-                if is_sender_admin:
-                    logger.warning(f"⚠️ Admin ID {sender_id_int} attempted to reply to session {numeric_session_id} assigned to agent ID {assigned_agent_id}")
-                    raise HTTPException(status_code=403, detail="Only the assigned agent can reply to this chat. You can view messages as read-only.")
-                else:
-                    logger.warning(f"⚠️ User ID {sender_id_int} attempted to send message to session {numeric_session_id} assigned to agent ID {assigned_agent_id}")
-                    raise HTTPException(status_code=403, detail="Only the assigned agent can send messages to this chat")
-
-            logger.info(f"✅ Authorization check passed: ID {sender_id_int} is assigned to session {numeric_session_id}")
 
             # Broadcast to customer
             await broadcast_event_to_session(session_uuid, event_data)
