@@ -462,7 +462,10 @@ async def update_widget_config(
                 config_data['chat_icon_filename'] = None
 
             # Update widget config
+            logger.info("📞 [Router] About to call config_service.update_widget_config(config_data) for multipart")
+            logger.info(f"📞 [Router] config_data contains suggested_messages: {'suggested_messages' in config_data}")
             await config_service.update_widget_config(config_data)
+            logger.info("📞 [Router] config_service.update_widget_config(config_data) completed successfully for multipart")
             return {"success": True, "message": "Widget configuration updated successfully with images"}
 
         else:
@@ -500,7 +503,10 @@ async def update_widget_config(
                 body['chat_icon_url'] = None
                 body['chat_icon_filename'] = None
 
+            logger.info("📞 [Router] About to call config_service.update_widget_config(body)")
+            logger.info(f"📞 [Router] Body contains suggested_messages: {'suggested_messages' in body}")
             await config_service.update_widget_config(body)
+            logger.info("📞 [Router] config_service.update_widget_config(body) completed successfully")
             return {"success": True, "message": "Widget configuration updated successfully"}
 
     except json.JSONDecodeError as e:

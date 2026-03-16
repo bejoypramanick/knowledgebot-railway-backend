@@ -130,6 +130,7 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
     2. page title: "page_7127_1773651148" (from retrieved_context.title)
     """
     if not doc_titles:
+        logger.info(f"📎 [DB_BATCH] Empty doc_titles list provided")
         return {}
 
     try:
@@ -137,6 +138,9 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
         from sqlalchemy import text
 
         async with get_db_session() as session:
+            logger.info(f"📎 [DB_BATCH] Starting batch lookup for {len(doc_titles)} titles")
+            logger.info(f"📎 [DB_BATCH] Doc titles: {doc_titles}")
+            
             # Strategy 1: Try direct match with gemini_file_name
             query = """
                 SELECT gemini_file_name, original_url FROM scraped_websites
@@ -144,6 +148,8 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
                 AND processing_status != 'deleted'
                 AND original_url IS NOT NULL
             """
+            logger.info(f"📎 [DB_BATCH] Strategy 1 query: {query}")
+            logger.info(f"📎 [DB_BATCH] Strategy 1 params: titles={doc_titles}")
             result = await session.execute(text(query), {"titles": doc_titles})
             rows = result.fetchall()
             url_map = {row[0]: row[1] for row in rows}
@@ -156,6 +162,7 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
             unmatched_titles = [t for t in doc_titles if t not in url_map]
             if unmatched_titles:
                 logger.info(f"📎 [DB_BATCH] Strategy 2: Attempting to match {len(unmatched_titles)} unmatched titles by page pattern...")
+                logger.info(f"📎 [DB_BATCH] Unmatched titles: {unmatched_titles}")
                 
                 # Extract page patterns from titles like "page_7127_1773651148"
                 # Remove underscores to get "page71271773651148" for pattern matching
@@ -168,6 +175,8 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
                         page_patterns.append(f"%{pattern}%")
                         title_to_pattern[title] = pattern
                         logger.info(f"📎 [DB_BATCH] Extracted page pattern from '{title}': %{pattern}%")
+                    else:
+                        logger.info(f"📎 [DB_BATCH] Title '{title}' does not start with 'page_', skipping pattern extraction")
                 
                 if page_patterns:
                     # Query for gemini_file_names containing these page patterns using parameterized query
@@ -177,6 +186,7 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
                         AND processing_status != 'deleted'
                         AND original_url IS NOT NULL
                     """
+                    logger.info(f"📎 [DB_BATCH] Strategy 2 query: {query2}")
                     logger.info(f"📎 [DB_BATCH] Strategy 2 query with patterns: {page_patterns}")
                     logger.info(f"📎 [DB_BATCH] Title to pattern mapping: {title_to_pattern}")
                     result2 = await session.execute(text(query2), {"patterns": page_patterns})
@@ -196,11 +206,14 @@ async def _batch_lookup_urls_by_gemini_file_names(doc_titles: List[str]) -> Dict
                                 break
                             else:
                                 logger.info(f"   📎 ❌ NO MATCH: pattern '{pattern}' not found in '{gemini_name}'")
+                else:
+                    logger.info(f"📎 [DB_BATCH] No page patterns extracted from unmatched titles")
 
             logger.info(f"📎 [DB_BATCH] Final result: {len(url_map)} URLs mapped")
+            logger.info(f"📎 [DB_BATCH] Final URL map: {url_map}")
             return url_map
     except Exception as e:
-        logger.warning(f"⚠️ [DB_BATCH] Error batch looking up URLs: {e}", exc_info=True)
+        logger.error(f"❌ [DB_BATCH] Error batch looking up URLs: {e}", exc_info=True)
         return {}
 
 
@@ -592,9 +605,14 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         all_doc_texts = []  # Also collect text snippets for fallback matching
         if citations_enabled and hasattr(response, 'candidates'):
             logger.info(f"📎 [CITATION] Phase 1: Collecting document titles from grounding chunks...")
-            for candidate in response.candidates:
+            logger.info(f"📎 [CITATION] Response has candidates: {hasattr(response, 'candidates')}")
+            logger.info(f"📎 [CITATION] Number of candidates: {len(response.candidates) if hasattr(response, 'candidates') else 0}")
+            
+            for candidate_idx, candidate in enumerate(response.candidates):
+                logger.info(f"📎 [CITATION] Processing candidate {candidate_idx}...")
                 if hasattr(candidate, 'grounding_metadata'):
                     grounding = candidate.grounding_metadata
+                    logger.info(f"📎 [CITATION] Candidate {candidate_idx} has grounding_metadata")
                     if hasattr(grounding, 'grounding_chunks'):
                         logger.info(f"📎 [CITATION] Found {len(grounding.grounding_chunks)} grounding chunks")
                         for chunk_idx, chunk in enumerate(grounding.grounding_chunks):
@@ -611,7 +629,14 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                                     all_doc_texts.append((doc_title, doc_text))
                             else:
                                 logger.info(f"📎 [CITATION] Chunk {chunk_idx} has no retrieved_context")
+                    else:
+                        logger.info(f"📎 [CITATION] Candidate {candidate_idx} has no grounding_chunks")
+                else:
+                    logger.info(f"📎 [CITATION] Candidate {candidate_idx} has no grounding_metadata")
             logger.info(f"📎 [CITATION] Phase 1 complete: Collected {len(all_doc_titles)} unique titles")
+            logger.info(f"📎 [CITATION] All doc titles: {all_doc_titles}")
+        else:
+            logger.info(f"📎 [CITATION] Phase 1 skipped: citations_enabled={citations_enabled}, has_candidates={hasattr(response, 'candidates')}")
 
         # Phase 2: Single batch DB lookup for all titles → URL mapping
         title_to_url = {}
@@ -740,6 +765,15 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
 
         # Append source URLs to content for citation
         enhanced_content = cited_response
+        logger.info("=" * 80)
+        logger.info("📎 CITATION APPENDING DECISION")
+        logger.info("=" * 80)
+        logger.info(f"📎 source_urls list: {source_urls}")
+        logger.info(f"📎 source_urls length: {len(source_urls)}")
+        logger.info(f"📎 citations_enabled: {citations_enabled}")
+        logger.info(f"📎 Will append citations: {bool(source_urls)}")
+        logger.info("=" * 80)
+        
         if source_urls:
             # Include flat list for frontend citationMapping
             citation_section = "\n\n[CITATION_SOURCES]"
@@ -759,6 +793,8 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         else:
             if citations_enabled:
                 logger.warning("⚠️ No source URLs found - no citations appended!")
+            else:
+                logger.info("ℹ️ Citations disabled - skipping citation appending")
             # Still include the response text even without citations
 
         # Check if response is meaningful or empty
