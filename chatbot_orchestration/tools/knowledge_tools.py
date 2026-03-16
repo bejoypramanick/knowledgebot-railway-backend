@@ -737,10 +737,12 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
             enhanced_content += citation_section
             logger.info(f"📎 Appended {len(source_urls)} source URL(s) to content")
             logger.info("=" * 80)
-            logger.info("📎 CITATIONS:")
+            logger.info("📎 CITATIONS APPENDED:")
             for i, url in enumerate(source_urls, 1):
                 logger.info(f"  [{i}] {url}")
             logger.info("=" * 80)
+            logger.info(f"📎 Citation section:\n{citation_section}")
+            logger.info(f"📎 Enhanced content length: {len(enhanced_content)} chars")
         else:
             if citations_enabled:
                 logger.warning("⚠️ No source URLs found - no citations appended!")
@@ -761,7 +763,10 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         logger.info(f"✅ Internal RAG search completed: _perform_rag_search (returned {len(enhanced_content)} chars)")
         logger.info("=" * 80)
         logger.info("📦 FINAL ENHANCED CONTENT (with citations):")
-        logger.info(enhanced_content)
+        logger.info(f"First 500 chars: {enhanced_content[:500]}")
+        logger.info(f"Last 500 chars: {enhanced_content[-500:]}")
+        logger.info(f"Total length: {len(enhanced_content)} chars")
+        logger.info(f"Contains [CITATION_SOURCES]: {'[CITATION_SOURCES]' in enhanced_content}")
         logger.info("=" * 80)
         return enhanced_content
 
