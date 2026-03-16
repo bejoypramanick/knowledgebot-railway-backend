@@ -677,6 +677,15 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                     source_urls.append(url)
                     logger.info(f"📄 Extracted URL from response text: {url}")
 
+        logger.info("=" * 80)
+        logger.info("📎 CITATION EXTRACTION SUMMARY")
+        logger.info("=" * 80)
+        logger.info(f"📎 Citations enabled: {citations_enabled}")
+        logger.info(f"📎 Source URLs found: {len(source_urls)}")
+        logger.info(f"📎 Source URLs: {source_urls}")
+        logger.info(f"📎 Title to URL mapping: {title_to_url}")
+        logger.info("=" * 80)
+
         # Insert inline citation markers [1], [2] using grounding_supports
         # grounding_supports maps text segments → chunk indices, and we have chunk → URL
         cited_response = response_text
