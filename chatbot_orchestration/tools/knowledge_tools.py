@@ -912,18 +912,17 @@ async def request_human_agent_connection(
                             if not customer_name:
                                 customer_name = f"User-{session_numeric_id}"
                             
-                            from shared.email_masking import mask_email
                             session_event = {
                                 "type": "session_update",
                                 "data": {
                                     "id": str(session_dict.get('id')),
                                     "session_uuid": session_uuid,
                                     "customer_name": customer_name,  # Use generated name if not in DB
-                                    "customer_email": mask_email(session_dict.get('customer_email')) if session_dict.get('customer_email') else None,
+                                    "customer_email": session_dict.get('customer_email'),
                                     "status": session_dict.get('archive_status', 'active'),
                                     "last_message_at": session_dict.get('last_activity_at').isoformat() if session_dict.get('last_activity_at') else datetime.utcnow().isoformat(),
                                     "created_at": session_dict.get('created_at').isoformat() if session_dict.get('created_at') else None,
-                                    "assigned_agent": mask_email(assigned_agent_email) if assigned_agent_email else None,
+                                    "assigned_agent": assigned_agent_email,
                                     "assigned_agent_id": assigned_agent_id,
                                     "feedback": None,
                                     "customer_feedback": None,

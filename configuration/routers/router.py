@@ -11,7 +11,6 @@ import asyncio
 
 from shared.otel_logger import get_otel_logger, clear_admin_context
 from shared.admin_audit import audit_action
-from shared.email_masking import mask_email
 from configuration.core.railway_storage import railway_storage
 from ..service.configuration_service import ConfigurationService
 from ..dao.admin_session_dao import AdminSessionDAO
@@ -952,7 +951,7 @@ async def agent_events_stream(request: Request, user: dict = Depends(get_current
 
                 # Send initial connection established event immediately
                 # This ensures the browser receives a response and the SSE connection is established
-                yield f"data: {json.dumps({'type': 'connected', 'agent_email': mask_email(user_email) if user_email else None, 'agent_id': user_id, 'role': user_role, 'timestamp': int(time.time())})}\n\n"
+                yield f"data: {json.dumps({'type': 'connected', 'agent_email': user_email, 'agent_id': user_id, 'role': user_role, 'timestamp': int(time.time())})}\n\n"
 
                 # Yield messages from queue
                 try:
@@ -1563,7 +1562,7 @@ async def send_agent_message(request: Request):
 
         if sender_type == "agent":
             event_data["agent_id"] = sender_id_int
-            event_data["agent_email"] = mask_email(sender_email) if sender_email else None
+            event_data["agent_email"] = sender_email
 
             # Fetch admin IDs for broadcast logic (reuse if already fetched above)
             admin_ids = await chat_log_service.get_admin_ids_cached()
@@ -1654,7 +1653,7 @@ async def end_agent_session(request: Request):
             "session_id": session_uuid,      # Use UUID for SSE channel matching
             "numeric_session_id": numeric_session_id,
             "ended_by": "agent",
-            "agent_email": mask_email(user_email) if user_email else None,
+            "agent_email": user_email,
             "show_feedback": True,  # Trigger feedback UI for customer
             "timestamp": datetime.datetime.utcnow().isoformat()
         }
@@ -2180,9 +2179,9 @@ async def get_user_profile(user: dict = Depends(get_current_user)):
         logger.info("[TRANSFORM] Building user profile object")
         profile = {
             "id": user_numeric_id,  # Numeric DB ID for authorization comparisons
-            "email": mask_email(user.get("email")),
+            "email": user.get("email"),
             "uid": user.get("uid"),
-            "display_name": user.get("name") or mask_email(user.get("email")),  # Frontend expects display_name
+            "display_name": user.get("name") or user.get("email"),  # Frontend expects display_name
             "photo_url": user.get("picture"),  # Frontend expects photo_url
             "role": primary_role,
             "roles": user_roles,  # Include all roles for frontend

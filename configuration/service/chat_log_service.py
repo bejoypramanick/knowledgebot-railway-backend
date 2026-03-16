@@ -7,8 +7,6 @@ from fastapi import HTTPException
 from configuration.dao.chat_log_dao import ChatLogDAO
 from configuration.dao.auth_dao import AuthDAO
 from shared.otel_logger import get_otel_logger
-from shared.email_masking import mask_email
-
 logger = get_otel_logger("chat_log_service", "configuration")
 
 # Import Redis Pub/Sub broadcast functions
@@ -201,7 +199,7 @@ class ChatLogService:
                 "type": "chat_assigned",
                 "session_id": session_uuid,  # CRITICAL: Use UUID for SSE channel matching
                 "numeric_session_id": str(session_db_id),  # Include numeric ID for reference
-                "agent_email": mask_email(agent_email) if agent_email else None,
+                "agent_email": agent_email,
                 "agent_id": agent_id,
                 "assignee_type": assignee_type,
                 "status": "active",
@@ -491,11 +489,11 @@ class ChatLogService:
                 id=str(session_db_id),
                 session_uuid=session_id,  # Include the UUID for frontend to use in mark-read/unread calls
                 customer_name=customer_name,  # Use generated name if not in metadata
-                customer_email=mask_email(metadata.get('customer_email')) if metadata.get('customer_email') else None,
+                customer_email=metadata.get('customer_email'),
                 status=status,
                 last_message_at=session_row['last_activity_at'].isoformat() if session_row['last_activity_at'] else datetime.utcnow().isoformat(),
                 created_at=session_row['created_at'].isoformat() if session_row['created_at'] else None,
-                assigned_agent=mask_email(assigned_agent) if assigned_agent else None,
+                assigned_agent=assigned_agent,
                 assigned_agent_id=assigned_agent_id,  # Numeric ID for comparison (not masked)
                 is_assigned_to_me=is_assigned_to_me,
                 feedback=session_feedback,

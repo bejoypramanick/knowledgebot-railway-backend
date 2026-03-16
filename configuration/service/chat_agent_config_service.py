@@ -5,7 +5,6 @@ Provides business logic layer for chat agent configuration operations
 from typing import Any, Dict, List, Optional
 
 from shared.otel_logger import get_otel_logger
-from shared.email_masking import mask_email
 from configuration.dao.chat_agent_config_dao import ChatAgentConfigDAO
 
 logger = get_otel_logger("chat_agent_config_service", "configuration")
@@ -86,8 +85,8 @@ class ChatAgentConfigService:
 
             # Build response with {id, masked_email} pairs for display + operations
             response = {
-                "admin_emails": [{"id": item["id"], "email": mask_email(item["email"])} for item in admin_emails_list],
-                "human_agents": [{"id": item["id"], "email": mask_email(item["email"])} for item in human_agents_list],
+                "admin_emails": [{"id": item["id"], "email": item["email"]} for item in admin_emails_list],
+                "human_agents": [{"id": item["id"], "email": item["email"]} for item in human_agents_list],
                 "security": security,
                 "llm_tokens": llm_tokens,
                 "persona": persona_config,
@@ -298,19 +297,19 @@ class ChatAgentConfigService:
             raise
 
     async def get_human_agents(self) -> List[Dict]:
-        """Get human agents list with {id, masked_email} for display"""
+        """Get human agents list with {id, email} for display"""
         try:
             agents = await self._chatAgent_dao.get_human_agents()
-            return [{"id": a["id"], "email": mask_email(a["email"])} for a in agents]
+            return [{"id": a["id"], "email": a["email"]} for a in agents]
         except Exception as e:
             logger.error(f"Error getting human agents: {e}")
             raise
 
     async def get_admin_emails(self) -> List[Dict]:
-        """Get admin emails list with {id, masked_email} for display"""
+        """Get admin emails list with {id, email} for display"""
         try:
             admins = await self._chatAgent_dao.get_admins()
-            return [{"id": a["id"], "email": mask_email(a["email"])} for a in admins]
+            return [{"id": a["id"], "email": a["email"]} for a in admins]
         except Exception as e:
             logger.error(f"Error getting admin emails: {e}")
             raise
