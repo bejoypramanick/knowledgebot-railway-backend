@@ -182,22 +182,22 @@ def init_worker_process(**kwargs):
         # Reset the global engine to force recreation in worker process
         if sqlalchemy_db._engine:
             logger.warning("⚠️ [WORKER_INIT] Found inherited database engine from parent process")
-
-            # Try to dispose of the engine pool gracefully if it exists
             try:
-                # Dispose of all connections in the pool
-                asyncio.run(sqlalchemy_db._engine.dispose())
+                new_loop.run_until_complete(sqlalchemy_db._engine.dispose())
                 logger.info("✅ [WORKER_INIT] Disposed of inherited database engine pool")
             except Exception as e:
                 logger.warning(f"⚠️ [WORKER_INIT] Error disposing inherited pool: {e}")
-
-            # Reset the global engine to None so it will be recreated
             sqlalchemy_db._engine = None
             sqlalchemy_db._async_session_maker = None
-            logger.info("✅ [WORKER_INIT] Reset database engine, will create fresh instance on first use")
-        else:
-            logger.info("✅ [WORKER_INIT] No inherited database engine found")
-        
+
+        # Initialize fresh database connection pool for this worker process
+        from shared.sqlalchemy_db import init_database
+        try:
+            new_loop.run_until_complete(init_database())
+            logger.info("✅ [WORKER_INIT] Database initialized for worker process")
+        except Exception as e:
+            logger.error(f"❌ [WORKER_INIT] Failed to initialize database: {e}")
+
         # Force garbage collection to clean up any lingering file descriptors
         gc.collect()
         logger.info("✅ [WORKER_INIT] Worker process initialization complete")

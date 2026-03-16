@@ -255,6 +255,28 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         raise
 
 
+@asynccontextmanager
+async def get_db_connection():
+    """
+    Get a raw asyncpg connection from the SQLAlchemy engine pool.
+
+    Use for code that needs raw asyncpg features (conn.fetchrow, $1 params, etc.):
+        async with get_db_connection() as conn:
+            row = await conn.fetchrow("SELECT * FROM users WHERE id = $1", user_id)
+
+    The connection is automatically returned to the pool on exit.
+    """
+    if _engine is None:
+        raise RuntimeError(
+            "Database not initialized. Call init_database() first."
+        )
+
+    # Get raw asyncpg connection from SQLAlchemy's async engine pool
+    async with _engine.connect() as sa_conn:
+        raw_conn = await sa_conn.get_raw_connection()
+        yield raw_conn.dbapi_connection.driver_connection
+
+
 async def health_check() -> dict:
     """
     Perform database health check with connection pool stats.
@@ -366,6 +388,7 @@ async def validate_database() -> bool:
 __all__ = [
     "init_database",
     "get_db_session",
+    "get_db_connection",
     "health_check",
     "close_database",
     "validate_database",

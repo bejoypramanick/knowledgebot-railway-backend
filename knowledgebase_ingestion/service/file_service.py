@@ -5,7 +5,7 @@ Provides business logic for file operations
 from typing import Any, Dict, Optional
 
 from shared.otel_logger import get_otel_logger
-from shared.sqlalchemy_db import get_db_session
+from shared.sqlalchemy_db import get_db_session, get_db_connection
 
 logger = get_otel_logger("file_service", "knowledgebase-ingestion")
 
