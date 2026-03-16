@@ -714,16 +714,17 @@ async def save_admin_widget_config(request: Request):
         config_service_url = settings.configuration_service_url
         full_url = f"{config_service_url}/api/v1/configuration/widgetConfig"
 
-        # Get request body
+        # Get request body and forward original content-type (may be multipart/form-data with images)
         body = await request.body()
+        content_type = request.headers.get("content-type", "application/json")
 
-        logger.info(f"🔄 Proxying admin widget config save request to: {full_url}")
+        logger.info(f"🔄 Proxying admin widget config save request to: {full_url} (content-type: {content_type[:50]})")
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 full_url,
                 content=body,
-                headers={"Content-Type": "application/json"}
+                headers={"Content-Type": content_type}
             )
 
             if response.status_code in [200, 201]:
