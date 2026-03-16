@@ -158,7 +158,7 @@ class WidgetConfigDAO:
                     logger.error("❌ [DAO] No widget_configuration row found! Cannot insert suggested messages.")
                     raise ValueError("No widget configuration found")
 
-                widget_config_id = config_id_row["id"]
+                widget_config_id = config_id_row[0]
                 logger.info(f"✅ [DAO] Found widget_config_id: {widget_config_id}")
 
                 # Clear existing messages for this widget config
