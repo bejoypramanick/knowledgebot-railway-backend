@@ -270,6 +270,7 @@ class ProcessingService:
 
                 # Delete processed markdown from S3 (now safely in Gemini FileSearch)
                 # Check RETAIN_MD_FILE environment variable to decide whether to delete
+                # Note: Manual atomic delete operations will still delete retained files
                 retain_md_file = os.getenv("RETAIN_MD_FILE", "false").lower() == "true"
                 
                 if processed_content_s3_key:

@@ -792,6 +792,7 @@ async def process_file_content(
 
                 # Delete processed markdown file (now safely stored in Gemini FileSearch)
                 # Check RETAIN_MD_FILE environment variable to decide whether to delete
+                # Note: Manual atomic delete operations will still delete retained files
                 retain_md_file = os.getenv("RETAIN_MD_FILE", "false").lower() == "true"
                 
                 if processed_content_s3_key:
