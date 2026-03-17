@@ -46,7 +46,7 @@ class WidgetConfigDAO:
         """Get suggested messages for the widget."""
         query = """
             SELECT message_text
-            FROM public.widget_suggested_messages
+            FROM widget_suggested_messages
             WHERE is_active = true
             ORDER BY display_order
         """
@@ -169,7 +169,7 @@ class WidgetConfigDAO:
                 logger.info(f"✅ [DAO] Found widget_config_id: {widget_config_id}")
 
                 # Clear existing messages for this widget config
-                delete_query = "DELETE FROM public.widget_suggested_messages WHERE widget_config_id = :widget_config_id"
+                delete_query = "DELETE FROM widget_suggested_messages WHERE widget_config_id = :widget_config_id"
                 delete_params = {"widget_config_id": widget_config_id}
                 logger.log_db_operation(delete_query, delete_params)
                 await session.execute(text(delete_query), delete_params)
@@ -177,7 +177,7 @@ class WidgetConfigDAO:
 
                 # Insert new messages
                 insert_query = """
-                    INSERT INTO public.widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
+                    INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
                     VALUES (:widget_config_id, :message_text, :display_order, true, NOW(), NOW())
                 """
                 logger.info("=" * 100)
@@ -271,7 +271,7 @@ class WidgetConfigDAO:
 
     async def clear_suggested_messages(self):
         """Clear all suggested messages."""
-        query = "DELETE FROM public.widget_suggested_messages"
+        query = "DELETE FROM widget_suggested_messages"
         try:
             logger.log_db_operation(query)
             logger.info("=" * 100)
@@ -293,7 +293,7 @@ class WidgetConfigDAO:
     async def add_suggested_message(self, message: str, index: int):
         """Add a suggested message."""
         query = """
-            INSERT INTO public.widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
+            INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
             VALUES (1, :message_text, :display_order, true, NOW(), NOW())
         """
         params = {"message_text": message, "display_order": index}
