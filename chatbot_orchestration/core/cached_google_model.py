@@ -28,6 +28,9 @@ from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.messages import ModelMessage
 from shared.otel_logger import get_otel_logger
 
+# Import cache manager for fallback cache creation
+from .cache_manager import GeminiCacheManager
+
 try:
     from google.genai import errors as genai_errors
     from google.genai.types import (
@@ -260,10 +263,12 @@ class CachedGoogleModel(GoogleModel):
         reference when falling back to a different model, otherwise the API
         will reject the request (cache was created for the primary model).
         
-        The fallback will use inline system_instruction + tools instead of cache:
-        - system_instruction: Comes from Agent's system_prompt parameter
-        - tools: Comes from Agent's tools parameter
-        - message_history: Already in the messages parameter (includes prepended system prompt if needed)
+        OPTIMIZATION: Creates a separate cache for fallback model using the same
+        system prompt and tools to maintain performance benefits.
+        
+        The fallback will use either:
+        - Cached mode: If fallback cache creation succeeds
+        - Inline mode: If cache creation fails (system_instruction + tools)
         
         This ensures RAG search and all tool functionality works identically in fallback mode.
         """
@@ -277,9 +282,53 @@ class CachedGoogleModel(GoogleModel):
         fallback_settings = dict(model_settings)
         if 'google_cached_content' in fallback_settings:
             cache_ref = fallback_settings.pop('google_cached_content')
-            logger.info(f"⚠️ Removed cache reference {cache_ref} (cache is model-specific)")
+            logger.info(f"⚠️ Removed primary cache reference {cache_ref} (cache is model-specific)")
+        
+        # Try to create cache for fallback model using the EXACT same system prompt and tools
+        # that were used for the primary cache
+        fallback_cache_name = None
+        
+        try:
+            logger.info("🔄 Attempting to create cache for fallback model...")
+            
+            # Get the exact system prompt and tools from the global cache manager
+            from .cache_manager import gemini_cache_manager
+            cached_system_prompt, cached_tool_functions = gemini_cache_manager.get_cached_content()
+            
+            if cached_system_prompt and cached_tool_functions:
+                logger.info(f"✅ Retrieved cached system prompt ({len(cached_system_prompt)} chars) and {len(cached_tool_functions)} tools")
+                
+                # Create a separate cache manager instance for fallback
+                fallback_cache_manager = GeminiCacheManager()
+                
+                fallback_cache_name = await fallback_cache_manager.ensure_cache(
+                    system_prompt=cached_system_prompt,
+                    tool_functions=cached_tool_functions,
+                    model_name=fallback_model,
+                )
+                
+                if fallback_cache_name:
+                    logger.info(f"✅ Created fallback cache with exact system prompt: {fallback_cache_name}")
+                    # Add cache reference to fallback settings
+                    fallback_settings['google_cached_content'] = fallback_cache_name
+                else:
+                    logger.info("ℹ️ Fallback cache creation returned None, using inline mode")
+            else:
+                logger.warning("⚠️ Could not retrieve cached system prompt and tools from global cache manager")
+                logger.info("ℹ️ This may happen if primary cache was not created or expired")
+                logger.info("ℹ️ Fallback will use inline mode with system_instruction + tools from Agent")
+                
+        except Exception as cache_error:
+            logger.warning(f"⚠️ Fallback cache creation failed: {cache_error}, using inline mode")
+            fallback_cache_name = None
+        
+        if fallback_cache_name:
+            logger.info("ℹ️ Fallback will use cached system_instruction + tools")
+        else:
             logger.info("ℹ️ Fallback will use inline system_instruction + tools (no cache)")
-            logger.info("ℹ️ RAG search and all tools will function identically")
+            logger.info("ℹ️ Note: Fallback may have slightly higher token usage due to no cache")
+        
+        logger.info("ℹ️ RAG search and all tools will function identically")
         
         fallback_settings = cast(GoogleModelSettings, fallback_settings)
         
@@ -288,13 +337,14 @@ class CachedGoogleModel(GoogleModel):
         fallback_instance = CachedGoogleModel(fallback_model)
         
         try:
-            # Use fallback settings WITHOUT cache reference
+            # Use fallback settings (with or without cache reference)
             # The parent GoogleModel will automatically include system_instruction + tools
-            # from the Agent's configuration (passed via model_request_parameters)
+            # from the Agent's configuration if no cache is active
             result = await fallback_instance._generate_content_direct(
                 messages, stream, fallback_settings, model_request_parameters
             )
-            logger.info(f"✅ Fallback to {fallback_model} succeeded")
+            cache_mode = "cached" if fallback_cache_name else "inline"
+            logger.info(f"✅ Fallback to {fallback_model} succeeded ({cache_mode} mode)")
             return result
         except Exception as fallback_error:
             logger.error(f"❌ Fallback to {fallback_model} also failed: {fallback_error}")

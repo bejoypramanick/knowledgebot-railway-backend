@@ -41,6 +41,9 @@ class GeminiCacheManager:
         self._cache_created_at: float = 0
         self._cache_ttl: int = int(os.getenv("GEMINI_CACHE_TTL_SECONDS", str(DEFAULT_CACHE_TTL_SECONDS)))
         self._lock = asyncio.Lock()
+        # Store the system prompt and tools for reuse in fallback caches
+        self._cached_system_prompt: Optional[str] = None
+        self._cached_tool_functions: Optional[List[Callable]] = None
 
     def _compute_hash(self, system_prompt: str, tool_functions: List[Callable]) -> str:
         """Compute hash of system prompt + tool names to detect changes."""
@@ -126,6 +129,9 @@ class GeminiCacheManager:
                 self._cache_name = cached_content.name
                 self._cache_hash = content_hash
                 self._cache_created_at = time.time()
+                # Store the system prompt and tools for reuse
+                self._cached_system_prompt = system_prompt
+                self._cached_tool_functions = tool_functions
 
                 logger.info(f"Created Gemini cache: {self._cache_name}")
                 if cached_content.usage_metadata:
@@ -152,6 +158,8 @@ class GeminiCacheManager:
             self._cache_name = None
             self._cache_hash = None
             self._cache_created_at = 0
+            self._cached_system_prompt = None
+            self._cached_tool_functions = None
 
             try:
                 from ..core.ai import get_genai_client
@@ -178,6 +186,16 @@ class GeminiCacheManager:
         self._cache_name = None
         self._cache_hash = None
         self._cache_created_at = 0
+        self._cached_system_prompt = None
+        self._cached_tool_functions = None
+
+    def get_cached_content(self) -> tuple[Optional[str], Optional[List[Callable]]]:
+        """Get the cached system prompt and tool functions for reuse in fallback caches.
+        
+        Returns:
+            Tuple of (system_prompt, tool_functions) or (None, None) if not available
+        """
+        return self._cached_system_prompt, self._cached_tool_functions
 
 
 # Global singleton
