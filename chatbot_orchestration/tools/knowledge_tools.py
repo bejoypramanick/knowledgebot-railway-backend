@@ -430,6 +430,10 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         logger.info("=" * 100)
         logger.info(f"Response Type: {type(response).__name__}")
         logger.info(f"Response Attributes: {dir(response)}")
+        logger.info(f"Response has 'text' attribute: {hasattr(response, 'text')}")
+        if hasattr(response, 'text'):
+            logger.info(f"Response.text is None: {response.text is None}")
+            logger.info(f"Response.text type: {type(response.text)}")
         logger.info("-" * 100)
         
         # Log response structure
@@ -503,7 +507,16 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         logger.info("📄 RESPONSE TEXT:")
         logger.info("-" * 100)
 
-        response_text = response.text if hasattr(response, 'text') else str(response)
+        # Extract response text with robust None handling
+        if hasattr(response, 'text') and response.text is not None:
+            response_text = response.text
+        else:
+            response_text = str(response) if response is not None else "No response received"
+        
+        # Ensure response_text is never None
+        if response_text is None:
+            response_text = "Response text is None"
+            
         logger.info(f"Response Text Length: {len(response_text)} chars")
         logger.info("=" * 100)
         logger.info("📦 RAW GEMINI RESPONSE (COMPLETE):")
