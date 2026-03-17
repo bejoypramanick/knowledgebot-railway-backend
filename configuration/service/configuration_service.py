@@ -192,9 +192,11 @@ class ConfigurationService:
             raise
 
     async def get_widget_config(self) -> Dict[str, Any]:
-        """Get widget configuration"""
+        """Get widget configuration with suggested messages"""
         try:
-            return await self._widget_dao.get_widget_config()
+            # Use WidgetConfigService which includes suggested messages
+            from configuration.service.widget_config_service import widget_config_service
+            return await widget_config_service.get_widget_config()
         except Exception as e:
             logger.error(f"Error getting widget config: {e}")
             raise
