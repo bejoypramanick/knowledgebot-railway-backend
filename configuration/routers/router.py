@@ -359,6 +359,8 @@ async def get_widget_config():
 
         logger.info(f"✓ Widget config retrieved: {config.get('display_name', 'Unknown')}")
         logger.info(f"📋 Suggested messages in response: {len(config.get('suggested_messages', []))}")
+        logger.info(f"📋 Config keys being returned: {list(config.keys())}")
+        logger.info(f"📋 Full config object: {config}")
         logger.info("=" * 100)
         return {"success": True, "data": config}
     except HTTPException:

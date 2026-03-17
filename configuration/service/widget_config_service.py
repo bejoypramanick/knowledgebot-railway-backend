@@ -64,6 +64,7 @@ class WidgetConfigService:
             logger.info("✅ Widget config retrieved successfully with suggested messages")
             logger.info(f"📋 Final config keys: {list(transformed_config.keys())}")
             logger.info(f"📋 Suggested messages in response: {len(transformed_config['suggested_messages'])}")
+            logger.info(f"📋 Full transformed_config: {transformed_config}")
             logger.info("=" * 100)
             return transformed_config
             
