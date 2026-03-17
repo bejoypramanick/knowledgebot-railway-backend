@@ -346,6 +346,10 @@ async def get_admin_emails():
 async def get_widget_config():
     """Get widget configuration - fails on error (no fallback)"""
     try:
+        logger.info("=" * 100)
+        logger.info("📥 GET /widgetConfig endpoint called")
+        logger.info("=" * 100)
+        
         config = await config_service.get_widget_config()
 
         # If no config exists, raise error instead of using default
@@ -354,6 +358,8 @@ async def get_widget_config():
             raise HTTPException(status_code=404, detail="Widget configuration not found")
 
         logger.info(f"✓ Widget config retrieved: {config.get('display_name', 'Unknown')}")
+        logger.info(f"📋 Suggested messages in response: {len(config.get('suggested_messages', []))}")
+        logger.info("=" * 100)
         return {"success": True, "data": config}
     except HTTPException:
         # Re-raise HTTP exceptions as-is

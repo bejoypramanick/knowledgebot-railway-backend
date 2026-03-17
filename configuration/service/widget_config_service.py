@@ -20,13 +20,25 @@ class WidgetConfigService:
     async def get_widget_config(self):
         """Get complete widget configuration with all data transformations"""
         try:
+            logger.info("=" * 100)
+            logger.info("🔍 GET_WIDGET_CONFIG: Starting widget config retrieval")
+            logger.info("=" * 100)
+            
             # Get main widget configuration
+            logger.info("📥 Fetching main widget configuration from DAO...")
             widget_config = await self._widget_config_dao.get_widget_config()
+            logger.info(f"✅ Main widget config retrieved: {bool(widget_config)}")
+            
             if not widget_config:
+                logger.warning("⚠️ No widget config found, using empty dict")
                 widget_config = {}
             
             # Get suggested messages
+            logger.info("📥 Fetching suggested messages from DAO...")
             suggested_messages = await self._widget_config_dao.get_suggested_messages()
+            logger.info(f"✅ Suggested messages retrieved: {len(suggested_messages)} messages")
+            for i, msg in enumerate(suggested_messages, 1):
+                logger.info(f"   [{i}] {msg}")
             
             # Transform configuration for frontend
             transformed_config = {
@@ -48,11 +60,16 @@ class WidgetConfigService:
                 "chat_icon_zoom": widget_config.get("chat_icon_zoom", 100)
             }
             
-            logger.info("✅ Widget config retrieved successfully")
+            logger.info("=" * 100)
+            logger.info("✅ Widget config retrieved successfully with suggested messages")
+            logger.info(f"📋 Final config keys: {list(transformed_config.keys())}")
+            logger.info(f"📋 Suggested messages in response: {len(transformed_config['suggested_messages'])}")
+            logger.info("=" * 100)
             return transformed_config
             
         except Exception as e:
-            logger.error(f"Error getting widget configuration: {e}")
+            logger.error(f"❌ Error getting widget configuration: {e}", exc_info=True)
+            logger.info("=" * 100)
             raise
 
 
