@@ -1302,7 +1302,8 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
             for i, candidate in enumerate(full_response.candidates):
                 candidate_info = {
                     "candidate_index": i,
-                    "has_grounding_metadata": hasattr(candidate, 'grounding_metadata')
+                    "has_grounding_metadata": hasattr(candidate, 'grounding_metadata'),
+                    "candidate_raw": str(candidate) if hasattr(candidate, '__dict__') else None
                 }
                 
                 if hasattr(candidate, 'grounding_metadata'):
@@ -1311,7 +1312,8 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
                         "type": type(gm).__name__,
                         "attributes": dir(gm),
                         "has_grounding_chunks": hasattr(gm, 'grounding_chunks'),
-                        "chunks_count": len(gm.grounding_chunks) if hasattr(gm, 'grounding_chunks') else 0
+                        "chunks_count": len(gm.grounding_chunks) if hasattr(gm, 'grounding_chunks') else 0,
+                        "raw_grounding_metadata": str(gm) if hasattr(gm, '__dict__') else None
                     }
                     
                     # Extract grounding chunks details
@@ -1321,7 +1323,8 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
                             chunk_info = {
                                 "chunk_index": j,
                                 "type": type(chunk).__name__,
-                                "attributes": dir(chunk)
+                                "attributes": dir(chunk),
+                                "raw_chunk": str(chunk) if hasattr(chunk, '__dict__') else None
                             }
                             
                             if hasattr(chunk, 'retrieved_context'):
@@ -1330,7 +1333,9 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
                                     "title": getattr(ctx, 'title', None),
                                     "uri": getattr(ctx, 'uri', None),
                                     "text_length": len(getattr(ctx, 'text', '')) if hasattr(ctx, 'text') else 0,
-                                    "text_preview": getattr(ctx, 'text', '')[:500] if hasattr(ctx, 'text') else None
+                                    "text_preview": getattr(ctx, 'text', '')[:500] if hasattr(ctx, 'text') else None,
+                                    "full_text": getattr(ctx, 'text', '') if hasattr(ctx, 'text') else None,
+                                    "raw_context": str(ctx) if hasattr(ctx, '__dict__') else None
                                 }
                             
                             chunks_details.append(chunk_info)
@@ -1340,6 +1345,17 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
                 grounding_info.append(candidate_info)
             
             response_data["grounding_analysis"] = grounding_info
+        
+        # Try to capture the complete raw response object
+        try:
+            if hasattr(full_response, '__dict__'):
+                response_data["raw_response_dict"] = full_response.__dict__
+            elif hasattr(full_response, 'model_dump'):
+                response_data["raw_response_model_dump"] = full_response.model_dump()
+            else:
+                response_data["raw_response_str"] = str(full_response)
+        except Exception as raw_error:
+            response_data["raw_response_error"] = str(raw_error)
         
         # Convert to formatted JSON
         json_content = json.dumps(response_data, indent=2, ensure_ascii=False)
@@ -1412,11 +1428,14 @@ async def _upload_agent_response_to_s3(session_id: str, all_messages: list, run_
         
         # Process all messages to extract structured data
         processed_messages = []
+        tool_calls_found = []
+        
         for i, msg in enumerate(all_messages):
             msg_data = {
                 "message_index": i,
                 "type": type(msg).__name__,
-                "attributes": dir(msg)
+                "attributes": dir(msg),
+                "raw_message": str(msg) if hasattr(msg, '__dict__') else None
             }
             
             # Extract parts if available
@@ -1426,7 +1445,8 @@ async def _upload_agent_response_to_s3(session_id: str, all_messages: list, run_
                     part_data = {
                         "part_index": j,
                         "type": type(part).__name__,
-                        "attributes": dir(part)
+                        "attributes": dir(part),
+                        "raw_part": str(part) if hasattr(part, '__dict__') else None
                     }
                     
                     # Extract content based on part type
@@ -1442,10 +1462,24 @@ async def _upload_agent_response_to_s3(session_id: str, all_messages: list, run_
                     
                     # Extract tool call information
                     if hasattr(part, 'tool_name'):
-                        part_data["tool_name"] = getattr(part, 'tool_name', None)
+                        tool_name = getattr(part, 'tool_name', None)
+                        part_data["tool_name"] = tool_name
+                        if tool_name:
+                            tool_calls_found.append(tool_name)
                     
                     if hasattr(part, 'args'):
                         part_data["tool_args"] = getattr(part, 'args', None)
+                    
+                    if hasattr(part, 'tool_call_id'):
+                        part_data["tool_call_id"] = getattr(part, 'tool_call_id', None)
+                    
+                    # Try to extract any other tool-related attributes
+                    for attr in dir(part):
+                        if 'tool' in attr.lower() and not attr.startswith('_'):
+                            try:
+                                part_data[f"tool_attr_{attr}"] = getattr(part, attr, None)
+                            except:
+                                pass
                     
                     parts_data.append(part_data)
                 
@@ -1485,11 +1519,14 @@ async def _upload_agent_response_to_s3(session_id: str, all_messages: list, run_
             "timestamp": timestamp,
             "type": "agent_response",
             "messages_count": len(all_messages),
+            "tool_calls_found": tool_calls_found,
+            "unique_tools_called": list(set(tool_calls_found)),
             "processed_messages": processed_messages,
             "raw_model_response": raw_response_data,
             "run_object_info": {
                 "type": type(run_object).__name__ if run_object else None,
-                "attributes": dir(run_object) if run_object else None
+                "attributes": dir(run_object) if run_object else None,
+                "raw_run_object": str(run_object) if run_object and hasattr(run_object, '__dict__') else None
             }
         }
         
