@@ -47,7 +47,7 @@ class WidgetConfigDAO:
         query = """
             SELECT message_text
             FROM widget_suggested_messages
-            WHERE is_active = true
+            WHERE widget_config_id = 1
             ORDER BY display_order
         """
         try:
