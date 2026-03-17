@@ -643,6 +643,15 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
             logger.warning("❌ Returning 'no information available' message instead of training data response")
             
             no_grounding_msg = "I don't have any information on this topic."
+            
+            # Still add RAG download link if S3 upload succeeded (for debugging the raw response)
+            if s3_download_url:
+                download_section = f"\n\n📁 **RAG Response Details**: [Download Complete Response]({s3_download_url})"
+                no_grounding_msg += download_section
+                logger.info(f"📁 ✅ Added RAG download link to no-grounding response: {s3_download_url}")
+            else:
+                logger.info("📁 ❌ No RAG download link added to no-grounding response - s3_download_url is None")
+            
             logger.info(f"✅ RAG search completed: _perform_rag_search (no grounding data)")
             logger.info("=" * 80)
             logger.info("📦 NO GROUNDING RESULT:")
