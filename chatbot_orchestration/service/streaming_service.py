@@ -839,6 +839,24 @@ class StreamingService:
                                 for j, part in enumerate(msg.parts):
                                     part_type = type(part).__name__
                                     logger.info(f"     Part {j}/{total_parts - 1}: {part_type}")
+                                    
+                                    # DEBUG: Log ALL part types and their full class info
+                                    logger.info(f"     🔍 PART DEBUG: {part_type}")
+                                    logger.info(f"     🔍 Full class: {type(part)}")
+                                    logger.info(f"     🔍 Module: {type(part).__module__}")
+                                    
+                                    # Check for any thinking-related attributes
+                                    part_attrs = dir(part)
+                                    thinking_attrs = [attr for attr in part_attrs if 'think' in attr.lower()]
+                                    if thinking_attrs:
+                                        logger.info(f"     🧠 Thinking-related attributes: {thinking_attrs}")
+                                    
+                                    # Check for content attribute and log its type/length
+                                    if hasattr(part, 'content'):
+                                        content = getattr(part, 'content', '')
+                                        logger.info(f"     📝 Content type: {type(content)}, length: {len(str(content))}")
+                                        if len(str(content)) > 1000:  # Large content might be thinking
+                                            logger.info(f"     🧠 LARGE CONTENT DETECTED - might be thinking: {str(content)[:200]}...")
 
                                     # 🧠 LOG EXTENDED THINKING (if present)
                                     if part_type == 'ThinkingPart':
@@ -846,8 +864,55 @@ class StreamingService:
                                         logger.info("=" * 100)
                                         logger.info("🧠 MODEL EXTENDED THINKING (Reasoning Process)")
                                         logger.info("=" * 100)
-                                        logger.info(thinking_content)
+                                        
+                                        # Handle potentially long thinking content by chunking it
+                                        if thinking_content:
+                                            # Split into chunks to avoid OTEL truncation
+                                            chunk_size = 2000  # 2KB chunks
+                                            thinking_lines = thinking_content.split('\n')
+                                            
+                                            logger.info(f"🧠 THINKING CONTENT LENGTH: {len(thinking_content)} chars, {len(thinking_lines)} lines")
+                                            
+                                            # ALSO use print() to bypass OTEL limitations
+                                            print("=" * 100)
+                                            print("🧠 MODEL EXTENDED THINKING (Reasoning Process) - DIRECT PRINT")
+                                            print("=" * 100)
+                                            print(thinking_content)
+                                            print("=" * 100)
+                                            
+                                            current_chunk = ""
+                                            chunk_num = 1
+                                            
+                                            for line in thinking_lines:
+                                                if len(current_chunk) + len(line) + 1 > chunk_size:
+                                                    # Log current chunk
+                                                    if current_chunk.strip():
+                                                        logger.info(f"🧠 THINKING CHUNK {chunk_num}:")
+                                                        logger.info(current_chunk)
+                                                        chunk_num += 1
+                                                    current_chunk = line + '\n'
+                                                else:
+                                                    current_chunk += line + '\n'
+                                            
+                                            # Log final chunk
+                                            if current_chunk.strip():
+                                                logger.info(f"🧠 THINKING CHUNK {chunk_num}:")
+                                                logger.info(current_chunk)
+                                        else:
+                                            logger.warning("🧠 ThinkingPart found but content is empty!")
+                                        
                                         logger.info("=" * 100)
+                                    
+                                    # 🧠 ALTERNATIVE: Check for thinking in other part types
+                                    elif hasattr(part, 'thinking') or hasattr(part, 'thoughts'):
+                                        logger.info("🧠 ALTERNATIVE THINKING ATTRIBUTE FOUND!")
+                                        thinking_attr = getattr(part, 'thinking', None) or getattr(part, 'thoughts', None)
+                                        if thinking_attr:
+                                            print("=" * 100)
+                                            print("🧠 ALTERNATIVE THINKING CONTENT - DIRECT PRINT")
+                                            print("=" * 100)
+                                            print(thinking_attr)
+                                            print("=" * 100)
 
                                     # Extract text from TextPart
                                     if isinstance(part, TextPart):
