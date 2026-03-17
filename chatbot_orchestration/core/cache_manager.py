@@ -83,8 +83,15 @@ class GeminiCacheManager:
         async with self._lock:
             content_hash = self._compute_hash(system_prompt, tool_functions)
 
+            # Check for force refresh environment variable
+            force_refresh = os.getenv("FORCE_CACHE_REFRESH", "false").lower() == "true"
+            if force_refresh:
+                logger.warning("🔄 FORCE_CACHE_REFRESH=true - forcing cache recreation")
+                self._cache_name = None
+                self._cache_hash = None
+
             # Reuse existing cache if hash matches and not expired
-            if self.cache_name and self._cache_hash == content_hash:
+            if self.cache_name and self._cache_hash == content_hash and not force_refresh:
                 logger.info(f"Reusing existing Gemini cache: {self._cache_name} (hash: {content_hash})")
                 return self._cache_name
 
@@ -100,7 +107,19 @@ class GeminiCacheManager:
 
                 # Convert tool functions to Gemini format
                 gemini_tools = convert_tools_to_gemini_format(tool_functions)
-                logger.info(f"Converted {len(tool_functions)} tools to Gemini format for caching")
+                logger.info(f"Converted {len(tool_functions)} tool functions to {len(gemini_tools)} Gemini tools for caching")
+                
+                if len(tool_functions) > 0 and len(gemini_tools) == 0:
+                    logger.error("🚨 CRITICAL: All tool conversions failed! Cache will be created without tools!")
+                    logger.error("🚨 This will cause the agent to not have access to search_knowledge_base!")
+                
+                if gemini_tools:
+                    for i, tool in enumerate(gemini_tools):
+                        if hasattr(tool, 'function_declarations'):
+                            tool_names = [f.name for f in tool.function_declarations]
+                            logger.info(f"   Gemini Tool {i+1}: {tool_names}")
+                        else:
+                            logger.warning(f"   Gemini Tool {i+1}: No function_declarations found")
 
                 # Create cached content
                 from google.genai import types
