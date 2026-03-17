@@ -530,6 +530,7 @@ class StreamingService:
             full_response = ""
             chunk_count = 0
             tool_call_count = 0
+            agent_s3_download_url = None  # Initialize for S3 upload
             
             # Import Redis pubsub manager for posting responses to channels
             from shared.redis_pubsub_manager import broadcast_event_to_session, broadcast_event_to_all_agents, broadcast_event_to_agent
@@ -679,6 +680,23 @@ class StreamingService:
                     # Get all messages from the run (this is the correct API for agent.iter())
                     all_messages = run.all_messages()
                     logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
+
+                    # 📁 UPLOAD AGENT RESPONSE TO S3 FOR DOWNLOAD (if enabled)
+                    enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "false").lower() == "true"
+                    
+                    if enable_s3_upload:
+                        try:
+                            from ..tools.knowledge_tools import _upload_agent_response_to_s3
+                            agent_s3_download_url = await _upload_agent_response_to_s3(session_id, all_messages, run)
+                            if agent_s3_download_url:
+                                logger.info(f"📁 Agent response uploaded to S3: {agent_s3_download_url}")
+                            else:
+                                logger.warning("⚠️ Failed to upload agent response to S3")
+                        except Exception as s3_error:
+                            logger.error(f"❌ Agent S3 upload failed: {s3_error}")
+                            # Continue without S3 upload - don't block the response
+                    else:
+                        logger.debug("📁 Agent S3 upload disabled (ENABLE_RAG_S3_UPLOAD=false)")
 
                     # DEBUG: Log all messages structure
                     if not all_messages:
@@ -1028,6 +1046,12 @@ class StreamingService:
                 # Strip out [Time-to-Solve: X mins] or similar timing information
                 full_response = re.sub(r'\[Time-to-Solve:.*?\]', '', full_response).strip()
                 logger.info(f"✅ Removed Time-to-Solve metadata if present")
+                
+                # Add agent download link if S3 upload succeeded
+                if agent_s3_download_url:
+                    agent_download_section = f"\n\n🤖 **Agent Response Details**: [Download Complete Response]({agent_s3_download_url})"
+                    full_response += agent_download_section
+                    logger.info(f"📁 Added agent download link to response: {agent_s3_download_url}")
 
                 # 🚨 CRITICAL: Filter out elaboration from tool responses
                 # If response contains "Human Agent support is currently not available" with elaboration,

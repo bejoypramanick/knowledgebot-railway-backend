@@ -1354,3 +1354,155 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
     except Exception as e:
         logger.error(f"❌ Failed to upload RAG response to S3: {e}")
         return None
+
+async def _upload_agent_response_to_s3(session_id: str, all_messages: list, run_object: Any = None) -> Optional[str]:
+    """
+    Upload the complete agent response to S3 and return a download URL.
+    
+    This feature is controlled by the ENABLE_RAG_S3_UPLOAD environment variable.
+    Set ENABLE_RAG_S3_UPLOAD=true to enable agent response uploads to S3.
+    
+    Args:
+        session_id: The chat session ID
+        all_messages: The complete message history from agent.iter()
+        run_object: The run object from agent.iter() (may contain raw response)
+        
+    Returns:
+        S3 download URL or None if upload failed
+    """
+    try:
+        # Get S3 configuration from environment
+        bucket_name = os.getenv("RAILWAY_BUCKET_NAME")
+        aws_access_key = os.getenv("RAILWAY_STORAGE_ACCESS_KEY")
+        aws_secret_key = os.getenv("RAILWAY_STORAGE_SECRET_KEY")
+        aws_region = os.getenv("RAILWAY_REGION", "us-east-1")
+        storage_url = os.getenv("RAILWAY_STORAGE_URL")
+        
+        if not all([bucket_name, aws_access_key, aws_secret_key]):
+            logger.debug("📁 S3 credentials not configured - agent response upload skipped")
+            return None
+            
+        # Create S3 client
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key,
+            region_name=aws_region,
+            endpoint_url=storage_url if storage_url else None
+        )
+        
+        # Create comprehensive agent response data
+        timestamp = datetime.utcnow().isoformat()
+        
+        # Process all messages to extract structured data
+        processed_messages = []
+        for i, msg in enumerate(all_messages):
+            msg_data = {
+                "message_index": i,
+                "type": type(msg).__name__,
+                "attributes": dir(msg)
+            }
+            
+            # Extract parts if available
+            if hasattr(msg, 'parts'):
+                parts_data = []
+                for j, part in enumerate(msg.parts):
+                    part_data = {
+                        "part_index": j,
+                        "type": type(part).__name__,
+                        "attributes": dir(part)
+                    }
+                    
+                    # Extract content based on part type
+                    if hasattr(part, 'content'):
+                        content = getattr(part, 'content', '')
+                        part_data["content"] = str(content)
+                        part_data["content_length"] = len(str(content))
+                    
+                    if hasattr(part, 'text'):
+                        text = getattr(part, 'text', '')
+                        part_data["text"] = str(text)
+                        part_data["text_length"] = len(str(text))
+                    
+                    # Extract tool call information
+                    if hasattr(part, 'tool_name'):
+                        part_data["tool_name"] = getattr(part, 'tool_name', None)
+                    
+                    if hasattr(part, 'args'):
+                        part_data["tool_args"] = getattr(part, 'args', None)
+                    
+                    parts_data.append(part_data)
+                
+                msg_data["parts"] = parts_data
+                msg_data["parts_count"] = len(msg.parts)
+            
+            processed_messages.append(msg_data)
+        
+        # Try to extract raw model response if available
+        raw_response_data = None
+        if run_object:
+            try:
+                # Try to access raw response through various possible attributes
+                if hasattr(run_object, '_response'):
+                    raw_response = getattr(run_object, '_response', None)
+                    if raw_response and hasattr(raw_response, 'model_dump'):
+                        raw_response_data = raw_response.model_dump()
+                elif hasattr(run_object, 'response'):
+                    raw_response = getattr(run_object, 'response', None)
+                    if raw_response and hasattr(raw_response, 'model_dump'):
+                        raw_response_data = raw_response.model_dump()
+                elif hasattr(run_object, '_model_response'):
+                    raw_response = getattr(run_object, '_model_response', None)
+                    if raw_response and hasattr(raw_response, 'model_dump'):
+                        raw_response_data = raw_response.model_dump()
+                
+                if raw_response_data:
+                    logger.info("📦 Successfully extracted raw model response for S3 upload")
+                else:
+                    logger.debug("📦 No raw model response found in run object")
+                    
+            except Exception as raw_error:
+                logger.warning(f"⚠️ Failed to extract raw model response: {raw_error}")
+        
+        response_data = {
+            "session_id": session_id,
+            "timestamp": timestamp,
+            "type": "agent_response",
+            "messages_count": len(all_messages),
+            "processed_messages": processed_messages,
+            "raw_model_response": raw_response_data,
+            "run_object_info": {
+                "type": type(run_object).__name__ if run_object else None,
+                "attributes": dir(run_object) if run_object else None
+            }
+        }
+        
+        # Convert to formatted JSON
+        json_content = json.dumps(response_data, indent=2, ensure_ascii=False, default=str)
+        
+        # Create S3 key with timestamp and session
+        timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        s3_key = f"agent-responses/{session_id}/agent_response_{timestamp_str}.json"
+        
+        # Upload to S3
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=s3_key,
+            Body=json_content.encode('utf-8'),
+            ContentType='application/json',
+            ContentDisposition=f'attachment; filename="agent_response_{timestamp_str}.json"'
+        )
+        
+        # Generate download URL (expires in 1 hour)
+        download_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': s3_key},
+            ExpiresIn=3600  # 1 hour
+        )
+        
+        logger.info(f"📁 Agent response uploaded to S3: {s3_key}")
+        return download_url
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to upload agent response to S3: {e}")
+        return None
