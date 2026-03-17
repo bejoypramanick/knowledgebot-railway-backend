@@ -1371,7 +1371,7 @@ async def _upload_agent_request_to_s3(session_id: str, user_message: str, conver
         S3 download URL if successful, None otherwise
     """
     try:
-        from ..core.s3_client import get_s3_client
+        from ..core.s3_client import get_s3_client, get_bucket_name
         import json
         from datetime import datetime
         
@@ -1403,9 +1403,9 @@ async def _upload_agent_request_to_s3(session_id: str, user_message: str, conver
         filename = f"agent_request_{timestamp}.json"
         
         # Upload to S3
-        bucket_name = os.getenv("S3_BUCKET_NAME")
+        bucket_name = get_bucket_name()
         if not bucket_name:
-            logger.warning("📁 S3_BUCKET_NAME not configured - skipping agent request upload")
+            logger.warning("📁 S3 bucket name not configured - skipping agent request upload")
             return None
         
         s3_key = f"agent-requests/{session_id}/{filename}"
@@ -1453,7 +1453,7 @@ async def _upload_file_search_tool_request_to_s3(session_id: str, query: str, co
         S3 download URL if successful, None otherwise
     """
     try:
-        from ..core.s3_client import get_s3_client
+        from ..core.s3_client import get_s3_client, get_bucket_name
         import json
         from datetime import datetime
         
@@ -1511,9 +1511,9 @@ async def _upload_file_search_tool_request_to_s3(session_id: str, query: str, co
         filename = f"file_search_tool_request_{timestamp}.json"
         
         # Upload to S3
-        bucket_name = os.getenv("S3_BUCKET_NAME")
+        bucket_name = get_bucket_name()
         if not bucket_name:
-            logger.warning("📁 S3_BUCKET_NAME not configured - skipping FileSearch tool request upload")
+            logger.warning("📁 S3 bucket name not configured - skipping FileSearch tool request upload")
             return None
         
         s3_key = f"file-search-requests/{session_id}/{filename}"
@@ -1563,7 +1563,7 @@ async def _upload_file_search_tool_response_to_s3(session_id: str, response_text
         S3 download URL if successful, None otherwise
     """
     try:
-        from ..core.s3_client import get_s3_client
+        from ..core.s3_client import get_s3_client, get_bucket_name
         import json
         from datetime import datetime
         
@@ -1607,9 +1607,9 @@ async def _upload_file_search_tool_response_to_s3(session_id: str, response_text
         filename = f"file_search_tool_response_{timestamp}.json"
         
         # Upload to S3
-        bucket_name = os.getenv("S3_BUCKET_NAME")
+        bucket_name = get_bucket_name()
         if not bucket_name:
-            logger.warning("📁 S3_BUCKET_NAME not configured - skipping FileSearch tool response upload")
+            logger.warning("📁 S3 bucket name not configured - skipping FileSearch tool response upload")
             return None
         
         s3_key = f"file-search-responses/{session_id}/{filename}"
@@ -1792,25 +1792,15 @@ async def _upload_agent_response_to_s3(session_id: str, all_messages: list, run_
         logger.info(f"📁 Starting agent response S3 upload for session: {session_id}")
         logger.info(f"📁 COMPLETE RAW AGENT DUMP - No extraction, just raw data")
         
-        # Get S3 configuration from environment
-        bucket_name = os.getenv("RAILWAY_BUCKET_NAME")
-        aws_access_key = os.getenv("RAILWAY_STORAGE_ACCESS_KEY")
-        aws_secret_key = os.getenv("RAILWAY_STORAGE_SECRET_KEY")
-        aws_region = os.getenv("RAILWAY_REGION", "us-east-1")
-        storage_url = os.getenv("RAILWAY_STORAGE_URL")
+        # Use centralized S3 client
+        from ..core.s3_client import get_s3_client, get_bucket_name
         
-        if not all([bucket_name, aws_access_key, aws_secret_key]):
-            logger.debug("📁 S3 credentials not configured - agent response upload skipped")
+        s3_client = get_s3_client()
+        if not s3_client:
+            logger.warning("📁 S3 client not available - agent response upload skipped")
             return None
             
-        # Create S3 client
-        s3_client = boto3.client(
-            's3',
-            aws_access_key_id=aws_access_key,
-            aws_secret_access_key=aws_secret_key,
-            region_name=aws_region,
-            endpoint_url=storage_url if storage_url else None
-        )
+        bucket_name = get_bucket_name()
         
         # Create minimal wrapper - COMPLETE RAW AGENT RESPONSE DUMP
         timestamp = datetime.utcnow().isoformat()
