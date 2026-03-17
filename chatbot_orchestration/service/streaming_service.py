@@ -164,7 +164,7 @@ class StreamingService:
 
             # 📁 UPLOAD AGENT REQUEST TO S3 (if enabled)
             agent_request_download_url = None
-            enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "false").lower() == "true"
+            enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "true").lower() == "true"
             
             if enable_s3_upload:
                 logger.info("📁 Agent S3 upload is ENABLED - uploading agent request data...")
@@ -709,7 +709,7 @@ class StreamingService:
                     logger.info(f"📋 Total messages in conversation: {len(all_messages)}")
 
                     # 📁 UPLOAD AGENT RESPONSE TO S3 FOR DOWNLOAD (if enabled)
-                    enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "false").lower() == "true"
+                    enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "true").lower() == "true"
                     
                     logger.info(f"🔍 DEBUG: Agent S3 upload - ENABLE_RAG_S3_UPLOAD = '{os.getenv('ENABLE_RAG_S3_UPLOAD', 'NOT_SET')}'")
                     logger.info(f"🔍 DEBUG: Agent S3 upload - enable_s3_upload = {enable_s3_upload}")
@@ -1092,7 +1092,7 @@ class StreamingService:
                     logger.info(f"📁 ✅ Added agent response download link: {agent_s3_download_url}")
                 
                 if download_links:
-                    agent_download_section = f"\n\n🤖 **Agent Debug Details**: {' | '.join(download_links)}"
+                    agent_download_section = f"\n\n📁 **Agent Debug Details**: {' | '.join(download_links)}"
                     full_response += agent_download_section
                     logger.info(f"📁 ✅ Full response now includes agent debug section (total length: {len(full_response)} chars)")
                 else:

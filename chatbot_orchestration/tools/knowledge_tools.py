@@ -383,7 +383,7 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         # UPLOAD FILESEARCH TOOL REQUEST TO S3 (if enabled)
         # ============================================================================
         file_search_tool_request_url = None
-        enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "false").lower() == "true"
+        enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "true").lower() == "true"
         
         if enable_s3_upload:
             logger.info("📁 RAG S3 upload is ENABLED - uploading FileSearch tool request data...")
