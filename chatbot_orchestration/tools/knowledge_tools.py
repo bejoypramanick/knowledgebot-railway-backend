@@ -421,9 +421,7 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                         )
                     )
                 ],
-                thinking_config=types.ThinkingConfig(
-                    include_thinking=False  # Disable thinking to save tokens
-                )
+                thinking_config={"include_thoughts": False}  # Disable thinking to save tokens
             )
         )
         
