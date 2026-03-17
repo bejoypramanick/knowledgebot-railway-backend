@@ -255,3 +255,7 @@ class WidgetConfigService:
         except Exception as e:
             logger.error(f"Error generating embed script: {e}")
             raise
+
+
+# Export singleton instance
+widget_config_service = WidgetConfigService()
