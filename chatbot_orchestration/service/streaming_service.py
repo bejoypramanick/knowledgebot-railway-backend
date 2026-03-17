@@ -1068,10 +1068,10 @@ class StreamingService:
                     logger.error(f"❌ Failed to broadcast bot response to admins: {broadcast_error}")
                     # Continue anyway - don't block customer response if broadcast fails
 
-                # Break response into chunks for streaming (500 chars per chunk for smooth experience)
+                # Break response into chunks for streaming to customer (500 chars per chunk for smooth experience)
                 chunk_size = 500
                 chunks = [full_response[i:i+chunk_size] for i in range(0, len(full_response), chunk_size)]
-                logger.info(f"🔍 DEBUG: Created {len(chunks)} chunks")
+                logger.info(f"🔍 DEBUG: Created {len(chunks)} chunks for customer streaming")
 
                 for idx, chunk in enumerate(chunks, 1):
                     if chunk.strip():  # Only stream non-empty chunks
@@ -1086,27 +1086,7 @@ class StreamingService:
                         yield f"data: {json_response}\n\n"
                         chunk_count = idx
 
-                        # 📤 PUBLISH EACH CHUNK TO ADMIN CHANNEL IN REAL-TIME
-                        try:
-                            from shared.redis_pubsub_manager import broadcast_event_to_all_agents
-                            from datetime import datetime
-                            
-                            chunk_event = {
-                                "type": "bot_message_chunk",
-                                "message_id": f"bot-{session_id}-{int(time.time() * 1000)}",
-                                "session_id": session_id,
-                                "content": chunk,
-                                "chunk_index": idx,
-                                "total_chunks": len(chunks),
-                                "sender": "bot",
-                                "timestamp": datetime.utcnow().isoformat()
-                            }
-                            
-                            await broadcast_event_to_all_agents(chunk_event)
-                            logger.debug(f"📤 Published chunk {idx}/{len(chunks)} to admin channel")
-                        except Exception as chunk_broadcast_error:
-                            logger.warning(f"⚠️ Failed to broadcast chunk {idx} to admins: {chunk_broadcast_error}")
-                            # Continue anyway - don't block customer response if broadcast fails
+                        # Note: Removed bot_message_chunk broadcasting to admin - using only final bot_message
 
                 logger.info(f"📦 Streamed final response in {len(chunks)} chunks ({len(full_response)} chars total)")
 
