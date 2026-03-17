@@ -1236,6 +1236,48 @@ async def request_human_agent_connection(
         return f"I encountered an error while trying to connect you to a human agent. Please try again later."
 
 
+def _trim_system_prompt_content(data: Any, max_chars: int = 10) -> Any:
+    """
+    Recursively trim SystemPromptPart content to prevent exposing full system prompt in S3 uploads.
+    
+    Args:
+        data: The data structure to process (dict, list, or other)
+        max_chars: Maximum characters to keep from system prompt (default: 10)
+        
+    Returns:
+        Data with system prompt content trimmed to max_chars + "..."
+    """
+    if isinstance(data, dict):
+        result = {}
+        for key, value in data.items():
+            if key == 'content' and isinstance(value, str) and len(value) > 50:
+                # Check if this looks like a system prompt (long content starting with instructions)
+                if any(indicator in value.lower()[:100] for indicator in ['🚨', 'custom instructions', 'rule', 'you are', 'system']):
+                    original_length = len(value)
+                    result[key] = value[:max_chars] + "..." if len(value) > max_chars else value
+                    logger.info(f"📝 Trimmed system prompt content: {original_length} chars → {len(result[key])} chars")
+                    continue
+            result[key] = _trim_system_prompt_content(value, max_chars)
+        return result
+    elif isinstance(data, list):
+        return [_trim_system_prompt_content(item, max_chars) for item in data]
+    elif isinstance(data, str):
+        # Check if this is a string representation of a SystemPromptPart
+        if 'SystemPromptPart(content=' in data and len(data) > 100:
+            # Extract just the first part and trim
+            if 'content=' in data:
+                start_idx = data.find('content=') + 9  # Skip 'content="'
+                if start_idx < len(data):
+                    original_length = len(data)
+                    trimmed_content = data[start_idx:start_idx + max_chars] + "..."
+                    result = data[:start_idx] + trimmed_content + "')"
+                    logger.info(f"📝 Trimmed SystemPromptPart string: {original_length} chars → {len(result)} chars")
+                    return result
+        return data
+    else:
+        return data
+
+
 async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_response: Any) -> Optional[str]:
     """
     Upload the complete RAG response to S3 and return a download URL.
@@ -1321,6 +1363,9 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
             raw_response_data = f"CAPTURE_ERROR: {str(capture_error)}"
             capture_method = "error"
         
+        # Trim any system prompt content that might be in the response
+        trimmed_response_data = _trim_system_prompt_content(raw_response_data)
+        
         # Minimal wrapper - just metadata + complete raw response
         response_data = {
             "upload_info": {
@@ -1330,7 +1375,7 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
                 "capture_method": capture_method,
                 "response_text_length": len(response_text) if response_text else 0
             },
-            "complete_raw_response": raw_response_data,
+            "complete_raw_response": trimmed_response_data,
             "extracted_response_text": response_text  # Keep this for reference but raw data is the main content
         }
         
@@ -1420,9 +1465,12 @@ async def _upload_agent_response_to_s3(session_id: str, all_messages: list, run_
                 else:
                     msg_data = str(msg)
                 
+                # Trim system prompt content for privacy
+                trimmed_msg_data = _trim_system_prompt_content(msg_data)
+                
                 raw_messages_data.append({
                     "message_index": i,
-                    "raw_message_data": msg_data
+                    "raw_message_data": trimmed_msg_data
                 })
             except Exception as msg_error:
                 raw_messages_data.append({
