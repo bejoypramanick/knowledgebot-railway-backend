@@ -46,7 +46,7 @@ class WidgetConfigDAO:
         """Get suggested messages for the widget."""
         query = """
             SELECT message_text
-            FROM widget_suggested_messages
+            FROM public.widget_suggested_messages
             WHERE is_active = true
             ORDER BY display_order
         """
@@ -67,10 +67,17 @@ class WidgetConfigDAO:
                 logger.info("=" * 100)
                 return messages
         except Exception as e:
-            logger.log_db_query(query, None, error=e)
-            logger.error(f"❌ Error retrieving suggested messages: {e}")
-            logger.info("=" * 100)
-            return []
+            error_str = str(e)
+            # Check if table doesn't exist
+            if "does not exist" in error_str or "relation" in error_str:
+                logger.warning(f"⚠️ widget_suggested_messages table does not exist yet. Returning empty list.")
+                logger.info("=" * 100)
+                return []
+            else:
+                logger.log_db_query(query, None, error=e)
+                logger.error(f"❌ Error retrieving suggested messages: {e}")
+                logger.info("=" * 100)
+                return []
 
     async def update_widget_config(self, config_data: Dict[str, Any]):
         """
@@ -162,7 +169,7 @@ class WidgetConfigDAO:
                 logger.info(f"✅ [DAO] Found widget_config_id: {widget_config_id}")
 
                 # Clear existing messages for this widget config
-                delete_query = "DELETE FROM widget_suggested_messages WHERE widget_config_id = :widget_config_id"
+                delete_query = "DELETE FROM public.widget_suggested_messages WHERE widget_config_id = :widget_config_id"
                 delete_params = {"widget_config_id": widget_config_id}
                 logger.log_db_operation(delete_query, delete_params)
                 await session.execute(text(delete_query), delete_params)
@@ -170,7 +177,7 @@ class WidgetConfigDAO:
 
                 # Insert new messages
                 insert_query = """
-                    INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
+                    INSERT INTO public.widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
                     VALUES (:widget_config_id, :message_text, :display_order, true, NOW(), NOW())
                 """
                 logger.info("=" * 100)
@@ -264,7 +271,7 @@ class WidgetConfigDAO:
 
     async def clear_suggested_messages(self):
         """Clear all suggested messages."""
-        query = "DELETE FROM widget_suggested_messages"
+        query = "DELETE FROM public.widget_suggested_messages"
         try:
             logger.log_db_operation(query)
             logger.info("=" * 100)
@@ -286,7 +293,7 @@ class WidgetConfigDAO:
     async def add_suggested_message(self, message: str, index: int):
         """Add a suggested message."""
         query = """
-            INSERT INTO widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
+            INSERT INTO public.widget_suggested_messages (widget_config_id, message_text, display_order, is_active, created_at, updated_at)
             VALUES (1, :message_text, :display_order, true, NOW(), NOW())
         """
         params = {"message_text": message, "display_order": index}
