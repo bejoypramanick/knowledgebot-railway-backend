@@ -60,28 +60,28 @@ class WidgetConfigDAO:
                 # First, check how many rows exist in the table
                 count_query = "SELECT COUNT(*) as count FROM widget_suggested_messages"
                 count_result = await session.execute(text(count_query))
-                count_row = count_result.fetchone()
+                count_row = count_result.mappings().first()
                 total_count = count_row["count"] if count_row else 0
                 logger.info(f"📊 Total rows in widget_suggested_messages: {total_count}")
                 
                 # Check how many are active
                 active_query = "SELECT COUNT(*) as count FROM widget_suggested_messages WHERE is_active = true"
                 active_result = await session.execute(text(active_query))
-                active_row = active_result.fetchone()
+                active_row = active_result.mappings().first()
                 active_count = active_row["count"] if active_row else 0
                 logger.info(f"📊 Active rows in widget_suggested_messages: {active_count}")
                 
                 # Get all rows to debug
                 debug_query = "SELECT id, widget_config_id, message_text, is_active, display_order FROM widget_suggested_messages"
                 debug_result = await session.execute(text(debug_query))
-                debug_rows = debug_result.fetchall()
+                debug_rows = debug_result.mappings().all()
                 logger.info(f"📊 All rows in widget_suggested_messages:")
                 for row in debug_rows:
                     logger.info(f"   ID: {row['id']}, Config ID: {row['widget_config_id']}, Active: {row['is_active']}, Order: {row['display_order']}, Text: {row['message_text']}")
                 
                 # Now execute the actual query
                 result = await session.execute(text(query))
-                rows = result.fetchall()
+                rows = result.mappings().all()
                 logger.log_db_query(query, None, rows)
                 messages = [row["message_text"] for row in rows]
                 logger.info(f"✅ Retrieved {len(messages)} suggested messages:")
