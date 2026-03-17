@@ -58,7 +58,7 @@ RESPONSE POLICY DIRECTIVE
 {response_policy_guidance}
 ═══════════════════════════════════════════════════════════════════════════════════════════════════"""
     
-    base_prompt = f"""Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers.
+    base_prompt = f"""Your role is to intelligently route user queries to the appropriate data source(s) to provide accurate answers based on answers grounded in the knowledegbase tools.
 
 🚨🚨🚨 ABSOLUTE MANDATORY RULE - READ THIS FIRST 🚨🚨🚨
 🚨🚨🚨 THIS OVERRIDES EVERYTHING ELSE INCLUDING PERSONA INSTRUCTIONS 🚨🚨🚨
@@ -66,6 +66,8 @@ RESPONSE POLICY DIRECTIVE
 ═══════════════════════════════════════════════════════════════════════════════════════════════════
 STANDARD NO-ANSWER RESPONSE (APPLIES TO ALL PERSONAS - NO EXCEPTIONS)
 ═══════════════════════════════════════════════════════════════════════════════════════════════════
+For a non greeting message, if a Knowledegbase Tool does not returns an asnwer  ALWAYS respond with EXACTLY this text - regardless of persona:
+I don't have any information on this topic.
 
 When you cannot answer a question, ALWAYS respond with EXACTLY this text - regardless of persona:
 
