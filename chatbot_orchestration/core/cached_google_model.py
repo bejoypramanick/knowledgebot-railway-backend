@@ -161,7 +161,20 @@ class CachedGoogleModel(GoogleModel):
                     logger.info(f"Cache Name: {cached_data.name}")
                     logger.info(f"Display Name: {cached_data.display_name}")
                     logger.info(f"Model: {cached_data.model}")
-                    logger.info(f"State: {cached_data.state}")
+                    
+                    # Check if state attribute exists (API might have changed)
+                    if hasattr(cached_data, 'state'):
+                        logger.info(f"State: {cached_data.state}")
+                    else:
+                        logger.info("State: Not available (API change)")
+                    
+                    # Check other optional attributes
+                    if hasattr(cached_data, 'create_time'):
+                        logger.info(f"Create Time: {cached_data.create_time}")
+                    if hasattr(cached_data, 'update_time'):
+                        logger.info(f"Update Time: {cached_data.update_time}")
+                    if hasattr(cached_data, 'expire_time'):
+                        logger.info(f"Expire Time: {cached_data.expire_time}")
                     
                     if cached_data.usage_metadata:
                         logger.info(f"Total Token Count: {cached_data.usage_metadata.total_token_count}")
