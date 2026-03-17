@@ -525,18 +525,22 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         s3_download_url = None
         enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "false").lower() == "true"
         
+        logger.info(f"🔍 DEBUG: ENABLE_RAG_S3_UPLOAD environment variable = '{os.getenv('ENABLE_RAG_S3_UPLOAD', 'NOT_SET')}'")
+        logger.info(f"🔍 DEBUG: enable_s3_upload evaluated to = {enable_s3_upload}")
+        
         if enable_s3_upload:
+            logger.info("📁 RAG S3 upload is ENABLED - attempting upload...")
             try:
                 s3_download_url = await _upload_rag_response_to_s3(session_id, response_text, response)
                 if s3_download_url:
-                    logger.info(f"📁 RAG response uploaded to S3: {s3_download_url}")
+                    logger.info(f"📁 ✅ RAG response uploaded to S3: {s3_download_url}")
                 else:
-                    logger.warning("⚠️ Failed to upload RAG response to S3")
+                    logger.warning("📁 ⚠️ Failed to upload RAG response to S3 (returned None)")
             except Exception as s3_error:
-                logger.error(f"❌ S3 upload failed: {s3_error}")
+                logger.error(f"📁 ❌ S3 upload failed: {s3_error}")
                 # Continue without S3 upload - don't block the response
         else:
-            logger.debug("📁 RAG S3 upload disabled (ENABLE_RAG_S3_UPLOAD=false)")
+            logger.info("📁 RAG S3 upload is DISABLED (ENABLE_RAG_S3_UPLOAD=false or not set)")
         logger.info("=" * 100)
         logger.info("📦 RAW GEMINI RESPONSE (COMPLETE):")
         logger.info("=" * 100)
@@ -882,7 +886,10 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         if s3_download_url:
             download_section = f"\n\n📁 **RAG Response Details**: [Download Complete Response]({s3_download_url})"
             enhanced_content += download_section
-            logger.info(f"📁 Added download link to response: {s3_download_url}")
+            logger.info(f"📁 ✅ Added RAG download link to response: {s3_download_url}")
+            logger.info(f"📁 ✅ Enhanced content now includes download section (total length: {len(enhanced_content)} chars)")
+        else:
+            logger.info("📁 ❌ No RAG download link added - s3_download_url is None")
         
         return enhanced_content
 
@@ -1245,6 +1252,8 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
         S3 download URL or None if upload failed
     """
     try:
+        logger.info(f"📁 Starting RAG response S3 upload for session: {session_id}")
+        
         # Get S3 configuration from environment
         bucket_name = os.getenv("RAILWAY_BUCKET_NAME")
         aws_access_key = os.getenv("RAILWAY_STORAGE_ACCESS_KEY")
@@ -1252,8 +1261,15 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
         aws_region = os.getenv("RAILWAY_REGION", "us-east-1")
         storage_url = os.getenv("RAILWAY_STORAGE_URL")
         
+        logger.info(f"📁 S3 Config - Bucket: {bucket_name}, Region: {aws_region}, Storage URL: {storage_url}")
+        logger.info(f"📁 S3 Config - Has Access Key: {bool(aws_access_key)}, Has Secret Key: {bool(aws_secret_key)}")
+        
         if not all([bucket_name, aws_access_key, aws_secret_key]):
-            logger.debug("📁 S3 credentials not configured - RAG response upload skipped")
+            missing = []
+            if not bucket_name: missing.append("RAILWAY_BUCKET_NAME")
+            if not aws_access_key: missing.append("RAILWAY_STORAGE_ACCESS_KEY")
+            if not aws_secret_key: missing.append("RAILWAY_STORAGE_SECRET_KEY")
+            logger.warning(f"📁 S3 credentials not configured - missing: {', '.join(missing)}")
             return None
             
         # Create S3 client

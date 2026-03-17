@@ -684,19 +684,23 @@ class StreamingService:
                     # 📁 UPLOAD AGENT RESPONSE TO S3 FOR DOWNLOAD (if enabled)
                     enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "false").lower() == "true"
                     
+                    logger.info(f"🔍 DEBUG: Agent S3 upload - ENABLE_RAG_S3_UPLOAD = '{os.getenv('ENABLE_RAG_S3_UPLOAD', 'NOT_SET')}'")
+                    logger.info(f"🔍 DEBUG: Agent S3 upload - enable_s3_upload = {enable_s3_upload}")
+                    
                     if enable_s3_upload:
+                        logger.info("📁 Agent S3 upload is ENABLED - attempting upload...")
                         try:
                             from ..tools.knowledge_tools import _upload_agent_response_to_s3
                             agent_s3_download_url = await _upload_agent_response_to_s3(session_id, all_messages, run)
                             if agent_s3_download_url:
-                                logger.info(f"📁 Agent response uploaded to S3: {agent_s3_download_url}")
+                                logger.info(f"📁 ✅ Agent response uploaded to S3: {agent_s3_download_url}")
                             else:
-                                logger.warning("⚠️ Failed to upload agent response to S3")
+                                logger.warning("📁 ⚠️ Failed to upload agent response to S3 (returned None)")
                         except Exception as s3_error:
-                            logger.error(f"❌ Agent S3 upload failed: {s3_error}")
+                            logger.error(f"📁 ❌ Agent S3 upload failed: {s3_error}")
                             # Continue without S3 upload - don't block the response
                     else:
-                        logger.debug("📁 Agent S3 upload disabled (ENABLE_RAG_S3_UPLOAD=false)")
+                        logger.info("📁 Agent S3 upload is DISABLED (ENABLE_RAG_S3_UPLOAD=false or not set)")
 
                     # DEBUG: Log all messages structure
                     if not all_messages:
@@ -1051,7 +1055,10 @@ class StreamingService:
                 if agent_s3_download_url:
                     agent_download_section = f"\n\n🤖 **Agent Response Details**: [Download Complete Response]({agent_s3_download_url})"
                     full_response += agent_download_section
-                    logger.info(f"📁 Added agent download link to response: {agent_s3_download_url}")
+                    logger.info(f"📁 ✅ Added agent download link to response: {agent_s3_download_url}")
+                    logger.info(f"📁 ✅ Full response now includes agent download section (total length: {len(full_response)} chars)")
+                else:
+                    logger.info("📁 ❌ No agent download link added - agent_s3_download_url is None")
 
                 # 🚨 CRITICAL: Filter out elaboration from tool responses
                 # If response contains "Human Agent support is currently not available" with elaboration,
