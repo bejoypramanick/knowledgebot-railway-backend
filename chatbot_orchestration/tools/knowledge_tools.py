@@ -521,17 +521,22 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
             
         logger.info(f"Response Text Length: {len(response_text)} chars")
         
-        # 📁 UPLOAD RAW RESPONSE TO S3 FOR DOWNLOAD
+        # 📁 UPLOAD RAW RESPONSE TO S3 FOR DOWNLOAD (if enabled)
         s3_download_url = None
-        try:
-            s3_download_url = await _upload_rag_response_to_s3(session_id, response_text, response)
-            if s3_download_url:
-                logger.info(f"📁 RAG response uploaded to S3: {s3_download_url}")
-            else:
-                logger.warning("⚠️ Failed to upload RAG response to S3")
-        except Exception as s3_error:
-            logger.error(f"❌ S3 upload failed: {s3_error}")
-            # Continue without S3 upload - don't block the response
+        enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "false").lower() == "true"
+        
+        if enable_s3_upload:
+            try:
+                s3_download_url = await _upload_rag_response_to_s3(session_id, response_text, response)
+                if s3_download_url:
+                    logger.info(f"📁 RAG response uploaded to S3: {s3_download_url}")
+                else:
+                    logger.warning("⚠️ Failed to upload RAG response to S3")
+            except Exception as s3_error:
+                logger.error(f"❌ S3 upload failed: {s3_error}")
+                # Continue without S3 upload - don't block the response
+        else:
+            logger.debug("📁 RAG S3 upload disabled (ENABLE_RAG_S3_UPLOAD=false)")
         logger.info("=" * 100)
         logger.info("📦 RAW GEMINI RESPONSE (COMPLETE):")
         logger.info("=" * 100)
@@ -1228,6 +1233,9 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
     """
     Upload the complete RAG response to S3 and return a download URL.
     
+    This feature is controlled by the ENABLE_RAG_S3_UPLOAD environment variable.
+    Set ENABLE_RAG_S3_UPLOAD=true to enable RAG response uploads to S3.
+    
     Args:
         session_id: The chat session ID
         response_text: The extracted response text
@@ -1245,7 +1253,7 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
         storage_url = os.getenv("RAILWAY_STORAGE_URL")
         
         if not all([bucket_name, aws_access_key, aws_secret_key]):
-            logger.warning("⚠️ S3 credentials not configured - skipping RAG response upload")
+            logger.debug("📁 S3 credentials not configured - RAG response upload skipped")
             return None
             
         # Create S3 client
