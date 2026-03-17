@@ -505,10 +505,10 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
 
         response_text = response.text if hasattr(response, 'text') else str(response)
         logger.info(f"Response Text Length: {len(response_text)} chars")
-        logger.info(f"Response Text Preview (first 500 chars):")
-        logger.info(response_text[:500])
-        if len(response_text) > 500:
-            logger.info(f"... [truncated, total {len(response_text)} chars]")
+        logger.info("=" * 100)
+        logger.info("📦 RAW GEMINI RESPONSE (COMPLETE):")
+        logger.info("=" * 100)
+        logger.info(response_text)
         logger.info("=" * 100)
         
         # Strip out Gemini's HTML citations (e.g., <sup id="cite_ref-3"><a href="#cite_note-3">[3]</a></sup>)
@@ -524,6 +524,11 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         
         if original_response_text != response_text:
             logger.info(f"📎 [CITATION] Stripped HTML citations. Length before: {len(original_response_text)}, after: {len(response_text)}")
+            logger.info("=" * 100)
+            logger.info("📦 RESPONSE AFTER CITATION STRIPPING (COMPLETE):")
+            logger.info("=" * 100)
+            logger.info(response_text)
+            logger.info("=" * 100)
         else:
             logger.info(f"📎 [CITATION] No HTML citations found to strip")
         
@@ -833,8 +838,10 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         logger.info(f"✅ Internal RAG search completed: _perform_rag_search (returned {len(enhanced_content)} chars)")
         logger.info("=" * 80)
         logger.info("📦 FINAL ENHANCED CONTENT (with citations):")
-        logger.info(f"First 500 chars: {enhanced_content[:500]}")
-        logger.info(f"Last 500 chars: {enhanced_content[-500:]}")
+        logger.info(f"COMPLETE RAG RESPONSE:")
+        logger.info(enhanced_content)
+        logger.info("=" * 80)
+        logger.info(f"RESPONSE ANALYSIS:")
         logger.info(f"Total length: {len(enhanced_content)} chars")
         logger.info(f"Contains [CITATION_SOURCES]: {'[CITATION_SOURCES]' in enhanced_content}")
         logger.info("=" * 80)
