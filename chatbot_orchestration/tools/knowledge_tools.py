@@ -420,7 +420,10 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
                             file_search_store_names=[file_search_store_name]
                         )
                     )
-                ]
+                ],
+                thinking_config=types.ThinkingConfig(
+                    include_thinking=False  # Disable thinking to save tokens
+                )
             )
         )
         
