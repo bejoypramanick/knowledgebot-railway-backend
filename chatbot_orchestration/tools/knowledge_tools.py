@@ -1253,6 +1253,7 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
     """
     try:
         logger.info(f"📁 Starting RAG response S3 upload for session: {session_id}")
+        logger.info(f"📁 COMPLETE RAW RESPONSE DUMP - No extraction, just raw data")
         
         # Get S3 configuration from environment
         bucket_name = os.getenv("RAILWAY_BUCKET_NAME")
@@ -1281,81 +1282,57 @@ async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_r
             endpoint_url=storage_url if storage_url else None
         )
         
-        # Create comprehensive response data
+        # Create minimal metadata wrapper - COMPLETE RAW RESPONSE DUMP
         timestamp = datetime.utcnow().isoformat()
-        response_data = {
-            "session_id": session_id,
-            "timestamp": timestamp,
-            "response_text": response_text,
-            "response_length": len(response_text),
-            "response_metadata": {
-                "type": type(full_response).__name__,
-                "attributes": dir(full_response),
-                "has_candidates": hasattr(full_response, 'candidates'),
-                "candidates_count": len(full_response.candidates) if hasattr(full_response, 'candidates') else 0
-            }
-        }
         
-        # Add grounding metadata if available
-        if hasattr(full_response, 'candidates'):
-            grounding_info = []
-            for i, candidate in enumerate(full_response.candidates):
-                candidate_info = {
-                    "candidate_index": i,
-                    "has_grounding_metadata": hasattr(candidate, 'grounding_metadata'),
-                    "candidate_raw": str(candidate) if hasattr(candidate, '__dict__') else None
-                }
-                
-                if hasattr(candidate, 'grounding_metadata'):
-                    gm = candidate.grounding_metadata
-                    candidate_info["grounding_metadata"] = {
-                        "type": type(gm).__name__,
-                        "attributes": dir(gm),
-                        "has_grounding_chunks": hasattr(gm, 'grounding_chunks'),
-                        "chunks_count": len(gm.grounding_chunks) if hasattr(gm, 'grounding_chunks') else 0,
-                        "raw_grounding_metadata": str(gm) if hasattr(gm, '__dict__') else None
-                    }
-                    
-                    # Extract grounding chunks details
-                    if hasattr(gm, 'grounding_chunks') and gm.grounding_chunks:
-                        chunks_details = []
-                        for j, chunk in enumerate(gm.grounding_chunks):
-                            chunk_info = {
-                                "chunk_index": j,
-                                "type": type(chunk).__name__,
-                                "attributes": dir(chunk),
-                                "raw_chunk": str(chunk) if hasattr(chunk, '__dict__') else None
-                            }
-                            
-                            if hasattr(chunk, 'retrieved_context'):
-                                ctx = chunk.retrieved_context
-                                chunk_info["retrieved_context"] = {
-                                    "title": getattr(ctx, 'title', None),
-                                    "uri": getattr(ctx, 'uri', None),
-                                    "text_length": len(getattr(ctx, 'text', '')) if hasattr(ctx, 'text') else 0,
-                                    "text_preview": getattr(ctx, 'text', '')[:500] if hasattr(ctx, 'text') else None,
-                                    "full_text": getattr(ctx, 'text', '') if hasattr(ctx, 'text') else None,
-                                    "raw_context": str(ctx) if hasattr(ctx, '__dict__') else None
-                                }
-                            
-                            chunks_details.append(chunk_info)
-                        
-                        candidate_info["grounding_chunks"] = chunks_details
-                
-                grounding_info.append(candidate_info)
-            
-            response_data["grounding_analysis"] = grounding_info
+        # Try multiple methods to capture the COMPLETE raw response object
+        raw_response_data = None
+        capture_method = "none"
         
-        # Try to capture the complete raw response object
         try:
-            if hasattr(full_response, '__dict__'):
-                response_data["raw_response_dict"] = full_response.__dict__
-            elif hasattr(full_response, 'model_dump'):
-                response_data["raw_response_model_dump"] = full_response.model_dump()
+            # Method 1: Try model_dump() first (Pydantic models)
+            if hasattr(full_response, 'model_dump'):
+                raw_response_data = full_response.model_dump()
+                capture_method = "model_dump"
+                logger.info("📦 RAG S3: Captured via model_dump()")
+            # Method 2: Try __dict__ (regular objects)
+            elif hasattr(full_response, '__dict__'):
+                raw_response_data = full_response.__dict__
+                capture_method = "__dict__"
+                logger.info("📦 RAG S3: Captured via __dict__")
+            # Method 3: Try to convert to dict if it's a dataclass or similar
+            elif hasattr(full_response, '_asdict'):
+                raw_response_data = full_response._asdict()
+                capture_method = "_asdict"
+                logger.info("📦 RAG S3: Captured via _asdict()")
+            # Method 4: Try vars() function
             else:
-                response_data["raw_response_str"] = str(full_response)
-        except Exception as raw_error:
-            response_data["raw_response_error"] = str(raw_error)
+                try:
+                    raw_response_data = vars(full_response)
+                    capture_method = "vars"
+                    logger.info("📦 RAG S3: Captured via vars()")
+                except:
+                    # Method 5: Last resort - string representation
+                    raw_response_data = str(full_response)
+                    capture_method = "str"
+                    logger.info("📦 RAG S3: Captured via str() (last resort)")
+        except Exception as capture_error:
+            logger.error(f"📦 RAG S3: All capture methods failed: {capture_error}")
+            raw_response_data = f"CAPTURE_ERROR: {str(capture_error)}"
+            capture_method = "error"
+        
+        # Minimal wrapper - just metadata + complete raw response
+        response_data = {
+            "upload_info": {
+                "type": "complete_gemini_filesearch_response",
+                "session_id": session_id,
+                "timestamp": timestamp,
+                "capture_method": capture_method,
+                "response_text_length": len(response_text) if response_text else 0
+            },
+            "complete_raw_response": raw_response_data,
+            "extracted_response_text": response_text  # Keep this for reference but raw data is the main content
+        }
         
         # Convert to formatted JSON
         json_content = json.dumps(response_data, indent=2, ensure_ascii=False)
@@ -1403,6 +1380,9 @@ async def _upload_agent_response_to_s3(session_id: str, all_messages: list, run_
         S3 download URL or None if upload failed
     """
     try:
+        logger.info(f"📁 Starting agent response S3 upload for session: {session_id}")
+        logger.info(f"📁 COMPLETE RAW AGENT DUMP - No extraction, just raw data")
+        
         # Get S3 configuration from environment
         bucket_name = os.getenv("RAILWAY_BUCKET_NAME")
         aws_access_key = os.getenv("RAILWAY_STORAGE_ACCESS_KEY")
@@ -1423,111 +1403,66 @@ async def _upload_agent_response_to_s3(session_id: str, all_messages: list, run_
             endpoint_url=storage_url if storage_url else None
         )
         
-        # Create comprehensive agent response data
+        # Create minimal wrapper - COMPLETE RAW AGENT RESPONSE DUMP
         timestamp = datetime.utcnow().isoformat()
         
-        # Process all messages to extract structured data
-        processed_messages = []
-        tool_calls_found = []
-        
+        # Capture ALL messages without processing - just convert to serializable format
+        raw_messages_data = []
         for i, msg in enumerate(all_messages):
-            msg_data = {
-                "message_index": i,
-                "type": type(msg).__name__,
-                "attributes": dir(msg),
-                "raw_message": str(msg) if hasattr(msg, '__dict__') else None
-            }
-            
-            # Extract parts if available
-            if hasattr(msg, 'parts'):
-                parts_data = []
-                for j, part in enumerate(msg.parts):
-                    part_data = {
-                        "part_index": j,
-                        "type": type(part).__name__,
-                        "attributes": dir(part),
-                        "raw_part": str(part) if hasattr(part, '__dict__') else None
-                    }
-                    
-                    # Extract content based on part type
-                    if hasattr(part, 'content'):
-                        content = getattr(part, 'content', '')
-                        part_data["content"] = str(content)
-                        part_data["content_length"] = len(str(content))
-                    
-                    if hasattr(part, 'text'):
-                        text = getattr(part, 'text', '')
-                        part_data["text"] = str(text)
-                        part_data["text_length"] = len(str(text))
-                    
-                    # Extract tool call information
-                    if hasattr(part, 'tool_name'):
-                        tool_name = getattr(part, 'tool_name', None)
-                        part_data["tool_name"] = tool_name
-                        if tool_name:
-                            tool_calls_found.append(tool_name)
-                    
-                    if hasattr(part, 'args'):
-                        part_data["tool_args"] = getattr(part, 'args', None)
-                    
-                    if hasattr(part, 'tool_call_id'):
-                        part_data["tool_call_id"] = getattr(part, 'tool_call_id', None)
-                    
-                    # Try to extract any other tool-related attributes
-                    for attr in dir(part):
-                        if 'tool' in attr.lower() and not attr.startswith('_'):
-                            try:
-                                part_data[f"tool_attr_{attr}"] = getattr(part, attr, None)
-                            except:
-                                pass
-                    
-                    parts_data.append(part_data)
+            try:
+                # Try multiple methods to capture complete message data
+                if hasattr(msg, 'model_dump'):
+                    msg_data = msg.model_dump()
+                elif hasattr(msg, '__dict__'):
+                    msg_data = msg.__dict__
+                elif hasattr(msg, '_asdict'):
+                    msg_data = msg._asdict()
+                else:
+                    msg_data = str(msg)
                 
-                msg_data["parts"] = parts_data
-                msg_data["parts_count"] = len(msg.parts)
-            
-            processed_messages.append(msg_data)
+                raw_messages_data.append({
+                    "message_index": i,
+                    "raw_message_data": msg_data
+                })
+            except Exception as msg_error:
+                raw_messages_data.append({
+                    "message_index": i,
+                    "error": str(msg_error),
+                    "fallback_str": str(msg)
+                })
         
-        # Try to extract raw model response if available
-        raw_response_data = None
+        # Capture complete run object if available
+        raw_run_data = None
+        run_capture_method = "none"
         if run_object:
             try:
-                # Try to access raw response through various possible attributes
-                if hasattr(run_object, '_response'):
-                    raw_response = getattr(run_object, '_response', None)
-                    if raw_response and hasattr(raw_response, 'model_dump'):
-                        raw_response_data = raw_response.model_dump()
-                elif hasattr(run_object, 'response'):
-                    raw_response = getattr(run_object, 'response', None)
-                    if raw_response and hasattr(raw_response, 'model_dump'):
-                        raw_response_data = raw_response.model_dump()
-                elif hasattr(run_object, '_model_response'):
-                    raw_response = getattr(run_object, '_model_response', None)
-                    if raw_response and hasattr(raw_response, 'model_dump'):
-                        raw_response_data = raw_response.model_dump()
-                
-                if raw_response_data:
-                    logger.info("📦 Successfully extracted raw model response for S3 upload")
+                if hasattr(run_object, 'model_dump'):
+                    raw_run_data = run_object.model_dump()
+                    run_capture_method = "model_dump"
+                elif hasattr(run_object, '__dict__'):
+                    raw_run_data = run_object.__dict__
+                    run_capture_method = "__dict__"
+                elif hasattr(run_object, '_asdict'):
+                    raw_run_data = run_object._asdict()
+                    run_capture_method = "_asdict"
                 else:
-                    logger.debug("📦 No raw model response found in run object")
-                    
-            except Exception as raw_error:
-                logger.warning(f"⚠️ Failed to extract raw model response: {raw_error}")
+                    raw_run_data = str(run_object)
+                    run_capture_method = "str"
+            except Exception as run_error:
+                raw_run_data = f"RUN_CAPTURE_ERROR: {str(run_error)}"
+                run_capture_method = "error"
         
+        # Minimal wrapper - just metadata + complete raw data
         response_data = {
-            "session_id": session_id,
-            "timestamp": timestamp,
-            "type": "agent_response",
-            "messages_count": len(all_messages),
-            "tool_calls_found": tool_calls_found,
-            "unique_tools_called": list(set(tool_calls_found)),
-            "processed_messages": processed_messages,
-            "raw_model_response": raw_response_data,
-            "run_object_info": {
-                "type": type(run_object).__name__ if run_object else None,
-                "attributes": dir(run_object) if run_object else None,
-                "raw_run_object": str(run_object) if run_object and hasattr(run_object, '__dict__') else None
-            }
+            "upload_info": {
+                "type": "complete_agent_response",
+                "session_id": session_id,
+                "timestamp": timestamp,
+                "messages_count": len(all_messages),
+                "run_capture_method": run_capture_method
+            },
+            "complete_raw_messages": raw_messages_data,
+            "complete_raw_run_object": raw_run_data
         }
         
         # Convert to formatted JSON
