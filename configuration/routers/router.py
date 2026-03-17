@@ -543,10 +543,10 @@ async def generate_widget_embed_script(request: Request):
     allowfullscreen
 ></iframe>'''
         else:
-            # Bubble embed - reference the global embed script
+            # Bubble embed - reference the global embed script from bubble domain
             script = f'''<!-- Knowledgebot Widget - Bubble Embed -->
 <!-- This script loads the chat bubble widget dynamically -->
-<script src="{base_url}/widget-embed.js" type="module"></script>'''
+<script src="https://dailogue-bubble.globistaan.com/widget-embed.js" type="module"></script>'''
 
         return {
             "success": True,
