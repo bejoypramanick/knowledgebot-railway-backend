@@ -546,7 +546,7 @@ async def generate_widget_embed_script(request: Request):
             # Bubble embed - reference the global embed script
             script = f'''<!-- Knowledgebot Widget - Bubble Embed -->
 <!-- This script loads the chat bubble widget dynamically -->
-<script src="{base_url}/widget-embed.js"></script>'''
+<script src="{base_url}/widget-embed.js" type="module"></script>'''
 
         return {
             "success": True,
