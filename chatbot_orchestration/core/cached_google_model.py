@@ -9,10 +9,19 @@ from the GenerateContentConfig when a cache is active.
 Resilience: If Google expires the cache before our local TTL detects it,
 _generate_content catches the stale-cache error, invalidates the local cache,
 rebuilds the config WITH system_instruction/tools (inline fallback), and retries.
+
+Resilience Patterns:
+1. Exponential Backoff: Retries with jittered backoff for 503 errors
+2. Model Fallback: Falls back to gemini-2.0-flash if gemini-2.5-flash-lite is unavailable
+3. Circuit Breaker: Trips after 10 failures in 60s, blocks requests for 60s
 """
 
 from collections.abc import AsyncIterator, Awaitable
 from typing import Any, cast
+import asyncio
+import random
+import time
+from collections import deque
 
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models import ModelRequestParameters
@@ -38,6 +47,79 @@ def _is_cache_error(error: Exception) -> bool:
     return any(term in msg for term in (
         'cached_content', 'cachedcontent', 'cache', 'not found', 'expired',
     ))
+
+
+def _is_503_error(error: Exception) -> bool:
+    """Check if error is a 503 Service Unavailable (high demand)."""
+    msg = str(error).lower()
+    return '503' in msg or 'unavailable' in msg or 'high demand' in msg
+
+
+class CircuitBreaker:
+    """Circuit breaker pattern for model-specific failures.
+    
+    Tracks failures per model. After threshold failures in window_seconds,
+    trips the circuit and blocks requests for cooldown_seconds.
+    """
+    
+    def __init__(self, threshold: int = 10, window_seconds: int = 60, cooldown_seconds: int = 60):
+        self.threshold = threshold
+        self.window_seconds = window_seconds
+        self.cooldown_seconds = cooldown_seconds
+        self._failures: dict[str, deque] = {}  # model_name -> deque of failure timestamps
+        self._tripped_until: dict[str, float] = {}  # model_name -> timestamp when circuit closes
+        
+    def record_failure(self, model_name: str) -> None:
+        """Record a failure for the given model."""
+        now = time.time()
+        
+        if model_name not in self._failures:
+            self._failures[model_name] = deque()
+        
+        # Add failure timestamp
+        self._failures[model_name].append(now)
+        
+        # Remove failures outside the window
+        cutoff = now - self.window_seconds
+        while self._failures[model_name] and self._failures[model_name][0] < cutoff:
+            self._failures[model_name].popleft()
+        
+        # Check if we should trip the circuit
+        if len(self._failures[model_name]) >= self.threshold:
+            self._tripped_until[model_name] = now + self.cooldown_seconds
+            logger.warning(
+                f"🔴 Circuit breaker TRIPPED for {model_name}: "
+                f"{len(self._failures[model_name])} failures in {self.window_seconds}s. "
+                f"Blocking requests for {self.cooldown_seconds}s"
+            )
+    
+    def is_tripped(self, model_name: str) -> bool:
+        """Check if circuit is tripped for the given model."""
+        if model_name not in self._tripped_until:
+            return False
+        
+        now = time.time()
+        if now < self._tripped_until[model_name]:
+            remaining = int(self._tripped_until[model_name] - now)
+            logger.info(f"🔴 Circuit breaker is OPEN for {model_name} ({remaining}s remaining)")
+            return True
+        
+        # Circuit has cooled down
+        logger.info(f"🟢 Circuit breaker CLOSED for {model_name} (cooldown complete)")
+        del self._tripped_until[model_name]
+        self._failures[model_name].clear()
+        return False
+    
+    def reset(self, model_name: str) -> None:
+        """Reset circuit breaker for a model (after successful request)."""
+        if model_name in self._failures:
+            self._failures[model_name].clear()
+        if model_name in self._tripped_until:
+            del self._tripped_until[model_name]
+
+
+# Global circuit breaker instance
+_circuit_breaker = CircuitBreaker(threshold=10, window_seconds=60, cooldown_seconds=60)
 
 
 class CachedGoogleModel(GoogleModel):
@@ -81,31 +163,130 @@ class CachedGoogleModel(GoogleModel):
         model_settings: GoogleModelSettings,
         model_request_parameters: ModelRequestParameters,
     ) -> GenerateContentResponse | Awaitable[AsyncIterator[GenerateContentResponse]]:
-        """Override to add stale-cache resilience.
-
+        """Override to add resilience patterns:
+        
+        1. Exponential Backoff: Retries with jittered backoff for 503 errors
+        2. Model Fallback: Falls back to gemini-2.0-flash if primary model unavailable
+        3. Circuit Breaker: Trips after 10 failures in 60s, blocks for 60s
+        
         If the cached_content reference is expired/invalid on Google's side,
         catch the error, invalidate local cache, rebuild config without cache,
         and retry with inline system_instruction + tools.
         """
+        
+        # Get model name from settings or use default
+        model_name = self.model_name or "gemini-2.5-flash-lite"
+        
+        # PATTERN 3: Circuit Breaker - Check if circuit is tripped
+        if _circuit_breaker.is_tripped(model_name):
+            logger.warning(f"Circuit breaker is OPEN for {model_name}, attempting fallback...")
+            # Try fallback model immediately
+            return await self._try_fallback_model(messages, stream, model_settings, model_request_parameters)
+        
+        # PATTERN 1: Exponential Backoff with retries
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                result = await super()._generate_content(messages, stream, model_settings, model_request_parameters)
+                
+                # Success! Reset circuit breaker
+                _circuit_breaker.reset(model_name)
+                return result
+                
+            except Exception as e:
+                error_msg = str(e)
+                
+                # Handle cache errors (existing logic)
+                cached_content = model_settings.get('google_cached_content')
+                if cached_content and _is_cache_error(e):
+                    logger.warning(f"Stale Gemini cache detected ({cached_content}): {e}")
+                    logger.info("Invalidating cache and retrying with inline system_instruction + tools")
+
+                    # Invalidate local cache so future requests don't hit this again
+                    from .cache_manager import gemini_cache_manager
+                    gemini_cache_manager.invalidate()
+
+                    # Strip google_cached_content from settings and retry
+                    fallback_settings = dict(model_settings)
+                    fallback_settings.pop('google_cached_content', None)
+                    fallback_settings = cast(GoogleModelSettings, fallback_settings)
+
+                    logger.info("Retrying request without cache (inline fallback)")
+                    return await super()._generate_content(messages, stream, fallback_settings, model_request_parameters)
+                
+                # PATTERN 1 & 3: Handle 503 errors with exponential backoff
+                if _is_503_error(e):
+                    _circuit_breaker.record_failure(model_name)
+                    
+                    # Check if circuit just tripped
+                    if _circuit_breaker.is_tripped(model_name):
+                        logger.error(f"Circuit breaker TRIPPED for {model_name} after 503 error")
+                        # Try fallback immediately
+                        return await self._try_fallback_model(messages, stream, model_settings, model_request_parameters)
+                    
+                    # Exponential backoff with jitter
+                    if attempt < max_retries - 1:
+                        wait_time = (2 ** attempt) + random.uniform(0, 1)
+                        logger.warning(
+                            f"503 detected for {model_name} (attempt {attempt + 1}/{max_retries}), "
+                            f"retrying in {wait_time:.2f}s... Error: {error_msg[:200]}"
+                        )
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        # All retries exhausted, try fallback
+                        logger.error(f"All retries exhausted for {model_name}, attempting fallback...")
+                        return await self._try_fallback_model(messages, stream, model_settings, model_request_parameters)
+                
+                # Other errors - record failure and propagate
+                _circuit_breaker.record_failure(model_name)
+                raise
+        
+        # Should never reach here, but just in case
+        raise RuntimeError(f"Unexpected state in _generate_content after {max_retries} attempts")
+    
+    async def _try_fallback_model(
+        self,
+        messages: list[ModelMessage],
+        stream: bool,
+        model_settings: GoogleModelSettings,
+        model_request_parameters: ModelRequestParameters,
+    ) -> GenerateContentResponse | Awaitable[AsyncIterator[GenerateContentResponse]]:
+        """PATTERN 2: Model Fallback - Try a more stable model.
+        
+        Falls back from gemini-2.5-flash-lite to gemini-2.0-flash.
+        """
+        primary_model = self.model_name or "gemini-2.5-flash-lite"
+        fallback_model = "gemini-2.0-flash"
+        
+        logger.info(f"🔄 Falling back from {primary_model} to {fallback_model}")
+        
+        # Create a new instance with fallback model
+        fallback_instance = CachedGoogleModel(
+            model_name=fallback_model,
+            api_key=self.api_key,
+        )
+        
         try:
-            return await super()._generate_content(messages, stream, model_settings, model_request_parameters)
-        except Exception as e:
-            cached_content = model_settings.get('google_cached_content')
-            if not cached_content or not _is_cache_error(e):
-                raise  # Not cache-related, propagate normally
-
-            logger.warning(f"Stale Gemini cache detected ({cached_content}): {e}")
-            logger.info("Invalidating cache and retrying with inline system_instruction + tools")
-
-            # Invalidate local cache so future requests don't hit this again
-            from .cache_manager import gemini_cache_manager
-            gemini_cache_manager.invalidate()
-
-            # Strip google_cached_content from settings and retry
-            # This causes _build_content_and_config to keep system_instruction/tools intact
-            fallback_settings = dict(model_settings)
-            fallback_settings.pop('google_cached_content', None)
-            fallback_settings = cast(GoogleModelSettings, fallback_settings)
-
-            logger.info("Retrying request without cache (inline fallback)")
-            return await super()._generate_content(messages, stream, fallback_settings, model_request_parameters)
+            result = await fallback_instance._generate_content_direct(
+                messages, stream, model_settings, model_request_parameters
+            )
+            logger.info(f"✅ Fallback to {fallback_model} succeeded")
+            return result
+        except Exception as fallback_error:
+            logger.error(f"❌ Fallback to {fallback_model} also failed: {fallback_error}")
+            # Return user-friendly error
+            raise RuntimeError(
+                f"Service temporarily unavailable due to high demand on {primary_model}. "
+                f"Fallback to {fallback_model} also failed. Please try again in a moment."
+            ) from fallback_error
+    
+    async def _generate_content_direct(
+        self,
+        messages: list[ModelMessage],
+        stream: bool,
+        model_settings: GoogleModelSettings,
+        model_request_parameters: ModelRequestParameters,
+    ) -> GenerateContentResponse | Awaitable[AsyncIterator[GenerateContentResponse]]:
+        """Direct call to parent without retry logic (used by fallback)."""
+        return await super()._generate_content(messages, stream, model_settings, model_request_parameters)
