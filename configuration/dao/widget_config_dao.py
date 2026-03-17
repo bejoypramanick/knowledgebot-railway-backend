@@ -37,7 +37,13 @@ class WidgetConfigDAO:
                 row = result.mappings().first()
                 logger.log_db_query(query, None, row)
                 # Convert database row to dictionary
-                return dict(row) if row else None
+                if row:
+                    config_dict = dict(row)
+                    # Ensure display_chatbot is always present and is a boolean
+                    if 'display_chatbot' not in config_dict or config_dict['display_chatbot'] is None:
+                        config_dict['display_chatbot'] = True
+                    return config_dict
+                return None
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             raise  # Raise exception instead of silently returning None
