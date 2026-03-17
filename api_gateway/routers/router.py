@@ -638,6 +638,10 @@ async def get_widget_config(request: Request):
             if response.status_code == 200:
                 config_data = response.json()
                 logger.info(f"✓ Widget config loaded: display_name={config_data.get('display_name')}, has_icon={bool(config_data.get('chat_icon_url'))}")
+                logger.info(f"📋 Suggested messages in response: {len(config_data.get('suggested_messages', []))}")
+                if config_data.get('suggested_messages'):
+                    for i, msg in enumerate(config_data.get('suggested_messages', []), 1):
+                        logger.info(f"   [{i}] {msg}")
                 # Explicitly set CORS headers for public endpoint
                 return JSONResponse(
                     content=config_data,
@@ -682,6 +686,10 @@ async def get_admin_widget_config(request: Request):
             if response.status_code == 200:
                 config_data = response.json()
                 logger.info(f"✓ Admin widget config loaded: display_name={config_data.get('display_name')}")
+                logger.info(f"📋 Suggested messages in response: {len(config_data.get('suggested_messages', []))}")
+                if config_data.get('suggested_messages'):
+                    for i, msg in enumerate(config_data.get('suggested_messages', []), 1):
+                        logger.info(f"   [{i}] {msg}")
                 # Return with specific origin and credentials allowed
                 origin = request.headers.get('origin', '*')
                 return JSONResponse(
