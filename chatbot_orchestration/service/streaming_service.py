@@ -1060,6 +1060,33 @@ class StreamingService:
                 else:
                     logger.info("📁 ❌ No agent download link added - agent_s3_download_url is None")
 
+                # Extract RAG S3 download links from tool responses and add to final response
+                rag_s3_links = []
+                for msg in all_messages:
+                    if hasattr(msg, 'parts'):
+                        for part in msg.parts:
+                            # Check if this is a tool return part with RAG download link
+                            if hasattr(part, 'content') and isinstance(part.content, str):
+                                content = part.content
+                                # Look for RAG Response Details links
+                                rag_link_pattern = r'📁\s*\*\*RAG Response Details\*\*:\s*\[([^\]]+)\]\((https?://[^)]+)\)'
+                                matches = re.findall(rag_link_pattern, content)
+                                for link_text, url in matches:
+                                    if url not in rag_s3_links:
+                                        rag_s3_links.append(url)
+                                        logger.info(f"📁 ✅ Extracted RAG S3 link from tool response: {url}")
+
+                # Add extracted RAG download links to final response
+                for i, rag_url in enumerate(rag_s3_links):
+                    rag_download_section = f"\n\n📁 **RAG Response Details**: [Download Complete Response]({rag_url})"
+                    full_response += rag_download_section
+                    logger.info(f"📁 ✅ Added RAG download link {i+1} to final response: {rag_url}")
+
+                if rag_s3_links:
+                    logger.info(f"📁 ✅ Final response now includes {len(rag_s3_links)} RAG download link(s)")
+                else:
+                    logger.info("📁 ❌ No RAG download links found in tool responses")
+
                 # 🚨 CRITICAL: Filter out elaboration from tool responses
                 # If response contains "Human Agent support is currently not available" with elaboration,
                 # extract ONLY the core message
