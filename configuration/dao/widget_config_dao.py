@@ -34,10 +34,10 @@ class WidgetConfigDAO:
             logger.log_db_operation(query)
             async with get_db_session() as session:
                 result = await session.execute(text(query))
-                row = result.fetchone()
+                row = result.mappings().first()
                 logger.log_db_query(query, None, row)
                 # Convert database row to dictionary
-                return dict(row._mapping) if row else None
+                return dict(row) if row else None
         except Exception as e:
             logger.log_db_query(query, None, error=e)
             raise  # Raise exception instead of silently returning None
