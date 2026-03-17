@@ -146,6 +146,76 @@ class CachedGoogleModel(GoogleModel):
         if cached_content:
             logger.info(f"Gemini cache active: {cached_content}")
             logger.info("Stripping system_instruction, tools, tool_config from API request (included in cache)")
+            
+            # INSPECT CACHED CONTENT - Retrieve and log what's actually in the cache
+            try:
+                from ..core.ai import get_genai_client
+                client = get_genai_client()
+                if client:
+                    logger.info("🔍 INSPECTING GEMINI CACHE CONTENTS...")
+                    cached_data = await client.aio.caches.get(name=cached_content)
+                    
+                    logger.info("=" * 80)
+                    logger.info("📋 CACHED CONTENT INSPECTION")
+                    logger.info("=" * 80)
+                    logger.info(f"Cache Name: {cached_data.name}")
+                    logger.info(f"Display Name: {cached_data.display_name}")
+                    logger.info(f"Model: {cached_data.model}")
+                    logger.info(f"State: {cached_data.state}")
+                    
+                    if cached_data.usage_metadata:
+                        logger.info(f"Total Token Count: {cached_data.usage_metadata.total_token_count}")
+                    
+                    # Check system instruction
+                    if hasattr(cached_data, 'system_instruction') and cached_data.system_instruction:
+                        sys_inst_len = len(str(cached_data.system_instruction))
+                        logger.info(f"✅ System Instruction: {sys_inst_len} chars")
+                        # Log first 200 chars to verify it's the right prompt
+                        sys_preview = str(cached_data.system_instruction)[:200]
+                        logger.info(f"   Preview: {sys_preview}...")
+                    else:
+                        logger.warning("❌ No system instruction found in cache!")
+                    
+                    # Check tools - this is the critical part
+                    if hasattr(cached_data, 'tools') and cached_data.tools:
+                        logger.info(f"✅ Tools in cache: {len(cached_data.tools)} tool(s)")
+                        for i, tool in enumerate(cached_data.tools):
+                            logger.info(f"   Tool {i+1}:")
+                            if hasattr(tool, 'function_declarations'):
+                                logger.info(f"     Function declarations: {len(tool.function_declarations)}")
+                                for j, func_decl in enumerate(tool.function_declarations):
+                                    logger.info(f"       Function {j+1}: {func_decl.name}")
+                                    logger.info(f"         Description: {func_decl.description}")
+                                    if hasattr(func_decl, 'parameters') and func_decl.parameters:
+                                        params = func_decl.parameters
+                                        if hasattr(params, 'properties') and params.properties:
+                                            param_names = list(params.properties.keys())
+                                            logger.info(f"         Parameters: {param_names}")
+                                        if hasattr(params, 'required') and params.required:
+                                            logger.info(f"         Required: {params.required}")
+                            else:
+                                logger.info(f"     No function declarations found")
+                    else:
+                        logger.error("🚨 CRITICAL: NO TOOLS FOUND IN CACHE!")
+                        logger.error("🚨 This explains why the agent isn't calling search_knowledge_base!")
+                        logger.error("🚨 The cache was created without tools or tools were lost!")
+                    
+                    logger.info("=" * 80)
+                else:
+                    logger.warning("GenAI client not available for cache inspection")
+            except Exception as inspect_error:
+                logger.error(f"Failed to inspect cache contents: {inspect_error}")
+            
+            # Log what tools were originally present before stripping
+            original_tools = config.get('tools', [])
+            if original_tools:
+                logger.info(f"🔧 Original tools being stripped: {len(original_tools)} tool(s)")
+                for i, tool in enumerate(original_tools):
+                    if hasattr(tool, 'function_declarations'):
+                        tool_names = [f.name for f in tool.function_declarations]
+                        logger.info(f"   Tool {i+1}: {tool_names}")
+            else:
+                logger.warning("⚠️ No tools found in config to strip - this might be the issue!")
 
             # CRITICAL: Use pop() to REMOVE keys entirely, not set to None.
             # The Gemini API rejects requests that have system_instruction/tools
