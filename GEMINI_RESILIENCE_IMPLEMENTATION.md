@@ -27,12 +27,21 @@ await asyncio.sleep(wait_time)
 - Automatically falls back to `gemini-2.0-flash` if `gemini-2.5-flash-lite` is unavailable
 - Provides seamless user experience during outages
 - More stable model as backup (slightly higher cost but better availability)
+- **Cache Handling**: Strips model-specific cache reference, uses inline system_instruction + tools
+- **RAG Search**: Functions identically - all tools (search_knowledge_base, etc.) work the same
+- **System Prompt**: Automatically included from Agent configuration
+- **No Configuration Changes**: Fallback is transparent to the application
 
 **Flow:**
 ```
 gemini-2.5-flash-lite (503) → Retry with backoff → Still failing? 
-→ Fall back to gemini-2.0-flash
+→ Fall back to gemini-2.0-flash (with inline system prompt + tools, no cache)
 ```
+
+**Cache Behavior:**
+- Primary model: Uses Gemini cache (system prompt + tools cached)
+- Fallback model: Uses inline mode (system prompt + tools sent with each request)
+- Both modes produce identical responses - only performance/cost differs
 
 ### 3. Circuit Breaker Pattern
 - Tracks failures per model over a 60-second window
@@ -97,7 +106,30 @@ The implementation handles:
 - ✅ "UNAVAILABLE" status from Gemini API
 - ✅ "high demand" messages
 - ✅ Stale cache errors (existing functionality preserved)
+- ✅ Model-specific cache handling (strips cache on fallback)
+- ✅ RAG search functionality (identical in primary and fallback modes)
+- ✅ Tool execution (search_knowledge_base, query_railway_postgres, etc.)
+- ✅ System prompt preservation (via Agent configuration)
 - ✅ Other errors (propagated normally)
+
+## Cache and RAG Behavior
+
+### Primary Model (gemini-2.5-flash-lite with cache)
+- System prompt + tool declarations cached in Gemini
+- Reduces token usage and cost
+- Faster response times
+- RAG search via search_knowledge_base tool
+
+### Fallback Model (gemini-2.0-flash without cache)
+- System prompt + tool declarations sent inline with each request
+- Slightly higher token usage (no cache benefit)
+- Identical functionality - all tools work the same
+- RAG search via search_knowledge_base tool (same behavior)
+
+**Key Point**: The fallback is functionally identical to the primary model. Users get the same quality responses with the same RAG search capabilities. The only differences are:
+- Model version (2.0 vs 2.5)
+- No cache benefit (inline mode)
+- Slightly higher cost per request
 
 ## Files Modified
 

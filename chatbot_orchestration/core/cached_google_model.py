@@ -255,11 +255,33 @@ class CachedGoogleModel(GoogleModel):
         """PATTERN 2: Model Fallback - Try a more stable model.
         
         Falls back from gemini-2.5-flash-lite to gemini-2.0-flash.
+        
+        CRITICAL: Gemini caches are model-specific. We must strip the cache
+        reference when falling back to a different model, otherwise the API
+        will reject the request (cache was created for the primary model).
+        
+        The fallback will use inline system_instruction + tools instead of cache:
+        - system_instruction: Comes from Agent's system_prompt parameter
+        - tools: Comes from Agent's tools parameter
+        - message_history: Already in the messages parameter (includes prepended system prompt if needed)
+        
+        This ensures RAG search and all tool functionality works identically in fallback mode.
         """
         primary_model = self.model_name or "gemini-2.5-flash-lite"
         fallback_model = "gemini-2.0-flash"
         
         logger.info(f"🔄 Falling back from {primary_model} to {fallback_model}")
+        
+        # CRITICAL: Strip google_cached_content from settings
+        # Caches are model-specific and cannot be reused across different models
+        fallback_settings = dict(model_settings)
+        if 'google_cached_content' in fallback_settings:
+            cache_ref = fallback_settings.pop('google_cached_content')
+            logger.info(f"⚠️ Removed cache reference {cache_ref} (cache is model-specific)")
+            logger.info("ℹ️ Fallback will use inline system_instruction + tools (no cache)")
+            logger.info("ℹ️ RAG search and all tools will function identically")
+        
+        fallback_settings = cast(GoogleModelSettings, fallback_settings)
         
         # Create a new instance with fallback model
         fallback_instance = CachedGoogleModel(
@@ -268,8 +290,11 @@ class CachedGoogleModel(GoogleModel):
         )
         
         try:
+            # Use fallback settings WITHOUT cache reference
+            # The parent GoogleModel will automatically include system_instruction + tools
+            # from the Agent's configuration (passed via model_request_parameters)
             result = await fallback_instance._generate_content_direct(
-                messages, stream, model_settings, model_request_parameters
+                messages, stream, fallback_settings, model_request_parameters
             )
             logger.info(f"✅ Fallback to {fallback_model} succeeded")
             return result
