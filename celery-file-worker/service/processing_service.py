@@ -791,15 +791,22 @@ async def process_file_content(
                         logger.warning(f"⚠️ [S3_CLEANUP] Error deleting raw file from S3: {s3_cleanup_error}")
 
                 # Delete processed markdown file (now safely stored in Gemini FileSearch)
+                # Check RETAIN_MD_FILE environment variable to decide whether to delete
+                retain_md_file = os.getenv("RETAIN_MD_FILE", "false").lower() == "true"
+                
                 if processed_content_s3_key:
-                    try:
-                        deleted_processed = await s3_file_storage.delete_file(processed_content_s3_key)
-                        if deleted_processed:
-                            logger.info(f"✅ [S3_CLEANUP] Deleted processed markdown from S3: {processed_content_s3_key}")
-                        else:
-                            logger.warning(f"⚠️ [S3_CLEANUP] Failed to delete processed markdown from S3: {processed_content_s3_key}")
-                    except Exception as s3_cleanup_error:
-                        logger.warning(f"⚠️ [S3_CLEANUP] Error deleting processed markdown from S3: {s3_cleanup_error}")
+                    if retain_md_file:
+                        logger.info(f"📁 [MD_RETENTION] Retaining processed markdown in S3: {processed_content_s3_key}")
+                        logger.info(f"   RETAIN_MD_FILE=true - file will be available as attachment")
+                    else:
+                        try:
+                            deleted_processed = await s3_file_storage.delete_file(processed_content_s3_key)
+                            if deleted_processed:
+                                logger.info(f"✅ [S3_CLEANUP] Deleted processed markdown from S3: {processed_content_s3_key}")
+                            else:
+                                logger.warning(f"⚠️ [S3_CLEANUP] Failed to delete processed markdown from S3: {processed_content_s3_key}")
+                        except Exception as s3_cleanup_error:
+                            logger.warning(f"⚠️ [S3_CLEANUP] Error deleting processed markdown from S3: {s3_cleanup_error}")
 
                 logger.info(f"✅ [S3_CLEANUP] All S3 files cleaned up - content now in Gemini FileSearch only")
 

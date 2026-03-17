@@ -269,15 +269,22 @@ class ProcessingService:
                 logger.info(f"   ✅ Uploaded to Gemini: {upload_result.document_name}")
 
                 # Delete processed markdown from S3 (now safely in Gemini FileSearch)
+                # Check RETAIN_MD_FILE environment variable to decide whether to delete
+                retain_md_file = os.getenv("RETAIN_MD_FILE", "false").lower() == "true"
+                
                 if processed_content_s3_key:
-                    try:
-                        deleted = await s3_file_storage.delete_file(processed_content_s3_key)
-                        if deleted:
-                            logger.info(f"   🧹 [S3_CLEANUP] Deleted processed markdown: {processed_content_s3_key}")
-                        else:
-                            logger.warning(f"   ⚠️ [S3_CLEANUP] Failed to delete processed markdown: {processed_content_s3_key}")
-                    except Exception as cleanup_err:
-                        logger.warning(f"   ⚠️ [S3_CLEANUP] Error deleting processed markdown: {cleanup_err}")
+                    if retain_md_file:
+                        logger.info(f"📁 [MD_RETENTION] Retaining processed markdown in S3: {processed_content_s3_key}")
+                        logger.info(f"   RETAIN_MD_FILE=true - file will be available as attachment")
+                    else:
+                        try:
+                            deleted = await s3_file_storage.delete_file(processed_content_s3_key)
+                            if deleted:
+                                logger.info(f"   🧹 [S3_CLEANUP] Deleted processed markdown: {processed_content_s3_key}")
+                            else:
+                                logger.warning(f"   ⚠️ [S3_CLEANUP] Failed to delete processed markdown: {processed_content_s3_key}")
+                        except Exception as cleanup_err:
+                            logger.warning(f"   ⚠️ [S3_CLEANUP] Error deleting processed markdown: {cleanup_err}")
 
                 # Record to database
                 await self._recordPageToDB(page_data, upload_result, job_context, crawl_config, processed_content_s3_key)
