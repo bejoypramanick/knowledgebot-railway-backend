@@ -8,6 +8,8 @@ import re
 import json
 import time
 import logging
+import boto3
+from datetime import datetime
 from shared.otel_logger import get_otel_logger
 from typing import List, Dict, Any, Optional
 from pydantic_ai import RunContext
@@ -518,6 +520,18 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
             response_text = "Response text is None"
             
         logger.info(f"Response Text Length: {len(response_text)} chars")
+        
+        # 📁 UPLOAD RAW RESPONSE TO S3 FOR DOWNLOAD
+        s3_download_url = None
+        try:
+            s3_download_url = await _upload_rag_response_to_s3(session_id, response_text, response)
+            if s3_download_url:
+                logger.info(f"📁 RAG response uploaded to S3: {s3_download_url}")
+            else:
+                logger.warning("⚠️ Failed to upload RAG response to S3")
+        except Exception as s3_error:
+            logger.error(f"❌ S3 upload failed: {s3_error}")
+            # Continue without S3 upload - don't block the response
         logger.info("=" * 100)
         logger.info("📦 RAW GEMINI RESPONSE (COMPLETE):")
         logger.info("=" * 100)
@@ -858,6 +872,13 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         logger.info(f"Total length: {len(enhanced_content)} chars")
         logger.info(f"Contains [CITATION_SOURCES]: {'[CITATION_SOURCES]' in enhanced_content}")
         logger.info("=" * 80)
+        
+        # Add download link for RAG response if S3 upload succeeded
+        if s3_download_url:
+            download_section = f"\n\n📁 **RAG Response Details**: [Download Complete Response]({s3_download_url})"
+            enhanced_content += download_section
+            logger.info(f"📁 Added download link to response: {s3_download_url}")
+        
         return enhanced_content
 
     except Exception as e:
@@ -1201,3 +1222,127 @@ async def request_human_agent_connection(
         logger.error(f"❌ Tool failed: request_human_agent_connection - {e}", exc_info=True)
         clear_workflow()
         return f"I encountered an error while trying to connect you to a human agent. Please try again later."
+
+
+async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_response: Any) -> Optional[str]:
+    """
+    Upload the complete RAG response to S3 and return a download URL.
+    
+    Args:
+        session_id: The chat session ID
+        response_text: The extracted response text
+        full_response: The complete Gemini response object
+        
+    Returns:
+        S3 download URL or None if upload failed
+    """
+    try:
+        # Get S3 configuration from environment
+        bucket_name = os.getenv("RAILWAY_BUCKET_NAME")
+        aws_access_key = os.getenv("RAILWAY_STORAGE_ACCESS_KEY")
+        aws_secret_key = os.getenv("RAILWAY_STORAGE_SECRET_KEY")
+        aws_region = os.getenv("RAILWAY_REGION", "us-east-1")
+        storage_url = os.getenv("RAILWAY_STORAGE_URL")
+        
+        if not all([bucket_name, aws_access_key, aws_secret_key]):
+            logger.warning("⚠️ S3 credentials not configured - skipping RAG response upload")
+            return None
+            
+        # Create S3 client
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=aws_access_key,
+            aws_secret_access_key=aws_secret_key,
+            region_name=aws_region,
+            endpoint_url=storage_url if storage_url else None
+        )
+        
+        # Create comprehensive response data
+        timestamp = datetime.utcnow().isoformat()
+        response_data = {
+            "session_id": session_id,
+            "timestamp": timestamp,
+            "response_text": response_text,
+            "response_length": len(response_text),
+            "response_metadata": {
+                "type": type(full_response).__name__,
+                "attributes": dir(full_response),
+                "has_candidates": hasattr(full_response, 'candidates'),
+                "candidates_count": len(full_response.candidates) if hasattr(full_response, 'candidates') else 0
+            }
+        }
+        
+        # Add grounding metadata if available
+        if hasattr(full_response, 'candidates'):
+            grounding_info = []
+            for i, candidate in enumerate(full_response.candidates):
+                candidate_info = {
+                    "candidate_index": i,
+                    "has_grounding_metadata": hasattr(candidate, 'grounding_metadata')
+                }
+                
+                if hasattr(candidate, 'grounding_metadata'):
+                    gm = candidate.grounding_metadata
+                    candidate_info["grounding_metadata"] = {
+                        "type": type(gm).__name__,
+                        "attributes": dir(gm),
+                        "has_grounding_chunks": hasattr(gm, 'grounding_chunks'),
+                        "chunks_count": len(gm.grounding_chunks) if hasattr(gm, 'grounding_chunks') else 0
+                    }
+                    
+                    # Extract grounding chunks details
+                    if hasattr(gm, 'grounding_chunks') and gm.grounding_chunks:
+                        chunks_details = []
+                        for j, chunk in enumerate(gm.grounding_chunks):
+                            chunk_info = {
+                                "chunk_index": j,
+                                "type": type(chunk).__name__,
+                                "attributes": dir(chunk)
+                            }
+                            
+                            if hasattr(chunk, 'retrieved_context'):
+                                ctx = chunk.retrieved_context
+                                chunk_info["retrieved_context"] = {
+                                    "title": getattr(ctx, 'title', None),
+                                    "uri": getattr(ctx, 'uri', None),
+                                    "text_length": len(getattr(ctx, 'text', '')) if hasattr(ctx, 'text') else 0,
+                                    "text_preview": getattr(ctx, 'text', '')[:500] if hasattr(ctx, 'text') else None
+                                }
+                            
+                            chunks_details.append(chunk_info)
+                        
+                        candidate_info["grounding_chunks"] = chunks_details
+                
+                grounding_info.append(candidate_info)
+            
+            response_data["grounding_analysis"] = grounding_info
+        
+        # Convert to formatted JSON
+        json_content = json.dumps(response_data, indent=2, ensure_ascii=False)
+        
+        # Create S3 key with timestamp and session
+        timestamp_str = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        s3_key = f"rag-responses/{session_id}/rag_response_{timestamp_str}.json"
+        
+        # Upload to S3
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=s3_key,
+            Body=json_content.encode('utf-8'),
+            ContentType='application/json',
+            ContentDisposition=f'attachment; filename="rag_response_{timestamp_str}.json"'
+        )
+        
+        # Generate download URL (expires in 1 hour)
+        download_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': s3_key},
+            ExpiresIn=3600  # 1 hour
+        )
+        
+        logger.info(f"📁 RAG response uploaded to S3: {s3_key}")
+        return download_url
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to upload RAG response to S3: {e}")
+        return None
