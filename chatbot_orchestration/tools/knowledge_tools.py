@@ -616,6 +616,37 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         logger.info(response_text)
         logger.info("=" * 80)
 
+        # 🚨 CRITICAL CHECK: Verify if FileSearch found relevant documents in knowledge base
+        # If grounding_metadata is null, it means no relevant documents were found
+        # and Gemini is responding with training data instead of grounded results
+        has_grounding_data = False
+        if hasattr(response, 'candidates'):
+            for candidate in response.candidates:
+                if hasattr(candidate, 'grounding_metadata') and candidate.grounding_metadata is not None:
+                    # Check if grounding_metadata actually contains data
+                    gm = candidate.grounding_metadata
+                    if hasattr(gm, 'grounding_chunks') and gm.grounding_chunks:
+                        has_grounding_data = True
+                        logger.info("✅ GROUNDING CHECK: Found grounding data - response is based on knowledge base documents")
+                        break
+                    elif hasattr(gm, 'grounding_supports') and gm.grounding_supports:
+                        has_grounding_data = True
+                        logger.info("✅ GROUNDING CHECK: Found grounding supports - response is based on knowledge base documents")
+                        break
+        
+        if not has_grounding_data:
+            logger.warning("❌ GROUNDING CHECK: No grounding metadata found - FileSearch did not find relevant documents")
+            logger.warning("❌ This means the response is from Gemini training data, not your knowledge base")
+            logger.warning("❌ Returning 'no information available' message instead of training data response")
+            
+            no_grounding_msg = "I don't have any information on this topic."
+            logger.info(f"✅ RAG search completed: _perform_rag_search (no grounding data)")
+            logger.info("=" * 80)
+            logger.info("📦 NO GROUNDING RESULT:")
+            logger.info(no_grounding_msg)
+            logger.info("=" * 80)
+            return no_grounding_msg
+
         # DEBUG: Log response structure to understand what's available
         logger.info("🔍 DEBUG: Response object structure:")
         logger.info(f"  - Has 'candidates': {hasattr(response, 'candidates')}")
