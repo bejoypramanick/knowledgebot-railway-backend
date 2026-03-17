@@ -57,7 +57,8 @@ class WidgetConfigService:
                 "chat_welcome_message": widget_config.get("chat_welcome_message", ""),
                 "suggested_messages": suggested_messages,
                 "profile_zoom": widget_config.get("profile_zoom", 100),
-                "chat_icon_zoom": widget_config.get("chat_icon_zoom", 100)
+                "chat_icon_zoom": widget_config.get("chat_icon_zoom", 100),
+                "display_chatbot":widget_config.get("display_chatbot", true)
             }
             
             logger.info("=" * 100)
