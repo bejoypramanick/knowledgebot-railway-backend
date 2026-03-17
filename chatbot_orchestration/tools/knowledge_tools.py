@@ -380,6 +380,32 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         # FileSearch will use entire conversation for better RAG results
         
         # ============================================================================
+        # UPLOAD FILESEARCH TOOL REQUEST TO S3 (if enabled)
+        # ============================================================================
+        file_search_tool_request_url = None
+        enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "false").lower() == "true"
+        
+        if enable_s3_upload:
+            logger.info("📁 RAG S3 upload is ENABLED - uploading FileSearch tool request data...")
+            try:
+                file_search_tool_request_url = await _upload_file_search_tool_request_to_s3(
+                    session_id, 
+                    query, 
+                    contents, 
+                    conversation_history, 
+                    file_search_store_name
+                )
+                if file_search_tool_request_url:
+                    logger.info(f"📁 ✅ FileSearch tool request uploaded to S3: {file_search_tool_request_url}")
+                else:
+                    logger.warning("📁 ⚠️ Failed to upload FileSearch tool request to S3 (returned None)")
+            except Exception as s3_error:
+                logger.error(f"📁 ❌ FileSearch tool request S3 upload failed: {s3_error}")
+                # Continue without S3 upload - don't block the response
+        else:
+            logger.info("📁 RAG S3 upload is DISABLED (ENABLE_RAG_S3_UPLOAD=false or not set)")
+        
+        # ============================================================================
         # LOG ALL REQUEST PARAMETERS
         # ============================================================================
         logger.info("=" * 100)
@@ -522,26 +548,25 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
             
         logger.info(f"Response Text Length: {len(response_text)} chars")
         
-        # 📁 UPLOAD RAW RESPONSE TO S3 FOR DOWNLOAD (if enabled)
-        s3_download_url = None
-        enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "false").lower() == "true"
+        # 📁 UPLOAD FILESEARCH TOOL RESPONSE TO S3 FOR DOWNLOAD (if enabled)
+        file_search_tool_response_url = None
         
         logger.info(f"🔍 DEBUG: ENABLE_RAG_S3_UPLOAD environment variable = '{os.getenv('ENABLE_RAG_S3_UPLOAD', 'NOT_SET')}'")
         logger.info(f"🔍 DEBUG: enable_s3_upload evaluated to = {enable_s3_upload}")
         
         if enable_s3_upload:
-            logger.info("📁 RAG S3 upload is ENABLED - attempting upload...")
+            logger.info("📁 RAG S3 upload is ENABLED - attempting FileSearch tool response upload...")
             try:
-                s3_download_url = await _upload_rag_response_to_s3(session_id, response_text, response)
-                if s3_download_url:
-                    logger.info(f"📁 ✅ RAG response uploaded to S3: {s3_download_url}")
+                file_search_tool_response_url = await _upload_file_search_tool_response_to_s3(session_id, response_text, response)
+                if file_search_tool_response_url:
+                    logger.info(f"📁 ✅ FileSearch tool response uploaded to S3: {file_search_tool_response_url}")
                 else:
-                    logger.warning("📁 ⚠️ Failed to upload RAG response to S3 (returned None)")
+                    logger.warning("📁 ⚠️ Failed to upload FileSearch tool response to S3 (returned None)")
             except Exception as s3_error:
-                logger.error(f"📁 ❌ S3 upload failed: {s3_error}")
+                logger.error(f"📁 ❌ FileSearch tool response S3 upload failed: {s3_error}")
                 # Continue without S3 upload - don't block the response
         else:
-            logger.info("📁 RAG S3 upload is DISABLED (ENABLE_RAG_S3_UPLOAD=false or not set)")
+            logger.info("📁 FileSearch tool response S3 upload is DISABLED (ENABLE_RAG_S3_UPLOAD=false or not set)")
         logger.info("=" * 100)
         logger.info("📦 RAW GEMINI RESPONSE (COMPLETE):")
         logger.info("=" * 100)
@@ -642,13 +667,20 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
             
             no_grounding_msg = "I don't have any information on this topic."
             
-            # Still add RAG download link if S3 upload succeeded (for debugging the raw response)
-            if s3_download_url:
-                download_section = f"\n\n📁 **RAG Response Details**: [Download Complete Response]({s3_download_url})"
+            # Add FileSearch tool request and response download links if S3 upload succeeded
+            download_links = []
+            if file_search_tool_request_url:
+                download_links.append(f"[Download Tool Request]({file_search_tool_request_url})")
+                logger.info(f"📁 ✅ Added FileSearch tool request download link to no-grounding response: {file_search_tool_request_url}")
+            if file_search_tool_response_url:
+                download_links.append(f"[Download Tool Response]({file_search_tool_response_url})")
+                logger.info(f"📁 ✅ Added FileSearch tool response download link to no-grounding response: {file_search_tool_response_url}")
+            
+            if download_links:
+                download_section = f"\n\n📁 **FileSearch Debug Details**: {' | '.join(download_links)}"
                 no_grounding_msg += download_section
-                logger.info(f"📁 ✅ Added RAG download link to no-grounding response: {s3_download_url}")
             else:
-                logger.info("📁 ❌ No RAG download link added to no-grounding response - s3_download_url is None")
+                logger.info("📁 ❌ No FileSearch download links added to no-grounding response - both URLs are None")
             
             logger.info(f"✅ RAG search completed: _perform_rag_search (no grounding data)")
             logger.info("=" * 80)
@@ -923,14 +955,21 @@ async def _perform_rag_search(session_id: str, query: str) -> str:
         logger.info(f"Contains [CITATION_SOURCES]: {'[CITATION_SOURCES]' in enhanced_content}")
         logger.info("=" * 80)
         
-        # Add download link for RAG response if S3 upload succeeded
-        if s3_download_url:
-            download_section = f"\n\n📁 **RAG Response Details**: [Download Complete Response]({s3_download_url})"
+        # Add download links for FileSearch tool request and response if S3 upload succeeded
+        download_links = []
+        if file_search_tool_request_url:
+            download_links.append(f"[Download Tool Request]({file_search_tool_request_url})")
+            logger.info(f"📁 ✅ Added FileSearch tool request download link: {file_search_tool_request_url}")
+        if file_search_tool_response_url:
+            download_links.append(f"[Download Tool Response]({file_search_tool_response_url})")
+            logger.info(f"📁 ✅ Added FileSearch tool response download link: {file_search_tool_response_url}")
+        
+        if download_links:
+            download_section = f"\n\n📁 **FileSearch Debug Details**: {' | '.join(download_links)}"
             enhanced_content += download_section
-            logger.info(f"📁 ✅ Added RAG download link to response: {s3_download_url}")
-            logger.info(f"📁 ✅ Enhanced content now includes download section (total length: {len(enhanced_content)} chars)")
+            logger.info(f"📁 ✅ Enhanced content now includes FileSearch download section (total length: {len(enhanced_content)} chars)")
         else:
-            logger.info("📁 ❌ No RAG download link added - s3_download_url is None")
+            logger.info("📁 ❌ No FileSearch download links added - both URLs are None")
         
         return enhanced_content
 
@@ -1317,6 +1356,290 @@ def _trim_system_prompt_content(data: Any, max_chars: int = 10) -> Any:
         return data
     else:
         return data
+
+
+async def _upload_agent_request_to_s3(session_id: str, user_message: str, conversation_history: list = None) -> Optional[str]:
+    """
+    Upload agent request data (user message and conversation history) to S3 for debugging.
+    
+    Args:
+        session_id: Session identifier
+        user_message: The user's message/query
+        conversation_history: Previous conversation messages
+        
+    Returns:
+        S3 download URL if successful, None otherwise
+    """
+    try:
+        from ..core.s3_client import get_s3_client
+        import json
+        from datetime import datetime
+        
+        s3_client = get_s3_client()
+        if not s3_client:
+            logger.warning("📁 S3 client not configured - skipping agent request upload")
+            return None
+        
+        # Build comprehensive request data structure
+        request_data = {
+            "upload_info": {
+                "type": "agent_request",
+                "session_id": session_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "capture_method": "user_message_capture",
+                "user_message_length": len(user_message),
+                "conversation_history_count": len(conversation_history) if conversation_history else 0
+            },
+            "user_message": user_message,
+            "conversation_history": _trim_system_prompt_content(conversation_history or []),
+            "session_metadata": {
+                "session_id": session_id,
+                "capture_timestamp": datetime.utcnow().isoformat()
+            }
+        }
+        
+        # Generate filename with timestamp
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"agent_request_{timestamp}.json"
+        
+        # Upload to S3
+        bucket_name = os.getenv("S3_BUCKET_NAME")
+        if not bucket_name:
+            logger.warning("📁 S3_BUCKET_NAME not configured - skipping agent request upload")
+            return None
+        
+        s3_key = f"agent-requests/{session_id}/{filename}"
+        
+        # Convert to JSON string
+        json_content = json.dumps(request_data, indent=2, default=str)
+        
+        # Upload to S3
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=s3_key,
+            Body=json_content.encode('utf-8'),
+            ContentType='application/json'
+        )
+        
+        # Generate presigned URL for download (1 hour expiry)
+        download_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': s3_key},
+            ExpiresIn=3600
+        )
+        
+        logger.info(f"📁 ✅ Agent request uploaded to S3: {s3_key}")
+        logger.info(f"📁 ✅ Agent request download URL: {download_url}")
+        
+        return download_url
+        
+    except Exception as e:
+        logger.error(f"📁 ❌ Failed to upload agent request to S3: {e}", exc_info=True)
+        return None
+
+
+async def _upload_file_search_tool_request_to_s3(session_id: str, query: str, contents: list, conversation_history: list, file_search_store_name: str) -> Optional[str]:
+    """
+    Upload FileSearch tool request data to S3 for debugging.
+    
+    Args:
+        session_id: Session identifier
+        query: Original user query
+        contents: Complete contents array sent to Gemini API
+        conversation_history: Formatted conversation history
+        file_search_store_name: FileSearch store name used
+        
+    Returns:
+        S3 download URL if successful, None otherwise
+    """
+    try:
+        from ..core.s3_client import get_s3_client
+        import json
+        from datetime import datetime
+        
+        s3_client = get_s3_client()
+        if not s3_client:
+            logger.warning("📁 S3 client not configured - skipping FileSearch tool request upload")
+            return None
+        
+        # Build comprehensive input data structure
+        input_data = {
+            "upload_info": {
+                "type": "file_search_tool_request",
+                "session_id": session_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "capture_method": "pre_api_call",
+                "query_length": len(query),
+                "contents_count": len(contents),
+                "conversation_history_count": len(conversation_history) if conversation_history else 0
+            },
+            "original_query": query,
+            "file_search_store_name": file_search_store_name,
+            "conversation_history": _trim_system_prompt_content(conversation_history),
+            "complete_contents_array": []
+        }
+        
+        # Convert contents array to serializable format
+        for i, content in enumerate(contents):
+            content_data = {
+                "index": i,
+                "role": getattr(content, 'role', 'unknown'),
+                "parts": []
+            }
+            
+            if hasattr(content, 'parts'):
+                for j, part in enumerate(content.parts):
+                    part_data = {
+                        "part_index": j,
+                        "type": type(part).__name__
+                    }
+                    
+                    if hasattr(part, 'text'):
+                        # Trim system prompt content in parts as well
+                        part_text = part.text
+                        if 'system' in getattr(content, 'role', '').lower() or 'SystemPromptPart' in type(part).__name__:
+                            part_text = part_text[:10] + "..." if len(part_text) > 10 else part_text
+                        part_data["text"] = part_text
+                        part_data["text_length"] = len(part.text)
+                    
+                    content_data["parts"].append(part_data)
+            
+            input_data["complete_contents_array"].append(content_data)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"file_search_tool_request_{timestamp}.json"
+        
+        # Upload to S3
+        bucket_name = os.getenv("S3_BUCKET_NAME")
+        if not bucket_name:
+            logger.warning("📁 S3_BUCKET_NAME not configured - skipping FileSearch tool request upload")
+            return None
+        
+        s3_key = f"file-search-requests/{session_id}/{filename}"
+        
+        # Convert to JSON string
+        json_content = json.dumps(input_data, indent=2, default=str)
+        
+        # Upload to S3
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=s3_key,
+            Body=json_content.encode('utf-8'),
+            ContentType='application/json'
+        )
+        
+        # Generate presigned URL for download (1 hour expiry)
+        download_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': s3_key},
+            ExpiresIn=3600
+        )
+        
+        logger.info(f"📁 ✅ FileSearch tool request uploaded to S3: {s3_key}")
+        logger.info(f"📁 ✅ FileSearch tool request download URL: {download_url}")
+        
+        return download_url
+        
+    except Exception as e:
+        logger.error(f"📁 ❌ Failed to upload FileSearch tool request to S3: {e}", exc_info=True)
+        return None
+
+
+async def _upload_file_search_tool_response_to_s3(session_id: str, response_text: str, full_response: Any) -> Optional[str]:
+    """
+    Upload the complete FileSearch tool response to S3 and return a download URL.
+    
+    This feature is controlled by the ENABLE_RAG_S3_UPLOAD environment variable.
+    When enabled, captures the complete raw response from Gemini FileSearch API
+    including grounding metadata, usage statistics, and all response details.
+    
+    Args:
+        session_id: Session identifier for organizing uploads
+        response_text: Extracted text response from FileSearch
+        full_response: Complete response object from Gemini API
+        
+    Returns:
+        S3 download URL if successful, None otherwise
+    """
+    try:
+        from ..core.s3_client import get_s3_client
+        import json
+        from datetime import datetime
+        
+        s3_client = get_s3_client()
+        if not s3_client:
+            logger.warning("📁 S3 client not configured - skipping FileSearch tool response upload")
+            return None
+        
+        # Build comprehensive response data structure
+        response_data = {
+            "upload_info": {
+                "type": "file_search_tool_response",
+                "session_id": session_id,
+                "timestamp": datetime.utcnow().isoformat(),
+                "capture_method": "model_dump",
+                "response_text_length": len(response_text)
+            },
+            "extracted_response_text": response_text,
+            "complete_raw_response": {}
+        }
+        
+        # Capture complete raw response using model_dump if available
+        try:
+            if hasattr(full_response, 'model_dump'):
+                response_data["complete_raw_response"] = _trim_system_prompt_content(full_response.model_dump())
+                logger.info("📁 ✅ Captured complete response using model_dump()")
+            elif hasattr(full_response, '__dict__'):
+                # Fallback to __dict__ if model_dump not available
+                response_data["complete_raw_response"] = _trim_system_prompt_content(full_response.__dict__)
+                logger.info("📁 ✅ Captured complete response using __dict__")
+            else:
+                # Last resort: convert to string
+                response_data["complete_raw_response"] = {"raw_str": str(full_response)}
+                logger.info("📁 ⚠️ Captured response as string (no model_dump or __dict__)")
+        except Exception as capture_error:
+            logger.warning(f"📁 ⚠️ Error capturing raw response: {capture_error}")
+            response_data["complete_raw_response"] = {"error": str(capture_error), "raw_str": str(full_response)}
+        
+        # Generate filename with timestamp
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"file_search_tool_response_{timestamp}.json"
+        
+        # Upload to S3
+        bucket_name = os.getenv("S3_BUCKET_NAME")
+        if not bucket_name:
+            logger.warning("📁 S3_BUCKET_NAME not configured - skipping FileSearch tool response upload")
+            return None
+        
+        s3_key = f"file-search-responses/{session_id}/{filename}"
+        
+        # Convert to JSON string with proper serialization
+        json_content = json.dumps(response_data, indent=2, default=str)
+        
+        # Upload to S3
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=s3_key,
+            Body=json_content.encode('utf-8'),
+            ContentType='application/json'
+        )
+        
+        # Generate presigned URL for download (1 hour expiry)
+        download_url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': s3_key},
+            ExpiresIn=3600
+        )
+        
+        logger.info(f"📁 ✅ FileSearch tool response uploaded to S3: {s3_key}")
+        logger.info(f"📁 ✅ FileSearch tool response download URL: {download_url}")
+        
+        return download_url
+        
+    except Exception as e:
+        logger.error(f"📁 ❌ Failed to upload FileSearch tool response to S3: {e}", exc_info=True)
+        return None
 
 
 async def _upload_rag_response_to_s3(session_id: str, response_text: str, full_response: Any) -> Optional[str]:

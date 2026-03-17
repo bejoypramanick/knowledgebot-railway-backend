@@ -162,6 +162,33 @@ class StreamingService:
             logger.info(f"🚀 Starting agent stream for session: {session_id}")
             logger.info(f"📝 Message: {message[:100]}...")
 
+            # 📁 UPLOAD AGENT REQUEST TO S3 (if enabled)
+            agent_request_download_url = None
+            enable_s3_upload = os.getenv("ENABLE_RAG_S3_UPLOAD", "false").lower() == "true"
+            
+            if enable_s3_upload:
+                logger.info("📁 Agent S3 upload is ENABLED - uploading agent request data...")
+                try:
+                    from ..tools.knowledge_tools import _upload_agent_request_to_s3
+                    
+                    # Get conversation history for context
+                    chat_history = await session_state_manager.get_chat_history(session_id)
+                    
+                    agent_request_download_url = await _upload_agent_request_to_s3(
+                        session_id, 
+                        message, 
+                        chat_history
+                    )
+                    if agent_request_download_url:
+                        logger.info(f"📁 ✅ Agent request uploaded to S3: {agent_request_download_url}")
+                    else:
+                        logger.warning("📁 ⚠️ Failed to upload agent request to S3 (returned None)")
+                except Exception as s3_error:
+                    logger.error(f"📁 ❌ Agent request S3 upload failed: {s3_error}")
+                    # Continue without S3 upload - don't block the response
+            else:
+                logger.info("📁 Agent S3 upload is DISABLED (ENABLE_RAG_S3_UPLOAD=false or not set)")
+
             # STEP 1: Ensure session exists in Redis (DB 6) — zero PG connections
             # PG row created lazily by write-through or ensure_numeric_id() on first message
             try:
@@ -1051,41 +1078,70 @@ class StreamingService:
                 full_response = re.sub(r'\[Time-to-Solve:.*?\]', '', full_response).strip()
                 logger.info(f"✅ Removed Time-to-Solve metadata if present")
                 
-                # Add agent download link if S3 upload succeeded
+                # Add all debug download links if S3 upload succeeded
+                download_links = []
+                
+                # Add agent request link
+                if agent_request_download_url:
+                    download_links.append(f"[Download Agent Request]({agent_request_download_url})")
+                    logger.info(f"📁 ✅ Added agent request download link: {agent_request_download_url}")
+                
+                # Add agent response link
                 if agent_s3_download_url:
-                    agent_download_section = f"\n\n🤖 **Agent Response Details**: [Download Complete Response]({agent_s3_download_url})"
+                    download_links.append(f"[Download Agent Response]({agent_s3_download_url})")
+                    logger.info(f"📁 ✅ Added agent response download link: {agent_s3_download_url}")
+                
+                if download_links:
+                    agent_download_section = f"\n\n🤖 **Agent Debug Details**: {' | '.join(download_links)}"
                     full_response += agent_download_section
-                    logger.info(f"📁 ✅ Added agent download link to response: {agent_s3_download_url}")
-                    logger.info(f"📁 ✅ Full response now includes agent download section (total length: {len(full_response)} chars)")
+                    logger.info(f"📁 ✅ Full response now includes agent debug section (total length: {len(full_response)} chars)")
                 else:
-                    logger.info("📁 ❌ No agent download link added - agent_s3_download_url is None")
+                    logger.info("📁 ❌ No agent download links added - both URLs are None")
 
-                # Extract RAG S3 download links from tool responses and add to final response
-                rag_s3_links = []
+                # Extract FileSearch debug sections from tool responses and add to final response
+                filesearch_debug_sections = []
                 for msg in all_messages:
                     if hasattr(msg, 'parts'):
                         for part in msg.parts:
-                            # Check if this is a tool return part with RAG download link
+                            # Check if this is a tool return part with FileSearch download links
                             if hasattr(part, 'content') and isinstance(part.content, str):
                                 content = part.content
-                                # Look for RAG Response Details links
-                                rag_link_pattern = r'📁\s*\*\*RAG Response Details\*\*:\s*\[([^\]]+)\]\((https?://[^)]+)\)'
-                                matches = re.findall(rag_link_pattern, content)
-                                for link_text, url in matches:
-                                    if url not in rag_s3_links:
-                                        rag_s3_links.append(url)
-                                        logger.info(f"📁 ✅ Extracted RAG S3 link from tool response: {url}")
+                                
+                                # Look for FileSearch Debug Details format
+                                debug_pattern = r'📁\s*\*\*FileSearch Debug Details\*\*:\s*([^\n]+)'
+                                debug_matches = re.findall(debug_pattern, content)
+                                for debug_section in debug_matches:
+                                    if debug_section not in filesearch_debug_sections:
+                                        filesearch_debug_sections.append(debug_section)
+                                        logger.info(f"📁 ✅ Extracted FileSearch debug section from tool response: {debug_section}")
+                                
+                                # Also look for legacy RAG Debug Details format for backward compatibility
+                                legacy_rag_pattern = r'📁\s*\*\*RAG Debug Details\*\*:\s*([^\n]+)'
+                                legacy_rag_matches = re.findall(legacy_rag_pattern, content)
+                                for debug_section in legacy_rag_matches:
+                                    if debug_section not in filesearch_debug_sections:
+                                        filesearch_debug_sections.append(debug_section)
+                                        logger.info(f"📁 ✅ Extracted legacy RAG debug section from tool response: {debug_section}")
+                                
+                                # Also look for very legacy RAG Response Details format
+                                legacy_pattern = r'📁\s*\*\*RAG Response Details\*\*:\s*\[([^\]]+)\]\((https?://[^)]+)\)'
+                                legacy_matches = re.findall(legacy_pattern, content)
+                                for link_text, url in legacy_matches:
+                                    legacy_section = f"[{link_text}]({url})"
+                                    if legacy_section not in filesearch_debug_sections:
+                                        filesearch_debug_sections.append(legacy_section)
+                                        logger.info(f"📁 ✅ Extracted very legacy RAG S3 link from tool response: {url}")
 
-                # Add extracted RAG download links to final response
-                for i, rag_url in enumerate(rag_s3_links):
-                    rag_download_section = f"\n\n📁 **RAG Response Details**: [Download Complete Response]({rag_url})"
-                    full_response += rag_download_section
-                    logger.info(f"📁 ✅ Added RAG download link {i+1} to final response: {rag_url}")
+                # Add extracted FileSearch debug sections to final response
+                for i, debug_section in enumerate(filesearch_debug_sections):
+                    filesearch_download_section = f"\n\n📁 **FileSearch Debug Details**: {debug_section}"
+                    full_response += filesearch_download_section
+                    logger.info(f"📁 ✅ Added FileSearch debug section {i+1} to final response: {debug_section}")
 
-                if rag_s3_links:
-                    logger.info(f"📁 ✅ Final response now includes {len(rag_s3_links)} RAG download link(s)")
+                if filesearch_debug_sections:
+                    logger.info(f"📁 ✅ Final response now includes {len(filesearch_debug_sections)} FileSearch debug section(s)")
                 else:
-                    logger.info("📁 ❌ No RAG download links found in tool responses")
+                    logger.info("📁 ❌ No FileSearch debug sections found in tool responses")
 
                 # 🚨 CRITICAL: Filter out elaboration from tool responses
                 # If response contains "Human Agent support is currently not available" with elaboration,
