@@ -284,10 +284,8 @@ class CachedGoogleModel(GoogleModel):
         fallback_settings = cast(GoogleModelSettings, fallback_settings)
         
         # Create a new instance with fallback model
-        fallback_instance = CachedGoogleModel(
-            model_name=fallback_model,
-            api_key=self.api_key,
-        )
+        # Note: GoogleModel gets API key from environment, no need to pass it explicitly
+        fallback_instance = CachedGoogleModel(fallback_model)
         
         try:
             # Use fallback settings WITHOUT cache reference
