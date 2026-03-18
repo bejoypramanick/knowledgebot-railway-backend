@@ -1484,9 +1484,11 @@ async def send_customer_message(request: Request):
         logger.info(f"📤 Customer message broadcasted to session channel {session_uuid}")
 
         if is_assigned_admin:
+            # Always broadcast to all agents - UI will handle deduplication for admin users
             await broadcast_event_to_all_agents(event_data)
-            logger.info(f"📤 Broadcasting to all agents (admin ID {assigned_agent_id})")
+            logger.info(f"📤 Broadcasting to all agents (assigned agent {assigned_agent_id} is admin - UI will deduplicate)")
         else:
+            # Always broadcast to both channels - UI will handle any potential duplicates
             await broadcast_event_to_agent(assigned_agent_id, event_data)
             await broadcast_event_to_all_agents(event_data)
             logger.info(f"📤 Broadcasting to human agent ID {assigned_agent_id} and all admins")
@@ -1615,9 +1617,11 @@ async def send_agent_message(request: Request):
                 is_assigned_admin = assigned_agent_id in admin_ids
 
                 if is_assigned_admin:
+                    # Always broadcast to all agents - UI will handle deduplication for admin users
                     await broadcast_event_to_all_agents(event_data)
-                    logger.info(f"📤 Customer message sent via broadcast (assigned agent ID {assigned_agent_id} is admin)")
+                    logger.info(f"📤 Customer message sent via broadcast (assigned agent ID {assigned_agent_id} is admin - UI will deduplicate)")
                 else:
+                    # Always broadcast to both channels - UI will handle any potential duplicates
                     await broadcast_event_to_agent(assigned_agent_id, event_data)
                     await broadcast_event_to_all_agents(event_data)
                     logger.info(f"📤 Customer message sent to human agent ID {assigned_agent_id} and all admins")

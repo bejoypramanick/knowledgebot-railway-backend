@@ -656,7 +656,8 @@ class StreamingService:
                                 message,
                                 message_history=pydantic_messages,
                                 deps=session_deps,
-                                model_settings=model_settings
+                                model_settings=model_settings,
+                                result_retry_limit=3  # Sync with orchestrator retry attempts
                             ) as run:
                                 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
                                 async for event in run:
@@ -667,7 +668,8 @@ class StreamingService:
                             async with agent.iter(
                                 message,
                                 deps=session_deps,
-                                model_settings=model_settings
+                                model_settings=model_settings,
+                                result_retry_limit=3  # Sync with orchestrator retry attempts
                             ) as run:
                                 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
                                 async for event in run:
@@ -696,10 +698,44 @@ class StreamingService:
                                 continue
                             else:
                                 logger.error(f"❌ Rate limit exceeded after {max_retries} retries")
-                                raise
+                                # Return clean error instead of re-raising
+                                error_data = {
+                                    "type": "error",
+                                    "error_code": "RATE_LIMIT_EXCEEDED",
+                                    "message": "I'm currently experiencing high demand. Please try again in a few moments.",
+                                    "session_id": session_id,
+                                    "timestamp": int(time.time())
+                                }
+                                json_response = json.dumps(error_data, ensure_ascii=False)
+                                yield f"data: {json_response}\n\n"
+                                return
                         else:
-                            # Not a rate limit error - re-raise immediately
-                            raise
+                            # Not a rate limit error - return clean error instead of re-raising
+                            logger.error(f"❌ Agent.iter() setup failed: {str(e)}")
+                            error_data = {
+                                "type": "error",
+                                "error_code": "AGENT_SETUP_ERROR", 
+                                "message": "I apologize, but I encountered an error while setting up the response. Please try again.",
+                                "session_id": session_id,
+                                "timestamp": int(time.time())
+                            }
+                            json_response = json.dumps(error_data, ensure_ascii=False)
+                            yield f"data: {json_response}\n\n"
+                            return
+
+                # Check if we successfully got a run object
+                if run is None:
+                    logger.error("❌ Failed to create agent run after all retries")
+                    error_data = {
+                        "type": "error",
+                        "error_code": "AGENT_INITIALIZATION_FAILED",
+                        "message": "I apologize, but I'm unable to process your request right now. Please try again later.",
+                        "session_id": session_id,
+                        "timestamp": int(time.time())
+                    }
+                    json_response = json.dumps(error_data, ensure_ascii=False)
+                    yield f"data: {json_response}\n\n"
+                    return
 
                 # After iteration completes, get final result
                 logger.info("🔍 Agent iteration completed, extracting response from all_messages()...")
@@ -1362,14 +1398,26 @@ class StreamingService:
         except Exception as e:
             logger.error(f"❌ Critical error in stream_agent_response: {e}", exc_info=True)
             
-            # Send error response
+            # Return clean JSON error instead of feeding error text back to model
             error_data = {
                 "type": "error",
-                "content": f"I apologize, but a critical error occurred: {str(e)}",
-                "session_id": session_id
+                "error_code": "AGENT_PROCESSING_ERROR",
+                "message": "I apologize, but I encountered an error while processing your request. Please try again.",
+                "session_id": session_id,
+                "timestamp": int(time.time())
             }
             json_response = json.dumps(error_data, ensure_ascii=False)
             yield f"data: {json_response}\n\n"
+            
+            # Also yield completion signal to close the stream properly
+            completion_data = {
+                "type": "complete",
+                "session_id": session_id,
+                "completion_status": "error",
+                "timestamp": int(time.time())
+            }
+            completion_json = json.dumps(completion_data, ensure_ascii=False)
+            yield f"data: {completion_json}\n\n"
 
         finally:
             # Always reset streaming state
