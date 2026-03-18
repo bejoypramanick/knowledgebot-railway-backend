@@ -138,69 +138,79 @@ def get_results_summary():
 
 
 # ============================================================
-# QUESTIONS — varied prompts for 5 consecutive chats
+# QUESTIONS — Stockholm-focused conversation sequences and individual questions
 # ============================================================
 
 CHAT_SEQUENCES = [
-    # Sequence 1: Customer journey
+    # Sequence 1: Tourist planning visit to Stockholm
     [
-        "Hi, I'm looking for information about your products",
-        "What are your most popular items?",
-        "Can you tell me about pricing and discounts?",
-        "What is your shipping policy?",
-        "How do I place an order?"
+        "Hi, I'm planning a trip to Stockholm. Can you help me?",
+        "What are the must-see attractions in Stockholm?",
+        "Tell me about the Vasa Museum and Nobel Prize ceremonies",
+        "How does Stockholm's public transportation work?",
+        "What's the best time of year to visit Stockholm?"
     ],
-    # Sequence 2: Support journey
+    # Sequence 2: Learning about Stockholm's history
     [
-        "Hello, I need help with my account",
-        "How do I reset my password?",
-        "What if I forgot my email address?",
-        "Can you help me update my profile?",
-        "How do I contact customer support?"
+        "Hello, I'd like to learn about Stockholm's history",
+        "When was Stockholm founded and by whom?",
+        "What happened during the Stockholm Bloodbath?",
+        "How did Stockholm become Sweden's capital?",
+        "Tell me about Stockholm during the Swedish Empire period"
     ],
-    # Sequence 3: Product inquiry
+    # Sequence 3: Stockholm geography and climate
     [
-        "Good morning, I have questions about your services",
-        "What are the different service tiers?",
-        "Do you offer enterprise solutions?",
-        "What are the implementation timelines?",
-        "Can I get a custom quote?"
+        "Good morning, I have questions about Stockholm's geography",
+        "How many islands is Stockholm built on?",
+        "What's Stockholm's climate like throughout the year?",
+        "Tell me about the Stockholm archipelago",
+        "How does Stockholm compare to other Nordic capitals?"
     ],
-    # Sequence 4: Technical support
+    # Sequence 4: Stockholm culture and education
     [
-        "I'm having technical issues",
-        "The website is loading slowly",
-        "I can't access my dashboard",
-        "Are there any known outages?",
-        "How do I clear my browser cache?"
+        "I'm interested in Stockholm's cultural scene",
+        "What universities and educational institutions are in Stockholm?",
+        "Tell me about Stockholm's museums and art galleries",
+        "What's special about Stockholm's metro system?",
+        "How is Stockholm connected to the Nobel Prize?"
     ],
-    # Sequence 5: General inquiry
+    # Sequence 5: Stockholm economy and technology
     [
-        "Hi there, I'm new here",
-        "Can you explain how your platform works?",
-        "What makes you different from competitors?",
-        "Do you have any tutorials or guides?",
-        "What's the best way to get started?"
+        "Hi there, I want to know about Stockholm's economy",
+        "What major companies are headquartered in Stockholm?",
+        "Why is Stockholm called Europe's innovation hub?",
+        "Tell me about Stockholm's role in the tech industry",
+        "What makes Stockholm attractive for businesses?"
     ]
 ]
 
-# Additional individual questions for variety
+# Additional individual questions based on Stockholm Wikipedia content
 INDIVIDUAL_QUESTIONS = [
-    "What products do you offer?",
-    "Tell me about your pricing plans",
-    "What is your return policy?",
-    "Do you ship internationally?",
-    "What payment methods do you accept?",
-    "How do I track my order?",
-    "Can you explain the warranty policy?",
-    "What is the estimated delivery time?",
-    "How do I update my shipping address?",
-    "Do you offer bulk discounts?",
-    "What are the product specifications?",
-    "Tell me about your loyalty program",
-    "What is the cancellation process?",
-    "How secure is my data?",
-    "Do you have a mobile app?"
+    "What does the name Stockholm mean?",
+    "How many people live in Stockholm?",
+    "What is Stockholm's nickname 'Venice of the North'?",
+    "Tell me about Gamla Stan, Stockholm's Old Town",
+    "What is the Royal Palace in Stockholm?",
+    "How does Stockholm's congestion pricing system work?",
+    "What is Drottningholm Palace?",
+    "Tell me about Stockholm's green spaces and parks",
+    "What is the Stockholm Stock Exchange?",
+    "How many museums does Stockholm have?",
+    "What is Skansen open-air museum?",
+    "Tell me about ABBA and Stockholm's music scene",
+    "What sports teams are popular in Stockholm?",
+    "How does Stockholm handle environmental sustainability?",
+    "What is the Stockholm Marathon?",
+    "Tell me about Stockholm's restaurant scene",
+    "What is the Stockholm archipelago?",
+    "How does Stockholm's metro art gallery work?",
+    "What is Stockholm Pride festival?",
+    "Tell me about Stockholm's winter and summer daylight hours",
+    "What is Karolinska Institute?",
+    "How did Stockholm host the 1912 Olympics?",
+    "What is Stockholm City Hall famous for?",
+    "Tell me about Stockholm's population diversity",
+    "What is the Stockholm Water Festival?"
 ]
 
 

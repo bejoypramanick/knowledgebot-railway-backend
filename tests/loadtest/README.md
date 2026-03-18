@@ -1,7 +1,7 @@
-# Enhanced Chatbot Load Test
+# Enhanced Chatbot Load Test - Stockholm Knowledge Base
 
 ## Overview
-This load test simulates 20 concurrent users, each having 5 consecutive conversations with the chatbot API, for a total of 100 chat interactions.
+This load test simulates 20 concurrent users, each having 5 consecutive conversations with the chatbot API about Stockholm-related topics, for a total of 100 chat interactions. The questions are based on comprehensive Stockholm Wikipedia content covering history, geography, culture, economy, and tourism.
 
 ## Features
 - **20 concurrent users** × **5 chats each** = **100 total conversations**
@@ -49,14 +49,22 @@ locust -f locustfile.py \
 ## Test Scenarios
 
 ### Conversation Sequences (70% of users)
-1. **Customer Journey**: Product inquiry → Popular items → Pricing → Shipping → Order
-2. **Support Journey**: Account help → Password reset → Email issues → Profile update → Contact support
-3. **Product Inquiry**: Services overview → Tiers → Enterprise → Timelines → Quote
-4. **Technical Support**: Issues → Slow loading → Dashboard access → Outages → Cache clearing
-5. **General Inquiry**: New user → Platform explanation → Differentiators → Tutorials → Getting started
+1. **Tourist Planning**: Trip planning → Attractions → Museums/Nobel → Transportation → Best time to visit
+2. **Stockholm History**: History overview → Founding → Stockholm Bloodbath → Capital status → Swedish Empire
+3. **Geography & Climate**: Geography questions → Islands → Climate → Archipelago → Nordic comparisons  
+4. **Culture & Education**: Cultural scene → Universities → Museums → Metro art → Nobel connection
+5. **Economy & Technology**: Economic overview → Major companies → Innovation hub → Tech industry → Business attractiveness
 
 ### Random Questions (30% of users)
-- Individual questions selected randomly from a pool of 15 common inquiries
+- Individual questions about Stockholm based on Wikipedia content including:
+  - Stockholm's name meaning and nicknames
+  - Population and demographics  
+  - Historical sites (Gamla Stan, Royal Palace, Drottningholm)
+  - Transportation (metro, congestion pricing)
+  - Culture (museums, ABBA, sports, festivals)
+  - Environment and sustainability
+  - Geography (archipelago, islands, climate)
+  - Economy (companies, stock exchange, tech scene)
 
 ## Metrics Tracked
 
