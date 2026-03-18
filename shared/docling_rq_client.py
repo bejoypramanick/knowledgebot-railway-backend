@@ -161,7 +161,7 @@ class DoclingRQClient:
                         "table_structure_options": {
                             "mode":"accurate",
                             "do_cell_matching": False,
-                            "threshold": 0.4,
+                            "threshold": 0.3,
                             "correct_overlapping_cells":True
                         },
                         "pdf_backend_options": {
