@@ -1,9 +1,16 @@
 """
-Load Test: 20 Concurrent Chatbot Users — Single Round
+Load Test: 20 Concurrent Chatbot Users — 5 Consecutive Chats Each
 
-Spawns 20 users, each sends ONE message to the streaming chat endpoint,
-consumes the full SSE response, and stops. The test auto-terminates once
-all 20 users have completed their request.
+Spawns 20 users, each sends 5 consecutive messages to the streaming chat endpoint,
+consumes the full SSE response for each, and tracks detailed request/response data.
+The test auto-terminates once all 20 users have completed their 5 chats.
+
+Features:
+- 20 concurrent users × 5 chats = 100 total requests
+- Detailed request/response logging with web UI display
+- Session continuity across chats for each user
+- Comprehensive metrics and failure tracking
+- Real-time progress monitoring
 
 Install:
     pip install -r requirements.txt
@@ -19,6 +26,7 @@ Run headless:
 Metrics tracked:
     /chat/stream        — Full end-to-end response time (request → stream done)
     /chat/stream [TTFC] — Time to first chunk (how fast the bot starts typing)
+    /chat/stream [Chat-N] — Individual chat round metrics
 
 Web UI fields:
     # Users       → Total concurrent virtual users (default 20)
@@ -27,69 +35,172 @@ Web UI fields:
     RPS           → Requests per second across all users
     Response Time → Median / P95 / P99 end-to-end latency in ms
     Failures      → Count + percentage of failed requests (HTTP errors or empty responses)
+
+Additional Web UI:
+    Custom endpoint at /test-results shows detailed request/response data
 """
 
 import json
 import random
 import time
 import threading
+from datetime import datetime
+from flask import Flask, render_template_string
+from threading import Thread
 
 from locust import HttpUser, task, constant, events
+from locust.web import WebUI
 
 # ============================================================
 # CONFIG
 # ============================================================
 
 TARGET_USERS = 20  # Test stops after this many users complete
+CHATS_PER_USER = 5  # Each user sends 5 consecutive messages
+TOTAL_EXPECTED_CHATS = TARGET_USERS * CHATS_PER_USER  # 100 total chats
 
 # ============================================================
-# SHARED STATE — tracks how many users have finished
+# SHARED STATE — tracks progress and stores detailed results
 # ============================================================
 
 _lock = threading.Lock()
 _completed_users = 0
+_completed_chats = 0
+_detailed_results = []  # Store all request/response details
 
+def _add_result(user_id, chat_num, question, response_text, session_id, 
+                ttfc, total_time, chunk_count, status, error=None):
+    """Add detailed result to shared storage."""
+    global _detailed_results
+    with _lock:
+        _detailed_results.append({
+            'timestamp': datetime.now().isoformat(),
+            'user_id': user_id,
+            'chat_num': chat_num,
+            'question': question,
+            'response_text': response_text[:200] + '...' if len(response_text) > 200 else response_text,
+            'response_length': len(response_text),
+            'session_id': session_id,
+            'ttfc': round(ttfc, 3),
+            'total_time': round(total_time, 3),
+            'chunk_count': chunk_count,
+            'status': status,
+            'error': error
+        })
 
-def _mark_complete(environment):
-    """Increment completed count; quit the runner when all users are done."""
+def _mark_chat_complete(environment):
+    """Increment completed chat count."""
+    global _completed_chats
+    with _lock:
+        _completed_chats += 1
+        done = _completed_chats
+    print(f"[Load Test] {done}/{TOTAL_EXPECTED_CHATS} chats completed")
+
+def _mark_user_complete(environment):
+    """Increment completed user count; quit when all users are done."""
     global _completed_users
     with _lock:
         _completed_users += 1
         done = _completed_users
-    print(f"[Load Test] {done}/{TARGET_USERS} users completed")
+    print(f"[Load Test] {done}/{TARGET_USERS} users completed all 5 chats")
     if done >= TARGET_USERS:
-        print("\n✅ All users completed — stopping test\n")
+        print(f"\n✅ All {TARGET_USERS} users completed {CHATS_PER_USER} chats each ({TOTAL_EXPECTED_CHATS} total) — stopping test\n")
         environment.runner.quit()
 
+def get_results_summary():
+    """Get summary statistics of all results."""
+    with _lock:
+        results = _detailed_results.copy()
+    
+    if not results:
+        return {
+            'total_chats': 0,
+            'successful_chats': 0,
+            'failed_chats': 0,
+            'avg_ttfc': 0,
+            'avg_total_time': 0,
+            'avg_response_length': 0
+        }
+    
+    successful = [r for r in results if r['status'] == 'success']
+    failed = [r for r in results if r['status'] == 'failed']
+    
+    return {
+        'total_chats': len(results),
+        'successful_chats': len(successful),
+        'failed_chats': len(failed),
+        'success_rate': round(len(successful) / len(results) * 100, 1) if results else 0,
+        'avg_ttfc': round(sum(r['ttfc'] for r in successful) / len(successful), 3) if successful else 0,
+        'avg_total_time': round(sum(r['total_time'] for r in successful) / len(successful), 3) if successful else 0,
+        'avg_response_length': round(sum(r['response_length'] for r in successful) / len(successful), 1) if successful else 0,
+        'results': results[-50:]  # Show last 50 results
+    }
+
 
 # ============================================================
-# QUESTIONS — varied prompts to exercise different RAG paths
+# QUESTIONS — varied prompts for 5 consecutive chats
 # ============================================================
 
-QUESTIONS = [
-    # Greetings (no RAG needed)
-    "Hi, I need some help",
-    "Hello there",
-    "Hey, can you assist me?",
-    "Good morning",
-    # General / FAQ
+CHAT_SEQUENCES = [
+    # Sequence 1: Customer journey
+    [
+        "Hi, I'm looking for information about your products",
+        "What are your most popular items?",
+        "Can you tell me about pricing and discounts?",
+        "What is your shipping policy?",
+        "How do I place an order?"
+    ],
+    # Sequence 2: Support journey
+    [
+        "Hello, I need help with my account",
+        "How do I reset my password?",
+        "What if I forgot my email address?",
+        "Can you help me update my profile?",
+        "How do I contact customer support?"
+    ],
+    # Sequence 3: Product inquiry
+    [
+        "Good morning, I have questions about your services",
+        "What are the different service tiers?",
+        "Do you offer enterprise solutions?",
+        "What are the implementation timelines?",
+        "Can I get a custom quote?"
+    ],
+    # Sequence 4: Technical support
+    [
+        "I'm having technical issues",
+        "The website is loading slowly",
+        "I can't access my dashboard",
+        "Are there any known outages?",
+        "How do I clear my browser cache?"
+    ],
+    # Sequence 5: General inquiry
+    [
+        "Hi there, I'm new here",
+        "Can you explain how your platform works?",
+        "What makes you different from competitors?",
+        "Do you have any tutorials or guides?",
+        "What's the best way to get started?"
+    ]
+]
+
+# Additional individual questions for variety
+INDIVIDUAL_QUESTIONS = [
     "What products do you offer?",
     "Tell me about your pricing plans",
     "What is your return policy?",
     "Do you ship internationally?",
     "What payment methods do you accept?",
-    # Knowledge-base questions (triggers RAG)
-    "How do I place an order?",
-    "What are the shipping costs?",
     "How do I track my order?",
     "Can you explain the warranty policy?",
     "What is the estimated delivery time?",
     "How do I update my shipping address?",
     "Do you offer bulk discounts?",
     "What are the product specifications?",
-    "How do I contact customer support?",
     "Tell me about your loyalty program",
     "What is the cancellation process?",
+    "How secure is my data?",
+    "Do you have a mobile app?"
 ]
 
 
@@ -151,30 +262,41 @@ def consume_sse_stream(response):
 
 class ChatbotUser(HttpUser):
     """
-    Simulates a single chatbot visitor.
+    Simulates a single chatbot visitor making 5 consecutive chats.
 
-    Each user sends exactly ONE message, waits for the full streaming
-    response, reports metrics, then idles until the test stops.
+    Each user sends 5 messages in sequence, maintaining session continuity,
+    waits for the full streaming response for each, reports detailed metrics,
+    then idles until the test stops.
     """
 
-    # After the single request, idle forever (test will quit via _mark_complete)
+    # After all 5 chats, idle forever (test will quit via _mark_user_complete)
     wait_time = constant(999_999)
 
     def on_start(self):
-        self.session_id = None
-        self.question = random.choice(QUESTIONS)
-        self.done = False
+        self.session_id = ""  # Will be set after first chat
         self.user_num = random.randint(1000, 9999)
-        print(f"[User-{self.user_num}] Spawned — will ask: \"{self.question[:50]}\"")
+        self.chat_count = 0
+        self.done = False
+        
+        # Choose a conversation sequence or random questions
+        if random.random() < 0.7:  # 70% use predefined sequences
+            self.questions = random.choice(CHAT_SEQUENCES)
+        else:  # 30% use random individual questions
+            self.questions = random.sample(INDIVIDUAL_QUESTIONS, 5)
+        
+        print(f"[User-{self.user_num}] Spawned — will ask {len(self.questions)} questions")
 
     @task
     def send_chat_message(self):
-        if self.done:
+        if self.done or self.chat_count >= CHATS_PER_USER:
             return
 
+        current_question = self.questions[self.chat_count]
+        chat_num = self.chat_count + 1
+
         payload = {
-            "message": self.question,
-            "session_id": "",  # new session every time
+            "message": current_question,
+            "session_id": self.session_id,  # Maintain session across chats
         }
 
         start_time = time.time()
@@ -186,7 +308,7 @@ class ChatbotUser(HttpUser):
                 stream=True,
                 catch_response=True,
                 timeout=120,
-                name="/chat/stream",
+                name=f"/chat/stream [Chat-{chat_num}]",
             ) as response:
 
                 if response.status_code != 200:
@@ -197,30 +319,50 @@ class ChatbotUser(HttpUser):
                         body = "<unreadable>"
                     reason = f"HTTP {response.status_code}"
                     response.failure(reason)
+                    
+                    # Log detailed failure
+                    _add_result(
+                        self.user_num, chat_num, current_question, "", 
+                        self.session_id, 0, time.time() - start_time, 0, 
+                        "failed", f"{reason}: {body}"
+                    )
+                    
                     print(
-                        f"[User-{self.user_num}] ❌ {reason} | "
+                        f"[User-{self.user_num}] ❌ Chat {chat_num}/5 - {reason} | "
                         f"Body: {body}"
                     )
-                    self.done = True
-                    _mark_complete(self.environment)
+                    self.chat_count += 1
+                    _mark_chat_complete(self.environment)
+                    
+                    if self.chat_count >= CHATS_PER_USER:
+                        self.done = True
+                        _mark_user_complete(self.environment)
                     return
 
                 full_text, new_session_id, ttfc, chunk_count = consume_sse_stream(response)
                 total_time = time.time() - start_time
 
+                # Update session ID for continuity
                 if new_session_id:
                     self.session_id = new_session_id
 
                 if full_text:
                     response.success()
+                    
+                    # Log detailed success
+                    _add_result(
+                        self.user_num, chat_num, current_question, full_text,
+                        self.session_id, ttfc, total_time, chunk_count, "success"
+                    )
+                    
                     print(
-                        f"[User-{self.user_num}] ✅ "
-                        f"\"{self.question[:30]}...\" → "
+                        f"[User-{self.user_num}] ✅ Chat {chat_num}/5 - "
+                        f"\"{current_question[:30]}...\" → "
                         f"{len(full_text)} chars, {chunk_count} chunks | "
                         f"TTFC: {ttfc:.2f}s | Total: {total_time:.2f}s"
                     )
 
-                    # Fire custom metric for time-to-first-chunk
+                    # Fire custom metrics
                     events.request.fire(
                         request_type="SSE",
                         name="/chat/stream [TTFC]",
@@ -229,20 +371,194 @@ class ChatbotUser(HttpUser):
                         exception=None,
                         context={},
                     )
+                    
+                    events.request.fire(
+                        request_type="SSE",
+                        name="/chat/stream",
+                        response_time=total_time * 1000,
+                        response_length=len(full_text),
+                        exception=None,
+                        context={},
+                    )
                 else:
-                    response.failure("Empty response — likely gateway 30s timeout under load")
+                    response.failure("Empty response — likely gateway timeout")
+                    
+                    # Log detailed failure
+                    _add_result(
+                        self.user_num, chat_num, current_question, "",
+                        self.session_id, ttfc, total_time, chunk_count, 
+                        "failed", "Empty AI response"
+                    )
+                    
                     print(
-                        f"[User-{self.user_num}] ❌ Empty AI response | "
+                        f"[User-{self.user_num}] ❌ Chat {chat_num}/5 - Empty AI response | "
                         f"Elapsed: {total_time:.1f}s | "
                         f"Chunks received: {chunk_count} | "
                         f"Session: {new_session_id or 'none'}"
                     )
 
         except Exception as e:
-            print(f"[User-{self.user_num}] ❌ ERROR: {str(e)[:100]}")
+            error_msg = str(e)[:100]
+            print(f"[User-{self.user_num}] ❌ Chat {chat_num}/5 - ERROR: {error_msg}")
+            
+            # Log detailed error
+            _add_result(
+                self.user_num, chat_num, current_question, "",
+                self.session_id, 0, time.time() - start_time, 0,
+                "failed", error_msg
+            )
 
-        self.done = True
-        _mark_complete(self.environment)
+        self.chat_count += 1
+        _mark_chat_complete(self.environment)
+        
+        # Check if this user is done with all 5 chats
+        if self.chat_count >= CHATS_PER_USER:
+            self.done = True
+            _mark_user_complete(self.environment)
+            print(f"[User-{self.user_num}] 🎉 Completed all {CHATS_PER_USER} chats!")
+        else:
+            # Small delay between chats to simulate realistic user behavior
+            time.sleep(random.uniform(1, 3))
+
+
+# ============================================================
+# WEB UI EXTENSION — Custom endpoint for detailed results
+# ============================================================
+
+# HTML template for results page
+RESULTS_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Load Test Results - Detailed View</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .header { text-align: center; color: #333; margin-bottom: 30px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 30px; }
+        .stat-card { background: #f8f9fa; padding: 15px; border-radius: 6px; text-align: center; border-left: 4px solid #007bff; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #007bff; }
+        .stat-label { font-size: 12px; color: #666; text-transform: uppercase; }
+        .results-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .results-table th, .results-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        .results-table th { background: #f8f9fa; font-weight: bold; }
+        .status-success { color: #28a745; font-weight: bold; }
+        .status-failed { color: #dc3545; font-weight: bold; }
+        .refresh-btn { background: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; margin-bottom: 20px; }
+        .refresh-btn:hover { background: #0056b3; }
+        .progress { background: #e9ecef; border-radius: 4px; height: 20px; margin: 10px 0; }
+        .progress-bar { background: #007bff; height: 100%; border-radius: 4px; transition: width 0.3s; }
+    </style>
+    <script>
+        function refreshResults() {
+            location.reload();
+        }
+        // Auto-refresh every 5 seconds
+        setInterval(refreshResults, 5000);
+    </script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Chatbot Load Test Results</h1>
+            <p>20 Users × 5 Chats Each = 100 Total Conversations</p>
+            <button class="refresh-btn" onclick="refreshResults()">🔄 Refresh Now</button>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value">{{ summary.total_chats }}</div>
+                <div class="stat-label">Total Chats</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ summary.successful_chats }}</div>
+                <div class="stat-label">Successful</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ summary.failed_chats }}</div>
+                <div class="stat-label">Failed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ summary.success_rate }}%</div>
+                <div class="stat-label">Success Rate</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ summary.avg_ttfc }}s</div>
+                <div class="stat-label">Avg TTFC</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ summary.avg_total_time }}s</div>
+                <div class="stat-label">Avg Total Time</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">{{ summary.avg_response_length }}</div>
+                <div class="stat-label">Avg Response Length</div>
+            </div>
+        </div>
+
+        <div class="progress">
+            <div class="progress-bar" style="width: {{ (summary.total_chats / 100 * 100) }}%"></div>
+        </div>
+        <p style="text-align: center; color: #666;">Progress: {{ summary.total_chats }}/100 chats completed</p>
+
+        <h2>Recent Results (Last 50)</h2>
+        <table class="results-table">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>User</th>
+                    <th>Chat #</th>
+                    <th>Question</th>
+                    <th>Response Preview</th>
+                    <th>Length</th>
+                    <th>TTFC</th>
+                    <th>Total</th>
+                    <th>Chunks</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for result in summary.results %}
+                <tr>
+                    <td>{{ result.timestamp[11:19] }}</td>
+                    <td>{{ result.user_id }}</td>
+                    <td>{{ result.chat_num }}/5</td>
+                    <td title="{{ result.question }}">{{ result.question[:40] }}{% if result.question|length > 40 %}...{% endif %}</td>
+                    <td title="{{ result.response_text }}">{{ result.response_text[:50] }}{% if result.response_text|length > 50 %}...{% endif %}</td>
+                    <td>{{ result.response_length }}</td>
+                    <td>{{ result.ttfc }}s</td>
+                    <td>{{ result.total_time }}s</td>
+                    <td>{{ result.chunk_count }}</td>
+                    <td class="status-{{ result.status }}">{{ result.status.upper() }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        
+        {% if summary.results|length == 0 %}
+        <p style="text-align: center; color: #666; margin: 40px 0;">No results yet. Start the load test to see data here.</p>
+        {% endif %}
+    </div>
+</body>
+</html>
+"""
+
+def setup_web_ui_extension(environment):
+    """Add custom endpoint to Locust's web UI for detailed results."""
+    if hasattr(environment, 'web_ui') and environment.web_ui:
+        app = environment.web_ui.app
+        
+        @app.route("/test-results")
+        def test_results():
+            summary = get_results_summary()
+            return render_template_string(RESULTS_TEMPLATE, summary=summary)
+        
+        print("📊 Custom results page available at: http://localhost:8089/test-results")
+
+# Hook into Locust events
+@events.init.add_listener
+def on_locust_init(environment, **kwargs):
+    setup_web_ui_extension(environment)
 
 
 # ============================================================
@@ -250,9 +566,9 @@ class ChatbotUser(HttpUser):
 # ============================================================
 
 if __name__ == "__main__":
-    print("""
+    print(f"""
 ╔═══════════════════════════════════════════════════════════╗
-║   CHATBOT LOAD TEST — 20 Users, Single Round, Auto-Stop  ║
+║   CHATBOT LOAD TEST — 20 Users × 5 Chats = 100 Total     ║
 ╚═══════════════════════════════════════════════════════════╝
 
 Run with Web UI:
@@ -265,11 +581,21 @@ Run headless:
 
 What happens:
   1. Spawns 20 users at 2/sec (ramp-up over 10 seconds)
-  2. Each user sends ONE message to /chat/stream
-  3. Full SSE response is consumed and measured
-  4. Test auto-stops once all 20 users have completed
+  2. Each user sends 5 consecutive messages to /chat/stream
+  3. Session continuity maintained across all 5 chats per user
+  4. Full SSE response consumed and detailed metrics collected
+  5. Test auto-stops once all users complete their 5 chats
 
 Metrics (Web UI at http://localhost:8089):
-  /chat/stream        → End-to-end time (request → stream fully consumed)
-  /chat/stream [TTFC] → Time to first chunk (bot starts typing)
+  /chat/stream [Chat-N]   → Individual chat round performance
+  /chat/stream            → Overall end-to-end time
+  /chat/stream [TTFC]     → Time to first chunk (bot starts typing)
+
+📊 Detailed Results: http://localhost:8089/test-results
+   - Real-time request/response data
+   - Success/failure tracking
+   - Performance metrics per chat
+   - Auto-refreshes every 5 seconds
+
+Total Expected: {TARGET_USERS} users × {CHATS_PER_USER} chats = {TOTAL_EXPECTED_CHATS} conversations
 """)
