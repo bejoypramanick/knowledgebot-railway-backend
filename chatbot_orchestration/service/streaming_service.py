@@ -435,22 +435,12 @@ class StreamingService:
                                     logger.info(f"📤 Sent chat_assigned event to customer on channel customer:events:{session_id}")
                                     logger.info(f"📤 Customer broadcast result: {customer_broadcast_result}")
                                     
-                                    # Send confirmation to customer (this will be filtered out by frontend)
-                                    confirmation_msg = f"Connected to human agent\n"
+                                    # Don't send any confirmation message - UI will show waiting indicator
+                                    # The chat_assigned event will trigger the waiting state
                                     
-                                    # Save AI confirmation message
-                                    await session_state_manager.save_message(
-                                        session_id=session_id,
-                                        role="assistant",
-                                        content=confirmation_msg,
-                                        metadata={}
-                                    )
-                                    
-                                    # Stream confirmation to customer with proper SSE format
-                                    yield f"data: {json.dumps({'type': 'chunk', 'content': confirmation_msg})}\n\n"
-                                    await asyncio.sleep(0.01)  # Small delay to ensure message is sent
+                                    # Stream empty response to complete the stream properly
                                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
-                                    logger.info(f"✅ Agent assigned and customer notified via SSE")
+                                    logger.info(f"✅ Agent assigned and stream completed")
                                     return
                                     
                                 elif response.status_code == 503:
