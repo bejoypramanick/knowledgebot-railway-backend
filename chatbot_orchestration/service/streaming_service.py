@@ -646,8 +646,7 @@ class StreamingService:
                                 message,
                                 message_history=pydantic_messages,
                                 deps=session_deps,
-                                model_settings=model_settings,
-                                result_retry_limit=3  # Sync with orchestrator retry attempts
+                                model_settings=model_settings
                             ) as run:
                                 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
                                 async for event in run:
@@ -658,8 +657,7 @@ class StreamingService:
                             async with agent.iter(
                                 message,
                                 deps=session_deps,
-                                model_settings=model_settings,
-                                result_retry_limit=3  # Sync with orchestrator retry attempts
+                                model_settings=model_settings
                             ) as run:
                                 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
                                 async for event in run:
