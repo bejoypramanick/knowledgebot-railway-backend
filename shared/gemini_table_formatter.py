@@ -186,11 +186,28 @@ OUTPUT FORMAT (Structured Markdown):
 - [Column 2]: [Brief natural language explanation of what this column represents and its meaning in the context of this table]
 - [Continue for all columns...]
 
-**Row 1 (first row, 1st entry)** | [Column 1]: [Value 1] | [Column 2]: [Value 2] | [Column 3]: [Value 3]
+**Row 1 (first row, 1st entry)**: [Natural language sentence describing the data, e.g., "The population in the year 1289 was 3,000 with an annual percentage change of +9.63%"]
 
-**Row 2 (second row, 2nd entry)** | [Column 1]: [Value 1] | [Column 2]: [Value 2] | [Column 3]: [Value 3]
+**Row 2 (second row, 2nd entry)**: [Natural language sentence describing the data, e.g., "In 1348, the population reached 7,000 showing a growth rate of +12.5%"]
 
 [Continue for all rows...]
+
+NATURAL LANGUAGE FORMATTING EXAMPLES:
+Instead of: **Row 2** | Year: 1289 | Population: 3,000 | Change: +9.63%
+Write as: **Row 2 (second row, 2nd entry)**: The population in the year 1289 was 3,000 with an annual percentage change of +9.63%
+
+Instead of: **Row 3** | Battery: Li-ion | Capacity: 2500mAh | Cycles: 1000
+Write as: **Row 3 (third row, 3rd entry)**: The Li-ion battery has a capacity of 2500mAh and can handle 1000 charge cycles
+
+Instead of: **Row 4** | Model: GPT-4 | Accuracy: 95.2% | Speed: 50ms
+Write as: **Row 4 (fourth row, 4th entry)**: The GPT-4 model achieves 95.2% accuracy with a response speed of 50ms
+
+NATURAL LANGUAGE GUIDELINES:
+- Create flowing sentences that sound natural when read aloud
+- Use connecting words like "with", "and", "showing", "achieving", "reaching"
+- Incorporate units and context (e.g., "per year", "charge cycles", "response time")
+- Make relationships between data points clear and meaningful
+- Avoid robotic repetition of column names
 
 NESTED TABLE HANDLING:
 If the original table has nested/hierarchical structure, FLATTEN it like this:
@@ -201,10 +218,12 @@ REQUIREMENTS:
 - Use markdown format, NOT JSON
 - Include summary at top for context
 - Include column summaries that explain each column's meaning in natural language phrases
-- **CRITICAL: Use SINGLE ROW format for all data rows - put all key-value pairs on ONE line separated by " | " (space-pipe-space)**
-- **IMPORTANT: All data within each row (separated by |) represents RELATED information about the same entity/record**
-- Format each row as: **Row X (position)** | Key1: Value1 | Key2: Value2 | Key3: Value3
-- Each pipe-separated segment contains data that belongs together and describes the same item/entity
+- **CRITICAL: Convert each row into NATURAL LANGUAGE sentences instead of repeating column names**
+- **NATURAL LANGUAGE FORMAT**: Transform data into readable sentences that flow naturally
+- **AVOID REPETITIVE STRUCTURE**: Don't repeat "Year: X | Population: Y" format - instead write "The population in year X was Y"
+- **CONTEXTUAL SENTENCES**: Create meaningful sentences that explain the relationship between data points
+- Format each row as: **Row X (position)**: [Natural language sentence describing all the data in that row]
+- Each sentence should incorporate all relevant data from the row in a flowing, readable manner
 - Number each row with BOTH number AND spelled-out position
 - List all columns in "Columns:" line
 - Make it easy to read and search - explicit row naming helps RAG find specific rows
