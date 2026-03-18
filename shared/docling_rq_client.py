@@ -161,6 +161,10 @@ class DoclingRQClient:
                         "table_structure_options": {
                             "mode":"accurate",
                             "do_cell_matching": False,
+                            "threshold": 0.4
+                        },
+                        "pdf_backend_options": {
+                            "force_full_page_parse": true 
                         },
                         "include_images": False, # CRITICAL: Prevents ZIP bundling
                         "export_options": {
