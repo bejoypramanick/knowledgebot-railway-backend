@@ -172,6 +172,7 @@ YOUR TASK:
    - Title showing table number {table_number}
    - Summary line describing table purpose, key columns, and data type
    - Column list (including parent context columns if nested)
+   - Column summaries explaining the meaning of each column in natural language
    - Data rows in key-value format
 5. Preserve all cell values exactly
 
@@ -180,14 +181,14 @@ OUTPUT FORMAT (Structured Markdown):
 ### Table: Table {table_number}
 **Summary**: [Brief description of table contents, purpose, key columns, and data type]
 **Columns**: [Comma-separated list of column headers]
+**Column Summaries**:
+- [Column 1]: [Brief natural language explanation of what this column represents and its meaning in the context of this table]
+- [Column 2]: [Brief natural language explanation of what this column represents and its meaning in the context of this table]
+- [Continue for all columns...]
 
-**Row 1 (first row, 1st entry)**
-- [Column 1]: [Value 1]
-- [Column 2]: [Value 2]
+**Row 1 (first row, 1st entry)** | [Column 1]: [Value 1] | [Column 2]: [Value 2] | [Column 3]: [Value 3]
 
-**Row 2 (second row, 2nd entry)**
-- [Column 1]: [Value 1]
-- [Column 2]: [Value 2]
+**Row 2 (second row, 2nd entry)** | [Column 1]: [Value 1] | [Column 2]: [Value 2] | [Column 3]: [Value 3]
 
 [Continue for all rows...]
 
@@ -199,10 +200,15 @@ If the original table has nested/hierarchical structure, FLATTEN it like this:
 REQUIREMENTS:
 - Use markdown format, NOT JSON
 - Include summary at top for context
-- Use key-value pairs (-) for each column in each row
+- Include column summaries that explain each column's meaning in natural language phrases
+- **CRITICAL: Use SINGLE ROW format for all data rows - put all key-value pairs on ONE line separated by " | " (space-pipe-space)**
+- **IMPORTANT: All data within each row (separated by |) represents RELATED information about the same entity/record**
+- Format each row as: **Row X (position)** | Key1: Value1 | Key2: Value2 | Key3: Value3
+- Each pipe-separated segment contains data that belongs together and describes the same item/entity
 - Number each row with BOTH number AND spelled-out position
 - List all columns in "Columns:" line
 - Make it easy to read and search - explicit row naming helps RAG find specific rows
+- Column summaries should be concise but descriptive, explaining what each column represents
 - Do NOT include raw docling metadata
 - Do NOT include explanations, only the formatted markdown output
 

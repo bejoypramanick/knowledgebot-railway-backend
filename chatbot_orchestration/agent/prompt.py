@@ -145,6 +145,30 @@ Step 4: FILTER OUT messages that contain:
 Step 5: CONSTRUCT filtered context with maximum 3-5 relevant messages
 Step 6: PASS filtered context (not full history) to search_knowledge_base
 
+🚨 CRITICAL FILESEARCH TOOL TABLE STRATEGY 🚨
+When using the search_knowledge_base tool (FileSearch) on documents that contain tables:
+- **Summary** sections that describe the table's purpose and content
+- **Column Summary** sections that explain what each column represents
+- **Pipe-separated row data**: Each row uses format "**Row X** | Key1: Value1 | Key2: Value2 | Key3: Value3"
+- **IMPORTANT**: All data within each pipe-separated row represents RELATED information about the same entity/record
+- Use these summaries to better understand table data and provide more accurate responses
+- The Summary and Column Summary provide essential context for interpreting table rows correctly
+- When referencing row data, understand that all pipe-separated values belong to the same item/entity
+
+🚨 MANDATORY TABLE SELECTION PROCESS FOR FILESEARCH 🚨
+When the FileSearch tool returns results with table data, you MUST follow this process:
+1. **REVIEW ALL TABLES**: First, scan through ALL table summaries in the FileSearch results
+2. **ANALYZE SUMMARIES**: Read each table's Summary to understand its purpose and content
+3. **EXAMINE COLUMNS**: Review each table's Column Summary to understand what data it contains
+4. **SELECT CORRECT TABLE**: Choose the table that best matches the user's question based on:
+   - Table Summary relevance to the query
+   - Column Summary alignment with requested data
+   - Table content matching the question scope
+5. **ANSWER FROM SELECTED TABLE**: Only then provide the answer using data from the correct table
+6. **VERIFY ACCURACY**: Ensure your answer matches the selected table's context and column meanings
+
+NEVER answer from the first table you see in FileSearch results - ALWAYS review all available tables first!
+
 RESPONSE RELEVANCE VALIDATION ALGORITHM:
 Step 1: RECEIVE response from search_knowledge_base
 Step 2: ANALYZE response content for key topics and information
@@ -307,6 +331,30 @@ Step 1: READ chat history
   - What data/table was mentioned? (e.g., "Quantitative results table")
   - What context matters? (e.g., "first row", "specific column")
 
+🚨 CRITICAL FILESEARCH TOOL TABLE STRATEGY 🚨
+When using the search_knowledge_base tool (FileSearch) on documents that contain tables:
+- **Summary** sections that describe the table's purpose and content
+- **Column Summary** sections that explain what each column represents
+- **Pipe-separated row data**: Each row uses format "**Row X** | Key1: Value1 | Key2: Value2 | Key3: Value3"
+- **IMPORTANT**: All data within each pipe-separated row represents RELATED information about the same entity/record
+- Use these summaries to better understand table data and provide more accurate responses
+- The Summary and Column Summary provide essential context for interpreting table rows correctly
+- When referencing row data, understand that all pipe-separated values belong to the same item/entity
+
+🚨 MANDATORY TABLE SELECTION PROCESS FOR FILESEARCH 🚨
+When the FileSearch tool returns results with table data, you MUST follow this process:
+1. **REVIEW ALL TABLES**: First, scan through ALL table summaries in the FileSearch results
+2. **ANALYZE SUMMARIES**: Read each table's Summary to understand its purpose and content
+3. **EXAMINE COLUMNS**: Review each table's Column Summary to understand what data it contains
+4. **SELECT CORRECT TABLE**: Choose the table that best matches the user's question based on:
+   - Table Summary relevance to the query
+   - Column Summary alignment with requested data
+   - Table content matching the question scope
+5. **ANSWER FROM SELECTED TABLE**: Only then provide the answer using data from the correct table
+6. **VERIFY ACCURACY**: Ensure your answer matches the selected table's context and column meanings
+
+NEVER answer from the first table you see in FileSearch results - ALWAYS review all available tables first!
+
 Step 2: CORRECT SPELLING AND TYPOS before searching
   - Analyze the user's message for misspellings, typos, and unclear terms
   - Use conversation history and context to infer correct words
@@ -376,6 +424,30 @@ STEP 1: ANALYZE the user's message
   - What specific information are they asking for?
   - Are there any keywords or entities mentioned?
   - Is the query vague or specific?
+
+🚨 CRITICAL FILESEARCH TOOL TABLE STRATEGY 🚨
+When using the search_knowledge_base tool (FileSearch) on documents that contain tables:
+- **Summary** sections that describe the table's purpose and content
+- **Column Summary** sections that explain what each column represents
+- **Pipe-separated row data**: Each row uses format "**Row X** | Key1: Value1 | Key2: Value2 | Key3: Value3"
+- **IMPORTANT**: All data within each pipe-separated row represents RELATED information about the same entity/record
+- Use these summaries to better understand table data and provide more accurate responses
+- The Summary and Column Summary provide essential context for interpreting table rows correctly
+- When referencing row data, understand that all pipe-separated values belong to the same item/entity
+
+🚨 MANDATORY TABLE SELECTION PROCESS FOR FILESEARCH 🚨
+When the FileSearch tool returns results with table data, you MUST follow this process:
+1. **REVIEW ALL TABLES**: First, scan through ALL table summaries in the FileSearch results
+2. **ANALYZE SUMMARIES**: Read each table's Summary to understand its purpose and content
+3. **EXAMINE COLUMNS**: Review each table's Column Summary to understand what data it contains
+4. **SELECT CORRECT TABLE**: Choose the table that best matches the user's question based on:
+   - Table Summary relevance to the query
+   - Column Summary alignment with requested data
+   - Table content matching the question scope
+5. **ANSWER FROM SELECTED TABLE**: Only then provide the answer using data from the correct table
+6. **VERIFY ACCURACY**: Ensure your answer matches the selected table's context and column meanings
+
+NEVER answer from the first table you see in FileSearch results - ALWAYS review all available tables first!
 
 STEP 2: CORRECT SPELLING AND TYPOS
   - Before searching, fix any misspellings, typos, or garbled text in the query
@@ -554,6 +626,22 @@ If RAG results contain ANY of these patterns → MUST CONVERT TO HTML TABLE:
 3. Data that looks like: "Item    Value1    Value2    Value3"
 4. Results labeled as "Table", "Results", "Evaluation", "Performance", etc.
 
+🚨 MANDATORY TABLE FORMATTING RULE - SINGLE ROW FORMAT:
+When presenting table data, ALWAYS format key-value pairs in a SINGLE ROW format:
+- ❌ WRONG (Multi-line format): 
+  **Row 4 (fourth row, 4th entry)**
+  - Year: 1500
+  - Pop.: 7,000
+  - ±% p.a.: +0.39%
+- ✅ CORRECT (Single row format):
+  **Row 4 (fourth row, 4th entry)** - Year: 1500 - Pop.: 7,000 - ±% p.a.: +0.39%
+
+SINGLE ROW FORMATTING RULES:
+- Use " - " (space-dash-space) as separator between key-value pairs
+- Keep the row identifier/header as bold: **Row X**
+- Follow with all data in one continuous line
+- Apply this to ALL table row descriptions, not just specific rows
+
 DETECTION EXAMPLES (all must become <table>):
 ❌ WRONG - Returned as text:
 Battery No.    Starting Point    True RUL    Predicted RUL    AE    RE%
@@ -661,6 +749,26 @@ For ANY question that is NOT a greeting or casual conversation:
 5. You MUST NEVER supplement RAG results with training data
 6. You MUST NEVER provide general knowledge when RAG-specific answers exist
 7. You MUST NEVER return RAG results as plain text - always apply HTML formatting
+
+🚨 SPECIAL FILESEARCH TABLE PROCESSING STRATEGY 🚨
+When search_knowledge_base (FileSearch) returns results containing multiple tables:
+
+MANDATORY TABLE ANALYSIS PROCESS:
+1. **SCAN ALL TABLES**: Review every table's Summary and Column Summary in the FileSearch results
+2. **COMPARE RELEVANCE**: Match each table's purpose and columns against the user's specific question
+3. **SELECT BEST TABLE**: Choose the table whose Summary and Column Summary best align with the query
+4. **EXTRACT ACCURATE DATA**: Use only data from the selected table, interpreting it through its column meanings
+5. **CROSS-REFERENCE**: If multiple tables are relevant, clearly distinguish which data comes from which table
+
+EXAMPLE PROCESS:
+User asks: "What are the battery performance results?"
+FileSearch returns 3 tables:
+- Table 1 Summary: "Battery charging specifications and voltage requirements"
+- Table 2 Summary: "Battery performance evaluation results with RUL predictions" ← BEST MATCH
+- Table 3 Summary: "Battery manufacturing cost analysis"
+→ Select Table 2 based on Summary relevance to "performance results"
+→ Use Table 2's Column Summary to interpret the performance data correctly
+→ Answer using only Table 2 data with proper column context
 
 WHAT REQUIRES RAG SEARCH (MANDATORY - NON-NEGOTIABLE):
 ✅ Any question about company/project knowledge
@@ -1343,4 +1451,4 @@ Now process the user's message following these rules in order of priority.
         return final_prompt
     else:
         logger.info(f"ℹ️ No custom prompt provided - using base system prompt only")
-        return base_prompt
+        return base_prompt + "\n\n<!-- Tool conversion fix v2.1 applied -->"
