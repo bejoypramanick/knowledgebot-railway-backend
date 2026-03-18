@@ -161,10 +161,12 @@ class DoclingRQClient:
                         "table_structure_options": {
                             "mode":"accurate",
                             "do_cell_matching": False,
-                            "threshold": 0.4
+                            "threshold": 0.4,
+                            "correct_overlapping_cells":True
                         },
                         "pdf_backend_options": {
-                            "force_full_page_parse": True 
+                            "force_full_page_parse": True,
+                            "force_backend_text":True
                         },
                         "include_images": False, # CRITICAL: Prevents ZIP bundling
                         "export_options": {
