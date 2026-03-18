@@ -241,6 +241,33 @@ Return the formatted table in the markdown KV format shown above."""
 _GEMINI_TABLE_CONCURRENCY = 5
 
 
+def _extract_first_cells_preview(table: Dict[str, Any], table_number: int) -> None:
+    """Extract and log the first cell of each row for debugging purposes."""
+    try:
+        table_data = table.get('data', {})
+        grid = table_data.get('grid', [])
+        
+        if not grid:
+            logger.info(f"📋 [TABLE_{table_number}_PREVIEW] No grid data found")
+            return
+            
+        logger.info(f"📋 [TABLE_{table_number}_PREVIEW] First cell of each row:")
+        
+        for row_idx, row in enumerate(grid):
+            if row and len(row) > 0:
+                first_cell = row[0]
+                cell_text = first_cell.get('text', '').strip() if isinstance(first_cell, dict) else str(first_cell).strip()
+                # Truncate long text for readability
+                if len(cell_text) > 50:
+                    cell_text = cell_text[:47] + "..."
+                logger.info(f"📋 [TABLE_{table_number}_PREVIEW] Row {row_idx + 1}: '{cell_text}'")
+            else:
+                logger.info(f"📋 [TABLE_{table_number}_PREVIEW] Row {row_idx + 1}: <empty row>")
+                
+    except Exception as e:
+        logger.warning(f"📋 [TABLE_{table_number}_PREVIEW] Failed to extract first cells: {e}")
+
+
 async def _format_single_table(genai_client, table: Dict[str, Any], table_number: int,
                                 semaphore: asyncio.Semaphore, executor: ThreadPoolExecutor) -> Optional[str]:
     """Format a single table with Gemini. Returns markdown string or None on failure."""
@@ -248,6 +275,9 @@ async def _format_single_table(genai_client, table: Dict[str, Any], table_number
     num_rows = table.get('data', {}).get('num_rows', 0)
     num_cols = table.get('data', {}).get('num_cols', 0)
     logger.info(f"🤖 [GEMINI_TABLE_{table_number}] Formatting table: {num_rows} rows x {num_cols} cols, {len(table_text)} chars")
+    
+    # Print first cell of each row for debugging
+    _extract_first_cells_preview(table, table_number)
 
     prompt = _build_table_prompt(table_text, table_number)
 
